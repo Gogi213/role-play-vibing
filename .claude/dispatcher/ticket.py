@@ -1,42 +1,40 @@
-"""Формат тикета: `.claude/tickets/<ID>.md` (ID по умолчанию `TK-NNN`).
+"""Формат тикета диспетчера alpha: `.claude/tickets/<ID>.md`.
 
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
-`id, title, owner` (ключ исполнителя из конфига ролей: researcher|engineer|judge по умолчанию), `status`
+`id, title, owner` (researcher|engineer|judge), `status`
 (backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner), `reviewer` (опц.),
-`wait_for` (опц.: `file:<путь>` локально, `ssh:<путь>` на второй машине через ssh, `ticket:<ID>`),
-`next` (опц.: ключ роли — кого запустить один раз; пишет `tickets.py comment --next`, диспетчер очищает при
-запуске), `effort` (опц.: `low|medium|high|xhigh`), `updated`. `backlog` — задача записана, но ещё не в работе:
-диспетчер её не трогает (`dispatch.decide()`), в `todo` переводит `tickets.py start <ID>`.
+`wait_for` (опц.: `file:<путь>` локально, `deck:<путь>` на Steam Deck через ssh, `ticket:<ID>`),
+`next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
+`tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
+`updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
+не трогает (`dispatch.decide()`), в `todo` переводит `tickets.py start <ID>`.
 
-Тело: свободное описание, затем заголовок `## Лог` (или `## Log`) — записи `### <ISO-время> <автор>` + текст.
-«Роль оставила запись» диспетчер определяет по НОВОМУ заголовку записи этой роли (`role_entry_keys()`), не по
-росту секции; @упоминания в тексте — обычный текст и никого не будят. Лог больше 20 КБ ужимается
-(`compact_log()`): всё, кроме последних 8 записей, уходит в `archive/<ID>-log.md`.
+Тело: свободное описание, затем заголовок `## Лог` — записи `### <ISO-время> <автор>` + текст.
+v2 (02.10): «роль оставила запись» диспетчер определяет по НОВОМУ заголовку записи этой роли
+(`role_entry_keys()`), не по росту секции; @упоминания в тексте — обычный текст и никого не будят.
+Лог больше 20 КБ ужимается (`compact_log()`): всё, кроме последних 8 записей, уходит в
+`archive/<ID>-log.md`.
 
-Только stdlib. Роли и авторы записей — латинские ключи (researcher/engineer/judge/ceo/dispatcher), не названия на
-естественном языке: так упоминания и авторство сравниваются без транслитерации.
+Только stdlib. Роли и авторы записей — латинские ключи (researcher/engineer/judge/ceo/
+dispatcher), не русские названия: так упоминания и авторство сравниваются без транслитерации.
 """
 from __future__ import annotations
 
 import os
 import re
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import rpv_config as C  # noqa: E402
-
 HEADER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
-LOG_HEADING_RE = re.compile(r"^##\s*(?:Лог|Log)\s*$", re.M)
+LOG_HEADING_RE = re.compile(r"^##\s*Лог\s*$", re.M)
 ENTRY_RE = re.compile(r"^###\s+(\S+)\s+(.+?)\s*$", re.M)
-ROLE_TOKENS = C.role_keys(C.load_config())   # все роли из конфига (по умолчанию researcher, engineer, judge, ceo)
-MENTION_RE = re.compile(r"@(" + "|".join(re.escape(r) for r in ROLE_TOKENS) + r")\b", re.I)
+MENTION_RE = re.compile(r"@(researcher|engineer|judge|ceo)\b", re.I)
+ROLE_TOKENS = ("researcher", "engineer", "judge", "ceo")
 VALID_EFFORTS = ("low", "medium", "high", "xhigh")
 
-# Компакция лога тикета — файл > LOG_COMPACT_BYTES → всё, кроме последних LOG_KEEP_ENTRIES
+# v2 (02.10): компакция лога тикета — файл > LOG_COMPACT_BYTES → всё, кроме последних LOG_KEEP_ENTRIES
 # записей, переезжает в archive/<ID>-log.md (дословно); в логе остаётся одна строка-указатель.
 LOG_COMPACT_BYTES = 20 * 1024
 LOG_KEEP_ENTRIES = 8
@@ -103,13 +101,13 @@ class Ticket:
 
     @property
     def next_role(self) -> str:
-        """Кого запустить один раз (`next:` в шапке); пусто/незнакомое значение — никого."""
+        """v2: кого запустить один раз (`next:` в шапке); пусто/незнакомое значение — никого."""
         value = (self.header.get("next") or "").strip().lower()
         return value if value in ROLE_TOKENS else ""
 
     @property
     def effort(self) -> str:
-        """Усилие запуска по тикету (`effort:`); пусто/незнакомое значение — роль решает по умолчанию."""
+        """v2: усилие запуска по тикету (`effort:`); пусто/незнакомое значение — роль решает по умолчанию."""
         value = (self.header.get("effort") or "").strip().lower()
         return value if value in VALID_EFFORTS else ""
 
@@ -163,7 +161,7 @@ def author_is(author: str, role: str) -> bool:
 
 
 def role_entry_keys(tkt: "Ticket", role: str) -> list:
-    """Ключи «<ts> <автор>» записей лога, оставленных ролью (заголовок `### <ts> <роль>`).
+    """Ключи «<ts> <автор>» записей лога, оставленных ролью (заголовок `### <ts> <роль>`). v2 (02.10):
     «роль оставила запись» = в логе появился ключ, которого не было на старте запуска; от смещений
     (компакция лога, правки текста) не зависит — только от заголовков записей."""
     return [f"{e.ts_raw} {e.author}" for e in tkt.log if author_is(e.author, role)]
@@ -198,7 +196,7 @@ def _entry_starts(body: str) -> list:
 
 
 def compact_log(path, keep: int = None, limit_bytes: int = None) -> int:
-    """Файл тикета > limit_bytes (20 КБ) → все записи лога, кроме последних `keep` (8),
+    """v2 (02.10): файл тикета > limit_bytes (20 КБ) → все записи лога, кроме последних `keep` (8),
     дописываются ДОСЛОВНО в `archive/<ID>-log.md` (рядом с каталогом тикетов; `list_tickets` берёт только
     `*.md` верхнего уровня), в логе остаётся одна строка-указатель. Запись атомарная (tmp + replace);
     сперва архив, потом тикет — при сбое между ними записи продублируются, но не потеряются.
@@ -274,7 +272,8 @@ def write_header_updates(path, updates: dict, now: datetime = None, stamp_update
         if key not in seen:
             new_lines.append(f"{key}: {value}")
     new_header = "---\n" + "\n".join(new_lines) + "\n---\n"
-    # newline="\n" — иначе на Windows write_text переводит \n в CRLF, и git ругается на смену окончаний строк
+    # newline="\n" — иначе на Windows write_text переводит \n в CRLF (судья 27.09: `git commit`
+    # предупреждал «CRLF will be replaced by LF», цель fc2faa3 «задачи всегда LF» не держалась)
     path.write_text(new_header + text[m.end():], encoding="utf-8", newline="\n")
 
 

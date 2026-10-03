@@ -1,0 +1,18 @@
+# Рантайм-артефакты диспетчера — не коммитить (формируются при работе, см. README.md)
+__pycache__/
+state.json
+state.json.tmp
+runs.log
+ceo-inbox.md
+ceo-wake.log
+.ceo-inbox-seen
+dispatch.pid
+dispatch.*.log
+watch-heartbeat.json
+watch-heartbeat.json.tmp
+watch-state.json
+watch-state.json.tmp
+watch.pid
+watch.*.log
+runs/*
+!runs/.gitkeep

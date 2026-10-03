@@ -1,12 +1,16 @@
 {
   "name": "role-play-vibing",
-  "owner": { "name": "Gogi213" },
-  "metadata": { "description": "Role Play Vibing: ролевая система (тикеты, диспетчер, сторож, хуки) для Claude Code" },
+  "owner": {
+    "name": "Gogi213"
+  },
+  "metadata": {
+    "description": "Role Play Vibing: команда ролей для Claude Code (тикеты, диспетчер, сторож, хуки)"
+  },
   "plugins": [
     {
       "name": "role-play-vibing",
       "source": "./",
-      "description": "Команда ролей поверх Claude Code: тикеты, диспетчер запусков, сторож, хуки ролей. Работа в процессе: см. README."
+      "description": "Команда ролей для Claude Code: CEO говорит с владельцем, Исследователь, Инженер и Судья работают по тикетам под диспетчером; сторож и хуки ролей."
     }
   ]
 }
