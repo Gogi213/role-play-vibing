@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# рантайм диспетчера и сторожа в проекте-пользователе, не в репозитории плагина
+state.json
+runs.log
+ceo-inbox.md
+ceo-wake.log
+*.pid

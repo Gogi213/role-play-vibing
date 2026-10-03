@@ -1,0 +1,8 @@
+{
+  "name": "role-play-vibing",
+  "version": "0.1.0",
+  "description": "Команда ролей поверх Claude Code: тикеты, диспетчер запусков, сторож, хуки ролей (CEO, Исследователь, Инженер, Судья). Работа в процессе (0.1.0-wip): см. README.",
+  "author": { "name": "Gogi213" },
+  "repository": "https://github.com/Gogi213/role-play-vibing",
+  "keywords": ["roles", "tickets", "dispatcher", "workflow"]
+}
