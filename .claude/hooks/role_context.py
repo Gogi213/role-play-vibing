@@ -143,6 +143,16 @@ def rel(path):
     return os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
+def tickets_command():
+    """Готовая команда тикетов: `python "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`.
+
+    Плагин лежит в своей папке, в проекте `tickets.py` нет — хук знает свой путь и подставляет его сам (слэши прямые:
+    работают и в Bash, и в PowerShell на Windows). Подкоманда (`comment`, `new` …) дописывается после `--project`."""
+    here = os.path.dirname(os.path.abspath(__file__))                      # <плагин>/.claude/hooks
+    script = os.path.join(os.path.dirname(here), "dispatcher", "tickets.py")
+    return f'python "{script.replace(os.sep, "/")}" --project "{ROOT.replace(os.sep, "/")}"'
+
+
 def ticket_path():
     """Относительный путь файла тикета запуска или None."""
     tid = ticket_id()
@@ -195,6 +205,7 @@ def short_context(role, title, source):
     tp = ticket_path()
     if tp:
         lines[1] += f" Тикет запуска — {tp}."
+    lines[1] += f" Команда тикетов: `{tickets_command()} <подкоманда>`."
     return "\n".join(lines)
 
 
@@ -213,9 +224,12 @@ def full_context(role, title, source, hook_in):
         head.append("Ты говоришь с владельцем; работа команды — тикеты `.claude/tickets/`.")
     else:
         head.append("Работа — тикет `.claude/tickets/<ID>.md`, который назвал владелец или CEO.")
-    head.append(f"Связь с командой — только лог тикета: `python .claude/dispatcher/tickets.py comment <ID> "
+    tcmd = tickets_command()
+    head.append(f"Связь с командой — только лог тикета (готовая команда, путь абсолютный): `{tcmd} comment <ID> "
                 f"--author {role} --text \"...\" [--next <роль>]` (`--next` — кого разбудить следующим; "
-                "@упоминания никого не будят).")
+                "@упоминания никого не будят)."
+                + (" Остальные подкоманды (`new`, `start`, `status`) — после `--project \"...\"` той же командой."
+                   if role == "ceo" else ""))
     if role != "ceo":
         head.append("Общую память проекта (CLAUDE.md, автопамять) пишет только `CEO`; ты работаешь по своему "
                     "тикету.")

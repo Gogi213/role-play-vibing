@@ -5,6 +5,7 @@
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,9 +13,13 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# корень проекта для хуков — каталог плагина/проекта над `.claude` (в нём есть .claude/roles); без этого хуки молчат
-os.environ["CLAUDE_PROJECT_DIR"] = os.path.dirname(os.path.dirname(HERE))
+PLUGIN = os.path.dirname(os.path.dirname(HERE))
 TMP = tempfile.mkdtemp(prefix="hooks-test-")
+# проект-пустышка после `/rpv-init`: `.claude/roles` из шаблонов плагина (без него хуки молчат)
+PROJECT = os.path.join(TMP, "proj")
+shutil.copytree(os.path.join(PLUGIN, "templates", "roles"), os.path.join(PROJECT, ".claude", "roles"))
+os.makedirs(os.path.join(PROJECT, ".claude", "tickets"))
+os.environ["CLAUDE_PROJECT_DIR"] = PROJECT
 os.environ["RPV_STATE_DIR"] = os.path.join(TMP, "state")
 os.environ["RPV_LOG_DIR"] = os.path.join(TMP, "log")
 os.environ["RPV_DISPATCHER_DIR"] = os.path.join(TMP, "disp")
@@ -57,7 +62,23 @@ class SessionStart(unittest.TestCase):
                 self.assertLessEqual(len(text), rc.LIMIT, (role, source))
                 self.assertLessEqual(len(raw.decode("utf-8")), rc.LIMIT + 300, (role, source))  # вывод хука ≈ тексту
                 self.assertIn(f".claude/roles/{role}.md", text)
-                self.assertIn("tickets.py comment", text)
+                self.assertIn("tickets.py\" --project", text)
+                self.assertIn(" comment <ID> --author " + role, text)
+
+    def test_startup_gives_ready_tickets_command_with_absolute_path(self):
+        """Блокер: в проекте после /rpv-init нет tickets.py — хук вставляет готовую команду с абсолютным путём плагина."""
+        for role in ("researcher", "engineer", "judge", "ceo"):
+            for source in ("startup", "resume"):
+                text, _ = start_text(role, source)
+                m = re.search(r'python "([^"]+tickets\.py)" --project "([^"]+)"', text)
+                self.assertIsNotNone(m, (role, source, text))
+                script, project = m.group(1), m.group(2)
+                self.assertTrue(os.path.isabs(script), script)
+                self.assertTrue(os.path.isfile(script), script)
+                self.assertEqual(os.path.normpath(script),
+                                 os.path.normpath(os.path.join(PLUGIN, ".claude", "dispatcher", "tickets.py")))
+                self.assertEqual(os.path.normpath(project), os.path.normpath(PROJECT))
+                self.assertNotIn("python .claude/dispatcher/tickets.py", text)
 
     def test_resume_and_compact_are_short(self):
         for role in ("researcher", "judge"):
@@ -177,7 +198,7 @@ class RoleDetection(unittest.TestCase):
         for source in ("startup", "resume"):
             for role in ("ceo", "engineer"):
                 text, _ = start_text(role, source)
-                head = text.split("\n--- ")[0]
+                head = text.split("\n--- ")[0].replace(rc.tickets_command(), "")  # абсолютные пути — не текст хука
                 self.assertNotIn("alpha", head.lower(), (role, source))
         self.assertNotIn("alpha", rc.MANUAL.lower())
         self.assertNotIn("alpha", rc.OUTSIDER.lower())

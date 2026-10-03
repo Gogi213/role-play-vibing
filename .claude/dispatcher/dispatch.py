@@ -5,7 +5,8 @@
 Только stdlib. Подробности формата — `ticket.py`, правила — `README.md`.
 
 Запускается прямо из папки плагина; проект — `--project <путь>`, иначе `RPV_PROJECT` / `CLAUDE_PROJECT_DIR`,
-иначе текущий каталог (см. `project.py`). Состояние — в `<проект>/.claude/dispatcher/`.
+иначе ближайший каталог вверх от текущего с `.claude/roles` (см. `project.py`); не нашли — ошибка с подсказкой,
+каталоги не создаются. Состояние — в `<проект>/.claude/dispatcher/`.
 
 Тест: `python -m unittest .claude/dispatcher/test_dispatch.py` (или из каталога — см. README).
 """
@@ -36,6 +37,7 @@ CODE_DIR = Path(__file__).resolve().parent  # где лежит сам дисп�
 # configure_project(): при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/текущему каталогу, в main() — по флагу.
 PROJECT_ROOT = DISPATCHER_DIR = TICKETS_DIR = STATE_FILE = PID_FILE = RUNS_DIR = RUNS_LOG = None
 CEO_INBOX = CEO_WAKE_LOG = None
+PROJECT_FOUND = False  # проект найден при импорте (флаг/окружение/поиск вверх); False — CLI откажет с подсказкой
 
 
 def configure_project(root) -> Path:
@@ -53,7 +55,24 @@ def configure_project(root) -> Path:
     return PROJECT_ROOT
 
 
-configure_project(P.resolve_project())
+try:
+    configure_project(P.resolve_project())
+    PROJECT_FOUND = True
+except P.ProjectNotFound:                 # импорт не падает; пути — заглушка от cwd, ничего не создаётся
+    configure_project(Path.cwd())
+
+
+def ensure_project(argv, prog: str) -> bool:
+    """Точка входа CLI: проект задан флагом `--project` (переключаем пути) или найден при импорте; иначе —
+    подсказка в stderr и False (вызывающий выходит с кодом 2, не создав ни одного каталога)."""
+    explicit = P.project_arg(argv)
+    if explicit:
+        configure_project(explicit)
+        return True
+    if not PROJECT_FOUND:
+        print(f"[{prog}] ошибка: {P.NOT_FOUND_HINT}", file=sys.stderr)
+        return False
+    return True
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"  # имя из PATH, без зашитых путей
 PID_EXPECT_NAME = "claude"  # _pid_alive: подстрока имени образа процесса; тесты подменяют на "python"
@@ -1310,7 +1329,7 @@ def tick(now=None) -> int:
 
 
 USAGE = """Диспетчер задач (v2, 02.10). Запускается из папки плагина; проект — --project <путь>, иначе RPV_PROJECT /
-CLAUDE_PROJECT_DIR, иначе текущий каталог. Состояние — <проект>/.claude/dispatcher/.
+CLAUDE_PROJECT_DIR, иначе ближайший каталог вверх с .claude/roles. Состояние — <проект>/.claude/dispatcher/.
   python <плагин>/.claude/dispatcher/dispatch.py --project <проект>          # цикл раз в RPV_DISPATCH_INTERVAL (15 с) — БОЕВОЙ
   python <плагин>/.claude/dispatcher/dispatch.py --project <проект> --once   # один тик (тоже боевой: может запустить роли)
   python <плагин>/.claude/dispatcher/dispatch.py --help                      # эта справка (ничего не запускает)
@@ -1322,8 +1341,8 @@ def main(argv=None) -> int:
     if "--help" in argv or "-h" in argv:  # раньше любой аргумент запускал боевой цикл
         print(USAGE)
         return 0
-    if P.project_arg(argv):                      # явный --project; без него остаются пути, выставленные при импорте
-        configure_project(P.project_arg(argv))
+    if not ensure_project(argv, "dispatch"):     # нет проекта — ошибка с подсказкой, каталоги не создаём
+        return 2
     DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
     TICKETS_DIR.mkdir(parents=True, exist_ok=True)
     ok, why = acquire_instance_lock(PID_FILE)

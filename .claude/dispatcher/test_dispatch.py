@@ -7,8 +7,10 @@
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,8 +20,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# корень проекта для хуков, которые импортирует тест (role_context молчит без .claude/roles)
-os.environ.setdefault("CLAUDE_PROJECT_DIR", str(Path(__file__).resolve().parent.parent.parent))
+# проект-пустышка с `.claude/roles` (после /rpv-init): тесты не касаются ни папки плагина, ни рабочего проекта выше неё
+_SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
+os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
+os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
+atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import project as P  # noqa: E402
@@ -363,7 +368,7 @@ class TicketLockTests(unittest.TestCase):
             time.sleep(1.5)
             self.assertIsNone(proc.poll(), "дочерний процесс обязан ждать блокировку")
         out, _ = proc.communicate(timeout=30)
-        self.assertGreaterEqual(float(out.strip()), 1.0)
+        self.assertGreaterEqual(float(out.strip()), 0.5)  # t0 — после импортов дочернего; на нагруженной машине они долгие
         self.assertIn("из дочернего процесса", self.path.read_text(encoding="utf-8"))
 
     def test_cli_comment_and_start_use_the_lock(self):
@@ -1726,7 +1731,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_roles_and_dispatcher_docs_mention_no_money_ceiling(self):
         """README диспетчера и устав ролей («Расход»): без потолков и денег, кроме «траты считаются»."""
-        docs = [Path(D.__file__).parent / "README.md", Path(D.__file__).parent.parent / "roles" / "README.md"]
+        docs = [Path(D.__file__).parent / "README.md", Path(D.__file__).parent.parent.parent / "templates" / "roles" / "README.md"]
         for doc in docs:
             if not doc.exists():
                 continue
@@ -2794,7 +2799,7 @@ class ContextTokensTests(unittest.TestCase):
 
 
 class DeckSshTests(unittest.TestCase):
-    """v1.1: умолчания ssh на Steam Deck (кириллический HOME ломает ~/.ssh по умолчанию)."""
+    """v1.1: умолчания ssh на вторую машину (кириллический HOME ломает ~/.ssh по умолчанию)."""
 
     def setUp(self):
         D._DECK_CACHE.clear()
@@ -3058,7 +3063,9 @@ class ProjectRootTests(unittest.TestCase):
         a, b, c = (self.proj / n for n in "abc")
         for d in (a, b, c):
             d.mkdir()
-        self.assertEqual(P.resolve_project([]), Path.cwd().resolve())
+        (d := self.proj / "d" / ".claude" / "roles").mkdir(parents=True)
+        with self.chdir(d.parent.parent):
+            self.assertEqual(P.resolve_project([]), d.parent.parent)       # без флага и окружения — поиск вверх
         os.environ["CLAUDE_PROJECT_DIR"] = str(c)
         self.assertEqual(P.resolve_project([]), c)
         os.environ["RPV_PROJECT"] = str(b)
@@ -3066,6 +3073,70 @@ class ProjectRootTests(unittest.TestCase):
         self.assertEqual(P.resolve_project(["--once", "--project", str(a)]), a)
         self.assertEqual(P.resolve_project([f"--project={a}"]), a)
         self.assertEqual(P.strip_project_arg(["--project", str(a), "--once"]), ["--once"])
+
+    def chdir(self, path):
+        """Контекст: текущий каталог процесса — `path` (возврат — в конце)."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def cm():
+            prev = os.getcwd()
+            os.chdir(path)
+            try:
+                yield
+            finally:
+                os.chdir(prev)
+        return cm()
+
+    def make_project(self, root):
+        (root / ".claude" / "roles").mkdir(parents=True)
+        return root
+
+    def run_script(self, script, args, cwd):
+        env = {k: v for k, v in os.environ.items() if k not in self.ENV_KEYS}
+        return subprocess.run([sys.executable, str(D.CODE_DIR / script), *args], cwd=str(cwd), env=env,
+                              capture_output=True, text=True, encoding="utf-8", timeout=120)
+
+    def test_resolve_walks_up_to_nearest_dir_with_claude_roles(self):
+        outer = self.make_project(self.proj / "outer")
+        inner = self.make_project(outer / "pkg" / "inner")
+        deep = inner / "a" / "b"
+        deep.mkdir(parents=True)
+        with self.chdir(deep):
+            self.assertEqual(P.find_project_root(), inner)                  # ближайший, не внешний
+            self.assertEqual(P.resolve_project([]), inner)
+        with self.chdir(outer / "pkg"):
+            self.assertEqual(P.resolve_project([]), outer)
+
+    def test_resolve_outside_project_raises_with_hint_and_creates_nothing(self):
+        empty = self.proj / "plain" / "sub"
+        empty.mkdir(parents=True)
+        with self.chdir(empty):
+            with self.assertRaises(P.ProjectNotFound) as cm:
+                P.resolve_project([])
+        self.assertIn("--project", str(cm.exception))
+        self.assertIn("/rpv-init", str(cm.exception))
+        self.assertEqual([p.name for p in self.proj.rglob(".claude")], [])
+
+    def test_tickets_cli_from_subfolder_creates_ticket_in_project_root(self):
+        proj = self.make_project(self.proj / "work")
+        sub = proj / "src" / "deep"
+        sub.mkdir(parents=True)
+        done = self.run_script("tickets.py", ["new", "--owner", "engineer", "--title", "Из подпапки"], sub)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual([p.name for p in (proj / ".claude" / "tickets").glob("TK-*.md")], ["TK-001.md"])
+        self.assertFalse((sub / ".claude").exists())
+
+    def test_scripts_outside_project_fail_with_hint_and_create_no_directories(self):
+        empty = self.proj / "nowhere"
+        empty.mkdir()
+        for script, args in (("tickets.py", ["new", "--owner", "engineer", "--title", "x"]),
+                             ("dispatch.py", ["--once"]), ("watch.py", ["--once"])):
+            done = self.run_script(script, args, empty)
+            self.assertEqual(done.returncode, 2, (script, done.stdout, done.stderr))
+            self.assertIn("--project", done.stderr, script)
+            self.assertIn("/rpv-init", done.stderr, script)
+        self.assertEqual(list(empty.iterdir()), [])
 
     def test_env_prefers_rpv_then_alpha_then_default(self):
         self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")

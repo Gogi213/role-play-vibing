@@ -3,7 +3,7 @@
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
 (backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner), `reviewer` (опц.),
-`wait_for` (опц.: `file:<путь>` локально, `deck:<путь>` на Steam Deck через ssh, `ticket:<ID>`),
+`wait_for` (опц.: `file:<путь>` локально, `deck:<путь>` на второй машине через ssh, `ticket:<ID>`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
 `updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её

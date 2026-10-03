@@ -1,7 +1,8 @@
 """CLI для тикетов диспетчера: `new`, `comment`, `start`, `status`. Только stdlib.
 
 Запускается из папки плагина; проект — `--project <путь>` (перед подкомандой), иначе `RPV_PROJECT` /
-`CLAUDE_PROJECT_DIR`, иначе текущий каталог. Тикеты — `<проект>/.claude/tickets/`. Ниже `tickets.py` — это
+`CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от текущего с `.claude/roles`; не нашли — ошибка с подсказкой,
+каталоги не создаются. Тикеты — `<проект>/.claude/tickets/`. Ниже `tickets.py` — это
 `python <плагин>/.claude/dispatcher/tickets.py [--project <проект>]`.
 
     tickets.py new --owner researcher --title "..." [--desc "..."]  # ревьюера нет (v2)
@@ -31,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import ticket as T  # noqa: E402
 
-# Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd);
+# Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
 # в main() флаг --project переключает их ещё раз. Тесты подменяют TICKETS_DIR прямо на модуле.
 TICKETS_DIR = D.TICKETS_DIR
 PROJECT_ROOT = D.PROJECT_ROOT
@@ -134,7 +135,8 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     p = argparse.ArgumentParser(prog="tickets.py")
     p.add_argument("--project", default=None,
-                   help="корень проекта (иначе RPV_PROJECT, CLAUDE_PROJECT_DIR, текущий каталог); перед подкомандой")
+                   help="корень проекта (иначе RPV_PROJECT, CLAUDE_PROJECT_DIR, ближайший каталог вверх с .claude/roles); "
+                        "перед подкомандой")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_new = sub.add_parser("new")
@@ -172,9 +174,10 @@ def main(argv=None) -> int:
     p_status.set_defaults(func=cmd_status)
 
     args = p.parse_args(argv)
+    if not D.ensure_project(["--project", args.project] if args.project else [], "tickets"):
+        return 2                                 # нет проекта — ошибка с подсказкой, тикет не создаётся
     if args.project:
         global TICKETS_DIR, PROJECT_ROOT
-        D.configure_project(args.project)
         TICKETS_DIR, PROJECT_ROOT = D.TICKETS_DIR, D.PROJECT_ROOT
     return args.func(args)
 

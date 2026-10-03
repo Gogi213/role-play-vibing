@@ -2,13 +2,20 @@
 `unittest`, без сети (ssh — через инъекцию `ssh_run`, как просит сам watch.py)."""
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# проект-пустышка с `.claude/roles`: импорт диспетчера не должен найти рабочий проект выше папки плагина
+_SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
+os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
+os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
+atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import ticket as T  # noqa: E402
@@ -70,7 +77,7 @@ class NoDeckHostTests(WatchSandbox):
     def test_without_deck_host_variable_deck_checks_are_off(self):
         os.environ.pop("ALPHA_DECK_HOST", None)
         calls = []
-        self.assertEqual(W.check_steam_deck(lambda *a, **kw: calls.append(a) or (True, "")), [])
+        self.assertEqual(W.check_second_machine(lambda *a, **kw: calls.append(a) or (True, "")), [])
         self.assertEqual(calls, [])
 
 
@@ -164,20 +171,20 @@ class OrphanTicketTests(WatchSandbox):
         T.append_log(p, "engineer", "отменено", now=self.now - timedelta(hours=10))
         self.assertEqual(W.check_orphan_tickets(self.now), [])
 
-class SteamDeckWatchTests(WatchSandbox):
+class SecondMachineWatchTests(WatchSandbox):
     def test_alert_file_becomes_finding(self):
         def fake_ssh(cmd, timeout=10.0):
             if "ALERT" in cmd:
                 return True, "ALERT-rework: 54 суток разобраны повторно"
             return True, ""
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertTrue(any(f.kind == "deck-alert" for f in findings))
 
     def test_ssh_failure_is_a_signal_not_silence(self):
         """п.2в: ошибка ssh/чтения — сигнал, не молчание."""
         def fake_ssh(cmd, timeout=10.0):
             return False, "Connection timed out"
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertTrue(any(f.kind == "deck-ssh-error" for f in findings))
         self.assertEqual(len(findings), 3)  # alerts-, hold- и frozen-запросы — все упали
 
@@ -186,36 +193,36 @@ class SteamDeckWatchTests(WatchSandbox):
             if "ALERT" in cmd:
                 return True, ""
             return True, "HOLD"
-        self.assertEqual(W.check_steam_deck(fake_ssh), [])
+        self.assertEqual(W.check_second_machine(fake_ssh), [])
 
     def test_idle_with_pending_queue_is_a_finding(self):
         def fake_ssh(cmd, timeout=10.0):
             if "ALERT" in cmd:
                 return True, ""
             return True, f"3 {int(W.DECK_QUEUE_STALE_MINUTES * 60) + 120}"
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertTrue(any(f.kind == "deck-queue-stale" for f in findings))
 
     def test_queue_count_reads_pending_jobs_dir(self):
-        """TK-016: задания gridq — queue/pending/*.job; прежний счёт queue/*.json всегда давал 0."""
+        """задания очереди — queue/pending/*.job (а не queue/*.json)."""
         cmds = []
         def fake_ssh(cmd, timeout=10.0):
             cmds.append(cmd)
             return True, ""
-        W.check_steam_deck(fake_ssh)
+        W.check_second_machine(fake_ssh)
         queue_cmd = next(c for c in cmds if "STATUS" in c)
         self.assertIn("queue/pending/", queue_cmd)
         self.assertIn(".job", queue_cmd)
 
     def test_disk_full_mark_is_frozen_finding(self):
-        """TK-016 (1): метка DISK-FULL → deck-frozen сразу, с числом юнитов и свободным местом."""
+        """метка DISK-FULL → deck-frozen сразу, с числом юнитов и свободным местом."""
         def fake_ssh(cmd, timeout=10.0):
             if "DISK-FULL" in cmd:
                 return True, "mark 10\nfree 8\n"
             if "ALERT" in cmd:
                 return True, ""
             return True, "HOLD"
-        f = [x for x in W.check_steam_deck(fake_ssh) if x.kind == "deck-frozen"]
+        f = [x for x in W.check_second_machine(fake_ssh) if x.kind == "deck-frozen"]
         self.assertEqual(len(f), 1)
         self.assertIn("10", f[0].message)
         self.assertIn("свободно 8 ГБ", f[0].message)
@@ -225,13 +232,13 @@ class SteamDeckWatchTests(WatchSandbox):
         """TK-016 (3): systemctl --user list-units --state=frozen не пуст → deck-frozen."""
         def fake_ssh(cmd, timeout=10.0):
             if "DISK-FULL" in cmd:
-                return True, "nomark\nfree 40\nfrozen alpha-gridq.service\n"
+                return True, "nomark\nfree 40\nfrozen queue-worker.service\n"
             if "ALERT" in cmd:
                 return True, ""
             return True, "HOLD"
-        f = [x for x in W.check_steam_deck(fake_ssh) if x.kind == "deck-frozen"]
+        f = [x for x in W.check_second_machine(fake_ssh) if x.kind == "deck-frozen"]
         self.assertEqual(len(f), 1)
-        self.assertIn("alpha-gridq.service", f[0].message)
+        self.assertIn("queue-worker.service", f[0].message)
 
     def test_no_mark_no_frozen_is_silent(self):
         self.assertEqual(W.check_deck_frozen(lambda c, timeout=10.0: (True, "nomark\nfree 40\n")), [])
@@ -241,11 +248,11 @@ class SteamDeckWatchTests(WatchSandbox):
             if "ALERT" in cmd:
                 return True, ""
             return True, "3 30"  # свежо
-        self.assertEqual(W.check_steam_deck(fake_ssh), [])
+        self.assertEqual(W.check_second_machine(fake_ssh), [])
 
 
 class DeckOffFlagTests(WatchSandbox):
-    """Владелец 03.10 04:26: флаг `deck-off` — сторож не ходит на Steam Deck (ssh_run не вызывается)."""
+    """Флаг `deck-off` — сторож не ходит на вторую машину (ssh_run не вызывается)."""
 
     def _counting_ssh(self):
         calls = []
@@ -255,10 +262,10 @@ class DeckOffFlagTests(WatchSandbox):
             return False, "Connection timed out"
         return calls, fake_ssh
 
-    def test_flag_present_check_steam_deck_makes_no_ssh_call(self):
-        W.DECK_OFF_FLAG.write_text("владелец: Steam Deck не трогаем", encoding="utf-8")
+    def test_flag_present_check_second_machine_makes_no_ssh_call(self):
+        W.DECK_OFF_FLAG.write_text("владелец: вторую машину не трогаем", encoding="utf-8")
         calls, fake_ssh = self._counting_ssh()
-        self.assertEqual(W.check_steam_deck(fake_ssh), [])
+        self.assertEqual(W.check_second_machine(fake_ssh), [])
         self.assertEqual(calls, [])
 
     def test_flag_present_check_deck_frozen_makes_no_ssh_call(self):
@@ -289,7 +296,7 @@ class DeckOffFlagTests(WatchSandbox):
 
     def test_without_flag_behaviour_unchanged(self):
         calls, fake_ssh = self._counting_ssh()
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertEqual(len(calls), 3)  # alerts, hold, frozen
         self.assertTrue(any(f.kind == "deck-ssh-error" for f in findings))
 
@@ -424,7 +431,7 @@ class SshFailStreakTests(WatchSandbox):
         self.assertIn("watch-deck-ssh-error", inbox)
 
 
-class SteamDeckHoldTests(WatchSandbox):
+class SecondMachineHoldTests(WatchSandbox):
     """CEO 27.09: ALERT-idle-deck при активном HOLD — ожидаемое состояние (паузу ставит CEO по слову
     владельца) — не будить, а в сводку; другие тревоги (например ALERT-rework) под HOLD всё равно будят."""
 
@@ -433,7 +440,7 @@ class SteamDeckHoldTests(WatchSandbox):
             if "ALERT" in cmd:
                 return True, "ALERT-idle-deck: очередь простаивает 18:26Z"
             return True, "HOLD"
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].kind, "deck-idle-expected")
 
@@ -442,7 +449,7 @@ class SteamDeckHoldTests(WatchSandbox):
             if "ALERT" in cmd:
                 return True, "ALERT-rework: 54 суток разобраны повторно 18:26Z"
             return True, "HOLD"
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].kind, "deck-alert")
 
@@ -452,7 +459,7 @@ class SteamDeckHoldTests(WatchSandbox):
             if "ALERT" in cmd:
                 return True, "ALERT-idle-deck: простаивает"
             return True, "NOHOLD"
-        findings = W.check_steam_deck(fake_ssh)
+        findings = W.check_second_machine(fake_ssh)
         self.assertTrue(any(f.kind == "deck-alert" for f in findings))
         self.assertFalse(any(f.kind == "deck-idle-expected" for f in findings))
 
@@ -491,29 +498,29 @@ class SteamDeckHoldTests(WatchSandbox):
         return fake_ssh
 
     def test_hold_check_timeout_with_hold_hint_keeps_idle_expected(self):
-        findings = W.check_steam_deck(self.idle_ssh((False, "TimeoutExpired: timed out")), hold_hint=True)
+        findings = W.check_second_machine(self.idle_ssh((False, "TimeoutExpired: timed out")), hold_hint=True)
         kinds = {f.kind for f in findings}
         self.assertIn("deck-idle-expected", kinds)
         self.assertNotIn("deck-alert", kinds)
         self.assertIn("deck-ssh-error", kinds)  # сам сбой проверки HOLD по-прежнему сообщается (через серию)
 
     def test_hold_check_timeout_without_hint_is_still_not_an_alert(self):
-        findings = W.check_steam_deck(self.idle_ssh((False, "TimeoutExpired: timed out")), hold_hint=None)
+        findings = W.check_second_machine(self.idle_ssh((False, "TimeoutExpired: timed out")), hold_hint=None)
         self.assertNotIn("deck-alert", {f.kind for f in findings})
 
     def test_hold_check_timeout_with_nohold_hint_is_a_real_alert(self):
-        findings = W.check_steam_deck(self.idle_ssh((False, "TimeoutExpired: timed out")), hold_hint=False)
+        findings = W.check_second_machine(self.idle_ssh((False, "TimeoutExpired: timed out")), hold_hint=False)
         self.assertIn("deck-alert", {f.kind for f in findings})
 
     def test_observed_hold_is_recorded_when_check_succeeds(self):
         observed = {}
-        W.check_steam_deck(self.idle_ssh((True, "HOLD")), observed=observed)
+        W.check_second_machine(self.idle_ssh((True, "HOLD")), observed=observed)
         self.assertIs(observed["hold"], True)
         observed = {}
-        W.check_steam_deck(self.idle_ssh((True, "NOHOLD")), observed=observed)
+        W.check_second_machine(self.idle_ssh((True, "NOHOLD")), observed=observed)
         self.assertIs(observed["hold"], False)
         observed = {}
-        W.check_steam_deck(self.idle_ssh((False, "timeout")), observed=observed)
+        W.check_second_machine(self.idle_ssh((False, "timeout")), observed=observed)
         self.assertNotIn("hold", observed)
 
     def test_run_once_remembers_hold_and_uses_it_when_next_check_times_out(self):
@@ -555,7 +562,7 @@ class ContentFingerprintDedupTests(WatchSandbox):
         self.assertEqual(posted2, [])
 
     def test_same_content_after_long_repeat_window_reposts_as_reminder(self):
-        """v2: та же тревога Steam Deck — раз в сутки (WATCH_LONG_REPEAT_HOURS), не раз в 2 ч; пока нет суток —
+        """v2: та же тревога второй машины — раз в сутки (WATCH_LONG_REPEAT_HOURS), не раз в 2 ч; пока нет суток —
         тишина."""
         ws = {}
         f = [W.Finding("deck-alert", "ALERT-rework", "разобрано повторно 18:26Z")]
@@ -567,13 +574,13 @@ class ContentFingerprintDedupTests(WatchSandbox):
 
     # --- v2 (02.10): нормализованная сигнатура — реальные тексты ALERT-* из ceo-inbox ---
 
-    REWORK_A = ("Steam Deck: ALERT-rework: 2026-10-01T23:12:59Z 1 суток разобраны повторно за 24 ч (всего разборов 3); "
+    REWORK_A = ("Вторая машина: ALERT-rework: 2026-10-01T23:12:59Z 1 суток разобраны повторно за 24 ч (всего разборов 3); "
                 "больше всех — /home/deck/alpha/tk022/view/2026-01-01/root-2026-01-01: 3 р")
-    REWORK_B = ("Steam Deck: ALERT-rework: 2026-10-02T00:03:40Z 2 суток разобраны повторно за 24 ч (всего разборов 4); "
+    REWORK_B = ("Вторая машина: ALERT-rework: 2026-10-02T00:03:40Z 2 суток разобраны повторно за 24 ч (всего разборов 4); "
                 "больше всех — /home/deck/alpha/tk022/view/2026-01-01/root-2026-01-01: 4 р")
-    IDLE_A = ("Steam Deck: ALERT-idle-deck: 2026-10-01T22:07:01Z очередь пуста, заданий нет, load1 0.31 — "
+    IDLE_A = ("Вторая машина: ALERT-idle-deck: 2026-10-01T22:07:01Z очередь пуста, заданий нет, load1 0.31 — "
               "простой дольше 30 мин")
-    IDLE_B = ("Steam Deck: ALERT-idle-deck: 2026-10-01T23:04:30Z очередь пуста, заданий нет, load1 0.76 — "
+    IDLE_B = ("Вторая машина: ALERT-idle-deck: 2026-10-01T23:04:30Z очередь пуста, заданий нет, load1 0.76 — "
               "простой дольше 30 мин")
 
     def test_normalize_strips_iso_times_t_fragments_and_counters(self):

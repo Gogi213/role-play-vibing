@@ -2,8 +2,10 @@
 
 Диспетчер, сторож и tickets.py запускаются прямо из папки плагина и работают с проектом, а не с
 каталогом, где лежит сам файл. Корень проекта: `--project <путь>` в аргументах, иначе `RPV_PROJECT`, иначе
-`CLAUDE_PROJECT_DIR`, иначе текущий каталог. Состояние (state.json, логи, pid, ceo-inbox, ceo-wake.log)
-пишется в `<проект>/.claude/dispatcher/`, тикеты читаются из `<проект>/.claude/tickets/`.
+`CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от текущего, где есть `.claude/roles` (после `/rpv-init`);
+не нашли — `ProjectNotFound` (скрипты печатают подсказку и выходят, ничего не создавая). Состояние
+(state.json, логи, pid, ceo-inbox, ceo-wake.log) пишется в `<проект>/.claude/dispatcher/`, тикеты читаются
+из `<проект>/.claude/tickets/`.
 
 Переменные: `RPV_<имя>`; при отсутствии берётся прежнее `ALPHA_<имя>` (совместимость).
 """
@@ -14,6 +16,13 @@ import sys
 from pathlib import Path
 
 ENV_PREFIXES = ("RPV_", "ALPHA_")  # новое имя первым, прежнее — запасное
+
+NOT_FOUND_HINT = ("проект не найден: от текущего каталога вверх нет каталога с `.claude/roles`. "
+                  "Укажите `--project <путь>` (или RPV_PROJECT) либо выполните `/rpv-init` в корне проекта.")
+
+
+class ProjectNotFound(Exception):
+    """Корень проекта не задан и не найден поиском вверх от текущего каталога."""
 
 
 def env(name: str, default=None):
@@ -36,11 +45,26 @@ def project_arg(argv) -> str | None:
     return None
 
 
+def find_project_root(start=None) -> Path | None:
+    """Ближайший каталог вверх от `start` (по умолчанию — текущий), где есть `.claude/roles`; нет — None."""
+    here = Path(start).expanduser().resolve() if start else Path.cwd().resolve()
+    for d in (here, *here.parents):
+        if (d / ".claude" / "roles").is_dir():
+            return d
+    return None
+
+
 def resolve_project(argv=None) -> Path:
-    """Корень проекта: --project, RPV_PROJECT, CLAUDE_PROJECT_DIR, текущий каталог (не расположение файла)."""
+    """Корень проекта: --project, RPV_PROJECT, CLAUDE_PROJECT_DIR, иначе поиск вверх от текущего каталога
+    (не расположение файла). Нигде не нашли — `ProjectNotFound`; каталоги не создаются."""
     argv = sys.argv[1:] if argv is None else argv
     chosen = project_arg(argv) or os.environ.get("RPV_PROJECT") or os.environ.get("CLAUDE_PROJECT_DIR")
-    return Path(chosen).expanduser().resolve() if chosen else Path.cwd().resolve()
+    if chosen:
+        return Path(chosen).expanduser().resolve()
+    found = find_project_root()
+    if found is None:
+        raise ProjectNotFound(NOT_FOUND_HINT)
+    return found
 
 
 def strip_project_arg(argv) -> list:

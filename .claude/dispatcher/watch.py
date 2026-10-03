@@ -1,5 +1,5 @@
 """Сторож CEO без модели (судья TK-002 п.2) — заменяет получасовой крон CEO. Покрывает то же самое:
-диспетчер жив, тревоги Steam Deck (ALERT-*), простой Steam Deck при непустой
+диспетчер жив, тревоги второй машины (ALERT-*), простой второй машины при непустой
 очереди, тикеты-сироты (in_progress/waiting без новой записи дольше порога), blocked/needs_owner.
 Ошибка ssh/чтения — сама сигнал (не молчание, п.2в). Дедуп по (вид, ключ), повтор раз в
 WATCH_DEDUP_REPEAT_HOURS, пока проблема не снята (п.2г). Пишет `ceo-wake.log`/`ceo-inbox.md` только
@@ -7,14 +7,15 @@ WATCH_DEDUP_REPEAT_HOURS, пока проблема не снята (п.2г). П
 его возраст проверяет хук `role_memory.py` (кто сторожит сторожа, п.2а).
 
 v2 (02.10, аудит ролевой системы — «сторож: тревога с меткой времени в подписи → повтор каждые 10 мин»):
-тревоги Steam Deck сравниваются по нормализованной сигнатуре (без ISO-времён, кусков вроде `T23:`, времён
+тревоги второй машины сравниваются по нормализованной сигнатуре (без ISO-времён, кусков вроде `T23:`, времён
 суток и счётчиков «всего разборов N») и сообщаются один раз, пока тревога не исчезнет или не изменится по
 сути (напоминание — раз в WATCH_LONG_REPEAT_HOURS); известные тревоги не «забываются» после цикла с
 ошибкой ssh; таймаут проверки HOLD не превращает ожидаемый простой в тревогу; orphan по закрытым
 (done/cancelled) тикетам молчат, по открытым повторяются не чаще раза в сутки.
 v3 (03.10, В-173): проверки трат (суточный/часовой расход, бюджет тикета) удалены — лимитов денег нет.
 
-Запуск из папки плагина (проект — --project <путь>, иначе RPV_PROJECT / CLAUDE_PROJECT_DIR / текущий каталог):
+Запуск из папки плагина (проект — --project <путь>, иначе RPV_PROJECT / CLAUDE_PROJECT_DIR / ближайший каталог
+вверх с .claude/roles):
         python <плагин>/.claude/dispatcher/watch.py --project <проект> --once   (для крона/планировщика Windows)
         python <плагин>/.claude/dispatcher/watch.py --project <проект>          (цикл раз в WATCH_INTERVAL_S)
 """
@@ -47,7 +48,7 @@ def _set_paths() -> None:
     WATCH_HEARTBEAT_FILE = DISPATCHER_DIR / "watch-heartbeat.json"
     WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (D.acquire_instance_lock)
     WATCH_STATE_FILE = DISPATCHER_DIR / "watch-state.json"
-    # Владелец 03.10 04:26: «стимдек больше не трогаем». Файл есть — сторож вообще не ходит на Steam Deck по ssh
+    # Файл есть — сторож вообще не ходит на вторую машину по ssh
     # (ни ALERT-*/HOLD/очередь, ни заморозка); наличие проверяется на КАЖДОМ цикле — перезапуск не нужен.
     DECK_OFF_FLAG = DISPATCHER_DIR / "deck-off"
 
@@ -74,7 +75,7 @@ WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "deck-alert", "deck-idle-expected", 
 CLOSED_TICKET_STATUSES = ("done", "cancelled")
 DISPATCH_STALE_MINUTES = float(P.env("WATCH_DISPATCH_STALE_MIN", "5"))
 ORPHAN_TICKET_HOURS = float(P.env("WATCH_ORPHAN_HOURS", "2"))
-# TK-016: 30 → 10 мин (простой 28.09 07:22–08:31 — очередь стояла 69 мин незамеченной)
+# через сколько минут без обновления STATUS непустая очередь на второй машине считается простоем
 DECK_QUEUE_STALE_MINUTES = float(P.env("WATCH_DECK_QUEUE_STALE_MIN", "10"))
 
 
@@ -179,7 +180,7 @@ DECK_SSH_IMMEDIATE_RETRIES = int(P.env("WATCH_DECK_SSH_RETRIES", "1"))
 
 
 def _ssh_run(cmd_suffix: str, timeout: float = 10.0):
-    """Общий ssh-вызов на Steam Deck теми же умолчаниями, что и dispatch._deck_file_exists (кириллический
+    """Общий ssh-вызов на вторую машину теми же умолчаниями, что и dispatch._deck_file_exists (кириллический
     HOME) плюс явная кодировка UTF-8 (CEO 27.09: без неё вывод шёл кракозябрами — Python декодировал
     ssh-байты локальной кодировкой Windows-консоли, как уже исправлено в role_memory.py:deck_alert).
     Один немедленный повтор при неудаче (CEO 27.09: разовый ssh-таймаут, а через мгновение сам ssh
@@ -199,8 +200,8 @@ def _ssh_run(cmd_suffix: str, timeout: float = 10.0):
 DECK_IDLE_ALERT_NAME = "ALERT-idle-deck"
 
 
-def check_steam_deck(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) -> list:
-    """п.2б/в: ALERT-* Steam Deck + простой при непустой очереди; ssh-хелпер подменяем в тестах.
+def check_second_machine(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) -> list:
+    """п.2б/в: ALERT-* второй машины + простой при непустой очереди; ssh-хелпер подменяем в тестах.
     v2: `hold_hint` — последнее известное состояние HOLD (из watch-state); если проверка HOLD сама упала
     (таймаут ssh), используем его (нет подсказки — считаем HOLD активным: сам сбой проверки сообщается
     отдельно как deck-ssh-error), чтобы ожидаемый простой не превращался в тревогу. `observed` — словарь,
@@ -219,32 +220,32 @@ def check_steam_deck(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) ->
     else:
         hold_active = True if hold_hint is None else bool(hold_hint)
     if not ok:
-        out.append(Finding("deck-ssh-error", "alerts", f"не удалось проверить тревоги Steam Deck: {alerts}"))
+        out.append(Finding("deck-ssh-error", "alerts", f"не удалось проверить тревоги второй машины: {alerts}"))
     elif alerts.strip():
         for line in alerts.strip().splitlines():
             name = line.split(":", 1)[0].strip()
             if name == DECK_IDLE_ALERT_NAME and hold_active:
-                out.append(Finding("deck-idle-expected", name, f"Steam Deck (HOLD активен, ожидаемо): {line[:200]}"))
+                out.append(Finding("deck-idle-expected", name, f"вторая машина (HOLD активен, ожидаемо): {line[:200]}"))
             else:
-                out.append(Finding("deck-alert", name, f"Steam Deck: {line[:200]}"))
+                out.append(Finding("deck-alert", name, f"вторая машина: {line[:200]}"))
 
     # простой при непустой очереди: HOLD снят, очередь непуста, но STATUS давно не обновлялся
     if not ok_hold:
-        out.append(Finding("deck-ssh-error", "hold", f"не удалось проверить HOLD Steam Deck: {hold_out}"))
+        out.append(Finding("deck-ssh-error", "hold", f"не удалось проверить HOLD второй машины: {hold_out}"))
     elif not hold_active:
-        # TK-016: задания gridq — queue/pending/*.job (прежний счёт queue/*.json всегда давал 0 → молчание)
+        # задания очереди — queue/pending/*.job и queue/running/*.job
         ok2, status_info = ssh_run(
             f"n=$(ls {DECK_ROOT}/queue/pending/ {DECK_ROOT}/queue/running/ 2>/dev/null | grep -c '\\.job$'); "
             f"age=$(( $(date +%s) - $(stat -c %Y {DECK_ROOT}/queue/STATUS 2>/dev/null || echo 0) )); "
             "echo \"$n $age\"")
         if not ok2:
-            out.append(Finding("deck-ssh-error", "queue", f"не удалось проверить очередь Steam Deck: {status_info}"))
+            out.append(Finding("deck-ssh-error", "queue", f"не удалось проверить очередь второй машины: {status_info}"))
         elif status_info.strip():
             try:
                 n_pending, age_s = (int(x) for x in status_info.split())
                 if n_pending > 0 and age_s > DECK_QUEUE_STALE_MINUTES * 60:
                     out.append(Finding("deck-queue-stale", "queue",
-                                        f"очередь Steam Deck не пуста ({n_pending}), STATUS не обновлялся "
+                                        f"очередь второй машины не пуста ({n_pending}), STATUS не обновлялся "
                                         f"{age_s // 60:.0f} мин — похоже на простой"))
             except ValueError:
                 pass  # неожиданный вывод — не валим находками на угад, но и не молчим полностью
@@ -252,7 +253,7 @@ def check_steam_deck(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) ->
     return out
 
 
-# TK-016: disk-guard.sh замораживает счёт (метка <DECK_ROOT>/sync/DISK-FULL) — замороженная очередь сама ALERT-*
+# Метка заморозки <DECK_ROOT>/sync/DISK-FULL: замороженная очередь сама ALERT-*
 # не пишет, STATUS стоит. Отдельный запрос: метка (число «frozen» в ней), свободно ГБ, замороженные юниты.
 DECK_FROZEN_CMD = (f"if [ -f {DECK_ROOT}/sync/DISK-FULL ]; then echo \"mark $(grep -c '^frozen ' {DECK_ROOT}/sync/DISK-FULL)\"; "
                    f"else echo nomark; fi; echo \"free $(df --output=avail -BG {DECK_ROOT} | tail -1 | tr -dc 0-9)\"; "
@@ -264,7 +265,7 @@ def check_deck_frozen(ssh_run=_ssh_run) -> list:
         return []
     ok, info = ssh_run(DECK_FROZEN_CMD)
     if not ok:
-        return [Finding("deck-ssh-error", "frozen", f"не удалось проверить заморозку Steam Deck: {info}")]
+        return [Finding("deck-ssh-error", "frozen", f"не удалось проверить заморозку второй машины: {info}")]
     mark_n, free_gb, frozen = None, "?", []
     for line in info.strip().splitlines():
         head, _, rest = line.strip().partition(" ")
@@ -276,11 +277,11 @@ def check_deck_frozen(ssh_run=_ssh_run) -> list:
             frozen.append(rest.strip())
     if mark_n is None and not frozen:
         return []
-    why = f"метка {DECK_ROOT}/sync/DISK-FULL (disk-guard)" if mark_n is not None else "без метки DISK-FULL"
+    why = f"метка {DECK_ROOT}/sync/DISK-FULL" if mark_n is not None else "без метки DISK-FULL"
     n = len(frozen) if frozen else mark_n
     units = ", ".join(frozen[:6]) + (" …" if len(frozen) > 6 else "")
     return [Finding("deck-frozen", "frozen",
-                    f"Steam Deck заморожен: {why}, заморожено юнитов {n}, свободно {free_gb} ГБ"
+                    f"вторая машина заморожена: {why}, заморожено юнитов {n}, свободно {free_gb} ГБ"
                     + (f" ({units})" if units else "") + " — счёт стоит, нужно место/разморозка")]
 
 
@@ -290,13 +291,13 @@ def collect_findings(state: dict, now, ssh_run=_ssh_run, started_at=None, hold_h
     findings += check_dispatcher_alive(state, now, started_at)
     findings += check_blocked_and_needs_owner(now)
     findings += check_orphan_tickets(now)
-    findings += check_steam_deck(ssh_run, hold_hint=hold_hint, observed=observed)
+    findings += check_second_machine(ssh_run, hold_hint=hold_hint, observed=observed)
     return findings
 
 
 # --- дедуп (вид, ключ) с повтором раз в WATCH_DEDUP_REPEAT_HOURS, пока не снято (п.2г) -----------
 #
-# Steam Deck перезаписывает ALERT-* каждые ~15 мин с той же сутью, но новой меткой времени внутри
+# Вторая машина перезаписывает ALERT-* каждые ~15 мин с той же сутью, но новой меткой времени внутри
 # (CEO 27.09: «18:26Z → 18:41Z → 18:56Z», иначе будило бы на каждое перезаписывание) — для deck-alert/
 # deck-idle-expected сравниваем СОДЕРЖИМОЕ без времени, не только (вид, ключ): та же суть — молчим до
 # истечения WATCH_DEDUP_REPEAT_HOURS, другая суть — будим сразу, как новую находку.
@@ -395,13 +396,13 @@ def _flush_pending_summary(ws: dict, now) -> None:
 
 def notify_findings(findings: list, ws: dict, now) -> list:
     """Возвращает находки, по которым реально написали (для тестов). Дедуп — (kind, key) + для
-    Steam Deck ещё и содержимое без времени (см. выше). Виды из WATCH_SUMMARY_KINDS не будят сразу —
+    второй машины ещё и содержимое без времени (см. выше). Виды из WATCH_SUMMARY_KINDS не будят сразу —
     копятся и уходят одной строкой не реже WATCH_SUMMARY_EVERY_HOURS (не молчание, просто не срочно;
     CEO 27.09: ALERT-idle-deck при активном HOLD — ожидаемое состояние)."""
     notified = ws.setdefault("notified", {})
     current_keys = set()
     posted = []
-    # v2: цикл с ошибкой ssh не видит тревог Steam Deck вовсе — их маркеры НЕ забываем, иначе первый же
+    # v2: цикл с ошибкой ssh не видит тревог второй машины вовсе — их маркеры НЕ забываем, иначе первый же
     # успешный цикл сообщит те же самые тревоги заново
     ssh_failed = any(f.kind in ("deck-ssh-error", "deck-ssh-error-transient") for f in findings)
     for f in findings:
@@ -429,7 +430,7 @@ def notify_findings(findings: list, ws: dict, now) -> list:
     for marker in list(notified):
         if marker not in current_keys:
             if ssh_failed and marker.startswith("deck-") and not marker.startswith("deck-ssh-error"):
-                continue  # проверка Steam Deck в этом цикле не состоялась — «снятой» тревога не считается
+                continue  # проверка второй машины в этом цикле не состоялась — «снятой» тревога не считается
             notified.pop(marker, None)
     # периодический флаш накопленной сводки — независимо от того, добавилось что-то в этом цикле или нет
     last_flush = ws.get("last_summary_flush")
@@ -470,8 +471,10 @@ def run_once(now=None, ssh_run=_ssh_run) -> list:
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if P.project_arg(argv):                      # явный --project; без него остаются пути, выставленные при импорте
-        configure_project(P.project_arg(argv))
+    if not D.ensure_project(argv, "watch"):      # нет проекта — ошибка с подсказкой, каталоги не создаём
+        return 2
+    if P.project_arg(argv):                      # проект переключён флагом — пути сторожа от него
+        _set_paths()
     DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
     if "--once" in argv:
         posted = run_once()

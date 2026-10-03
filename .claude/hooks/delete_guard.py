@@ -1,7 +1,7 @@
 """Удаление — только внутри своей папки (владелец 27.09: «нельзя удалять ничего кроме чего то внутри своей папки»).
 
-Вызывается PreToolUse-хуком плагина (`hooks/hooks.json`, Bash/PowerShell): точка входа `main()` читает JSON события со
-stdin, `check(cmd, cwd)` → причина отказа или None. Корень проекта — `CLAUDE_PROJECT_DIR` (иначе cwd); нет `.claude/roles` — молчит.
+Вызывается PreToolUse-хуком плагина (`hooks/hooks.json`: Bash, PowerShell, Write, Edit, MultiEdit,
+NotebookEdit): точка входа `main()` читает JSON события со stdin, `check(cmd, cwd)` → причина отказа или None. Корень проекта — `CLAUDE_PROJECT_DIR` (иначе cwd); нет `.claude/roles` — молчит.
 Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `RPV_GUARD_REMOTE_ROOTS`
 (и `RPV_GUARD_HOST_ROOTS` для своего хоста); оперативная стадия — `RPV_GUARD_STAGE`. Никогда: хосты из
 `RPV_GUARD_FORBIDDEN_HOSTS`, Storage Box (ssh порт 23), записи `root/` и `deep/` (единственные копии). Цель, которую нельзя

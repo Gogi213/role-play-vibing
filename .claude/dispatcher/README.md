@@ -3,11 +3,13 @@
 Раз в 15 с читает `<проект>/.claude/tickets/*.md` и будит роль (`claude -p`) или CEO (строка в `ceo-inbox.md`). Только stdlib, Python 3.11.
 
 Скрипты запускаются прямо из папки плагина (`<плагин>`), копировать их в проект не нужно. Корень проекта — `--project <путь>`
-(у `tickets.py` — перед подкомандой), иначе `RPV_PROJECT`, иначе `CLAUDE_PROJECT_DIR`, иначе текущий каталог (не расположение
-файла). Состояние (`state.json`, `runs.log`, `runs/`, pid, `ceo-inbox.md`, `ceo-wake.log`, сердцебиение сторожа) — в
+(у `tickets.py` — перед подкомандой), иначе `RPV_PROJECT`, иначе `CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от
+текущего с `.claude/roles` (не расположение файла); не нашли — ошибка с подсказкой `--project` / `/rpv-init`, каталоги не
+создаются. Состояние (`state.json`, `runs.log`, `runs/`, pid, `ceo-inbox.md`, `ceo-wake.log`, сердцебиение сторожа) — в
 `<проект>/.claude/dispatcher/` (создаётся при старте); тикеты и роли — из проекта.
 
 ```
+python <плагин>/.claude/dispatcher/start.py [--project <проект>]    # диспетчер + сторож в фоне, уже запущенные перезапускает (/rpv-start)
 python <плагин>/.claude/dispatcher/dispatch.py --project <проект>   # диспетчер, боевой цикл (--once — один тик; --help — справка)
 python <плагин>/.claude/dispatcher/watch.py --project <проект>      # сторож: диспетчер жив, сироты, blocked (--once — один цикл)
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." [--reviewer judge] [--effort high]
@@ -17,7 +19,8 @@ python -m unittest discover -s <плагин>/.claude/dispatcher && python -m un
 ```
 
 Роль, запущенная диспетчером, получает в окружении `RPV_ROLE`, `RPV_TICKET`, `RPV_PROJECT` (и `ALPHA_ROLE`, `ALPHA_TICKET` —
-для хуков, читающих прежние имена); в промпте — команда `tickets.py` с абсолютным путём из папки плагина.
+для хуков, читающих прежние имена); в промпте — команда `tickets.py` с абсолютным путём из папки плагина (то же хук
+`role_context.py` вставляет в начало каждой сессии роли и CEO).
 
 Статусы: backlog, todo, in_progress, waiting (+ `wait_for: file:… | ticket:… | deck:…`), in_review, done, blocked,
 needs_owner. Будят: `todo`, `in_progress`, выполненный `wait_for` — владельца; `done`/`in_review` с `reviewer` —
