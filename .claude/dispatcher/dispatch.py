@@ -18,6 +18,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -36,13 +37,13 @@ CODE_DIR = Path(__file__).resolve().parent  # где лежит сам дисп�
 # Пути проекта (PROJECT_ROOT, TICKETS_DIR, DISPATCHER_DIR — каталог СОСТОЯНИЯ в проекте и остальные файлы) выставляет
 # configure_project(): при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/текущему каталогу, в main() — по флагу.
 PROJECT_ROOT = DISPATCHER_DIR = TICKETS_DIR = STATE_FILE = PID_FILE = RUNS_DIR = RUNS_LOG = None
-CEO_INBOX = CEO_WAKE_LOG = None
+CEO_INBOX = CEO_WAKE_LOG = STOP_DIR = None
 PROJECT_FOUND = False  # проект найден при импорте (флаг/окружение/поиск вверх); False — CLI откажет с подсказкой
 
 
 def configure_project(root) -> Path:
     """Корень проекта и все пути состояния от него (ничего не создаёт — каталоги появляются при записи)."""
-    global PROJECT_ROOT, DISPATCHER_DIR, TICKETS_DIR, STATE_FILE, PID_FILE, RUNS_DIR, RUNS_LOG, CEO_INBOX, CEO_WAKE_LOG
+    global PROJECT_ROOT, DISPATCHER_DIR, TICKETS_DIR, STATE_FILE, PID_FILE, RUNS_DIR, RUNS_LOG, CEO_INBOX, CEO_WAKE_LOG, STOP_DIR
     PROJECT_ROOT = Path(root).expanduser().resolve()
     DISPATCHER_DIR = PROJECT_ROOT / ".claude" / "dispatcher"
     TICKETS_DIR = PROJECT_ROOT / ".claude" / "tickets"
@@ -52,6 +53,7 @@ def configure_project(root) -> Path:
     RUNS_LOG = DISPATCHER_DIR / "runs.log"
     CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
     CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # короткая копия каждой строки ceo-inbox — CEO держит на ней Monitor
+    STOP_DIR = DISPATCHER_DIR / "stop"  # заявки `tickets.py stop` (<ID>.json): диспетчер разбирает их на ближайшем тике
     return PROJECT_ROOT
 
 
@@ -102,6 +104,12 @@ MAX_IDLE_RUNS = int(P.env("DISPATCH_MAX_IDLE_RUNS", "2"))
 # После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher +
 # `next: ceo` (одна строка CEO). Число НАЗНАЧЕНО CEO 03.10, не измерено.
 MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "3"))
+# Остановка роли CEO (`tickets.py stop`): после снятия дерева процессов ждём смерти процесса не дольше STOP_VERIFY_S
+# секунд (число НАЗНАЧЕНО, не измерено: taskkill/killpg возвращаются сразу, 10 с — запас на очередь ОС); не умер —
+# строка CEO `stop-failed`, заявка остаётся до следующего тика.
+STOP_VERIFY_S = float(P.env("DISPATCH_STOP_VERIFY_S", "10"))
+STOP_NOTE = ("Прошлый запуск оборван CEO — проверь git status и недописанные правки, начни с новой постановки "
+             "(последняя запись CEO в логе тикета).")
 
 # Модель и перерасход (владелец 27.09, v1.2 — пилот Судьи на умолчаниях CLI стоил $6,8 на Fable 5.1
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
@@ -906,6 +914,48 @@ def _kill_proc(info: dict) -> None:
         _pid_kill(info.get("pid"))
 
 
+def _kill_tree_nt(pid) -> None:
+    """Windows: `taskkill /T /F /PID` — процесс и все его потомки."""
+    try:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
+    except Exception:
+        pass
+
+
+def _kill_tree_posix(pid) -> None:
+    """Linux/macOS: SIGKILL всей группе процессов роли — запуск идёт со `start_new_session=True`, группа = pid. Процесс не
+    лидер своей группы (запущен до этой правки и сидит в группе диспетчера) — только он сам: killpg по такой группе
+    снял бы и сам диспетчер."""
+    sig = getattr(signal, "SIGKILL", 9)
+    try:
+        if os.getpgid(pid) == pid:
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
+    except Exception:
+        pass
+
+
+def _kill_tree(pid) -> None:
+    if not pid:
+        return
+    (_kill_tree_nt if os.name == "nt" else _kill_tree_posix)(pid)
+
+
+def _stop_run(info: dict) -> bool:
+    """Снять запущенную роль всем деревом процессов и проверить, что она умерла (ждём до STOP_VERIFY_S). True — умерла.
+    Уже мёртвый процесс не трогаем: его pid ОС могла отдать чужому."""
+    pid = info.get("pid") or (info["popen"].pid if info.get("popen") is not None else None)
+    if _proc_alive(info):
+        _kill_tree(pid)
+    deadline = time.time() + STOP_VERIFY_S
+    while _proc_alive(info):
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.1)
+    return True
+
+
 # --- запуск роли ------------------------------------------------------------------------------
 
 def _popen(cmd, **kwargs):
@@ -945,6 +995,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
     store = _resume_store(state, tid, role)
     sid = store.get("session_id")
+    if state.get("stopped_runs", {}).pop(tid, None):
+        # прошлый запуск этого тикета оборван CEO (`tickets.py stop`): сессия НОВАЯ (без --resume), в промпте — пометка
+        sid = None
+        extra_note = " ".join(x for x in (extra_note, STOP_NOTE) if x)
     if sid and store.get("last_context_tokens", 0) > ROTATE_TOKENS:
         # ротация: контекст прошлой сессии этой роли слишком большой — начинаем новую
         sid = None
@@ -991,7 +1045,9 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
-    popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True)
+    # своя группа процессов (на Windows параметр без действия): остановка CEO снимает роль вместе с потомками
+    popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
+                   start_new_session=True)
     RUNNING[tid] = {
         "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
@@ -1022,10 +1078,10 @@ def _read_run_result(run_file: Path) -> dict:
 
 
 def _log_run_summary(tid: str, info: dict, result: dict, now, timed_out: bool, resolved_cost: float,
-                      ticket_spent: float, cost_note: bool = False) -> None:
+                      ticket_spent: float, cost_note: bool = False, stopped: bool = False) -> None:
     RUNS_LOG.parent.mkdir(parents=True, exist_ok=True)
     usage = result.get("usage") or {}
-    status = "timeout" if timed_out else ("ok" if result else "no_output")
+    status = "stopped" if stopped else "timeout" if timed_out else ("ok" if result else "no_output")
     # cost_usd — сырой (кумулятивный за сессию) из JSON; resolved_cost — разница с прошлым итогом ТОЙ ЖЕ
     # session_id (судья TK-002 п.1) — то, что реально начислено этому запуску; cost_note=asis — не было
     # с чем сравнить (новая/ротированная сессия) или разница < 0 — использован сырой итог как есть.
@@ -1185,7 +1241,7 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     save_state(state)
 
 
-def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool) -> None:
+def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped: bool = False) -> None:
     for fh in (info.get("out_fh"), info.get("err_fh")):
         try:
             fh.close()
@@ -1208,13 +1264,16 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool) -> None
     _add_cost(state, now, resolved_cost)
     add_ticket_cost(state, tid, resolved_cost)
     _record_cost_event(state, now, resolved_cost)
-    _log_run_summary(tid, info, result, now, timed_out, resolved_cost, ticket_cost_spent(state, tid), cost_note)
+    _log_run_summary(tid, info, result, now, timed_out, resolved_cost, ticket_cost_spent(state, tid), cost_note,
+                     stopped=stopped)
 
     expected_model = _expected_model_family(info)
     model_warn = _model_usage_warning(model_usage_diff, expected_model)
     if model_warn:
         route_ceo_signal(tid, "model", model_warn, state, now)
 
+    if stopped:
+        return  # остановка CEO — не провал: ни повтора, ни «не оставил запись» (след и счётчики — _apply_stop)
     _finish_role_part(tid, info, state, now, timed_out, result)
 
 
@@ -1256,6 +1315,100 @@ def recover_active_runs(state: dict, now) -> None:
             _finish_run(tid, info, state, now, timed_out=False)
 
 
+# --- остановка роли посреди запуска: `tickets.py stop` (CEO, 03.10) ----------------------------------------------
+
+def write_stop_request(tid: str, next_role: str, text: str, now=None) -> Path:
+    """`tickets.py stop`: заявка `stop/<ID>.json` — время, роль для `--next` (или пусто) и текст новой постановки. Диспетчер
+    разбирает её на ближайшем тике (process_stop_requests); новая заявка по тому же тикету заменяет прежнюю."""
+    STOP_DIR.mkdir(parents=True, exist_ok=True)
+    path = STOP_DIR / f"{tid}.json"
+    T.atomic_write_text(path, json.dumps({"at": T.now_iso(now), "next": next_role or "", "text": text},
+                                         ensure_ascii=False, indent=2))
+    return path
+
+
+def _stop_requests() -> list:
+    out = []
+    for path in sorted(STOP_DIR.glob("*.json")) if STOP_DIR.exists() else []:
+        try:
+            req = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(req, dict):
+            out.append((path, req))
+    return out
+
+
+def _reset_loop_state(state: dict, tid: str) -> None:
+    """Остановка CEO — не провал и новая постановка: счётчики холостых и «запись есть, статус тот же» запусков, повторов,
+    ротации (сессия и контекст ЭТОГО тикета у всех ролей) и часовой лимит запусков по тикету — с нуля."""
+    for role in ROLE_KEYS:
+        key = f"{tid}::{role}"
+        state.setdefault("idle_runs", {}).pop(key, None)
+        _reset_same_status(state, key)
+        if key in state.get("sessions", {}):
+            state["sessions"][key]["retries"] = 0
+        store = state.get("ticket_sessions", {}).get(key)
+        if store:
+            store.pop("session_id", None)
+            store.pop("last_context_tokens", None)
+    state.get("launch_history", {}).pop(tid, None)
+
+
+def _apply_stop(path: Path, tid: str, req: dict, info, state: dict, now) -> None:
+    """Запись тикета после остановки: след диспетчера → запись CEO с постановкой (последняя в логе — её читает следующий
+    запуск) → статус (`--next`: todo + next, роль стартует в этом же тике; иначе stopped — не будит, пока CEO не переведёт
+    в todo). Был снят запуск — следующий запуск тикета начнёт новую сессию (пометка `stopped_runs`, см. launch_run)."""
+    hhmm = now.strftime("%H:%M")
+    if info is not None:
+        T.append_log(path, "dispatcher", f"остановлен CEO в {hhmm}: запуск роли {info['role']} (pid {info.get('pid')}) снят "
+                                          "вместе с дочерними процессами; следующий запуск — новая сессия.", now=now)
+    else:
+        T.append_log(path, "dispatcher", f"остановка CEO в {hhmm}: запущенной роли не было — статус применён.", now=now)
+    try:
+        at = T.parse_dt(req["at"])
+    except Exception:
+        at = now
+    T.append_log(path, "ceo", str(req.get("text") or "").strip() or "(постановка без текста)", now=at)
+    nxt = req.get("next")
+    if nxt in ROLE_KEYS:
+        T.write_header_updates(path, {"status": "todo", "next": nxt}, now=now)
+    else:
+        T.write_header_updates(path, {"status": "stopped", "next": ""}, now=now)
+    _reset_loop_state(state, tid)
+    if info is not None:
+        state.setdefault("stopped_runs", {})[tid] = T.now_iso(now)
+
+
+def process_stop_requests(state: dict, now) -> None:
+    """Заявки `tickets.py stop`: запущенную роль тикета снять деревом процессов, проверить смерть, записать след и статус.
+    Не умерла — одна на заявку строка CEO `stop-failed`, заявка и запуск остаются до следующего тика. Тикета нет или он
+    не читается — заявку не трогаем (битый тикет заметит основной цикл; чужой корень заявку не съест)."""
+    for req_path, req in _stop_requests():
+        tid = req_path.stem
+        path = TICKETS_DIR / f"{tid}.md"
+        try:
+            T.read_ticket(path)
+        except Exception:
+            continue
+        info = RUNNING.get(tid)
+        if info is not None:
+            if not _stop_run(info):
+                notified = state.setdefault("ceo_stop_failed_notified", {})
+                if notified.get(tid) != req.get("at"):
+                    append_ceo_inbox(tid, "stop-failed", f"{info['role']}: pid {info.get('pid')} не умер после снятия "
+                                     "деревом процессов — заявка остаётся, снимите вручную", now)
+                    notified[tid] = req.get("at")
+                continue
+            RUNNING.pop(tid, None)
+            _finish_run(tid, info, state, now, timed_out=False, stopped=True)
+        _apply_stop(path, tid, req, info, state, now)
+        try:
+            req_path.unlink()
+        except OSError:
+            pass
+
+
 # --- тик / цикл -------------------------------------------------------------------------------
 
 def _apply_header_updates(path: Path, updates: dict, now) -> None:
@@ -1274,6 +1427,7 @@ def tick(now=None) -> int:
     now = now or datetime.now().astimezone()
     state = load_state()
     recover_active_runs(state, now)  # диспетчер мог перезапуститься — живые/умершие прогоны из state.json
+    process_stop_requests(state, now)  # `tickets.py stop` (CEO): снять запущенную роль до разбора завершённых — не провал
     _poll_running(state, now)
     baseline_done_notified(state)  # v2: историю `done` CEO не пересказываем (один раз, ключ в state.json)
     save_state(state)

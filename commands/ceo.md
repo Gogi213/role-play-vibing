@@ -18,7 +18,7 @@ disable-model-invocation: true
    `.claude/roles/notes/ceo.md` (блокнот).
 4. Запомни команду тикетов (в проекте `tickets.py` нет — он в папке плагина):
    `python "${CLAUDE_PLUGIN_ROOT}/.claude/dispatcher/tickets.py" --project "<корень проекта>"` + подкоманда (`new`,
-   `comment`, `start`, `status`). `${CLAUDE_PLUGIN_ROOT}` пуст — найди каталог плагина `role-play-vibing` под
+   `comment`, `start`, `stop`, `status`). `${CLAUDE_PLUGIN_ROOT}` пуст — найди каталог плагина `role-play-vibing` под
    `~/.claude/plugins`. Диспетчер и сторож запускает `/rpv-start`.
 5. Ответь владельцу одной строкой: «Сессия помечена как CEO». Дальше веди себя по уставу CEO.
 

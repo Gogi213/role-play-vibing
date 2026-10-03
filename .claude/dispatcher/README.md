@@ -15,17 +15,26 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>      
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." [--reviewer judge] [--effort high]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> comment TK-001 --author engineer --text "..." [--next judge|ceo]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> start TK-001 | status
+python <плагин>/.claude/dispatcher/tickets.py --project <проект> stop TK-001 --text "<новая постановка>" [--next judge]   # только CEO
 python -m unittest discover -s <плагин>/.claude/dispatcher && python -m unittest discover -s <плагин>/.claude/hooks   # тесты
 ```
+
+`start.py` запускает службы отвязанными от сессии (Windows — WMI `Win32_Process.Create`, вне job-объекта приложения; Linux с systemd — `systemd-run --user`, юнит `rpv-<служба>-<хеш пути проекта>`; иначе `Popen`) и печатает «отвязан: да/нет»; чтобы юниты пережили выход из системы — `loginctl enable-linger $USER` (перезапуск юнита гасит и запущенные роли).
 
 Роль, запущенная диспетчером, получает в окружении `RPV_ROLE`, `RPV_TICKET`, `RPV_PROJECT` (и `ALPHA_ROLE`, `ALPHA_TICKET` —
 для хуков, читающих прежние имена); в промпте — команда `tickets.py` с абсолютным путём из папки плагина (то же хук
 `role_context.py` вставляет в начало каждой сессии роли и CEO).
 
 Статусы: backlog, todo, in_progress, waiting (+ `wait_for: file:… | ticket:… | deck:…`), in_review, done, blocked,
-needs_owner. Будят: `todo`, `in_progress`, выполненный `wait_for` — владельца; `done`/`in_review` с `reviewer` —
+needs_owner, stopped (остановлено CEO — не будит, пока CEO не вернёт в `todo`). Будят: `todo`, `in_progress`, выполненный `wait_for` — владельца; `done`/`in_review` с `reviewer` —
 ревьюера; `--next` — названную роль один раз. Запуск без новой записи — один повтор, затем `blocked`. Траты считаются
 (`runs.log`, `tickets.py status`), ничего не ограничивают.
+
+Остановка роли — `tickets.py stop TK-NN --text "<новая постановка>" [--next <роль>]` (только CEO; из сессии роли, где стоит `RPV_ROLE`, отказ): заявка `<проект>/.claude/dispatcher/stop/<ID>.json`; на ближайшем тике диспетчер снимает запущенную роль этого тикета ВСЕМ деревом процессов (Windows — `taskkill /T /F /PID`, иначе — `killpg` группы: роль запускается с `start_new_session=True`) и проверяет, что процесс умер (не умер — строка CEO `[stop-failed]`, заявка остаётся).
+Остановка — не провал: ни повтора, ни пометки «запуск не оставил запись»; счётчики холостых и «запись есть, статус тот же» запусков, повторов, ротации (сессия и контекст тикета) и часовой лимит запусков по тикету — с нуля.
+След: в лог — запись `dispatcher` «остановлен CEO в ЧЧ:ММ», затем запись CEO с постановкой (последняя в логе); следующий запуск тикета — НОВАЯ сессия (без `--resume`), в промпте «прошлый запуск оборван CEO — проверь git status и недописанные правки, начни с новой постановки».
+Статус: с `--next` — `todo` + `next: <роль>` (роль стартует в этом же тике); без `--next` — `stopped`: диспетчер не будит, сторож не считает сиротой, в `todo` возвращает CEO (`tickets.py start TK-NN` или правка шапки).
+Ограничение: задания на машинах (`systemd-run`, ssh) диспетчер не останавливает — их снимает CEO; запущенный диспетчер видит заявку только после перезапуска (`/rpv-start`).
 
 Переменные окружения (умолчания в скобках). Имена `RPV_*`; если `RPV_<имя>` не задана, берётся прежняя `ALPHA_<имя>`:
 

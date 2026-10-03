@@ -171,6 +171,14 @@ class OrphanTicketTests(WatchSandbox):
         T.append_log(p, "engineer", "отменено", now=self.now - timedelta(hours=10))
         self.assertEqual(W.check_orphan_tickets(self.now), [])
 
+    def test_stopped_ticket_is_not_orphan_even_if_old(self):
+        """`stopped` (CEO остановил роль без --next) ждёт слова CEO — не сирота, сколько бы ни лежал."""
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Остановлена", status="todo",
+                             now=self.now - timedelta(hours=10))
+        T.write_header_updates(p, {"status": "stopped"}, now=self.now - timedelta(hours=10))
+        T.append_log(p, "ceo", "Новая постановка", now=self.now - timedelta(hours=10))
+        self.assertEqual(W.check_orphan_tickets(self.now), [])
+
 class SecondMachineWatchTests(WatchSandbox):
     def test_alert_file_becomes_finding(self):
         def fake_ssh(cmd, timeout=10.0):

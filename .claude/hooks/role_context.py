@@ -228,7 +228,7 @@ def full_context(role, title, source, hook_in):
     head.append(f"Связь с командой — только лог тикета (готовая команда, путь абсолютный): `{tcmd} comment <ID> "
                 f"--author {role} --text \"...\" [--next <роль>]` (`--next` — кого разбудить следующим; "
                 "@упоминания никого не будят)."
-                + (" Остальные подкоманды (`new`, `start`, `status`) — после `--project \"...\"` той же командой."
+                + (" Остальные подкоманды (`new`, `start`, `stop`, `status`) — после `--project \"...\"` той же командой."
                    if role == "ceo" else ""))
     if role != "ceo":
         head.append("Общую память проекта (CLAUDE.md, автопамять) пишет только `CEO`; ты работаешь по своему "

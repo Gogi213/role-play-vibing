@@ -12,12 +12,18 @@
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
     tickets.py comment TK-001 --author researcher --text "..." [--next judge]
-    tickets.py start TK-001                                     # backlog → todo
+    tickets.py start TK-001                                     # backlog|stopped → todo
+    tickets.py stop TK-001 --text "..." [--next engineer]       # только CEO: снять роль
     tickets.py status                                           # потрачено по задачам
 
 `--next researcher|engineer|judge|ceo` — единственный способ разбудить другую роль (или CEO) записью лога:
 пишет `next: <роль>` в шапку, диспетчер запускает роль ОДИН раз и очищает поле. @упоминания в тексте никого
 не будят. После записи лог больше 20 КБ ужимается: всё, кроме последних 8 записей, — в `archive/<ID>-log.md`.
+
+`stop <ID> --text "<новая постановка>" [--next <роль>]` — только CEO (запись в лог — от `ceo`; из сессии роли — отказ): заявка
+диспетчеру снять запущенную роль всем деревом процессов и дать новую постановку (подробно — README диспетчера, «Остановка
+роли»). С `--next` тикет станет `todo` + `next: <роль>` и роль стартует сразу; без — `status: stopped`: диспетчер не будит,
+пока CEO не переведёт в `todo` (`start`).
 
 Лимитов денег на тикет нет (В-173, 03.10): `status` показывает только потрачено (учёт из state.json).
 """
@@ -87,19 +93,47 @@ def cmd_comment(args) -> int:
     return 0
 
 
+def _caller_role() -> str:
+    """Роль вызывающей сессии: диспетчер ставит `RPV_ROLE` (и `ALPHA_ROLE`) запускам ролей; у CEO и владельца её нет."""
+    return (D.P.env("ROLE", "") or "").strip().lower()
+
+
 def cmd_start(args) -> int:
-    """backlog → todo: задача, перенесённая из TASKS.md, берётся в работу — диспетчер начинает её видеть."""
+    """backlog → todo: задача, перенесённая из TASKS.md, берётся в работу — диспетчер начинает её видеть. stopped → todo:
+    CEO возвращает остановленную (`stop` без `--next`) задачу в работу."""
     path = TICKETS_DIR / f"{args.id}.md"
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
     with T.ticket_lock(path):
         tkt = T.read_ticket(path)
-        if tkt.status != "backlog":
-            print(f"{args.id}: status={tkt.status!r}, не backlog — не трогаю", file=sys.stderr)
+        if tkt.status not in ("backlog", "stopped"):
+            print(f"{args.id}: status={tkt.status!r}, не backlog/stopped — не трогаю", file=sys.stderr)
             return 1
+        was = tkt.status
         T.write_header_updates(path, {"status": "todo"})
-    print(f"{args.id}: backlog → todo")
+    print(f"{args.id}: {was} → todo")
+    return 0
+
+
+def cmd_stop(args) -> int:
+    """CEO: остановить запущенную роль тикета и дать новую постановку. Только заявка диспетчеру (`stop/<ID>.json`): снятие
+    процесса, след, статус и запись CEO в лог делает диспетчер на ближайшем тике (README, «Остановка роли»)."""
+    role = _caller_role()
+    if role and role != "ceo":
+        print(f"stop — только CEO; эта сессия — роль {role}", file=sys.stderr)
+        return 1
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    text = (args.text or "").strip()
+    if not text:
+        print("stop: --text пуст — нужна новая постановка", file=sys.stderr)
+        return 1
+    D.write_stop_request(path.stem, args.next or "", text)
+    print(f"{args.id}: заявка на остановку принята — на ближайшем тике диспетчер снимет запущенную роль; дальше: "
+          + (f"todo, next: {args.next}" if args.next else "status: stopped (не будить)"))
     return 0
 
 
@@ -169,6 +203,13 @@ def main(argv=None) -> int:
     p_start = sub.add_parser("start")
     p_start.add_argument("id")
     p_start.set_defaults(func=cmd_start)
+
+    p_stop = sub.add_parser("stop", help="только CEO: остановить запущенную роль тикета и дать новую постановку")
+    p_stop.add_argument("id")
+    p_stop.add_argument("--text", required=True, help="новая постановка — запись CEO в лог тикета")
+    p_stop.add_argument("--next", choices=["researcher", "engineer", "judge"], default=None,
+                        help="роль, которая стартует сразу (тикет станет todo); без --next — status: stopped, не будить")
+    p_stop.set_defaults(func=cmd_stop)
 
     p_status = sub.add_parser("status")
     p_status.set_defaults(func=cmd_status)

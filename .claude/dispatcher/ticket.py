@@ -2,12 +2,13 @@
 
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
-(backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner), `reviewer` (опц.),
+(backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner|stopped), `reviewer` (опц.),
 `wait_for` (опц.: `file:<путь>` локально, `deck:<путь>` на второй машине через ssh, `ticket:<ID>`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
 `updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
-не трогает (`dispatch.decide()`), в `todo` переводит `tickets.py start <ID>`.
+не трогает (`dispatch.decide()`), в `todo` переводит `tickets.py start <ID>`. `stopped` — роль остановлена CEO
+(`tickets.py stop` без `--next`): диспетчер не будит, сторож не считает сиротой; в `todo` — тем же `start`.
 
 Тело: свободное описание, затем заголовок `## Лог` — записи `### <ISO-время> <автор>` + текст.
 v2 (02.10): «роль оставила запись» диспетчер определяет по НОВОМУ заголовку записи этой роли

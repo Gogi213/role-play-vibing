@@ -669,6 +669,17 @@ print(json.dumps({"session_id": f"sess-{tid}-{role}", "total_cost_usd": 0.01, "u
 """
 
 
+# Роль с потомком (оба «висят»): для остановки деревом процессов (`tickets.py stop`). pid потомка — в `child.pid` рядом с
+# каталогом тикетов; потомок наследует выходные файлы запуска, после остановки они должны закрыться.
+FAKE_BIN_TREE = r"""
+import os, subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+(Path(os.environ["FAKE_TICKETS_DIR"]).parent / "child.pid").write_text(str(child.pid))
+time.sleep(120)
+"""
+
+
 class DispatchRunTests(unittest.TestCase):
     """Сквозные тесты `tick()` с подменённым `CLAUDE_BIN` (без сети и без настоящего claude)."""
 
@@ -683,7 +694,7 @@ class DispatchRunTests(unittest.TestCase):
         self._orig = {k: getattr(D, k) for k in
                       ("TICKETS_DIR", "PROJECT_ROOT", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
                        "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
-                       "PID_EXPECT_NAME")}
+                       "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S")}
         D.TICKETS_DIR = self.tickets_dir
         D.PROJECT_ROOT = self.base
         D.STATE_FILE = self.dispatcher_dir / "state.json"
@@ -691,6 +702,7 @@ class DispatchRunTests(unittest.TestCase):
         D.RUNS_LOG = self.dispatcher_dir / "runs.log"
         D.CEO_INBOX = self.dispatcher_dir / "ceo-inbox.md"
         D.CEO_WAKE_LOG = self.dispatcher_dir / "ceo-wake.log"
+        D.STOP_DIR = self.dispatcher_dir / "stop"
         # фейковый "claude" в тестах — это sys.executable (python.exe/python3), не claude.exe
         D.PID_EXPECT_NAME = Path(sys.executable).stem
         D.RUNNING.clear()
@@ -1352,6 +1364,209 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.RUNNING, {})  # без reviewer некого запускать
         D.tick(now=dt("2026-09-27T12:02:30+04:00"))  # дедуп: тот же updated — второй строки нет
         self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[done]"), 1)
+
+    # --- `tickets.py stop`: остановка роли посреди запуска (CEO, 03.10) ------------------------------------------------
+
+    def _alive(self, pid):
+        return D._pid_alive(pid, Path(sys.executable).stem)
+
+    def start_tree_run(self, owner="researcher"):
+        """Фейковая роль с потомком, оба «висят»: (путь тикета, pid потомка)."""
+        self.set_fake_bin(FAKE_BIN_TREE)
+        path = T.create_ticket(self.tickets_dir, owner=owner, title="Долгий запуск")
+        T.write_header_updates(path, {"status": "in_progress"})
+        D.tick()
+        self.assertIn(path.stem, D.RUNNING)
+        pid_file = self.base / "child.pid"
+        deadline = time.time() + 30
+        while not (pid_file.exists() and pid_file.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        child = int(pid_file.read_text().strip())
+        self.addCleanup(D._kill_tree, child)  # тест упал — потомок не остаётся жить
+        return path, child
+
+    def _stop_next_launch_cmd(self, tid):
+        """Заявка `--next researcher` + тик: команда запуска, который диспетчер сделал в этом же тике."""
+        calls = []
+        D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
+        D.write_stop_request(tid, "researcher", "Новая постановка")
+        D.tick()
+        self.assertEqual(len(calls), 1, "роль стартует в том же тике")
+        return calls[0]
+
+    def test_stop_kills_role_and_its_child_and_removes_request(self):
+        path, child = self.start_tree_run()
+        popen = D.RUNNING[path.stem]["popen"]
+        D.write_stop_request(path.stem, "", "Новая постановка")
+        D.tick()
+        self.assertIsNotNone(popen.poll(), "роль снята")
+        self.assertFalse(self._alive(child), "потомок роли снят вместе с ней")
+        self.assertEqual(D.RUNNING, {})
+        self.assertNotIn(path.stem, D.load_state().get("active_runs", {}))
+        self.assertFalse((D.STOP_DIR / f"{path.stem}.json").exists(), "заявка разобрана")
+
+    def test_stop_without_next_parks_ticket_as_stopped_and_is_not_a_failure(self):
+        path, _ = self.start_tree_run()
+        D.write_stop_request(path.stem, "", "Новая постановка: сделай X")
+        D.tick()
+        tkt = T.read_ticket(path)
+        self.assertEqual(tkt.status, "stopped")
+        self.assertEqual(tkt.next_role, "")
+        trace, entry = tkt.log[-2], tkt.log[-1]
+        self.assertEqual(trace.author, "dispatcher")
+        self.assertRegex(trace.text, r"^остановлен CEO в \d\d:\d\d")
+        self.assertEqual((entry.author, entry.text), ("ceo", "Новая постановка: сделай X"))
+        self.assertIn("status=stopped", D.RUNS_LOG.read_text(encoding="utf-8"))
+        for _ in range(3):
+            self.assertEqual(D.tick(), 0, "stopped никого не будит")
+        self.assertEqual(D.RUNNING, {}, "ни повтора, ни запуска")
+        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        self.assertNotIn("blocked", inbox)
+        self.assertFalse(any("не оставил" in e.text or "заблокирована" in e.text for e in tkt.log))
+
+    def test_stop_with_next_starts_role_at_once_in_new_session_with_note(self):
+        path, _ = self.start_tree_run()
+        tid = path.stem
+        cmd = self._stop_next_launch_cmd(tid)
+        self.assertNotIn("--resume", cmd, "новая сессия, не продолжение прежней")
+        prompt = cmd[cmd.index("-p") + 1]
+        self.assertIn("рошлый запуск оборван CEO — проверь git status и недописанные правки, начни с новой постановки",
+                      prompt)
+        self.assertEqual(D.RUNNING[tid]["reason"], "next")
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.next_role), ("todo", ""), "next погашен запуском")
+        self.assertEqual((tkt.log[-1].author, tkt.log[-1].text), ("ceo", "Новая постановка"))
+        self.assertNotIn(tid, D.load_state().get("stopped_runs", {}), "пометка снята одним запуском")
+
+    def test_stop_new_session_also_when_session_scope_is_role(self):
+        """scope «role»: сессия общая на роль и у тикета её не стереть — новая сессия идёт по пометке запуска."""
+        D.SESSION_SCOPE["researcher"] = "role"
+        path, _ = self.start_tree_run()
+        state = D.load_state()
+        state.setdefault("role_sessions", {})["researcher"] = {"session_id": "shared-sess", "last_context_tokens": 5}
+        D.save_state(state)
+        cmd = self._stop_next_launch_cmd(path.stem)
+        self.assertNotIn("--resume", cmd)
+        self.assertIn("оборван CEO", cmd[cmd.index("-p") + 1])
+
+    def test_stop_resets_loop_counters_rotation_and_launch_history(self):
+        path, _ = self.start_tree_run()
+        tid, key = path.stem, f"{path.stem}::researcher"
+        state = D.load_state()
+        state["idle_runs"] = {key: 1}
+        state["same_status_runs"] = {key: 5}
+        state["same_status_warned"] = {key: 5}
+        state.setdefault("sessions", {}).setdefault(key, {})["retries"] = 1
+        state["ticket_sessions"] = {key: {"session_id": "old", "last_context_tokens": D.ROTATE_TOKENS + 1}}
+        D.save_state(state)
+        self.assertIn(tid, state["launch_history"])
+        D.write_stop_request(tid, "", "x")
+        D.tick()
+        state = D.load_state()
+        self.assertNotIn(key, state["idle_runs"])
+        self.assertNotIn(key, state["same_status_runs"])
+        self.assertNotIn(key, state["same_status_warned"])
+        self.assertEqual(state["sessions"][key]["retries"], 0)
+        self.assertEqual(state["ticket_sessions"][key], {}, "сессия и контекст — с нуля")
+        self.assertNotIn(tid, state["launch_history"], "часовой лимит запусков по тикету — с нуля")
+
+    def test_stop_without_running_role_still_applies_status_and_entry(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Не запущена")
+        T.write_header_updates(path, {"status": "waiting"})
+        D.write_stop_request(path.stem, "", "Новая постановка")
+        D.tick()
+        tkt = T.read_ticket(path)
+        self.assertEqual(tkt.status, "stopped")
+        self.assertIn("запущенной роли не было", tkt.log[-2].text)
+        self.assertEqual(tkt.log[-1].author, "ceo")
+        self.assertNotIn(path.stem, D.load_state().get("stopped_runs", {}), "прерывать было нечего")
+
+    def test_stop_that_cannot_kill_keeps_request_and_tells_ceo_once(self):
+        path, _ = self.start_tree_run()
+        tid = path.stem
+        real_kill = D._kill_tree
+        D._kill_tree = lambda pid: None
+        D.STOP_VERIFY_S = 0.3
+        self.addCleanup(setattr, D, "_kill_tree", real_kill)
+        D.write_stop_request(tid, "", "x")
+        D.tick()
+        D.tick()
+        self.assertIn(tid, D.RUNNING)
+        self.assertTrue((D.STOP_DIR / f"{tid}.json").exists(), "заявка ждёт следующего тика")
+        self.assertEqual(T.read_ticket(path).status, "in_progress")
+        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[stop-failed]"), 1)
+        D._kill_tree = real_kill
+        D.tick()
+        self.assertNotIn(tid, D.RUNNING)
+        self.assertEqual(T.read_ticket(path).status, "stopped")
+
+    def test_stop_reaches_run_restored_from_state_after_dispatcher_restart(self):
+        path, child = self.start_tree_run()
+        info = D.RUNNING[path.stem]
+        real_popen = info["popen"]
+        info["out_fh"].close()
+        info["err_fh"].close()
+        D.RUNNING.clear()  # «перезапуск диспетчера»: в памяти пусто, зеркало — в state.json
+        D.write_stop_request(path.stem, "", "x")
+        D.tick()  # recover_active_runs подхватывает по pid, затем заявка снимает его
+        self.assertFalse(self._alive(child))
+        real_popen.wait(timeout=5)
+        self.assertEqual(T.read_ticket(path).status, "stopped")
+        self.assertEqual(D.RUNNING, {})
+
+    def test_stop_request_for_unknown_ticket_is_left_untouched(self):
+        D.write_stop_request("TK-404", "", "x")
+        D.tick()
+        self.assertTrue((D.STOP_DIR / "TK-404.json").exists())
+
+    def test_role_is_launched_in_its_own_process_group(self):
+        self.set_fake_bin(FAKE_BIN_SILENT)
+        seen = {}
+        orig = D._popen
+        D._popen = lambda cmd, **kw: (seen.update(kw), orig(cmd, **kw))[1]
+        T.create_ticket(self.tickets_dir, owner="researcher", title="Группа")
+        D.tick()
+        self.assertIs(seen.get("start_new_session"), True)
+
+    def test_kill_tree_dispatches_by_platform(self):
+        from unittest import mock
+        with mock.patch.object(D, "_kill_tree_nt") as nt, mock.patch.object(D, "_kill_tree_posix") as px:
+            with mock.patch.object(os, "name", "nt"):
+                D._kill_tree(11)
+            with mock.patch.object(os, "name", "posix"):
+                D._kill_tree(22)
+            D._kill_tree(0)
+        nt.assert_called_once_with(11)
+        px.assert_called_once_with(22)
+
+    def test_kill_tree_nt_is_taskkill_tree_force(self):
+        from unittest import mock
+        with mock.patch.object(D.subprocess, "run") as run:
+            D._kill_tree_nt(777)
+        self.assertEqual(run.call_args[0][0], ["taskkill", "/T", "/F", "/PID", "777"])
+
+    def test_kill_tree_posix_kills_group_of_leader_and_only_pid_of_non_leader(self):
+        from unittest import mock
+        sig = getattr(D.signal, "SIGKILL", 9)
+        with mock.patch.object(os, "getpgid", create=True, return_value=4242) as gp, \
+                mock.patch.object(os, "killpg", create=True) as kg, mock.patch.object(os, "kill") as kill:
+            D._kill_tree_posix(4242)  # запущен со start_new_session: группа = pid
+            kg.assert_called_once_with(4242, sig)
+            kill.assert_not_called()
+            kg.reset_mock()
+            gp.return_value = 1  # сидит в чужой группе (запущен до правки): killpg снял бы и диспетчер
+            D._kill_tree_posix(4242)
+            kg.assert_not_called()
+            kill.assert_called_once_with(4242, sig)
+
+    def test_stopped_status_wakes_nobody_but_explicit_next_still_works(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Остановлена")
+        T.write_header_updates(path, {"status": "stopped"})
+        now = datetime.now().astimezone()
+        self.assertIsNone(D.decide(T.read_ticket(path), {}, now))
+        T.write_header_updates(path, {"next": "judge"})
+        dec = D.decide(T.read_ticket(path), {}, now)
+        self.assertEqual((dec.role, dec.reason), ("judge", "next"))
 
     def test_sim6_timeout_with_logged_progress_is_not_a_failure(self):
         """(6) обязательно: RUN_TIMEOUT назван в промпте, а прогресс до таймаута — не провал."""
@@ -2326,6 +2541,86 @@ class TicketsCliStartTests(unittest.TestCase):
     def test_new_kind_without_executor_is_refused(self):
         rc = TK.main(["new", "--owner", "engineer", "--title", "Странно", "--kind", "publish"])
         self.assertEqual(rc, 1)
+
+
+class TicketsCliStopTests(unittest.TestCase):
+    """`tickets.py stop` (CEO, 03.10): заявка диспетчеру. Сам тикет команда не трогает — статус, след и запись CEO пишет
+    диспетчер после снятия процесса (иначе ещё живая роль перетёрла бы статус)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.tickets_dir = self.base / "tickets"
+        self._orig = (TK.TICKETS_DIR, D.STOP_DIR)
+        TK.TICKETS_DIR, D.STOP_DIR = self.tickets_dir, self.base / "stop"
+        self._env = {k: os.environ.pop(k, None) for k in ("ALPHA_ROLE", "RPV_ROLE")}
+
+    def tearDown(self):
+        TK.TICKETS_DIR, D.STOP_DIR = self._orig
+        for k, v in self._env.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+        self.tmp.cleanup()
+
+    def request(self, tid):
+        return json.loads((D.STOP_DIR / f"{tid}.json").read_text(encoding="utf-8"))
+
+    def test_stop_writes_request_and_leaves_ticket_untouched(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
+        T.write_header_updates(path, {"status": "in_progress"})
+        before = path.read_bytes()
+        rc = TK.main(["stop", path.stem, "--text", "Новая постановка", "--next", "engineer"])
+        self.assertEqual(rc, 0)
+        req = self.request(path.stem)
+        self.assertEqual((req["next"], req["text"]), ("engineer", "Новая постановка"))
+        T.parse_dt(req["at"])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_stop_without_next_writes_empty_next(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
+        self.assertEqual(TK.main(["stop", path.stem, "--text", "Стоп"]), 0)
+        self.assertEqual(self.request(path.stem)["next"], "")
+
+    def test_stop_refuses_unknown_ticket_and_empty_text(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
+        self.assertEqual(TK.main(["stop", "TK-404", "--text", "x"]), 1)
+        self.assertEqual(TK.main(["stop", path.stem, "--text", "   "]), 1)
+        self.assertFalse(D.STOP_DIR.exists(), "заявки нет")
+
+    def test_stop_is_for_ceo_only(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
+        os.environ["ALPHA_ROLE"] = "engineer"  # диспетчер ставит роль в окружение запуска роли
+        self.assertEqual(TK.main(["stop", path.stem, "--text", "x"]), 1)
+        self.assertFalse(D.STOP_DIR.exists())
+        os.environ["ALPHA_ROLE"] = "ceo"
+        self.assertEqual(TK.main(["stop", path.stem, "--text", "x"]), 0)
+
+    def test_stop_next_accepts_only_roles_the_dispatcher_starts(self):
+        import contextlib
+        import io
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
+        with contextlib.redirect_stderr(io.StringIO()):
+            for bad in ("ceo", "everyone"):
+                with self.assertRaises(SystemExit):
+                    TK.main(["stop", path.stem, "--text", "x", "--next", bad])
+        self.assertFalse(D.STOP_DIR.exists())
+
+    def test_second_stop_replaces_the_first(self):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
+        TK.main(["stop", path.stem, "--text", "Первая"])
+        TK.main(["stop", path.stem, "--text", "Вторая", "--next", "judge"])
+        req = self.request(path.stem)
+        self.assertEqual((req["text"], req["next"]), ("Вторая", "judge"))
+        self.assertEqual(len(list(D.STOP_DIR.glob("*.json"))), 1)
+
+    def test_start_returns_stopped_ticket_to_todo_and_only_backlog_or_stopped(self):
+        stopped = T.create_ticket(self.tickets_dir, owner="engineer", title="Остановлена", status="stopped")
+        done = T.create_ticket(self.tickets_dir, owner="engineer", title="Готова", status="done")
+        self.assertEqual(TK.main(["start", stopped.stem]), 0)
+        self.assertEqual(T.read_ticket(stopped).status, "todo")
+        self.assertEqual(TK.main(["start", done.stem]), 1)
+        self.assertEqual(T.read_ticket(done).status, "done")
 
 
 class JudgeSimulationDecideTests(unittest.TestCase):

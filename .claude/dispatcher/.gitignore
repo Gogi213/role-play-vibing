@@ -14,5 +14,6 @@ watch-state.json
 watch-state.json.tmp
 watch.pid
 watch.*.log
+stop/
 runs/*
 !runs/.gitkeep
