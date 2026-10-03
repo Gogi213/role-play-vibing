@@ -26,8 +26,11 @@ ROLES = [
     ("ceo", "ceo"),
 ]
 ROLE_NAMES = {"researcher": "Исследователь", "engineer": "Инженер", "judge": "Судья", "ceo": "CEO"}
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Корень — проект, в котором идёт сессия (плагин лежит в своей папке): CLAUDE_PROJECT_DIR, иначе текущий каталог.
+ROOT = os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 ROLES_DIR = os.path.join(ROOT, ".claude", "roles")
+if not os.path.isdir(ROLES_DIR):  # в проекте нет команды ролей — хуки молчат
+    sys.exit(0)
 TICKETS_DIR = os.path.join(ROOT, ".claude", "tickets")
 
 LIMIT = 8000          # знаков вставки; больше — Claude Code покажет роли только превью ~2 КБ
