@@ -23,6 +23,15 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 хоста, связанные worktree внутри папки проекта (`.git` — файл); неизвестная переменная в `cd $W`,
 `--git-dir`/`--work-tree`/GIT_DIR, основное дерево и вложенные репозитории — отказ; `git push --force` —
 всегда отказ; перезапись/усечение (не удаление) разрешены в автопамяти `~/.claude/projects/<проект>/memory/`.
+Дыры, закрытые вторым проходом аудита (03.10): (а) `mv` проверяет и ИСТОЧНИК — как удаление источника (`mv …/deep/x ./trash
+&& rm -rf ./trash`); то же `Move-Item`/`move`/`ren`; (б) файловые инструменты Write/Edit/MultiEdit/NotebookEdit —
+`check_file(путь, cwd)`: путь вне корней и файл уже есть — отказ (новый файл вне корней — можно, как для Bash); единая точка
+входа хука — `check_tool(событие)`; (д) временные файлы — не данные владельца: запись, перезапись, удаление под `$TMP`/`$TEMP`/`$TMPDIR`/`$env:TEMP`/`%TEMP%`, `/tmp/<путь>`
+(локально и на любой удалённой машине, кроме закрытых узлов), `…/AppData/Local/Temp/<путь>` и результатами `mktemp` без `-p`;
+сам корень временного каталога, `*`, `..`, сегменты root/deep — по-прежнему нет; (в) `tee` без `-a`, `Out-File`/`Set-Content`/`Tee-Object`, `find … -exec cp|mv|tee|…
+{}` (пути find — цели), `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, `git stash
+clear|drop`, `git push +ref|:ref|--delete|--mirror` — как `git reset --hard` (вне основного дерева разрешено, иначе «только
+через CEO»); (г) fail-closed: сбой самого стража (исключение при разборе, битое событие) — отказ с причиной, не пропуск.
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
@@ -93,10 +102,19 @@ REASON_OVERWRITE = ("Перезапись/усечение файла (`> фай
                     "(~/.claude/projects/<проект>/memory/) — можно. Новый локальный файл вне папки можно создать (его ещё "
                     "нет). Закрытые узлы, записи root/ и deep/ — никогда. Цель: {t}")
 REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO записью "
-                       "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`). `git reset --hard` и "
-                       "`git clean -f` разрешены только в каталоге вне основного дерева, заданном явным путём (`cd <путь>` "
-                       "или `git -C <путь>`): scratchpad сессии, /opt/alpha-compute/<подкаталог>, /tmp/<подкаталог>, "
-                       "корни хоста, связанный worktree (.claude/worktrees/…); `git push --force` — всегда только через CEO.")
+                       "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`). `git reset --hard`, "
+                       "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
+                       "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
+                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, /opt/alpha-compute/<подкаталог>, "
+                       "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
+                       "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
+REASON_FILE = ("Запись в файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit/MultiEdit/NotebookEdit "
+               "меняют существующие файлы только внутри папки проекта, scratchpad сессии, временного каталога и автопамяти "
+               "проекта (~/.claude/projects/<проект>/memory/). Новый файл вне папки создать можно (его ещё нет). Записи "
+               "root/ и deep/, закрытые узлы — никогда. Нужна правка вне папки — через владельца/CEO.")
+REASON_CRASH = ("Страж удаления упал ({e}) — отказ по умолчанию (fail-closed), а не пропуск. Исправьте "
+                ".claude/hooks/delete_guard.py плагина вручную (вне этой сессии) или отключите плагин; не получилось — "
+                "сообщите владельцу/CEO.")
 UNKNOWN_TARGET = "<цель из кода не видна>"
 # куда писать можно всегда: не файлы (устройства-стоки, пустышка Windows/PowerShell)
 HARMLESS_SINK = re.compile(r"^(?:/dev/(?:null|stdout|stderr|tty|zero|full|fd/\d+)|/proc/self/fd/\d+|nul|con|\$null)$", re.I)
@@ -130,13 +148,76 @@ def host_root_ok(literal, host):
     return False
 
 
+TEMP_VARS = ("$tmp", "$temp", "$tmpdir", "${tmp}", "${temp}", "${tmpdir}", "${tmpdir:-/tmp}", "${tmp:-/tmp}",
+             "${temp:-/tmp}", "$env:tmp", "$env:temp", "%tmp%", "%temp%")
+TEMP_DIR_MARK = "/appdata/local/temp/"             # %TEMP% Windows (`C:/Users/<имя>/AppData/Local/Temp/…`, в т.ч. короткое имя 8.3)
+MKTEMP_RE = re.compile(r"^(?:\$\(\s*(?:command\s+)?mktemp\b([^()]*)\)|`\s*mktemp\b([^`]*)`)")
+
+
+def _sys_temp():
+    """Системный временный каталог этой машины (`tempfile.gettempdir()`: macOS `/var/folders/…/T`, Windows 8.3-имя) — только
+    если он выглядит как temp (имя tmp/temp/t, не короче двух сегментов): `TMPDIR=/home/user` не делает домашнюю папку временной."""
+    try:
+        import tempfile
+        t = norm(tempfile.gettempdir()).rstrip("/")
+    except Exception:
+        return ()
+    return (t + "/",) if t.count("/") >= 2 and t.rsplit("/", 1)[-1] in ("tmp", "temp", "t") else ()
+
+
+SYS_TEMP = _sys_temp()
+
+
+def temp_rest(p):
+    """Нормализованный путь (строчными) во временном каталоге → (остаток после корня, это результат mktemp); не временный
+    путь или `mktemp -p КАТАЛОГ` (каталог не временный) → None."""
+    for v in TEMP_VARS:
+        if p == v or p.startswith(v + "/"):
+            return p[len(v):].lstrip("/"), False
+    m = MKTEMP_RE.match(p)
+    if m:
+        for tok in (m.group(1) or m.group(2) or "").split():
+            if tok in ("-p", "--tmpdir") or tok.startswith(("--tmpdir=", "-p")):
+                return None                                  # каталог задан явно — это уже не временный каталог
+            if "/" in tok and temp_rest(tok.strip("'\"")) is None:
+                return None                                  # шаблон с путём вне временного каталога
+        rest = p[m.end():]
+        return (rest.lstrip("/"), True) if (not rest or rest.startswith("/")) else None
+    if p == "/tmp" or p.startswith("/tmp/"):
+        return p[5:].lstrip("/"), False
+    for r in SYS_TEMP + ("/private/tmp/",):
+        if p.startswith(r):
+            return p[len(r):].lstrip("/"), False
+    i = p.find(TEMP_DIR_MARK)
+    if i >= 0:
+        return p[i + len(TEMP_DIR_MARK):].lstrip("/"), False
+    return None
+
+
+def temp_ok(p, ctx):
+    """Путь внутри временного каталога (запись/перезапись/удаление разрешены) — кроме корня каталога, `*`, `..`, root/deep;
+    на закрытом узле — нет."""
+    tr = temp_rest(p)
+    if tr is None or getattr(ctx, "host", None) == CLOSED_HOST:
+        return False
+    rest, from_mktemp = tr
+    segs = [x for x in rest.split("/") if x]
+    if ".." in segs or any(x in FORBIDDEN_SEG for x in segs):
+        return False
+    return from_mktemp or bool(rest.strip("/*"))
+
+
 def allowed(t, ctx=None):
     """Цель удаления разрешена (путь внутри своей папки)? `ctx.cwd` — рабочий каталог для относительных путей."""
     p = norm(t)
     if not p or p.startswith("<") or "{}" in p:
         return False
+    if BOX_RE.search(p):
+        return False
+    if temp_rest(p) is not None:                          # временные файлы — не данные владельца
+        return temp_ok(p, ctx)
     literal = literal_part(p)
-    if not literal or ".." in literal.split("/") or BOX_RE.search(p):
+    if not literal or ".." in literal.split("/"):
         return False
     if STAGE and (literal == STAGE or literal.startswith(STAGE + "/")):
         return True
@@ -729,6 +810,8 @@ def join_cwd(cwd, target, vars_):
     if not target or target == "-":
         return None
     t = norm(expand_vars(target, vars_))
+    if temp_rest(t) is not None:                          # `cd $TMP/x`, `cd "$(mktemp -d)"` — каталог известен как временный
+        return posixpath.normpath(t)
     if "$" in t.replace("$home", "").replace("${home}", "") or "%" in t:
         return None
     absolute = t.startswith(("/", "~", "$home", "${home}")) or re.match(r"[a-z]:", t)
@@ -905,6 +988,7 @@ def find_scan(args, ctx, vars_, depth):
         k += 1
     expr = args[k:]
     deleting = "-delete" in expr
+    overwriting = False
     extra = []
     k = 0
     while k < len(expr):
@@ -917,8 +1001,21 @@ def find_scan(args, ctx, vars_, depth):
             inner = list(scan_one(Cmd(sub), ctx, vars_, (), depth + 1))
             if any(not isinstance(x[0], (Over, Forbid)) for x in inner):
                 deleting = True                     # внутри -exec удаление: целью становятся и пути find
+            for x in inner:
+                if isinstance(x[0], Over) and "{}" in x[0]:
+                    head = x[0][:x[0].index("{}")]
+                    if head:                        # `cp a /dir/{}` — члены каталога неизвестны: сам каталог как цель
+                        extra.append((Over(head), x[1]))
+                    else:                           # `cp a {}` / `tee {}` — перезаписываются найденные find файлы
+                        overwriting = True
             extra += [x for x in inner if "{}" not in x[0]]
+        elif expr[k] in ("-fprint", "-fprint0", "-fprintf", "-fls") and k + 1 < len(expr):
+            extra.append((Over(expr[k + 1]), ctx.copy()))    # find пишет вывод в файл и усекает его
+            k += 1
         k += 1
+    if overwriting:
+        for p in paths or ["."]:
+            yield (Over(p), ctx.copy())
     if deleting:
         for p in paths or ["."]:
             yield (p, ctx.copy())
@@ -961,6 +1058,55 @@ def rsync_scan(args, ctx):
             yield (path, ctx.copy())
 
 
+def git_discard(sub, rest, ctx, repo):
+    """Метка подкоманды git, которая затирает рабочее дерево, ветки или stash (checkout -- путь|., restore, switch -f,
+    branch -D|-M|-f, stash clear|drop), либо None — команда безопасна."""
+    if any(a in ("--help", "-h") for a in rest):
+        return None
+    short = [a[1:] for a in rest if a.startswith("-") and not a.startswith("--") and len(a) > 1]
+    long_ = {a.split("=", 1)[0] for a in rest if a.startswith("--")}
+    if sub == "stash":
+        pos = [a for a in rest if not a.startswith("-")]
+        return f"git stash {pos[0]}" if pos and pos[0] in ("clear", "drop") else None
+    if sub == "branch":
+        if "--force" in long_ or any(c for c in short if any(ch in c for ch in "DMCf")):
+            return "git branch -D/-M/-C/-f (удаление или перезапись ветки)"
+        return None
+    if sub == "restore":
+        staged = "--staged" in long_ or any("S" in c for c in short)
+        worktree = "--worktree" in long_ or any("W" in c for c in short)
+        return None if staged and not worktree else "git restore (затирает файлы рабочего дерева)"
+    if sub == "switch":
+        if "--discard-changes" in long_ or "--force" in long_ or any("f" in c for c in short):
+            return "git switch -f (затирает правки рабочего дерева)"
+        return None
+    # checkout
+    if "--" in rest:
+        return "git checkout -- <путь> (затирает файлы рабочего дерева)"
+    if long_ & {"--force", "--patch", "--ours", "--theirs", "--pathspec-from-file"} or any(
+            "f" in c or "p" in c for c in short):
+        return "git checkout -f/-p/--ours/--theirs (затирает файлы рабочего дерева)"
+    pos = []
+    k = 0
+    while k < len(rest):
+        a = rest[k]
+        k += 1
+        if a in ("-b", "-B", "--orphan", "--conflict"):
+            k += 1                                       # значение: имя новой ветки
+        elif not a.startswith("-"):
+            pos.append(a)
+    if len(pos) >= 2 or any(a == "." or any(ch in a for ch in "*?[") for a in pos):
+        return "git checkout <ревизия> <путь>|. (затирает файлы рабочего дерева)"
+    if len(pos) == 1 and not getattr(ctx, "remote", False):
+        try:
+            fp = fs_path(pos[0], Ctx(repo or ctx.cwd, False))
+            if fp is not None and os.path.lexists(fp):   # `git checkout файл` без `--`: существующий путь — восстановление
+                return "git checkout <путь> (затирает файл рабочего дерева)"
+        except (OSError, ValueError):
+            pass
+    return None
+
+
 def git_scan(args, ctx, vars_, redirected=False):
     """`redirected` — GIT_DIR/GIT_WORK_TREE в окружении команды: каталог репозитория не равен рабочему."""
     j = 0
@@ -993,9 +1139,20 @@ def git_scan(args, ctx, vars_, redirected=False):
             yield (Forbid("git reset --hard"), ctx.copy())
         return
     if sub == "push":
+        pos = [a for a in rest if not a.startswith("-")]
         if any(a == "--force" or a.startswith("--force-with-lease")
                or (a.startswith("-") and not a.startswith("--") and "f" in a[1:]) for a in rest):
             yield (Forbid("git push --force"), ctx.copy())
+        elif any(a.startswith("+") for a in pos):
+            yield (Forbid("git push +ветка (принудительное обновление)"), ctx.copy())
+        elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
+              or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
+            yield (Forbid("git push --delete/--mirror/:ветка (удаление веток на удалённом)"), ctx.copy())
+        return
+    if sub in ("checkout", "switch", "restore", "branch", "stash"):
+        label = git_discard(sub, rest, ctx, repo)
+        if label and not (not exotic and scratch_repo_ok(repo, ctx)):
+            yield (Forbid(label), ctx.copy())
         return
     if sub != "clean":
         return
@@ -1053,8 +1210,10 @@ def over(t, vars_, ctx):
     return ((Over(t), ctx.copy()),)
 
 
-def cp_scan(args, ctx, vars_):
-    """`cp`/`mv`: цель — существующий файл (или `каталог/имя` существующего каталога); `-n`/`--no-clobber` — не трогает."""
+def cp_scan(args, ctx, vars_, move=False, xargs=False):
+    """`cp`/`mv`: цель — существующий файл (или `каталог/имя` существующего каталога); `-n`/`--no-clobber` — не трогает.
+    `mv` (`move=True`) вдобавок УДАЛЯЕТ источники: каждый источник проверяется как цель удаления (`mv …/deep/x ./trash`
+    с последующим `rm -rf ./trash` — отказ на первом шаге); источники из stdin `xargs` не проверить — отказ."""
     pos = []
     dest_opt = None
     noclobber = False
@@ -1083,15 +1242,23 @@ def cp_scan(args, ctx, vars_):
                 k += 1
         else:
             pos.append(a)
-    if noclobber:
-        return
     if dest_opt is not None:
         dest, srcs = dest_opt, pos
     elif len(pos) >= 2:
         dest, srcs = pos[-1], pos[:-1]
     else:
+        dest, srcs = None, []
+    if move and (dest is not None or xargs):
+        for src in srcs:
+            yield (expand_vars(src, vars_), ctx.copy())          # источник mv исчезает со своего места
+        if xargs:
+            yield ("<цели из stdin xargs>", ctx.copy())
+    if noclobber or dest is None:
         return
     dest = expand_vars(dest, vars_)
+    if xargs and dest_opt is not None:                            # `xargs cp -t КАТАЛОГ`: члены неизвестны — сам каталог
+        yield from over(dest, {}, ctx)
+        return
     fp = None if ctx.remote else fs_path(dest, ctx)
     is_dir = dest_opt is not None or dest.endswith(("/", "\\")) or (fp is not None and os.path.isdir(fp))
     if is_dir and not ctx.remote and fp is not None:      # известный каталог: затрагиваются только его члены
@@ -1100,6 +1267,103 @@ def cp_scan(args, ctx, vars_):
             yield from over(dest.rstrip("/\\") + "/" + name, {}, ctx)
     else:
         yield from over(dest, {}, ctx)
+
+
+def tee_scan(args, ctx, vars_):
+    """`tee файл…` усекает файлы; `-a`/`--append` — дописывает (не трогает)."""
+    pos = []
+    options = True
+    for a in args:
+        if options and a == "--":
+            options = False
+        elif options and a.startswith("--"):
+            if a in ("--help", "--version", "--append"):
+                return
+        elif options and a.startswith("-") and len(a) > 1:
+            if "a" in a[1:]:
+                return
+        else:
+            pos.append(a)
+    for t in pos:
+        yield from over(t, vars_, ctx)
+
+
+PS_COPY_NAMES = {"copy-item": False, "ci": False, "copy": False, "move-item": True, "mi": True, "move": True}
+PS_RENAME_NAMES = {"rename-item", "rni", "ren", "rename"}
+PS_WRITE_NAMES = {"out-file", "tee-object", "set-content", "sc", "clear-content"}
+PS_COPY_VALUES = ("path", "literalpath", "destination", "filter", "include", "exclude", "credential", "stream")
+PS_RENAME_VALUES = ("path", "literalpath", "newname", "credential")
+PS_WRITE_VALUES = ("filepath", "path", "literalpath", "value", "encoding", "width", "inputobject", "variable", "stream",
+                   "delimiter", "credential", "filter", "include", "exclude")
+
+
+def ps_parse(args, value_params):
+    """Аргументы командлета PowerShell → (именованные {имя: значение}, позиционные, флаги). Имена параметров — строчными,
+    допустима однозначная приставка (`-Dest`), `-Имя:значение`."""
+    named, pos, flags = {}, [], set()
+    k = 0
+    while k < len(args):
+        a = args[k]
+        k += 1
+        if a.startswith("-") and len(a) > 1 and not a[1].isdigit():
+            name, _, val = a[1:].partition(":")
+            name = name.lower()
+            canon = next((vp for vp in value_params if len(name) >= 2 and vp.startswith(name)), None)
+            if canon is None and name in value_params:
+                canon = name
+            if canon is None:
+                flags.add(name)
+            elif val:
+                named[canon] = val
+            elif k < len(args):
+                named[canon] = args[k]
+                k += 1
+        else:
+            pos.append(a)
+    return named, pos, flags
+
+
+def ps_flag(flags, full, minlen=2):
+    return any(f and len(f) >= minlen and full.startswith(f) for f in flags)
+
+
+def ps_list(v):
+    return [x for x in re.split(r",(?![^()]*\))", v or "") if x]
+
+
+def ps_copy_scan(name, args, ctx, vars_, xargs=False):
+    """`Copy-Item`/`Move-Item` (и `copy`/`move`, `ci`/`mi`): `Источник [Приёмник]` — как `cp`/`mv` (у Move-Item источник
+    исчезает)."""
+    args = [a for a in args if not re.fullmatch(r"/(?:-?y|v|n|z|d)", a, re.I)]       # ключи cmd `copy /Y`, `move /Y`
+    named, pos, flags = ps_parse(args, PS_COPY_VALUES)
+    if ps_flag(flags, "whatif") or ps_flag(flags, "?", 1):
+        return
+    srcs = ps_list(named.get("path") or named.get("literalpath")) or ps_list(pos.pop(0) if pos else "")
+    dest = named.get("destination") or (pos.pop(0) if pos else None)
+    if dest is None:
+        return
+    yield from cp_scan(srcs + [dest], ctx, vars_, move=PS_COPY_NAMES[name], xargs=xargs)
+
+
+def ps_rename_scan(args, ctx, vars_):
+    """`Rename-Item`/`ren`: старое имя исчезает — как удаление источника."""
+    named, pos, flags = ps_parse(args, PS_RENAME_VALUES)
+    if ps_flag(flags, "whatif"):
+        return
+    for src in ps_list(named.get("path") or named.get("literalpath")) or ps_list(pos[0] if pos else ""):
+        yield (expand_vars(src, vars_), ctx.copy())
+
+
+def ps_write_scan(name, args, ctx, vars_):
+    """`Out-File`/`Tee-Object`/`Set-Content`/`Clear-Content` без `-Append`/`-NoClobber` усекают файл."""
+    named, pos, flags = ps_parse(args, PS_WRITE_VALUES)
+    if ps_flag(flags, "whatif") or ps_flag(flags, "append") or ps_flag(flags, "noclobber", 3):
+        return
+    target = named.get("filepath") or named.get("path") or named.get("literalpath")
+    if target is None and pos and not (name == "tee-object" and "variable" in named):
+        target = pos[0]
+    for t in ps_list(target):
+        yield from over(t, vars_, ctx)
 
 
 def truncate_scan(args, ctx, vars_):
@@ -1224,6 +1488,10 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     if len(words) == 3 and re.fullmatch(r"\$\w+", words[0]) and words[1] in ("=", "+="):
         vars_[words[0][1:]] = words[2]                # PowerShell: `$script = @'...'@` — строка, которую потом отдадут ssh
         return
+    if len(words) == 1 and re.match(r"^\$\w+=", words[0]):    # PowerShell: `$out="data\dashboard"` (без пробелов)
+        name_, _, value_ = words[0].partition("=")
+        vars_[name_[1:]] = expand_vars(value_, vars_)
+        return
     if all(ASSIGN.match(w) for w in words):          # `NAME=value` без команды — запомнить переменные
         for w in words:
             record_var(vars_, w, depth)
@@ -1277,7 +1545,15 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     elif name == "rsync":
         yield from rsync_scan(args, ctx)
     elif name in ("cp", "mv"):
-        yield from cp_scan(args, ctx, vars_)
+        yield from cp_scan(args, ctx, vars_, move=name == "mv", xargs=xargs)
+    elif name in PS_COPY_NAMES:
+        yield from ps_copy_scan(name, args, ctx, vars_, xargs)
+    elif name in PS_RENAME_NAMES:
+        yield from ps_rename_scan(args, ctx, vars_)
+    elif name == "tee":
+        yield from tee_scan(args, ctx, vars_)
+    elif name in PS_WRITE_NAMES:
+        yield from ps_write_scan(name, args, ctx, vars_)
     elif name == "truncate":
         yield from truncate_scan(args, ctx, vars_)
     elif name == "dd":
@@ -1428,50 +1704,111 @@ def legacy_found(cmd, cwd):
 
 
 def check(cmd, cwd):
-    """Причина отказа или None."""
+    """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed)."""
     cmd = cmd or ""
-    start = Ctx(norm(cwd).rstrip("/") if cwd else None, False, frozenset(FUNC_DEF.findall(cmd)))
     try:
-        found = list(scan_text(cmd, start))
-    except Exception:                               # ParseError и любая неожиданность — прежний разбор
+        start = Ctx(norm(cwd).rstrip("/") if cwd else None, False, frozenset(FUNC_DEF.findall(cmd)))
         try:
+            found = list(scan_text(cmd, start))
+        except ParseError:                          # незакрытая кавычка и т. п. — прежний регэксп как страховка
             found = legacy_found(cmd, cwd)
-        except Exception:
-            found = [("<команду не удалось разобрать>", start)] if LEGACY_VERBS.search(cmd) else []
-    for target, ctx in found:
-        if isinstance(target, Forbid):
-            return REASON_IRREVERSIBLE.format(t=target)
-        if isinstance(target, Over):
-            if not (allowed(target, ctx) or write_only_ok(target, ctx)) and may_exist(target, ctx):
-                return REASON_OVERWRITE.format(t=target)
-            continue
-        if not allowed(target, ctx):
-            return REASON.format(t=target)
+        for target, ctx in found:
+            if isinstance(target, Forbid):
+                return REASON_IRREVERSIBLE.format(t=target)
+            if isinstance(target, Over):
+                if not (allowed(target, ctx) or write_only_ok(target, ctx)) and may_exist(target, ctx):
+                    return REASON_OVERWRITE.format(t=target)
+                continue
+            if not allowed(target, ctx):
+                return REASON.format(t=target)
+    except Exception as e:                          # страж упал: пропуск был бы дырой — отказ с причиной
+        return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
     return None
 
 
+FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+SHELL_TOOLS = ("Bash", "PowerShell")
+GUARDED_TOOLS = SHELL_TOOLS + FILE_TOOLS
+FILE_KEYS = ("file_path", "notebook_path", "path", "filePath")
+
+
+def file_target(tool_input):
+    """Путь, который меняет файловый инструмент (Write/Edit/MultiEdit: `file_path`, NotebookEdit: `notebook_path`)."""
+    for k in FILE_KEYS:
+        v = tool_input.get(k) if isinstance(tool_input, dict) else None
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
+
+
+def check_file(path, cwd):
+    """Запись файловым инструментом — как перезапись через Bash: путь вне корней (папка проекта, scratchpad, temp,
+    автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно."""
+    try:
+        ctx = Ctx(norm(cwd).rstrip("/") if cwd else None, False)
+        target = Over(path)
+        if allowed(target, ctx) or write_only_ok(target, ctx) or not may_exist(target, ctx):
+            return None
+        return REASON_FILE.format(t=path)
+    except Exception as e:
+        return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+
+
+def check_tool(data):
+    """Событие PreToolUse (словарь из JSON хука) → причина отказа или None. Чужой инструмент — None. Путь файлового
+    инструмента определить нельзя — отказ (схема могла измениться: молча пропускать нельзя)."""
+    if not isinstance(data, dict):
+        return REASON_CRASH.format(e="событие хука не объект JSON")
+    tool = data.get("tool_name")
+    if tool not in GUARDED_TOOLS:
+        return None
+    ti = data.get("tool_input")
+    ti = ti if isinstance(ti, dict) else {}
+    cwd = str(data.get("cwd") or "")
+    try:
+        if tool in SHELL_TOOLS:
+            return check(str(ti.get("command") or ""), cwd)
+        path = file_target(ti)
+        if path is None:
+            return REASON_CRASH.format(e=f"{tool}: в tool_input нет пути файла")
+        return check_file(path, cwd)
+    except Exception as e:
+        return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+
+
 def main():
-    """PreToolUse-хук: stdin — JSON события; отказ — JSON с permissionDecision=deny. Не наш случай или сбой — тишина."""
+    """PreToolUse-хук: stdin — JSON события; отказ — JSON с permissionDecision=deny. Fail-closed: битое событие и сбой
+    стража — отказ с причиной. Тишина — только если инструмент не наш или в проекте нет команды ролей (`.claude/roles`)."""
     import json
     import sys
-    try:
-        data = json.load(sys.stdin)
-    except Exception:
-        return 0
-    if data.get("tool_name") not in ("Bash", "PowerShell"):
-        return 0
-    project = os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
-    if not os.path.isdir(os.path.join(project, ".claude", "roles")):    # в проекте нет команды ролей — молчим
-        return 0
-    configure(project)
-    try:
-        reason = check((data.get("tool_input") or {}).get("command") or "", str(data.get("cwd") or project))
-    except Exception:
-        return 0
-    if reason:
+
+    def deny(reason):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                  "permissionDecisionReason": reason}}, ensure_ascii=True))
-    return 0
+        return 0
+
+    def has_roles(project):
+        return os.path.isdir(os.path.join(project, ".claude", "roles"))
+
+    try:
+        data = json.load(sys.stdin)
+        if not isinstance(data, dict):
+            raise ValueError("событие не объект JSON")
+    except Exception as e:
+        if not has_roles(os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())):
+            return 0
+        return deny(REASON_CRASH.format(e=f"событие хука не прочитано: {type(e).__name__}: {e}"[:200]))
+    try:
+        if data.get("tool_name") not in GUARDED_TOOLS:
+            return 0
+        project = os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
+        if not has_roles(project):                                      # в проекте нет команды ролей — молчим
+            return 0
+        configure(project)
+        reason = check_tool(data)
+    except Exception as e:
+        reason = REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+    return deny(reason) if reason else 0
 
 
 if __name__ == "__main__":
