@@ -2,9 +2,9 @@
 
 Вызывается PreToolUse-хуком плагина (`hooks/hooks.json`, Bash/PowerShell): точка входа `main()` читает JSON события со
 stdin, `check(cmd, cwd)` → причина отказа или None. Корень проекта — `CLAUDE_PROJECT_DIR` (иначе cwd); нет `.claude/roles` — молчит.
-Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `ALPHA_GUARD_REMOTE_ROOTS`
-(и `ALPHA_GUARD_HOST_ROOTS` для своего хоста); оперативная стадия — `ALPHA_GUARD_STAGE`. Никогда: хосты из
-`ALPHA_GUARD_FORBIDDEN_HOSTS`, Storage Box (ssh порт 23), записи `root/` и `deep/` (единственные копии). Цель, которую нельзя
+Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `RPV_GUARD_REMOTE_ROOTS`
+(и `RPV_GUARD_HOST_ROOTS` для своего хоста); оперативная стадия — `RPV_GUARD_STAGE`. Никогда: хосты из
+`RPV_GUARD_FORBIDDEN_HOSTS`, Storage Box (ssh порт 23), записи `root/` и `deep/` (единственные копии). Цель, которую нельзя
 проверить (переменная без буквального префикса, список из конвейера/xargs, путь из кода), — отказ: переписать явным путём.
 
 Разбор (02.10, аудит: регэксп по всему тексту давал ~52 ложных отказа за 5 дней — на переменную `rd`, слово «rm» в
@@ -17,9 +17,9 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 не существует (создание нового файла); удалённый хост и непроверяемый путь считаются «существует». `git reset --hard`,
 `git clean -f…`, `git push --force/-f/--force-with-lease` — отказ «только через CEO» в любом каталоге. Исключений по имени
 скрипта нет: строка в тексте команды проверку не отключает.
-Корни хоста `HOST_ROOTS` (`ALPHA_GUARD_HOST_ROOTS`) действуют, только если команда идёт по ssh на этот хост;
+Корни хоста `HOST_ROOTS` (`RPV_GUARD_HOST_ROOTS`) действуют, только если команда идёт по ssh на этот хост;
 `git reset --hard` и `git clean -f…` разрешены в каталоге вне основного дерева, заданном явным путём (`cd <путь>`,
-`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `/opt/alpha-compute/<подкаталог>`, `/tmp/<подкаталог>`, корни
+`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `<подкаталог из RPV_GUARD_REMOTE_ROOTS>`, `/tmp/<подкаталог>`, корни
 хоста, связанные worktree внутри папки проекта (`.git` — файл); неизвестная переменная в `cd $W`,
 `--git-dir`/`--work-tree`/GIT_DIR, основное дерево и вложенные репозитории — отказ; `git push --force` —
 всегда отказ; перезапись/усечение (не удаление) разрешены в автопамяти `~/.claude/projects/<проект>/memory/`.
@@ -33,7 +33,7 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 clear|drop`, `git push +ref|:ref|--delete|--mirror` — как `git reset --hard` (вне основного дерева разрешено, иначе «только
 через CEO»); (г) fail-closed: сбой самого стража (исключение при разборе, битое событие) — отказ с причиной, не пропуск.
 Третий проход (03.10): (е) Write/Edit/MultiEdit/NotebookEdit вне корней ограничены только для запусков диспетчера
-(`ALPHA_ROLE`); сессия CEO/владельца правит файлы вне проекта, кроме root/ и deep/ и закрытых узлов; (ж) `.git` — удаление,
+(`RPV_ROLE`); сессия CEO/владельца правит файлы вне проекта, кроме root/ и deep/ и закрытых узлов; (ж) `.git` — удаление,
 перенос, шаблоны вроде `.*` никому (кроме `*.lock`), запись внутрь — не запускам диспетчера; (з) настройки Claude Code
 `.claude/settings*.json` запуску диспетчера не менять (через них выключаются хуки и плагин).
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
@@ -48,8 +48,13 @@ import re
 import textwrap
 
 
+def _env(name, default=""):
+    """Переменная `RPV_<имя>`, запасная — `ALPHA_<имя>` (прежнее название)."""
+    return os.environ.get("RPV_" + name) or os.environ.get("ALPHA_" + name) or default
+
+
 def _env_list(name):
-    return tuple(x.strip().lower() for x in os.environ.get(name, "").split(",") if x.strip())
+    return tuple(x.strip().lower() for x in _env(name).split(",") if x.strip())
 
 
 def project_roots(project_dir):
@@ -66,9 +71,9 @@ def memory_roots(project_dir):
 
 
 def _env_host_roots():
-    """`ALPHA_GUARD_HOST_ROOTS="хост=корень,корень;хост2=корень"` → {хост: (корни…)} строчными."""
+    """`RPV_GUARD_HOST_ROOTS="хост=корень,корень;хост2=корень"` → {хост: (корни…)} строчными."""
     out = {}
-    for part in os.environ.get("ALPHA_GUARD_HOST_ROOTS", "").split(";"):
+    for part in _env("GUARD_HOST_ROOTS").split(";"):
         host, _, roots = part.partition("=")
         host = host.strip().lower()
         if host and roots.strip():
@@ -87,29 +92,29 @@ LOCAL_ROOTS = project_roots(_PROJECT)
 WRITE_HOME_ROOTS = memory_roots(_PROJECT)
 SCRATCH = "/appdata/local/temp/claude/"
 # Удалённые машины и закрытые узлы — только из окружения, без умолчаний (через запятую, примеры в README плагина):
-# ALPHA_GUARD_REMOTE_ROOTS — каталоги, где на любых удалённых машинах можно удалять (нет переменной — нигде);
-# ALPHA_GUARD_HOST_ROOTS — то же, но только для ssh на конкретный хост; ALPHA_GUARD_STAGE — оперативная стадия
-# (целиком); ALPHA_GUARD_FORBIDDEN_HOSTS — хосты/IP, где нельзя вообще.
-REMOTE_ROOTS = _env_list("ALPHA_GUARD_REMOTE_ROOTS")
+# RPV_GUARD_REMOTE_ROOTS — каталоги, где на любых удалённых машинах можно удалять (нет переменной — нигде);
+# RPV_GUARD_HOST_ROOTS — то же, но только для ssh на конкретный хост; RPV_GUARD_STAGE — оперативная стадия
+# (целиком); RPV_GUARD_FORBIDDEN_HOSTS — хосты/IP, где нельзя вообще.
+REMOTE_ROOTS = _env_list("GUARD_REMOTE_ROOTS")
 HOST_ROOTS = _env_host_roots()
-STAGE = (os.environ.get("ALPHA_GUARD_STAGE") or "").strip().lower().rstrip("/")
+STAGE = _env("GUARD_STAGE").strip().lower().rstrip("/")
 FORBIDDEN_SEG = ("root", "deep")
-BOX_RE = re.compile("|".join(["storage-?box", "your-storagebox"] + [re.escape(h) for h in _env_list("ALPHA_GUARD_FORBIDDEN_HOSTS")]),
+BOX_RE = re.compile("|".join(["storage-?box", "your-storagebox"] + [re.escape(h) for h in _env_list("GUARD_FORBIDDEN_HOSTS")]),
                     re.I)
 REASON = ("Удаление запрещено вне своей папки. Можно только явным путём внутри папки проекта или scratchpad сессии; на "
-          "удалённых машинах — только каталоги из ALPHA_GUARD_REMOTE_ROOTS и ALPHA_GUARD_HOST_ROOTS (для этого хоста). "
-          "Закрытые узлы (Storage Box, ALPHA_GUARD_FORBIDDEN_HOSTS), записи root/ и deep/ — никогда (только владелец "
+          "удалённых машинах — только каталоги из RPV_GUARD_REMOTE_ROOTS и RPV_GUARD_HOST_ROOTS (для этого хоста). "
+          "Закрытые узлы (Storage Box, RPV_GUARD_FORBIDDEN_HOSTS), записи root/ и deep/ — никогда (только владелец "
           "через CEO). Непроверяемая цель: {t}")
 REASON_OVERWRITE = ("Перезапись/усечение файла (`> файл`, truncate, dd of=, cp/mv поверх существующего) вне своей папки "
                     "запрещены, как и удаление: внутри папки проекта или scratchpad сессии; на удалённых машинах — "
-                    "только каталоги из ALPHA_GUARD_REMOTE_ROOTS и ALPHA_GUARD_HOST_ROOTS; автопамять проекта "
+                    "только каталоги из RPV_GUARD_REMOTE_ROOTS и RPV_GUARD_HOST_ROOTS; автопамять проекта "
                     "(~/.claude/projects/<проект>/memory/) — можно. Новый локальный файл вне папки можно создать (его ещё "
                     "нет). Закрытые узлы, записи root/ и deep/ — никогда. Цель: {t}")
 REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO записью "
                        "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`). `git reset --hard`, "
                        "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
                        "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
-                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из ALPHA_GUARD_REMOTE_ROOTS, "
+                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из RPV_GUARD_REMOTE_ROOTS, "
                        "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
                        "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
 REASON_FILE = ("Запись в файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit/MultiEdit/NotebookEdit "
@@ -236,7 +241,7 @@ def allowed(t, ctx=None):
         return True
     if literal.startswith(("/", "~", "$", "c:", "%")) or re.match(r"[a-z]:", literal):
         return False
-    # относительный путь: от известного рабочего каталога (локально — cwd проекта, на ssh — после `cd ~/alpha/…`)
+    # относительный путь: от известного рабочего каталога (локально — cwd проекта, на ssh — после `cd ~/проект/…`)
     cwd = getattr(ctx, "cwd", None)
     if not cwd:
         return False
@@ -297,7 +302,7 @@ def linked_worktree(p):
 def scratch_repo_ok(d, ctx):
     """`git reset --hard` / `git clean -f` не трогают основное дерево: каталог репозитория известен явным путём (не
     переменная, не относительный без cwd) и лежит вне папки проекта — scratch (scratchpad сессии, свои удалённые корни
-    вроде /opt/alpha-compute/<подкаталог>, корни хоста), `/tmp/<подкаталог>` либо связанный worktree внутри папки
+    вроде <подкаталог из RPV_GUARD_REMOTE_ROOTS>, корни хоста), `/tmp/<подкаталог>` либо связанный worktree внутри папки
     проекта (`.git` — файл)."""
     p = norm(d) if d else ""
     if not p or "$" in p or ".." in p.split("/") or BOX_RE.search(p):
@@ -1725,9 +1730,9 @@ REASON_FILE_HARD = ("Запись в {t}: записи root/ и deep/ (един�
 
 
 def dispatcher_role():
-    """Роль запуска диспетчера (`ALPHA_ROLE`, её ставит dispatch.launch_run; наследуют и помощники роли) или None —
+    """Роль запуска диспетчера (`RPV_ROLE`, её ставит dispatch.launch_run; наследуют и помощники роли) или None —
     сессия CEO или владельца."""
-    r = (os.environ.get("ALPHA_ROLE") or "").strip().lower()
+    r = _env("ROLE").strip().lower()
     return r if r in DISPATCH_ROLES else None
 
 
@@ -1837,7 +1842,7 @@ def file_target(tool_input):
 
 
 def check_file(path, cwd):
-    """Запись файловым инструментом. Запуск диспетчера (`ALPHA_ROLE`) — как перезапись через Bash: путь вне корней (папка
+    """Запись файловым инструментом. Запуск диспетчера (`RPV_ROLE`) — как перезапись через Bash: путь вне корней (папка
     проекта, scratchpad, temp, автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно.
     Сессия CEO/владельца (аудит-3) правит файлы вне проекта свободно (настройки, соседние репозитории, планы); для неё
     остаётся только «никогда»: root/ и deep/, закрытые узлы. Для всех: внутрь .git и в настройки Claude Code — см. protected."""

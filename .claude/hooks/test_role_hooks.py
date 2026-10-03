@@ -15,11 +15,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # корень проекта для хуков — каталог плагина/проекта над `.claude` (в нём есть .claude/roles); без этого хуки молчат
 os.environ["CLAUDE_PROJECT_DIR"] = os.path.dirname(os.path.dirname(HERE))
 TMP = tempfile.mkdtemp(prefix="hooks-test-")
-os.environ["ALPHA_STATE_DIR"] = os.path.join(TMP, "state")
-os.environ["ALPHA_LOG_DIR"] = os.path.join(TMP, "log")
-os.environ["ALPHA_DISPATCHER_DIR"] = os.path.join(TMP, "disp")
-os.makedirs(os.environ["ALPHA_DISPATCHER_DIR"], exist_ok=True)
-for var in ("ALPHA_ROLE", "ALPHA_TICKET", "ALPHA_TICKET_ID", "CLAUDE_CODE_HOST_SESSION_ID"):
+os.environ["RPV_STATE_DIR"] = os.path.join(TMP, "state")
+os.environ["RPV_LOG_DIR"] = os.path.join(TMP, "log")
+os.environ["RPV_DISPATCHER_DIR"] = os.path.join(TMP, "disp")
+os.makedirs(os.environ["RPV_DISPATCHER_DIR"], exist_ok=True)
+for var in ("RPV_ROLE", "RPV_TICKET", "RPV_TICKET_ID", "ALPHA_ROLE", "ALPHA_TICKET", "ALPHA_TICKET_ID",
+            "ALPHA_STATE_DIR", "ALPHA_LOG_DIR", "ALPHA_DISPATCHER_DIR", "CLAUDE_CODE_HOST_SESSION_ID"):
     os.environ.pop(var, None)
 sys.path.insert(0, HERE)
 import role_context as rc  # noqa: E402
@@ -40,9 +41,9 @@ def run_hook(script, stdin, env_extra):
 
 
 def start_text(role, source, ticket=None):
-    env = {"ALPHA_ROLE": role}
+    env = {"RPV_ROLE": role}
     if ticket:
-        env["ALPHA_TICKET"] = ticket
+        env["RPV_TICKET"] = ticket
     r = run_hook("role_context.py", {"hook_event_name": "SessionStart", "source": source, "session_id": "t-1"}, env)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout.decode("utf-8"))["hookSpecificOutput"]["additionalContext"], r.stdout
@@ -80,11 +81,106 @@ class SessionStart(unittest.TestCase):
         self.assertNotIn("get_session", text)
 
     def test_bad_stdin_does_not_crash(self):
-        env = dict(os.environ, ALPHA_ROLE="judge")
+        env = dict(os.environ, RPV_ROLE="judge")
         r = subprocess.run([sys.executable, os.path.join(HERE, "role_context.py")], input=b"not json", env=env,
                            capture_output=True)
         self.assertEqual(r.returncode, 0)
         json.loads(r.stdout.decode("utf-8"))
+
+
+class RoleDetection(unittest.TestCase):
+    """Роль: RPV_ROLE, запасная ALPHA_ROLE, метка сессии (`/ceo`), последним — название сессии Desktop."""
+
+    def setUp(self):
+        for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+            os.environ.pop(k, None)
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "ALPHA_ROLE")])
+        shutil.rmtree(rc.STATE_DIR, ignore_errors=True)
+
+    def context(self, session_id, extra_env=None, source="startup"):
+        r = run_hook("role_context.py", {"hook_event_name": "SessionStart", "source": source, "session_id": session_id},
+                     extra_env or {})
+        return json.loads(r.stdout.decode("utf-8"))["hookSpecificOutput"]["additionalContext"]
+
+    def test_rpv_role_wins_over_alpha_role_and_alpha_is_fallback(self):
+        os.environ["ALPHA_ROLE"] = "judge"
+        self.assertEqual(rc.env_role(), "judge")
+        os.environ["RPV_ROLE"] = "engineer"
+        self.assertEqual(rc.env_role(), "engineer")
+        os.environ["RPV_ROLE"] = "nonsense"   # неизвестное значение — не роль, запасной путь не подменяет его
+        self.assertIsNone(rc.env_role())
+
+    def test_no_label_means_role_undetermined_and_hint_names_ceo_command(self):
+        text = self.context("no-label-1")
+        self.assertIn("не определена", text)
+        self.assertIn("/ceo", text)
+
+    def test_label_makes_session_ceo(self):
+        self.assertTrue(rc.write_label("ceo", "lab-1"))
+        self.assertTrue(os.path.isfile(os.path.join(rc.STATE_DIR, "session-lab-1.role")))
+        text = self.context("lab-1")
+        self.assertIn("«CEO»", text)
+        self.assertIn(".claude/roles/ceo.md", text)
+        short = self.context("lab-1", source="resume")
+        self.assertIn("«CEO»", short)
+        self.assertNotIn("«CEO»", self.context("other-session"))   # метка — своей сессии
+
+    def test_env_role_wins_over_label(self):
+        rc.write_label("ceo", "lab-2")
+        text = self.context("lab-2", {"RPV_ROLE": "judge"})
+        self.assertIn("«Судья»", text)
+
+    def test_host_label_survives_clear(self):
+        os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_abc"
+        self.addCleanup(lambda: os.environ.pop("CLAUDE_CODE_HOST_SESSION_ID", None))
+        rc.write_label("ceo", "before-clear")
+        self.assertTrue(os.path.isfile(os.path.join(rc.STATE_DIR, "host-local_abc.role")))
+        self.assertEqual(rc.read_label("after-clear"), "ceo")     # новый session_id, тот же id сессии приложения
+
+    def test_label_rejects_unknown_role_and_garbage(self):
+        self.assertFalse(rc.write_label("owner", "lab-3"))
+        self.assertFalse(rc.write_label("ceo", ""))
+        os.makedirs(rc.STATE_DIR, exist_ok=True)
+        with open(os.path.join(rc.STATE_DIR, "session-lab-4.role"), "w", encoding="utf-8") as fh:
+            fh.write("кто-то")
+        self.assertIsNone(rc.read_label("lab-4"))
+        self.assertIsNone(rc.read_label("../../x"))               # id сессии не выходит из каталога меток
+
+    def run_prompt(self, prompt, session_id):
+        return run_hook("role_memory.py", {"hook_event_name": "UserPromptSubmit", "session_id": session_id,
+                                           "prompt": prompt}, {})
+
+    def test_ceo_command_in_prompt_sets_label(self):
+        for prompt in ("/ceo", "/role-play-vibing:ceo", "  /ceo привет"):
+            sid = "cmd-" + str(abs(hash(prompt)))
+            self.run_prompt(prompt, sid)
+            self.assertEqual(rc.read_label(sid), "ceo", prompt)
+        self.run_prompt("/ceoish", "cmd-no")
+        self.run_prompt("расскажи про /ceo", "cmd-no2")
+        self.assertIsNone(rc.read_label("cmd-no"))
+        self.assertIsNone(rc.read_label("cmd-no2"))
+
+    def test_labelled_ceo_gets_ceo_prompts_not_silence_line(self):
+        rc.write_label("ceo", "lab-5")
+        self.assertEqual(rm.current_role({"session_id": "lab-5"}), ("CEO", "ceo"))
+        self.assertEqual(rm.current_role({"session_id": "unlabelled"}), (None, None))
+        r = self.run_prompt("привет", "lab-5")
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("молчание", r.stdout.decode("utf-8"))
+
+    def test_hook_texts_are_neutral(self):
+        for name in ("role_context.py", "role_memory.py", "delete_guard.py"):
+            with open(os.path.join(HERE, name), encoding="utf-8") as fh:
+                body = fh.read()
+            for bad in ("Steam Deck", "SETTLED", "«СОСТОЯНИЕ»", "alpha-compute", "alpha-role", "команды alpha"):
+                self.assertNotIn(bad, body, (name, bad))
+        for source in ("startup", "resume"):
+            for role in ("ceo", "engineer"):
+                text, _ = start_text(role, source)
+                head = text.split("\n--- ")[0]
+                self.assertNotIn("alpha", head.lower(), (role, source))
+        self.assertNotIn("alpha", rc.MANUAL.lower())
+        self.assertNotIn("alpha", rc.OUTSIDER.lower())
 
 
 class Fit(unittest.TestCase):
@@ -132,23 +228,23 @@ class Fit(unittest.TestCase):
 
 class Prompts(unittest.TestCase):
     def setUp(self):
-        for k in ("ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+        for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
             os.environ.pop(k, None)
-        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("ALPHA_ROLE", "ALPHA_TICKET")])
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET")])
 
-    def test_state_key_uses_alpha_role_and_ticket(self):
-        os.environ["ALPHA_ROLE"] = "researcher"
+    def test_state_key_uses_role_and_ticket(self):
+        os.environ["RPV_ROLE"] = "researcher"
         self.assertEqual(rm.state_key("researcher"), "researcher")
-        os.environ["ALPHA_TICKET"] = "TK-025"
+        os.environ["RPV_TICKET"] = "TK-025"
         self.assertEqual(rm.state_key("researcher"), "researcher-TK-025")
-        os.environ["ALPHA_TICKET"] = "../../evil"
+        os.environ["RPV_TICKET"] = "../../evil"
         self.assertEqual(rm.state_key("researcher"), "researcher")
-        os.environ.pop("ALPHA_ROLE")
+        os.environ.pop("RPV_ROLE")
         self.assertEqual(rm.state_key("judge"), "judge")
         self.assertEqual(rm.state_key(None), "unknown")
 
     def test_role_prompt_is_silence_line_about_ticket_log(self):
-        os.environ["ALPHA_ROLE"] = "engineer"
+        os.environ["RPV_ROLE"] = "engineer"
         text = rm.on_prompt_all({"session_id": "s1"}, "engineer")
         self.assertIn("tickets.py comment", text)
         for bad in ("SendMessage", "clear_session", "блокнот"):
@@ -211,26 +307,26 @@ class Prompts(unittest.TestCase):
                  "message": {"content": [{"type": "text", "text": "Готово"}]}}]
         with open(tr, "w", encoding="utf-8") as fh:
             fh.write("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
-        os.environ["ALPHA_ROLE"] = "engineer"
-        path = rm.write_digest(tr, "engineer", "ALPHA_ROLE=engineer", "cafebabe-1", "тест")
+        os.environ["RPV_ROLE"] = "engineer"
+        path = rm.write_digest(tr, "engineer", "RPV_ROLE=engineer", "cafebabe-1", "тест")
         with open(path, encoding="utf-8") as fh:
             body = fh.read()
         self.assertIn("· диспетчер", body)
         self.assertNotIn("· владелец", body)
-        os.environ.pop("ALPHA_ROLE")
+        os.environ.pop("RPV_ROLE")
         path2 = rm.write_digest(tr, "ceo", "CEO", "cafebabe-2", "тест")
         with open(path2, encoding="utf-8") as fh:
             self.assertIn("· владелец", fh.read())
 
 
 class TicketScopedDigests(unittest.TestCase):
-    """A7 (аудит 03.10): диспетчер передаёт `ALPHA_TICKET`; состояние и «конспект прошлой сессии» — по тикету: роль,
+    """A7 (аудит 03.10): диспетчер передаёт `RPV_TICKET`; состояние и «конспект прошлой сессии» — по тикету: роль,
     взявшая новый тикет, не получает ссылку на конспект чужого."""
 
     def setUp(self):
-        for k in ("ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+        for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
             os.environ.pop(k, None)
-        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("ALPHA_ROLE", "ALPHA_TICKET")])
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET")])
         self.role = "engineer"
         self.transcript = os.path.join(TMP, "ticket-turns.jsonl")
         rows = [{"type": "user", "timestamp": "2026-10-03T00:30:00Z", "message": {"content": "Тикет"}},
@@ -242,11 +338,11 @@ class TicketScopedDigests(unittest.TestCase):
         shutil.rmtree(rm.STATE_DIR, ignore_errors=True)
 
     def digest(self, ticket, cli):
-        os.environ["ALPHA_ROLE"] = self.role
+        os.environ["RPV_ROLE"] = self.role
         if ticket:
-            os.environ["ALPHA_TICKET"] = ticket
+            os.environ["RPV_TICKET"] = ticket
         else:
-            os.environ.pop("ALPHA_TICKET", None)
+            os.environ.pop("RPV_TICKET", None)
         return rm.write_digest(self.transcript, self.role, "t", cli, "тест")
 
     def test_digest_of_dispatcher_run_lands_in_ticket_folder(self):
@@ -257,14 +353,14 @@ class TicketScopedDigests(unittest.TestCase):
     def test_latest_digest_is_per_ticket(self):
         a = self.digest("TK-030", "aaaaaaaa-1")
         b = self.digest("TK-031", "bbbbbbbb-2")
-        os.environ["ALPHA_ROLE"] = self.role
-        os.environ["ALPHA_TICKET"] = "TK-030"
+        os.environ["RPV_ROLE"] = self.role
+        os.environ["RPV_TICKET"] = "TK-030"
         self.assertEqual(rm.latest_digest(self.role, "other-cli"), a)
-        os.environ["ALPHA_TICKET"] = "TK-031"
+        os.environ["RPV_TICKET"] = "TK-031"
         self.assertEqual(rm.latest_digest(self.role, "other-cli"), b)
-        os.environ["ALPHA_TICKET"] = "TK-099"
+        os.environ["RPV_TICKET"] = "TK-099"
         self.assertIsNone(rm.latest_digest(self.role, "other-cli"))      # новый тикет — чужого конспекта нет
-        os.environ.pop("ALPHA_TICKET")
+        os.environ.pop("RPV_TICKET")
         self.assertIsNone(rm.latest_digest(self.role, "other-cli"))      # без тикета — только каталог роли
 
     def test_session_without_ticket_keeps_role_folder(self):
@@ -272,8 +368,8 @@ class TicketScopedDigests(unittest.TestCase):
         self.assertEqual(os.path.basename(os.path.dirname(path)), self.role)
 
     def test_catch_up_of_previous_session_goes_to_the_same_ticket(self):
-        os.environ["ALPHA_ROLE"] = self.role
-        os.environ["ALPHA_TICKET"] = "TK-040"
+        os.environ["RPV_ROLE"] = self.role
+        os.environ["RPV_TICKET"] = "TK-040"
         rm.on_session_start({"session_id": "dddddddd-4", "transcript_path": self.transcript}, self.role, "t")
         last = rm.on_session_start({"session_id": "eeeeeeee-5", "transcript_path": self.transcript}, self.role, "t")
         self.assertIsNotNone(last)

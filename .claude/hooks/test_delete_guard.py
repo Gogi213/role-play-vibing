@@ -12,10 +12,10 @@ from pathlib import Path
 
 # проверки написаны на примере проекта alpha: корень и удалённые каталоги задаём окружением ДО импорта (умолчаний нет)
 os.environ["CLAUDE_PROJECT_DIR"] = r"C:\visual projects\alpha"
-os.environ["ALPHA_GUARD_REMOTE_ROOTS"] = "~/alpha/,$home/alpha/,${home}/alpha/,/home/deck/alpha/,/opt/alpha-compute/"
-os.environ["ALPHA_GUARD_HOST_ROOTS"] = "203.0.113.3=/home/deck/alpha/,/root/tk0,/data/tk0,/tmp/"
-os.environ["ALPHA_GUARD_STAGE"] = "/dev/shm/alpha-stage"
-os.environ["ALPHA_GUARD_FORBIDDEN_HOSTS"] = "203.0.113.1"
+os.environ["RPV_GUARD_REMOTE_ROOTS"] = "~/alpha/,$home/alpha/,${home}/alpha/,/home/deck/alpha/,/opt/alpha-compute/"
+os.environ["RPV_GUARD_HOST_ROOTS"] = "203.0.113.3=/home/deck/alpha/,/root/tk0,/data/tk0,/tmp/"
+os.environ["RPV_GUARD_STAGE"] = "/dev/shm/alpha-stage"
+os.environ["RPV_GUARD_FORBIDDEN_HOSTS"] = "203.0.113.1"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import delete_guard as dg  # noqa: E402
 
@@ -926,7 +926,7 @@ class SecondAudit(unittest.TestCase):
 
     def setUp(self):
         from unittest import mock
-        p = mock.patch.dict(os.environ, {"ALPHA_ROLE": "engineer"})   # файловые правила этого прохода — для запуска диспетчера
+        p = mock.patch.dict(os.environ, {"RPV_ROLE": "engineer"})   # файловые правила этого прохода — для запуска диспетчера
         p.start()
         self.addCleanup(p.stop)
 
@@ -1317,10 +1317,11 @@ class ThirdAudit(unittest.TestCase):
 
     def as_role(self, role):
         from unittest import mock
-        env = {"ALPHA_ROLE": role} if role else {}
+        env = {"RPV_ROLE": role} if role else {}
         p = mock.patch.dict(os.environ, env)
         p.start()
         if not role:
+            os.environ.pop("RPV_ROLE", None)
             os.environ.pop("ALPHA_ROLE", None)
         self.addCleanup(p.stop)
 
@@ -1421,9 +1422,10 @@ class HookEntryPoint(unittest.TestCase):
         if with_roles:
             os.makedirs(os.path.join(project, ".claude", "roles"), exist_ok=True)
         env = dict(os.environ, CLAUDE_PROJECT_DIR=project)
+        env.pop("RPV_ROLE", None)
         env.pop("ALPHA_ROLE", None)
         if role:
-            env["ALPHA_ROLE"] = role
+            env["RPV_ROLE"] = role
         r = subprocess.run([sys.executable, script or os.path.join(self.HERE, "delete_guard.py")],
                            input=(raw if raw is not None else json.dumps(event)).encode("utf-8"),
                            capture_output=True, env=env)
@@ -1595,6 +1597,38 @@ class Lexer(unittest.TestCase):
     def test_unterminated_raises(self):
         with self.assertRaises(dg.ParseError):
             dg.tokenize("echo 'abc")
+
+
+class EnvNames(unittest.TestCase):
+    """Переменные `RPV_*`, запасные `ALPHA_*` (прежние названия): RPV_ главнее."""
+
+    HERE = os.path.dirname(os.path.abspath(__file__))
+
+    def read(self, env_extra):
+        import subprocess
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RPV_", "ALPHA_"))}
+        env.update(env_extra)
+        code = ("import delete_guard as d; print(d.STAGE, d.REMOTE_ROOTS, sorted(d.HOST_ROOTS), "
+                "d.dispatcher_role(), bool(d.BOX_RE.search('host-9.example')))")
+        r = subprocess.run([sys.executable, "-c", code], cwd=self.HERE, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_alpha_names_still_read(self):
+        out = self.read({"ALPHA_GUARD_STAGE": "/dev/shm/s1", "ALPHA_GUARD_REMOTE_ROOTS": "/srv/a/", "ALPHA_ROLE": "judge",
+                         "ALPHA_GUARD_HOST_ROOTS": "h1=/x/", "ALPHA_GUARD_FORBIDDEN_HOSTS": "host-9.example"})
+        self.assertEqual(out, "/dev/shm/s1 ('/srv/a/',) ['h1'] judge True")
+
+    def test_rpv_names_win(self):
+        out = self.read({"RPV_GUARD_STAGE": "/dev/shm/new", "ALPHA_GUARD_STAGE": "/dev/shm/old",
+                         "RPV_GUARD_REMOTE_ROOTS": "/srv/new/", "ALPHA_GUARD_REMOTE_ROOTS": "/srv/old/",
+                         "RPV_ROLE": "engineer", "ALPHA_ROLE": "judge"})
+        self.assertEqual(out, "/dev/shm/new ('/srv/new/',) [] engineer False")
+
+    def test_texts_name_rpv_variables_only(self):
+        for text in (dg.REASON, dg.REASON_OVERWRITE, dg.REASON_IRREVERSIBLE):
+            self.assertNotIn("ALPHA_", text)
+        self.assertIn("RPV_GUARD_REMOTE_ROOTS", dg.REASON)
 
 
 if __name__ == "__main__":

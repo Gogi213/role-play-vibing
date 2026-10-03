@@ -1,8 +1,9 @@
-"""SessionStart: возвращает сессии команды alpha её роль.
+"""SessionStart: возвращает сессии команды ролей её роль.
 
-Роль — переменная `ALPHA_ROLE` (запуск диспетчера `claude -p`, одна задача — один тикет, id тикета —
-`ALPHA_TICKET`, если диспетчер его передал), иначе название сессии в Claude Desktop (метаданные приложения по
-`CLAUDE_CODE_HOST_SESSION_ID`, переживает клир).
+Роль определяется по порядку: (1) переменная `RPV_ROLE`, запасная `ALPHA_ROLE` (запуск диспетчера `claude -p`, одна
+задача — один тикет, id тикета — `RPV_TICKET`/`ALPHA_TICKET`); (2) метка сессии — файл в
+`<проект>/.claude/roles/.state/`, который ставит команда `/ceo` (по `session_id` события хука; в Claude Desktop ещё и по
+`CLAUDE_CODE_HOST_SESSION_ID` — переживает клир); (3) запасной путь — название сессии в метаданных Claude Desktop.
 
 Размер вставки — всегда ≤ LIMIT (8000) знаков: Claude Code режет всё, что больше ~10 тыс., до превью ~2 КБ, и
 тогда роль не видит свой устав (аудит 02.10). Поэтому:
@@ -26,25 +27,35 @@ ROLES = [
     ("ceo", "ceo"),
 ]
 ROLE_NAMES = {"researcher": "Исследователь", "engineer": "Инженер", "judge": "Судья", "ceo": "CEO"}
+
+
+def env(name, default=""):
+    """Переменная `RPV_<имя>`, запасная — `ALPHA_<имя>` (прежнее название)."""
+    return os.environ.get("RPV_" + name) or os.environ.get("ALPHA_" + name) or default
+
+
 # Корень — проект, в котором идёт сессия (плагин лежит в своей папке): CLAUDE_PROJECT_DIR, иначе текущий каталог.
 ROOT = os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 ROLES_DIR = os.path.join(ROOT, ".claude", "roles")
 if not os.path.isdir(ROLES_DIR):  # в проекте нет команды ролей — хуки молчат
     sys.exit(0)
 TICKETS_DIR = os.path.join(ROOT, ".claude", "tickets")
+# каталог меток сессий и состояния хуков; переопределение — `RPV_STATE_DIR` (для проверок хука)
+STATE_DIR = env("STATE_DIR") or os.path.join(ROLES_DIR, ".state")
 
 LIMIT = 8000          # знаков вставки; больше — Claude Code покажет роли только превью ~2 КБ
 NOTEBOOK_TAIL = 4000  # знаков конца блокнота роли
 SHORT_SOURCES = ("resume", "compact")
 
 MANUAL = (
-    "Роль сессии автоматически не определена. Если ты участник команды alpha — роль назовёт владелец "
-    "(`CEO`, `Роль: Исследователь`, `Роль: Инженер`, `Роль: Судья`); уставы — .claude/roles/<ceo|researcher|"
-    "engineer|judge>.md, команда — .claude/roles/README.md. Не из команды — правило ниже."
+    "Роль сессии автоматически не определена. Сессия CEO — команда `/ceo` (метит сессию); остальные роли "
+    "запускает диспетчер, либо роль назовёт владелец (`Роль: Исследователь`, `Роль: Инженер`, `Роль: Судья`); "
+    "уставы — .claude/roles/<ceo|researcher|engineer|judge>.md, команда — .claude/roles/README.md. Не из "
+    "команды — правило ниже."
 )
 OUTSIDER = (
-    "Общую память проекта (CLAUDE.md «СОСТОЯНИЕ», .memory/, docs/plan/SETTLED.md, автопамять "
-    "~/.claude/projects/…/memory/) пишет только сессия `CEO`; задачи команды без просьбы владельца не брать."
+    "Общую память проекта (CLAUDE.md, автопамять) пишет только сессия `CEO`; задачи команды без просьбы "
+    "владельца не брать."
 )
 
 
@@ -77,15 +88,55 @@ def find_title(host_id, cli_id):
 
 
 def env_role():
-    """Роль из `ALPHA_ROLE` (запуск диспетчера) или None."""
-    r = os.environ.get("ALPHA_ROLE")
+    """Роль из `RPV_ROLE` / `ALPHA_ROLE` (запуск диспетчера) или None."""
+    r = env("ROLE")
     return r if r in ROLE_NAMES else None
 
 
 def ticket_id():
-    """Id тикета запуска диспетчера (`ALPHA_TICKET`), если передан и безопасен для имени файла."""
-    t = os.environ.get("ALPHA_TICKET") or os.environ.get("ALPHA_TICKET_ID") or ""
+    """Id тикета запуска диспетчера (`RPV_TICKET`), если передан и безопасен для имени файла."""
+    t = env("TICKET") or env("TICKET_ID")
     return t if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", t) else None
+
+
+def _safe(x):
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(x))[:80]
+
+
+def label_files(session_id):
+    """Файлы-метки роли сессии: по session_id события хука и (Desktop) по id сессии приложения."""
+    names = []
+    if session_id:
+        names.append(f"session-{_safe(session_id)}.role")
+    host = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")
+    if host:
+        names.append(f"host-{_safe(host)}.role")
+    return [os.path.join(STATE_DIR, n) for n in names]
+
+
+def read_label(session_id):
+    """Роль по метке сессии (её ставит `/ceo`) или None."""
+    for f in label_files(session_id):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                r = fh.read().strip().lower()
+        except OSError:
+            continue
+        if r in ROLE_NAMES:
+            return r
+    return None
+
+
+def write_label(role, session_id):
+    """Поставить метку роли сессии; True — поставлена."""
+    files = label_files(session_id)
+    if role not in ROLE_NAMES or not files:
+        return False
+    os.makedirs(STATE_DIR, exist_ok=True)
+    for f in files:
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write(role)
+    return True
 
 
 def rel(path):
@@ -104,7 +155,10 @@ def detect(hook_in):
     """(роль, название, None) или (None, название|None, текст-вместо-вставки)."""
     er = env_role()
     if er:
-        return er, f"ALPHA_ROLE={er}", None
+        return er, f"RPV_ROLE={er}", None
+    lr = read_label(hook_in.get("session_id"))
+    if lr:
+        return lr, ROLE_NAMES[lr], None
     host_id = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")
     try:
         found, title = find_title(host_id, hook_in.get("session_id"))
@@ -115,7 +169,7 @@ def detect(hook_in):
         return None, None, f"=== РОЛЬ СЕССИИ: не определена ({why}) ===\n{MANUAL}\n{OUTSIDER}"
     role = next((r for key, r in ROLES if key in title.lower()), None)
     if role is None:
-        return None, title, f"=== Сессия «{title}» — не роль команды alpha ===\n{OUTSIDER}"
+        return None, title, f"=== Сессия «{title}» — не роль команды ролей проекта ===\n{OUTSIDER}"
     return role, title, None
 
 
@@ -135,7 +189,7 @@ def tail_chars(text, limit):
 
 def short_context(role, title, source):
     """resume/compact: 1–2 строки — роль и путь устава."""
-    lines = [f"=== РОЛЬ СЕССИИ: ты — «{ROLE_NAMES[role]}» команды alpha (хук role_context.py, событие: {source}) ===",
+    lines = [f"=== РОЛЬ СЕССИИ: ты — «{ROLE_NAMES[role]}» команды ролей проекта (хук role_context.py, событие: {source}) ===",
              f"Устав роли — .claude/roles/{role}.md, блокнот — .claude/roles/notes/{role}.md; "
              "если контекст сжат — перечитай устав."]
     tp = ticket_path()
@@ -150,9 +204,9 @@ def full_context(role, title, source, hook_in):
     name = ROLE_NAMES[role]
     shown = name if dispatcher else title
     tp = ticket_path()
-    head = [f"=== РОЛЬ СЕССИИ: ты — «{shown}» команды alpha (хук .claude/hooks/role_context.py, событие: {source}) ==="]
+    head = [f"=== РОЛЬ СЕССИИ: ты — «{shown}» команды ролей проекта (хук role_context.py, событие: {source}) ==="]
     if dispatcher:
-        head.append(f"Запуск диспетчера (ALPHA_ROLE={role}): одна задача — один тикет"
+        head.append(f"Запуск диспетчера (RPV_ROLE={role}): одна задача — один тикет"
                     + (f" `{tp}`" if tp else " (`.claude/tickets/`; id — в промпте)")
                     + ": шапка, описание, последние записи `## Лог`.")
     elif role == "ceo":
@@ -163,9 +217,8 @@ def full_context(role, title, source, hook_in):
                 f"--author {role} --text \"...\" [--next <роль>]` (`--next` — кого разбудить следующим; "
                 "@упоминания никого не будят).")
     if role != "ceo":
-        head.append("«Первое в новом чате» из CLAUDE.md — очередь CEO, не твоя. Общую память проекта (CLAUDE.md "
-                    "«СОСТОЯНИЕ», .memory/, docs/plan/SETTLED.md, автопамять) пишет только `CEO`; ты работаешь по "
-                    "своему тикету.")
+        head.append("Общую память проекта (CLAUDE.md, автопамять) пишет только `CEO`; ты работаешь по своему "
+                    "тикету.")
     try:  # память ролей: догнать конспект прошлой сессии, дать на него ссылку
         from role_memory import on_session_start
         last = on_session_start(hook_in, role, title)

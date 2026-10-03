@@ -1,15 +1,15 @@
-"""Память ролей команды alpha без внешних сервисов (замена Hindsight, владелец 26.09).
+"""Память ролей команды без внешних сервисов.
 
-- UserPromptSubmit: подсказки минимальные и без повторов.
+- UserPromptSubmit: подсказки минимальные и без повторов. Команда `/ceo` в сообщении ставит метку CEO текущей
+  сессии (запасной путь к метке, которую ставит сама команда).
   Роль (не CEO): строка «молчание» — итог в лог тикета, не текстом в ход.
   CEO: одна строка «[диспетчер] N новых в ceo-inbox.md» — только когда пришли новые; сторож и разрешения —
   по разу на 10 сообщений; сторож контекста — от 450 тыс. токенов (45 % окна), не чаще раза в 10 сообщений.
-  Тревоги Steam Deck хук не вставляет: их шлёт сторож `watch.py` в ceo-inbox (аудит 02.10).
 - SessionEnd (клир, выход, остановка): конспект разговора — сообщения владельца/диспетчера и сессий, ответы
   (без инструментов и рассуждений) — в `.claude/roles/log/<роль>/`. Не сработал — `role_context.py` на следующем
   старте догоняет конспект по записанному пути.
-- Ключ состояния сессии: для запуска диспетчера — `ALPHA_ROLE[-<ALPHA_TICKET>]` (раньше все роли писали в
-  `unknown.json` и конспекты путались), для Desktop — id сессии приложения.
+- Ключ состояния сессии: для запуска диспетчера — `RPV_ROLE[-<RPV_TICKET>]` (раньше все роли писали в
+  `unknown.json` и конспекты путались), для Desktop — id сессии приложения. Переменные — `RPV_*`, запасные `ALPHA_*`.
 Хук никогда не падает и не блокирует: ошибка — тишина.
 """
 import datetime
@@ -21,11 +21,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from role_context import ROLES, ROOT, env_role, find_title, ticket_id  # noqa: E402
+from role_context import (ROLE_NAMES, ROLES, ROOT, STATE_DIR, env, env_role, find_title, read_label,  # noqa: E402
+                          ticket_id, write_label)
 
 # каталоги можно переопределить окружением — для проверок хука, чтобы не трогать рабочее состояние
-STATE_DIR = os.environ.get("ALPHA_STATE_DIR") or os.path.join(ROOT, ".claude", "roles", ".state")
-LOG_DIR = os.environ.get("ALPHA_LOG_DIR") or os.path.join(ROOT, ".claude", "roles", "log")
+LOG_DIR = env("LOG_DIR") or os.path.join(ROOT, ".claude", "roles", "log")
 GMT4 = datetime.timezone(datetime.timedelta(hours=4))
 REPEAT_EVERY = 10  # сообщений: самое частое повторение одной и той же подсказки
 
@@ -37,14 +37,17 @@ def read_stdin():
         return {}
 
 
-def current_role():
-    """(название, роль) текущей сессии или (название, None). Сначала ALPHA_ROLE (диспетчерский запуск
-    `claude -p`, как в role_context.py) — иначе, если launch_run не снял CLAUDE_CODE_HOST_SESSION_ID
-    сессии CEO из env, find_title() принимает роль за CEO (судья 27.09, пилот TK-001, п.4 «обязательно»)."""
+def current_role(hook_in=None):
+    """(название, роль) текущей сессии или (название, None). Порядок как в role_context.py: `RPV_ROLE` (диспетчерский
+    запуск `claude -p`; иначе, если launch_run не снял CLAUDE_CODE_HOST_SESSION_ID сессии CEO из env, поиск названия
+    принял бы роль за CEO), метка сессии (`/ceo`), последним — название сессии Desktop."""
     er = env_role()
     if er:
         tid = ticket_id()
-        return f"ALPHA_ROLE={er}" + (f" {tid}" if tid else ""), er
+        return f"RPV_ROLE={er}" + (f" {tid}" if tid else ""), er
+    lr = read_label((hook_in or {}).get("session_id"))
+    if lr:
+        return ROLE_NAMES[lr], lr
     host_id = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")
     found, title = find_title(host_id, None) if host_id else (False, None)
     if not found or not title:
@@ -92,7 +95,7 @@ def stamp(iso):
 
 
 def digest_dir(role):
-    """Каталог конспектов: запуск диспетчера по тикету (`ALPHA_TICKET`) — подкаталог тикета (роль, взявшая новый
+    """Каталог конспектов: запуск диспетчера по тикету (`RPV_TICKET`) — подкаталог тикета (роль, взявшая новый
     тикет, не получает конспект чужого; аудит 03.10), иначе каталог роли."""
     base = os.path.join(LOG_DIR, role)
     if env_role():
@@ -175,8 +178,8 @@ def on_session_start(hook_in, role, title):
 
 # --- подсказки на сообщение -----------------------------------------------------------------------
 
-# владелец 27.09: «че у младших везде опять писанина» — правило устава README не держалось после клира;
-# стиль `.claude/output-styles/alpha-role.md` включается только на новом процессе, эта строка — на каждом сообщении
+# правило устава «роль не пишет текст в ход» не держится после клира; стиль вывода включается только на новом
+# процессе, эта строка — на каждом сообщении
 SILENT_TEXT = ("[роль: молчание] Текста в ход не писать: ни между инструментами, ни пересказом. Итог/вопрос — в лог "
                "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" [--next <роль>]`); сообщение "
                "диспетчера или другой сессии — не владелец. Конец хода — одна строка ≤ 80 знаков или ничего. "
@@ -197,7 +200,7 @@ def throttled(state, key, sig, text):
 
 # Судья TK-002 п.2а («кто сторожит сторожа», v1.4): сторож .claude/dispatcher/watch.py пишет отметку
 # сердцебиения на каждый цикл; здесь только её возраст (сам сторож — свой процесс, не этот хук).
-DISPATCHER_DIR = os.environ.get("ALPHA_DISPATCHER_DIR") or os.path.join(ROOT, ".claude", "dispatcher")  # для проверок
+DISPATCHER_DIR = env("DISPATCHER_DIR") or os.path.join(ROOT, ".claude", "dispatcher")  # для проверок
 WATCH_HEARTBEAT_FILE = os.path.join(DISPATCHER_DIR, "watch-heartbeat.json")
 WATCH_STALE_S = 2 * 120  # 2 интервала сторожа (WATCH_INTERVAL_S по умолчанию в watch.py — 120 с)
 
@@ -249,8 +252,8 @@ def ceo_inbox_alert():
     return f"[диспетчер] {len(new)} новых в .claude/dispatcher/ceo-inbox.md"
 
 
-# владелец 27.09 «зачем был запрос?»: вызов Инженера (в тексте был `rm -rf`) 1,5 ч ждал подтверждения в его сессии,
-# куда никто не смотрел. Уведомление роли «нужно разрешение» пишется меткой; CEO видит её на своём сообщении.
+# вызов роли может часами ждать подтверждения в её сессии, куда никто не смотрит. Уведомление роли «нужно
+# разрешение» пишется меткой; CEO видит её на своём сообщении.
 PENDING = os.path.join(STATE_DIR, "pending-permission.json")
 
 
@@ -289,11 +292,9 @@ def pending_permissions():
                  ".claude/roles/.state/pending-permission.json.")
 
 
-# Сторож контекста: порог — владелец 03.10: 45 % окна Opus 1 млн («давай клир хотя бы на 45%»); прежде — 55 %
-# (27.09: «давай снизим но до 55% хотяб»; 30 % он назвал «слишком мало»); 02.10 CEO ошибочно поставил 250 тыс.
-# без слова владельца. Только для сессий, где есть владелец, — у запуска диспетчера просить клир некого.
-# Переопределение — ALPHA_CONTEXT_WARN_TOKENS.
-CONTEXT_WARN_TOKENS = int(os.environ.get("ALPHA_CONTEXT_WARN_TOKENS", "450000"))
+# Сторож контекста: порог по умолчанию — 45 % окна 1 млн токенов. Только для сессий, где есть владелец, — у запуска
+# диспетчера просить клир некого. Переопределение — RPV_CONTEXT_WARN_TOKENS (запасная — ALPHA_CONTEXT_WARN_TOKENS).
+CONTEXT_WARN_TOKENS = int(env("CONTEXT_WARN_TOKENS", "450000"))
 
 
 def context_tokens(transcript):
@@ -368,13 +369,28 @@ def on_prompt_all(hook_in, role):
     return "\n".join(t for t in parts if t) or None
 
 
+# сообщение владельца — команда `/ceo` (или `/<плагин>:ceo`): метка CEO ставится хуком сразу, не дожидаясь, пока
+# команда выполнит свой шаг (без Bash, без подстановки id сессии в тексте команды)
+CEO_COMMAND = re.compile(r"^\s*/(?:[\w.-]+:)?ceo(?:\s|$)", re.I)
+
+
+def mark_ceo_on_command(hook_in):
+    if env_role() is None and CEO_COMMAND.match(hook_in.get("prompt") or ""):
+        write_label("ceo", hook_in.get("session_id"))
+
+
 def main():
     hook_in = read_stdin()
     event = hook_in.get("hook_event_name")
     try:
-        if event == "PostToolUse":  # раньше — метка чистки автопамяти; напоминание убрано (аудит 02.10)
+        if event == "PostToolUse":  # напоминаний после инструментов нет
             return 0
-        title, role = current_role()
+        if event == "UserPromptSubmit":
+            try:
+                mark_ceo_on_command(hook_in)
+            except Exception:
+                pass
+        title, role = current_role(hook_in)
         if role is None:
             return 0
         if event == "UserPromptSubmit":
