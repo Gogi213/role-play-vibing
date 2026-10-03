@@ -583,13 +583,16 @@ def _context_tokens_last(result: dict) -> int:
     return total // num_turns
 
 
-def _context_tokens_for_store(result: dict, previous: int) -> int:
+def _context_tokens_for_store(result: dict, previous: int, session_id=None) -> int:
     """Что записать в `last_context_tokens` сессии после запуска (аудит 03.10): нет JSON (таймаут/убит) или usage
-    пуст (ответ-ошибка) — НЕ обнулять, остаётся последнее известное; есть ход (iterations/транскрипт) — он; иначе
-    запасная оценка-среднее, но не ниже известного (контекст сессии без сжатия только растёт)."""
+    пуст (ответ-ошибка) — НЕ обнулять; аудит-2: если id сессии известен (`session_id` — та, что продолжал запуск, либо
+    из JSON), последний ход берётся из её транскрипта (убитая сессия успела записать ходы), а не старое число;
+    транскрипта нет — остаётся последнее известное. Есть ход (iterations/транскрипт) — он; иначе запасная
+    оценка-среднее, но не ниже известного (контекст сессии без сжатия только растёт)."""
     usage = (result or {}).get("usage") or {}
     if not _tokens_of(usage):
-        return previous
+        last = _transcript_last_turn_tokens(session_id or (result or {}).get("session_id"))
+        return last if last else previous
     iterations = usage.get("iterations")
     if isinstance(iterations, list) and iterations and _tokens_of(iterations[-1]):
         return _tokens_of(iterations[-1])
@@ -1048,10 +1051,11 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     key = f"{tid}::{role}"
     sess = state.setdefault("sessions", {}).setdefault(key, {})  # retries — всегда на (задачу, роль)
     store = _resume_store(state, tid, role)  # session_id/токены — по SESSION_SCOPE[role]
+    sid_used = result.get("session_id") or store.get("session_id")  # сессия этого запуска (убит — id прежней, --resume)
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
     # контекст последнего хода; нет JSON/usage (таймаут, ответ-ошибка) — прежнее значение, не ноль
-    store["last_context_tokens"] = _context_tokens_for_store(result, store.get("last_context_tokens", 0))
+    store["last_context_tokens"] = _context_tokens_for_store(result, store.get("last_context_tokens", 0), sid_used)
 
     path = TICKETS_DIR / f"{tid}.md"
     if not path.exists():

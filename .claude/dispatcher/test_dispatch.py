@@ -2029,6 +2029,72 @@ class DispatchRunTests(unittest.TestCase):
         self.assertTrue(captured, "повтор запущен")
         self.assertNotIn("--resume", captured, "контекст за порогом — повтор идёт в новой сессии")
 
+    # --- аудит-2 п.4: ротация после таймаута — последний ход из транскрипта убитой сессии
+    def write_session_transcript(self, root, session_id, turns):
+        proj = Path(root) / "any-project-slug"
+        proj.mkdir(parents=True, exist_ok=True)
+        lines = [json.dumps({"type": "assistant", "message": {"role": "assistant", "usage": u}}) for u in turns]
+        lines.append(json.dumps({"type": "user", "message": {"role": "user", "content": "x"}}))
+        (proj / f"{session_id}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def killed_run(self, previous_tokens, turns, sid="sess-killed", stored_sid="sess-killed", result_text=""):
+        """Запуск убит по таймауту (JSON пуст): возвращает (сохранённый контекст, команда повторного запуска)."""
+        path = self.make_in_progress("Убит")
+        tid = path.stem
+        state = D.load_state()
+        store = D._resume_store(state, tid, "engineer")
+        store.update({"last_context_tokens": previous_tokens})
+        if stored_sid:
+            store["session_id"] = stored_sid
+        D.save_state(state)
+        run_file = self.dispatcher_dir / "killed.json"
+        run_file.write_text(result_text, encoding="utf-8")
+        info = {"role": "engineer", "popen": None, "pid": None, "started": dt("2026-10-03T10:00:00+04:00"),
+                "attempt": 0, "run_file": run_file, "err_file": run_file, "out_fh": None, "err_fh": None,
+                "reason": "in_progress-resume", "status_at_launch": "in_progress", "log_keys_at_launch": []}
+        captured = []
+        orig_popen, orig_dir = D._popen, D.CLAUDE_PROJECTS_DIR
+        D._popen = lambda cmd, _o=orig_popen, **kw: (captured.extend(cmd), _o(cmd, **kw))[1]
+        with tempfile.TemporaryDirectory() as root:
+            if turns is not None:
+                self.write_session_transcript(root, sid, turns)
+            D.CLAUDE_PROJECTS_DIR = Path(root)
+            try:
+                D._finish_run(tid, info, state, dt("2026-10-03T10:20:00+04:00"), timed_out=True)
+            finally:
+                D._popen, D.CLAUDE_PROJECTS_DIR = orig_popen, orig_dir
+        saved = D.load_state()["ticket_sessions"][f"{tid}::engineer"]["last_context_tokens"]
+        return saved, captured
+
+    def test_killed_run_takes_last_turn_from_its_transcript_not_the_old_number(self):
+        small = [{"input_tokens": 5, "cache_read_input_tokens": 100_000, "cache_creation_input_tokens": 0},
+                 {"input_tokens": 7, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 3_000}]
+        saved, captured = self.killed_run(150_000, small)
+        self.assertEqual(saved, 7 + 20_000 + 3_000, "последний ход из транскрипта, не прежние 150000")
+        self.assertIn("--resume", captured, "контекст под порогом — повтор продолжает ту же сессию")
+        self.assertIn("sess-killed", captured)
+
+    def test_killed_run_with_big_transcript_makes_rotation_fire_even_if_old_number_was_small(self):
+        big = [{"input_tokens": 5, "cache_read_input_tokens": D.ROTATE_TOKENS + 10_000, "cache_creation_input_tokens": 0}]
+        saved, captured = self.killed_run(30_000, big)
+        self.assertEqual(saved, 5 + D.ROTATE_TOKENS + 10_000)
+        self.assertTrue(captured, "повтор запущен")
+        self.assertNotIn("--resume", captured, "по транскрипту контекст за порогом — новая сессия")
+
+    def test_killed_run_without_transcript_or_session_id_keeps_the_old_number(self):
+        saved, _ = self.killed_run(150_000, None)                              # транскрипта нет
+        self.assertEqual(saved, 150_000)
+        turns = [{"input_tokens": 1, "cache_read_input_tokens": 500, "cache_creation_input_tokens": 0}]
+        saved, _ = self.killed_run(150_000, turns, sid="sess-other", stored_sid=None)   # id сессии неизвестен
+        self.assertEqual(saved, 150_000)
+
+    def test_error_json_with_zero_usage_also_uses_the_session_transcript(self):
+        turns = [{"input_tokens": 2, "cache_read_input_tokens": 41_000, "cache_creation_input_tokens": 0}]
+        text = json.dumps({"is_error": True, "session_id": "sess-err2", "total_cost_usd": 0.0,
+                           "usage": {"input_tokens": 0, "output_tokens": 0}})
+        saved, _ = self.killed_run(150_000, turns, sid="sess-err2", stored_sid="sess-old", result_text=text)
+        self.assertEqual(saved, 41_002)
+
     def test_error_result_with_zero_usage_keeps_last_known_context(self):
         path = self.make_in_progress("Ошибка")
         tid = path.stem
