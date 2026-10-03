@@ -1988,6 +1988,32 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(self.ceo_lines(path.stem), [], "запись CEO — не повод для строки CEO и не будит ревьюера")
         self.assertEqual(T.read_ticket(path).log[-1].author, "ceo")
 
+    def test_no_escalation_while_owner_run_is_still_going(self):
+        """Аудит-3 п.4: после 3 возвратов промежуточная запись владельца ПОСРЕДИ его запуска — не «сдал на ревью»:
+        эскалация ждёт конца запуска (тикет в RUNNING), потом срабатывает один раз."""
+        path = self.review_setup()
+        tid = path.stem
+        for n in (1, 2, 3):
+            self.review_round(path, n, "in_progress")
+            self.owner_resubmits(path, n, "in_review")
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])   # запуск владельца ещё идёт
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        D.RUNNING[tid] = {"role": "engineer", "popen": proc, "pid": proc.pid, "started": dt("2026-10-03T15:00:00+04:00")}
+        self.addCleanup(D.RUNNING.clear)
+        T.append_log(path, "engineer", "промежуточно: правлю п.2", now=dt("2026-10-03T15:01:00+04:00"))
+        D.tick(now=dt("2026-10-03T15:02:00+04:00"))
+        tkt = T.read_ticket(path)
+        self.assertEqual(tkt.log[-1].author, "engineer", "пока запуск идёт, записи dispatcher нет")
+        self.assertEqual(self.ceo_lines(tid), [])
+        proc.kill()
+        proc.wait()
+        D.RUNNING.clear()                                               # конец запуска (сам разбор итога — в других тестах)
+        self.recording_popen()
+        D.tick(now=dt("2026-10-03T15:20:00+04:00"))                     # запуск кончился — эскалация, одна строка CEO
+        self.assertEqual(T.read_ticket(path).log[-1].author, "dispatcher")
+        self.assertEqual(len(self.ceo_lines(tid, "next-ceo")), 1, self.ceo_lines(tid))
+
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
         path = self.review_setup()
         for n in (1, 2, 3):

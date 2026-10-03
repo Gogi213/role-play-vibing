@@ -1243,7 +1243,9 @@ def tick(now=None) -> int:
 
         # CEO получает строку только по: `next: ceo`, blocked/needs_owner, done.
         # @ceo (и любые @упоминания) в тексте записей — просто текст.
-        tkt = escalate_review_limit(path, tkt, state, now)
+        if tkt.id not in RUNNING and path.stem not in RUNNING:
+            # аудит-3: пока владелец ещё работает, его промежуточная запись — не «сдал на ревью»; эскалация — после запуска
+            tkt = escalate_review_limit(path, tkt, state, now)
         handle_next_ceo(path, tkt, state, now)
         notify_status_for_ceo(tkt, state, now)
         notify_done(tkt, state, now)
