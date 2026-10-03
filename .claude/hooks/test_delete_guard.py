@@ -924,6 +924,12 @@ class SecondAudit(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.out, ignore_errors=True)
 
+    def setUp(self):
+        from unittest import mock
+        p = mock.patch.dict(os.environ, {"ALPHA_ROLE": "engineer"})   # файловые правила этого прохода — для запуска диспетчера
+        p.start()
+        self.addCleanup(p.stop)
+
     def no(self, cmd, cwd=CWD):
         self.assertIsNotNone(dg.check(cmd, cwd), f"пропущено: {cmd!r}")
 
@@ -1288,6 +1294,120 @@ class SecondAudit(unittest.TestCase):
         self.no("rm -rf C:/Users/x/AppData/Roaming/f")
 
 
+class ThirdAudit(unittest.TestCase):
+    """Третий проход аудита 03.10: (е) файловые инструменты вне проекта ограничены только для запусков диспетчера;
+    (ж) `.git` — удаление никому, запись — не запускам диспетчера; (з) настройки Claude Code — не запускам диспетчера."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = outside_dir()
+        base = Path(cls.out)
+        (base / "settings.json").write_text("{}", encoding="utf-8")
+        (base / "repo").mkdir()
+        (base / "repo" / "main.py").write_text("x", encoding="utf-8")
+        (base / "deep").mkdir()
+        (base / "deep" / "x.bin").write_text("x", encoding="utf-8")
+        cls.settings = (base / "settings.json").as_posix()
+        cls.repo_file = (base / "repo" / "main.py").as_posix()
+        cls.deep_file = (base / "deep" / "x.bin").as_posix()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.out, ignore_errors=True)
+
+    def as_role(self, role):
+        from unittest import mock
+        env = {"ALPHA_ROLE": role} if role else {}
+        p = mock.patch.dict(os.environ, env)
+        p.start()
+        if not role:
+            os.environ.pop("ALPHA_ROLE", None)
+        self.addCleanup(p.stop)
+
+    def tool(self, name, path, cwd=CWD):
+        key = "notebook_path" if name == "NotebookEdit" else "file_path"
+        return dg.check_tool({"tool_name": name, "tool_input": {key: path}, "cwd": cwd})
+
+    # ------------------------------------------------------------------------------------------ (е) чьи правила
+    def test_ceo_session_edits_outside_project(self):
+        self.as_role(None)
+        for name in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+            self.assertIsNone(self.tool(name, self.settings), name)          # ~/.claude/settings.json и т. п.
+            self.assertIsNone(self.tool(name, self.repo_file), name)         # соседний репозиторий (сам плагин)
+
+    def test_ceo_session_still_never_root_deep(self):
+        self.as_role(None)
+        reason = self.tool("Edit", self.deep_file)
+        self.assertIsNotNone(reason)
+        self.assertIn("никогда", reason)
+        self.assertIsNone(self.tool("Write", self.out + "/deep/new.bin"))      # нового файла ещё нет — создание
+
+    def test_dispatcher_role_keeps_full_rule(self):
+        for role in ("engineer", "researcher", "judge"):
+            self.as_role(role)
+            self.assertIsNotNone(self.tool("Edit", self.repo_file), role)
+            self.assertIn("вне своей папки", self.tool("Write", self.settings), role)
+
+    def test_unknown_role_value_is_ceo_session(self):
+        self.as_role("ceo")                                                # не роль диспетчера — правила сессии CEO
+        self.assertIsNone(self.tool("Edit", self.repo_file))
+
+    def test_home_root_user_is_not_root_segment(self):
+        from unittest import mock
+        self.as_role(None)
+        with mock.patch.object(dg.os.path, "expanduser", return_value="/root"):
+            self.assertFalse(dg.hard_forbidden_file("/root/.claude/settings.json", dg.Ctx(None)))
+            self.assertTrue(dg.hard_forbidden_file("/root/data/root/x.bin", dg.Ctx(None)))
+
+    # ------------------------------------------------------------------------------------------ (ж) .git
+    def test_git_dir_deletion_refused_for_everyone(self):
+        for role in (None, "engineer"):
+            self.as_role(role)
+            for cmd in ("rm -rf .git", "rm -rf ./.git/", 'rm -rf "C:/visual projects/alpha/.git"', "rm -rf .*",
+                        "rm -rf .[!.]*", "rm -rf .g*", "rm -f .git/config", "rm -rf .git/objects",
+                        "mv .git /c/Users/x/old-git", "cd .git && rm -rf objects", "find .git -delete",
+                        "ssh deck@192.0.2.49 'rm -rf ~/alpha/repo/.git'", "Remove-Item -Recurse .git"):
+                reason = dg.check(cmd, CWD)
+                self.assertIsNotNone(reason, f"{role}: {cmd}")
+            self.assertIn(".git", dg.check("rm -rf .git", CWD))
+
+    def test_git_dir_neighbours_and_locks_allowed(self):
+        self.as_role("engineer")
+        for cmd in ("rm -f .git/index.lock", "rm -f .git/refs/heads/main.lock", "rm -rf .github/old",
+                    "rm -f .gitignore.bak", "rm -rf node_modules/.cache", "rm -rf .claude/worktrees/agent-1",
+                    "rm -f .*.swp", "rm -rf /tmp/clone/.git", "git status", "echo x >> .git/info/exclude"):
+            self.assertIsNone(dg.check(cmd, CWD), cmd)
+
+    def test_git_dir_writes(self):
+        self.as_role("engineer")
+        self.assertIsNotNone(self.tool("Edit", "C:/visual projects/alpha/.git/config"))
+        self.assertIsNotNone(dg.check("echo ref > .git/HEAD", CWD))
+        self.as_role(None)                                                 # CEO: правка .git/hooks и т. п. — можно
+        self.assertIsNone(self.tool("Edit", "C:/visual projects/alpha/.git/hooks/pre-commit"))
+        self.assertIsNone(dg.check("echo ref > .git/info/exclude", CWD))
+
+    # ------------------------------------------------------------------------------------------ (з) настройки
+    def test_settings_closed_to_dispatcher_roles(self):
+        self.as_role("engineer")
+        for name in ("Write", "Edit", "MultiEdit"):
+            for path in ("C:/visual projects/alpha/.claude/settings.json", ".claude/settings.local.json",
+                         "C:\\visual projects\\alpha\\.claude\\settings.local.json"):
+                reason = self.tool(name, path)
+                self.assertIsNotNone(reason, f"{name} {path}")
+                self.assertIn("Настройки Claude Code", reason)
+        for cmd in ("echo '{}' > .claude/settings.json", "cp /c/x/s.json .claude/settings.local.json",
+                    "rm .claude/settings.json", "mv .claude/settings.json data/old.json",
+                    "cat x | tee .claude/settings.local.json"):
+            self.assertIn("Настройки Claude Code", dg.check(cmd, CWD) or "", cmd)
+        self.assertIsNone(self.tool("Write", "C:/visual projects/alpha/.claude/roles/notes/engineer.md"))
+        self.assertIsNone(dg.check("cat .claude/settings.json", CWD))
+
+    def test_settings_open_to_ceo(self):
+        self.as_role(None)
+        self.assertIsNone(self.tool("Edit", "C:/visual projects/alpha/.claude/settings.json"))
+        self.assertIsNone(dg.check("echo '{}' > .claude/settings.local.json", CWD))
+
+
 class HookEntryPoint(unittest.TestCase):
     """Точка входа PreToolUse: JSON со stdin → deny с причиной; не наш инструмент / нет `.claude/roles` в проекте — тишина;
     битое событие и сбой стража — отказ (fail-closed); обёртка в hooks.json — отказ, когда нет Python или страж сломан."""
@@ -1295,12 +1415,15 @@ class HookEntryPoint(unittest.TestCase):
     HERE = os.path.dirname(os.path.abspath(__file__))
     ROOT = os.path.dirname(os.path.dirname(HERE))
 
-    def run_hook(self, event, project, with_roles=True, raw=None, script=None):
+    def run_hook(self, event, project, with_roles=True, raw=None, script=None, role=None):
         import json
         import subprocess
         if with_roles:
             os.makedirs(os.path.join(project, ".claude", "roles"), exist_ok=True)
         env = dict(os.environ, CLAUDE_PROJECT_DIR=project)
+        env.pop("ALPHA_ROLE", None)
+        if role:
+            env["ALPHA_ROLE"] = role
         r = subprocess.run([sys.executable, script or os.path.join(self.HERE, "delete_guard.py")],
                            input=(raw if raw is not None else json.dumps(event)).encode("utf-8"),
                            capture_output=True, env=env)
@@ -1333,13 +1456,14 @@ class HookEntryPoint(unittest.TestCase):
             for tool, key in (("Write", "file_path"), ("Edit", "file_path"), ("MultiEdit", "file_path"),
                               ("NotebookEdit", "notebook_path")):
                 ev = {"tool_name": tool, "tool_input": {key: existing}, "cwd": d}
-                out = self.decision(self.run_hook(ev, d))
+                out = self.decision(self.run_hook(ev, d, role="engineer"))
                 self.assertEqual(out["permissionDecision"], "deny", tool)
                 self.assertIn("вне своей папки", out["permissionDecisionReason"])
+                self.assertEqual(self.run_hook(ev, d), "", tool)              # сессия CEO/владельца — можно (аудит-3)
                 inside = dict(ev, tool_input={key: d.replace("\\", "/") + "/src/x.rs"})
-                self.assertEqual(self.run_hook(inside, d), "", tool)
+                self.assertEqual(self.run_hook(inside, d, role="engineer"), "", tool)
             new = {"tool_name": "Write", "tool_input": {"file_path": (Path(out_dir) / "new.txt").as_posix()}, "cwd": d}
-            self.assertEqual(self.run_hook(new, d), "")                      # новый файл вне папки — создание
+            self.assertEqual(self.run_hook(new, d, role="engineer"), "")     # новый файл вне папки — создание
             nopath = {"tool_name": "Write", "tool_input": {"content": "x"}, "cwd": d}
             self.assertEqual(self.decision(self.run_hook(nopath, d))["permissionDecision"], "deny")
         with tempfile.TemporaryDirectory() as d2:                           # без команды ролей — молчит и для файлов
@@ -1382,17 +1506,23 @@ class HookEntryPoint(unittest.TestCase):
             self.assertIn(tool, guards[0]["matcher"].split("|"))
         return guards[0]["hooks"][0]["command"]
 
-    def run_wrapper(self, plugin_root, path_dirs, event):
+    def run_wrapper(self, plugin_root, path_dirs, event, project=None):
+        """`project` — CLAUDE_PROJECT_DIR события; по умолчанию — свежий проект с `.claude/roles` (обёртка отказывает
+        только в проекте команды ролей)."""
         import json
         import shutil as sh_
         import subprocess
         sh = sh_.which("sh")
         if not sh:
             self.skipTest("нет sh")
+        if project is None:
+            project = tempfile.mkdtemp(prefix="dg-proj-")
+            self.addCleanup(shutil.rmtree, project, True)
+            os.makedirs(os.path.join(project, ".claude", "roles"))
         cmd = self.guard_command().replace("${CLAUDE_PLUGIN_ROOT}", plugin_root.replace("\\", "/"))
         self.assertTrue(cmd.startswith("sh -c "))
         cmd = cmd.replace("sh -c ", '"' + sh.replace("\\", "/") + '" -c ', 1)         # PATH в тесте урезан: sh — по полному пути
-        env = dict(os.environ, CLAUDE_PLUGIN_ROOT=plugin_root, PATH=os.pathsep.join(path_dirs))
+        env = dict(os.environ, CLAUDE_PLUGIN_ROOT=plugin_root, PATH=os.pathsep.join(path_dirs), CLAUDE_PROJECT_DIR=project)
         return subprocess.run([sh, "-c", cmd], input=json.dumps(event).encode("utf-8"), capture_output=True, env=env)
 
     def test_wrapper_runs_guard(self):
@@ -1409,6 +1539,22 @@ class HookEntryPoint(unittest.TestCase):
             r = self.run_wrapper(self.ROOT, [empty], {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": empty})
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("Страж удаления", r.stderr.decode("utf-8", "replace"))
+
+    def test_wrapper_without_interpreter_outside_roles_project_is_silent(self):
+        """Аудит-3 п.1: нет Python — отказ только в проекте команды ролей; в остальных проектах плагин не мешает."""
+        import shutil as sh_
+        tr = sh_.which("tr")
+        with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as plain:
+            ev = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": plain}
+            r = self.run_wrapper(self.ROOT, [empty], ev, project=plain)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.stdout.strip(), b"")
+            if tr and os.name != "nt":                                      # путь Windows с обратными чертами → `/`
+                os.symlink(tr, os.path.join(empty, "tr"))                   # в PATH только tr, Python по-прежнему нет
+                with tempfile.TemporaryDirectory() as proj:
+                    os.makedirs(os.path.join(proj, ".claude", "roles"))
+                    r = self.run_wrapper(self.ROOT, [empty], ev, project=proj.replace("/", "\\"))
+                    self.assertEqual(r.returncode, 2, r.stdout)
 
     def test_wrapper_with_broken_guard_is_refusal(self):
         with tempfile.TemporaryDirectory() as root:

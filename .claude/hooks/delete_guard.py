@@ -32,6 +32,10 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 {}` (пути find — цели), `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, `git stash
 clear|drop`, `git push +ref|:ref|--delete|--mirror` — как `git reset --hard` (вне основного дерева разрешено, иначе «только
 через CEO»); (г) fail-closed: сбой самого стража (исключение при разборе, битое событие) — отказ с причиной, не пропуск.
+Третий проход (03.10): (е) Write/Edit/MultiEdit/NotebookEdit вне корней ограничены только для запусков диспетчера
+(`ALPHA_ROLE`); сессия CEO/владельца правит файлы вне проекта, кроме root/ и deep/ и закрытых узлов; (ж) `.git` — удаление,
+перенос, шаблоны вроде `.*` никому (кроме `*.lock`), запись внутрь — не запускам диспетчера; (з) настройки Claude Code
+`.claude/settings*.json` запуску диспетчера не менять (через них выключаются хуки и плагин).
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
@@ -1703,10 +1707,98 @@ def legacy_found(cmd, cwd):
     return found
 
 
+# ------------------------------------------------------------------------------------------------------------
+# Аудит-3 (03.10): чьи правила и что защищено всегда
+# ------------------------------------------------------------------------------------------------------------
+
+DISPATCH_ROLES = ("researcher", "engineer", "judge")
+SETTINGS_NAMES = ("settings.json", "settings.local.json")
+REASON_GIT_DIR = ("Каталог .git ({t}) — история репозитория: удалять или переносить его и файлы внутри нельзя никому "
+                  "(`rm -rf .git`, `rm -rf .*`, `mv .git …`); можно только снять зависший замок `*.lock`. Чистка "
+                  "истории — только владелец через CEO.")
+REASON_GIT_WRITE = ("Запуск диспетчера не пишет внутрь .git ({t}): состояние репозитория меняют команды git, а не правка "
+                    "файлов. Нужно иное — через CEO.")
+REASON_SETTINGS = ("Настройки Claude Code ({t}) запуску диспетчера менять нельзя: через них выключаются хуки и плагин "
+                   "(`disableAllHooks`, `enabledPlugins`), а с ними и этот страж. Правка настроек — через CEO.")
+REASON_FILE_HARD = ("Запись в {t}: записи root/ и deep/ (единственные копии) и закрытые узлы — никогда, в любой сессии. "
+                    "Только владелец через CEO.")
+
+
+def dispatcher_role():
+    """Роль запуска диспетчера (`ALPHA_ROLE`, её ставит dispatch.launch_run; наследуют и помощники роли) или None —
+    сессия CEO или владельца."""
+    r = (os.environ.get("ALPHA_ROLE") or "").strip().lower()
+    return r if r in DISPATCH_ROLES else None
+
+
+def _abs_norm(t, ctx):
+    """Нормализованный путь цели; относительный — от известного рабочего каталога (неизвестен — как есть)."""
+    p = norm(t)
+    if p and not (p.startswith(("/", "~", "$", "%")) or re.match(r"[a-z]:", p)):
+        cwd = getattr(ctx, "cwd", None)
+        if cwd:
+            p = posixpath.normpath(cwd + "/" + p)
+    return p
+
+
+def git_internal(t, ctx):
+    """Цель — каталог `.git` или путь внутри него, в т. ч. шаблон оболочки, который совпадёт с `.git` (`.*`, `.[!.]*`,
+    `.g*`). Исключения: зависший замок `….lock` внутри .git и временные каталоги."""
+    import fnmatch
+    p = _abs_norm(t, ctx)
+    if not p or p.startswith("<") or temp_rest(p) is not None:
+        return False
+    segs = [s for s in p.split("/") if s]
+    for i, s in enumerate(segs):
+        if s == ".git" or (s.startswith(".") and any(c in s for c in "*?[") and fnmatch.fnmatchcase(".git", s)):
+            rest = segs[i + 1:]
+            if s == ".git" and rest and rest[-1].endswith(".lock") and not any(c in rest[-1] for c in "*?["):
+                return False
+            return True
+    return False
+
+
+def settings_file(t, ctx):
+    """Цель — файл настроек Claude Code (`.claude/settings.json`, `.claude/settings.local.json`) в любом каталоге."""
+    segs = [s for s in _abs_norm(t, ctx).split("/") if s]
+    return len(segs) >= 2 and segs[-2] == ".claude" and segs[-1] in SETTINGS_NAMES
+
+
+def protected(t, ctx, role, deleting):
+    """Защищённые места → причина отказа или None. `.git`: удаление и перенос — никому, запись — запускам диспетчера;
+    настройки Claude Code — запускам диспетчера (ни удалить, ни перезаписать)."""
+    if git_internal(t, ctx):
+        if deleting:
+            return REASON_GIT_DIR.format(t=t)
+        if role:
+            return REASON_GIT_WRITE.format(t=t)
+    if role and settings_file(t, ctx):
+        return REASON_SETTINGS.format(t=t)
+    return None
+
+
+def hard_forbidden_file(path, ctx):
+    """Сессиям вне диспетчера (CEO, владелец) файловые инструменты закрыты только правилом «никогда»: записи root/ и deep/
+    и закрытые узлы. Домашний каталог (`/root` у root на Linux) сегментом не считается; во временном каталоге — сегменты
+    после его корня."""
+    p = norm(fs_path(path, ctx) or path)
+    if BOX_RE.search(p):
+        return True
+    tr = temp_rest(p)
+    if tr is not None:
+        p = tr[0]
+    else:
+        home = norm(os.path.expanduser("~")).rstrip("/") + "/"
+        if p.startswith(home):
+            p = p[len(home):]
+    return any(s in FORBIDDEN_SEG for s in literal_part(p).split("/") if s)
+
+
 def check(cmd, cwd):
     """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed)."""
     cmd = cmd or ""
     try:
+        role = dispatcher_role()
         start = Ctx(norm(cwd).rstrip("/") if cwd else None, False, frozenset(FUNC_DEF.findall(cmd)))
         try:
             found = list(scan_text(cmd, start))
@@ -1715,6 +1807,9 @@ def check(cmd, cwd):
         for target, ctx in found:
             if isinstance(target, Forbid):
                 return REASON_IRREVERSIBLE.format(t=target)
+            why = protected(target, ctx, role, deleting=not isinstance(target, Over))
+            if why:
+                return why
             if isinstance(target, Over):
                 if not (allowed(target, ctx) or write_only_ok(target, ctx)) and may_exist(target, ctx):
                     return REASON_OVERWRITE.format(t=target)
@@ -1742,11 +1837,21 @@ def file_target(tool_input):
 
 
 def check_file(path, cwd):
-    """Запись файловым инструментом — как перезапись через Bash: путь вне корней (папка проекта, scratchpad, temp,
-    автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно."""
+    """Запись файловым инструментом. Запуск диспетчера (`ALPHA_ROLE`) — как перезапись через Bash: путь вне корней (папка
+    проекта, scratchpad, temp, автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно.
+    Сессия CEO/владельца (аудит-3) правит файлы вне проекта свободно (настройки, соседние репозитории, планы); для неё
+    остаётся только «никогда»: root/ и deep/, закрытые узлы. Для всех: внутрь .git и в настройки Claude Code — см. protected."""
     try:
         ctx = Ctx(norm(cwd).rstrip("/") if cwd else None, False)
         target = Over(path)
+        role = dispatcher_role()
+        why = protected(target, ctx, role, deleting=False)
+        if why:
+            return why
+        if role is None:
+            if hard_forbidden_file(path, ctx) and may_exist(target, ctx):
+                return REASON_FILE_HARD.format(t=path)
+            return None
         if allowed(target, ctx) or write_only_ok(target, ctx) or not may_exist(target, ctx):
             return None
         return REASON_FILE.format(t=path)
