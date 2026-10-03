@@ -109,7 +109,7 @@ REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): тол�
                        "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`). `git reset --hard`, "
                        "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
                        "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
-                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, /opt/alpha-compute/<подкаталог>, "
+                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из ALPHA_GUARD_REMOTE_ROOTS, "
                        "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
                        "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
 REASON_FILE = ("Запись в файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit/MultiEdit/NotebookEdit "
