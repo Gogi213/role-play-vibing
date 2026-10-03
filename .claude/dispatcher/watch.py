@@ -19,6 +19,7 @@ v3 (03.10, В-173): проверки трат (суточный/часовой �
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
@@ -35,6 +36,7 @@ import ticket as T  # noqa: E402
 
 DISPATCHER_DIR = Path(__file__).resolve().parent
 WATCH_HEARTBEAT_FILE = DISPATCHER_DIR / "watch-heartbeat.json"
+WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (D.acquire_instance_lock)
 WATCH_STATE_FILE = DISPATCHER_DIR / "watch-state.json"
 # Владелец 03.10 04:26: «стимдек больше не трогаем». Файл есть — сторож вообще не ходит на Steam Deck по ssh
 # (ни ALERT-*/HOLD/очередь, ни заморозка); наличие проверяется на КАЖДОМ цикле — перезапуск не нужен.
@@ -449,6 +451,11 @@ def main(argv=None) -> int:
         posted = run_once()
         print(f"[watch] once: findings={len(posted)}")
         return 0
+    ok, why = D.acquire_instance_lock(WATCH_PID_FILE)
+    if not ok:                                   # второй сторож — дублировал бы строки CEO
+        print(f"[watch] {why}", file=sys.stderr)
+        return 1
+    atexit.register(D.release_instance_lock, WATCH_PID_FILE)
     print(f"[watch] loop every {WATCH_INTERVAL_S:.0f}s")
     while True:
         try:

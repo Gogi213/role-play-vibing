@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
@@ -31,6 +32,7 @@ CLAUDE_DIR = DISPATCHER_DIR.parent
 PROJECT_ROOT = CLAUDE_DIR.parent
 TICKETS_DIR = PROJECT_ROOT / ".claude" / "tickets"
 STATE_FILE = DISPATCHER_DIR / "state.json"
+PID_FILE = DISPATCHER_DIR / "dispatch.pid"  # замок единственного экземпляра диспетчера (см. acquire_instance_lock)
 RUNS_DIR = DISPATCHER_DIR / "runs"
 RUNS_LOG = DISPATCHER_DIR / "runs.log"
 CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
@@ -722,9 +724,29 @@ def _pid_alive(pid, expect_name: str = None) -> bool:
             return False
         except Exception:
             return False
+    return _pid_alive_posix(pid, expect_name)
+
+
+def _proc_state(pid):
+    """Буква состояния процесса по `/proc/<pid>/status` (Linux: R, S, D, T, Z, X…) или None, если /proc недоступен."""
+    try:
+        with open(f"/proc/{pid}/status", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("State:"):
+                    return line.split(":", 1)[1].strip()[:1] or None
+    except OSError:
+        return None
+    return None
+
+
+def _pid_alive_posix(pid, expect_name: str = None) -> bool:
+    """Живость pid на Linux/macOS: `kill -0` отвечает и на зомби (завершился, но родитель не вызвал wait) — такой
+    процесс мёртв, иначе подхват «живого» прогона после перезапуска ждёт вечно (состояние Z или X в /proc)."""
     try:
         os.kill(pid, 0)
     except Exception:
+        return False
+    if _proc_state(pid) in ("Z", "X"):
         return False
     if not expect_name:
         return True
@@ -747,6 +769,48 @@ def _pid_kill(pid) -> None:
     try:
         os.kill(pid, 15)
     except Exception:
+        pass
+
+
+def acquire_instance_lock(pid_file, expect_name: str = "py"):
+    """Замок единственного экземпляра: pid-файл создаётся атомарно (O_EXCL). Файл есть и в нём живой чужой процесс —
+    (False, сообщение); процесса нет (упал, зомби) или файл битый — замок забирается; свой pid (его записал запускатель) —
+    ок. Второй диспетчер/сторож иначе запускал бы роли повторно (двойные запуски и расход)."""
+    pid_file = Path(pid_file)
+    me = os.getpid()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(5):
+        try:
+            fd = os.open(str(pid_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                other = int(pid_file.read_text(encoding="utf-8").strip() or 0)
+            except (OSError, ValueError):
+                other = 0
+            if other == me:
+                return True, ""
+            if other and _pid_alive(other, expect_name):
+                return False, f"уже запущен (pid {other}, файл {pid_file.name}) — второй экземпляр не нужен, выхожу"
+            try:
+                pid_file.unlink()       # процесса нет — замок осиротел, забираем
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                return False, f"не удалось забрать осиротевший замок {pid_file}: {e}"
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(str(me))
+        return True, ""
+    return False, f"не удалось взять замок {pid_file}"
+
+
+def release_instance_lock(pid_file) -> None:
+    """Снять замок, если он наш (чужой pid не трогаем)."""
+    pid_file = Path(pid_file)
+    try:
+        if int(pid_file.read_text(encoding="utf-8").strip() or 0) == os.getpid():
+            pid_file.unlink()
+    except (OSError, ValueError):
         pass
 
 
@@ -1165,6 +1229,11 @@ def main(argv=None) -> int:
         print(USAGE)
         return 0
     TICKETS_DIR.mkdir(parents=True, exist_ok=True)
+    ok, why = acquire_instance_lock(PID_FILE)
+    if not ok:                                   # второй диспетчер (в т. ч. ручной --once при живом цикле) — не стартуем
+        print(f"[dispatch] {why}", file=sys.stderr)
+        return 1
+    atexit.register(release_instance_lock, PID_FILE)
     if "--once" in argv:
         n = tick()
         print(f"[dispatch] once: launched={n} running={len(RUNNING)}")

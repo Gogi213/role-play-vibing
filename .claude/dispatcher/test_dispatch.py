@@ -2661,5 +2661,87 @@ class RoleMemoryHookTests(unittest.TestCase):
         self.assertEqual(self.rm.current_role(), (None, None))
 
 
+class ZombieAndInstanceLockTests(unittest.TestCase):
+    """Аудит-2 п.7: на Linux зомби — мёртв (`/proc/<pid>/status`: State Z); п.5: второй диспетчер/сторож не стартует."""
+
+    def test_zombie_state_counts_as_dead_and_normal_state_as_alive(self):
+        orig_kill, orig_state = D.os.kill, D._proc_state
+        D.os.kill = lambda pid, sig: None                      # kill -0 «успешен» — как для зомби
+        try:
+            D._proc_state = lambda pid: "Z"
+            self.assertFalse(D._pid_alive_posix(4242, ""))
+            D._proc_state = lambda pid: "X"
+            self.assertFalse(D._pid_alive_posix(4242, ""))
+            D._proc_state = lambda pid: "S"
+            self.assertTrue(D._pid_alive_posix(4242, ""))
+            D._proc_state = lambda pid: None                    # /proc недоступен — по kill -0
+            self.assertTrue(D._pid_alive_posix(4242, ""))
+        finally:
+            D.os.kill, D._proc_state = orig_kill, orig_state
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "зомби и /proc — только Linux")
+    def test_real_zombie_child_is_not_alive(self):
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        try:
+            deadline = time.time() + 10
+            while time.time() < deadline and D._proc_state(child.pid) != "Z":   # завершился, но не реапнут (wait не звали)
+                time.sleep(0.05)
+            self.assertEqual(D._proc_state(child.pid), "Z")
+            self.assertFalse(D._pid_alive(child.pid, expect_name=""))
+        finally:
+            child.wait(timeout=10)
+
+    def test_first_instance_takes_lock_second_is_refused_with_message(self):
+        with tempfile.TemporaryDirectory() as d:
+            pid_file = Path(d) / "x.pid"
+            holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+            try:
+                pid_file.write_text(str(holder.pid), encoding="utf-8")        # «первый экземпляр» — живой чужой процесс
+                ok, why = D.acquire_instance_lock(pid_file, expect_name="")
+                self.assertFalse(ok)
+                self.assertIn(str(holder.pid), why)
+                self.assertIn("уже запущен", why)
+                self.assertEqual(pid_file.read_text(encoding="utf-8"), str(holder.pid), "чужой замок не тронут")
+            finally:
+                holder.kill()
+                holder.wait(timeout=10)
+
+    def test_stale_or_broken_lock_is_taken_over_and_own_lock_is_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            pid_file = Path(d) / "x.pid"
+            dead = subprocess.Popen([sys.executable, "-c", "pass"])
+            dead.wait(timeout=10)
+            pid_file.write_text(str(dead.pid), encoding="utf-8")              # процесса нет — замок осиротел
+            self.assertEqual(D.acquire_instance_lock(pid_file, expect_name=""), (True, ""))
+            self.assertEqual(pid_file.read_text(encoding="utf-8"), str(os.getpid()))
+            self.assertEqual(D.acquire_instance_lock(pid_file, expect_name=""), (True, ""))   # свой pid (запускатель записал)
+            pid_file.write_text("мусор", encoding="utf-8")                   # битый файл
+            self.assertTrue(D.acquire_instance_lock(pid_file, expect_name="")[0])
+            D.release_instance_lock(pid_file)
+            self.assertFalse(pid_file.exists(), "свой замок снимается")
+            pid_file.write_text(str(os.getpid() + 1), encoding="utf-8")
+            D.release_instance_lock(pid_file)
+            self.assertTrue(pid_file.exists(), "чужой замок не снимается")
+
+    def test_main_refuses_second_dispatcher_and_does_not_tick(self):
+        with tempfile.TemporaryDirectory() as d:
+            orig = (D.PID_FILE, D.TICKETS_DIR, D.tick)
+            holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+            ticks = []
+            D.PID_FILE, D.TICKETS_DIR = Path(d) / "dispatch.pid", Path(d) / "tickets"
+            D.tick = lambda *a, **kw: ticks.append(1) or 0
+            D.PID_FILE.write_text(str(holder.pid), encoding="utf-8")
+            orig_alive = D._pid_alive
+            D._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
+            try:
+                self.assertEqual(D.main(["--once"]), 1)
+                self.assertEqual(ticks, [], "второй экземпляр не должен тикать")
+            finally:
+                D._pid_alive = orig_alive
+                D.PID_FILE, D.TICKETS_DIR, D.tick = orig
+                holder.kill()
+                holder.wait(timeout=10)
+
+
 if __name__ == "__main__":
     unittest.main()

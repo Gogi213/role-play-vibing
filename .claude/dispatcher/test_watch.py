@@ -704,5 +704,26 @@ class RunOnceTests(WatchSandbox):
         self.assertTrue(any(f.kind == "dispatcher-down" for f in posted))
 
 
+class WatchInstanceLockTests(WatchSandbox):
+    def test_second_watch_loop_is_refused_without_running_cycles(self):
+        import subprocess
+        orig = (W.WATCH_PID_FILE, W.run_once)
+        holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        cycles = []
+        W.WATCH_PID_FILE = Path(self.tmp.name) / "watch.pid"
+        W.run_once = lambda *a, **kw: cycles.append(1) or []
+        W.WATCH_PID_FILE.write_text(str(holder.pid), encoding="utf-8")
+        orig_alive = D._pid_alive
+        D._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
+        try:
+            self.assertEqual(W.main([]), 1)
+            self.assertEqual(cycles, [])
+        finally:
+            D._pid_alive = orig_alive
+            W.WATCH_PID_FILE, W.run_once = orig
+            holder.kill()
+            holder.wait(timeout=10)
+
+
 if __name__ == "__main__":
     unittest.main()
