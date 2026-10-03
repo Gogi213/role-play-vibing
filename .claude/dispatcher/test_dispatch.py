@@ -1860,6 +1860,149 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(T.read_ticket(met).status, "blocked")
         self.assertEqual(T.read_ticket(unmet).status, "waiting")
 
+    # --- аудит-2 п.2: пинг-понг ревью
+    def review_setup(self, title="Ревью"):
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title=title, reviewer="judge",
+                               now=dt("2026-10-03T09:00:00+04:00"))
+        T.write_header_updates(path, {"status": "in_review"}, now=dt("2026-10-03T09:00:00+04:00"))
+        T.append_log(path, "engineer", "готово", now=dt("2026-10-03T09:05:00+04:00"))
+        return path
+
+    def review_round(self, path, n, new_status, next_role=None):
+        """Один завершённый запуск ревьюера (judge) на статусе in_review: запись + новый статус [+ next]."""
+        tid = path.stem
+        keys = T.role_entry_keys(T.read_ticket(path), "judge")
+        base = dt("2026-10-03T10:00:00+04:00") + timedelta(minutes=10 * n)
+        T.append_log(path, "judge", f"круг {n}", now=base)
+        updates = {"status": new_status}
+        if next_role:
+            updates["next"] = next_role
+        T.write_header_updates(path, updates, now=base)
+        run_file = self.dispatcher_dir / f"review-{tid}-{n}.json"
+        run_file.write_text(json.dumps({"session_id": "s-rev", "total_cost_usd": 0.01}), encoding="utf-8")
+        info = {"role": "judge", "popen": None, "pid": None, "started": base, "attempt": 0, "run_file": run_file,
+                "err_file": run_file, "out_fh": None, "err_fh": None, "reason": "review",
+                "status_at_launch": "in_review", "log_keys_at_launch": keys}
+        state = D.load_state()
+        D._finish_run(tid, info, state, base + timedelta(seconds=30), timed_out=False)
+        D.save_state(state)
+
+    def owner_resubmits(self, path, n, status="done"):
+        T.append_log(path, "engineer", f"доработал {n}", now=dt("2026-10-03T12:00:00+04:00") + timedelta(minutes=n))
+        T.write_header_updates(path, {"status": status, "next": ""},     # диспетчер очищает next при запуске владельца
+                               now=dt("2026-10-03T12:00:00+04:00") + timedelta(minutes=n))
+
+    def ceo_lines(self, tid, kind=None):
+        if not D.CEO_INBOX.exists():
+            return []
+        return [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines()
+                if tid in ln and (kind is None or f"[{kind}]" in ln)]
+
+    def recording_popen(self):
+        calls = []
+        D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
+        return calls
+
+    def test_default_review_returns_limit_is_three_with_env_name(self):
+        if os.environ.get("ALPHA_DISPATCH_MAX_REVIEW_RETURNS"):
+            self.skipTest("порог задан в окружении")
+        self.assertEqual(D.MAX_REVIEW_RETURNS, 3)
+        self.assertIn("ALPHA_DISPATCH_MAX_REVIEW_RETURNS", Path(D.__file__).read_text(encoding="utf-8"))
+
+    def test_reviewer_return_counts_and_approval_resets_the_series(self):
+        path = self.review_setup()
+        tid = path.stem
+        self.review_round(path, 1, "in_progress")                       # вернул владельцу
+        self.assertEqual(D.load_state()["review_returns"][tid], 1)
+        self.owner_resubmits(path, 1, "in_review")
+        self.review_round(path, 2, "in_review", next_role="engineer")   # вернул через --next владельцу
+        self.assertEqual(D.load_state()["review_returns"][tid], 2)
+        self.owner_resubmits(path, 2, "in_review")
+        self.review_round(path, 3, "done")                              # принял — серия кончилась
+        self.assertNotIn(tid, D.load_state().get("review_returns", {}))
+
+    def test_blocked_or_next_ceo_by_reviewer_is_not_a_return(self):
+        path = self.review_setup()
+        self.review_round(path, 1, "in_progress")
+        self.owner_resubmits(path, 1, "in_review")
+        self.review_round(path, 2, "in_review", next_role="ceo")
+        self.assertNotIn(path.stem, D.load_state().get("review_returns", {}))
+
+    def test_three_returns_then_resubmit_goes_to_ceo_and_reviewer_is_not_woken(self):
+        path = self.review_setup()
+        tid = path.stem
+        for n in (1, 2, 3):
+            self.review_round(path, n, "in_progress")
+            self.owner_resubmits(path, n, "in_review" if n < 3 else "done")
+        self.assertEqual(D.load_state()["review_returns"][tid], 3)
+        calls = self.recording_popen()
+        D.tick()
+        tkt = T.read_ticket(path)
+        self.assertEqual(calls, [], "ревьюера на четвёртый круг не будим")
+        self.assertEqual(tkt.status, "in_review")
+        self.assertEqual(tkt.log[-1].author, "dispatcher")
+        self.assertIn("3", tkt.log[-1].text)
+        self.assertEqual(tkt.next_role, "", "next: ceo обработан и очищен")
+        self.assertEqual(len(self.ceo_lines(tid)), 1, self.ceo_lines(tid))
+        self.assertIn("[next-ceo]", self.ceo_lines(tid)[0])
+        D.tick()
+        D.tick()
+        self.assertEqual(len(self.ceo_lines(tid)), 1, "повторов нет")
+        self.assertEqual(calls, [])
+        self.assertEqual(D.RUNNING, {})
+
+    def test_below_the_limit_reviewer_is_still_woken(self):
+        path = self.review_setup()
+        for n in (1, 2):
+            self.review_round(path, n, "in_progress")
+            self.owner_resubmits(path, n, "done")
+        calls = self.recording_popen()
+        D.tick()
+        self.assertEqual(len(calls), 1, "после двух возвратов ревьюер ещё получает третий круг")
+        self.assertEqual(T.read_ticket(path).status, "in_review")
+        self.assertEqual(self.ceo_lines(path.stem), [])
+
+    def test_ceo_next_wakes_reviewer_even_over_the_limit_and_counter_keeps_going(self):
+        path = self.review_setup()
+        for n in (1, 2, 3):
+            self.review_round(path, n, "in_progress")
+            self.owner_resubmits(path, n, "in_review")
+        tkt = T.read_ticket(path)
+        T.append_log(path, "ceo", "ещё один круг", now=dt("2026-10-03T15:00:00+04:00"))
+        T.write_header_updates(path, {"next": "judge"}, now=dt("2026-10-03T15:00:00+04:00"))
+        calls = self.recording_popen()
+        D.tick()
+        self.assertEqual(len(calls), 1, "явный next — раньше предела")
+        self.assertEqual(self.ceo_lines(path.stem), [])
+
+    def test_limit_is_judged_only_after_owner_resubmits_not_on_ceo_or_reviewer_entries(self):
+        path = self.review_setup()
+        for n in (1, 2, 3):
+            self.review_round(path, n, "in_progress")
+            self.owner_resubmits(path, n, "in_review")
+        T.append_log(path, "ceo", "пока думаю", now=dt("2026-10-03T15:00:00+04:00"))     # последняя запись — CEO
+        calls = self.recording_popen()
+        D.tick()
+        D.tick()
+        self.assertEqual(calls, [])
+        self.assertEqual(self.ceo_lines(path.stem), [], "запись CEO — не повод для строки CEO и не будит ревьюера")
+        self.assertEqual(T.read_ticket(path).log[-1].author, "ceo")
+
+    def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
+        path = self.review_setup()
+        for n in (1, 2, 3):
+            self.review_round(path, n, "in_progress")
+            self.owner_resubmits(path, n, "in_review")
+        self.recording_popen()
+        D.tick()                                       # эскалация + первый тик (метка «историю done не пересказываем»)
+        self.assertEqual(len(self.ceo_lines(path.stem, "next-ceo")), 1)
+        T.append_log(path, "ceo", "принимаю как есть", now=dt("2026-10-03T15:00:00+04:00"))
+        T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-03T15:00:00+04:00"))
+        D.tick()
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, self.ceo_lines(path.stem))
+        D.tick()
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, "дедуп")
+
     # --- A6: ротация контекста
     def test_timeout_without_json_keeps_last_known_context_and_rotation_still_fires(self):
         path = self.make_in_progress("Таймаут")

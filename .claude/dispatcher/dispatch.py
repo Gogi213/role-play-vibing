@@ -62,6 +62,10 @@ MIN_GAP_S = float(os.environ.get("ALPHA_DISPATCH_MIN_GAP_S", "60"))
 MAX_SAME_STATUS_RUNS = int(os.environ.get("ALPHA_DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
 SAME_STATUS_WARN_RUNS = int(os.environ.get("ALPHA_DISPATCH_SAME_STATUS_WARN_RUNS", "0"))
 MAX_IDLE_RUNS = int(os.environ.get("ALPHA_DISPATCH_MAX_IDLE_RUNS", "2"))
+# Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
+# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher +
+# `next: ceo` (одна строка CEO). Число НАЗНАЧЕНО CEO 03.10, не измерено.
+MAX_REVIEW_RETURNS = int(os.environ.get("ALPHA_DISPATCH_MAX_REVIEW_RETURNS", "3"))
 
 # Модель и перерасход (владелец 27.09, v1.2 — пилот Судьи на умолчаниях CLI стоил $6,8 на Fable 5.1
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
@@ -333,6 +337,27 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
     T.write_header_updates(path, {"next": ""}, now=now, stamp_updated=False)
 
 
+def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
+    """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
+    ревьюера не будим; запись dispatcher + `next: ceo` (одну строку CEO пишет handle_next_ceo этого же тика), статус
+    in_review. Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
+    не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
+    if tkt.status not in ("done", "in_review") or tkt.reviewer not in ROLE_KEYS:
+        return tkt
+    returns = _review_returns(state, tkt.id)
+    if returns < MAX_REVIEW_RETURNS or tkt.next_role in ROLE_KEYS or tkt.next_role == "ceo":
+        return tkt
+    last_author = tkt.log[-1].author if tkt.log else ""
+    if not T.author_is(last_author, tkt.owner):
+        return tkt
+    T.append_log(path, "dispatcher",
+                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд — на новый круг не будим. Решение за CEO: "
+                 f"ещё один круг (`tickets.py comment {tkt.id} --author ceo --text \"...\" --next {tkt.reviewer}`) "
+                 "либо принять/закрыть самому.", now=now)
+    T.write_header_updates(path, {"status": "in_review", "next": "ceo"}, now=now)
+    return T.read_ticket(path)
+
+
 def notify_status_for_ceo(tkt: T.Ticket, state: dict, now) -> None:
     if tkt.status not in ("blocked", "needs_owner"):
         return
@@ -355,10 +380,17 @@ def notify_parse_error(tid: str, err_text: str, state: dict, now) -> None:
     notified[tid] = err_text
 
 
-def _review_pending(tkt: T.Ticket) -> bool:
+def _review_returns(state: dict, tid: str) -> int:
+    return int((state or {}).get("review_returns", {}).get(tid, 0))
+
+
+def _review_pending(tkt: T.Ticket, state: dict = None) -> bool:
     """done при заданном reviewer, но последняя запись лога не от ревьюера (и не dispatcher) — правило (г)
-    ещё запустит ревью: задача не закончена."""
+    ещё запустит ревью: задача не закончена. На пределе возвратов (MAX_REVIEW_RETURNS) ревьюера уже не будят —
+    ревью не «ожидается», решает CEO."""
     if tkt.status != "done" or tkt.reviewer not in ROLE_KEYS:
+        return False
+    if state is not None and _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
         return False
     last_author = tkt.log[-1].author.lower() if tkt.log else None
     return last_author not in (tkt.reviewer.lower(), "dispatcher")
@@ -387,7 +419,7 @@ def notify_done(tkt: T.Ticket, state: dict, now) -> None:
     """v2 (02.10): `done` — одна строка CEO, когда работа реально закончена: ревьюера нет (теперь норма —
     `tickets.py new` не ставит reviewer по умолчанию) либо ревью уже состоялось. Если ждёт ревью — молчим,
     строка придёт после вердикта. Дедуп по (задача, `updated`)."""
-    if tkt.status != "done" or _review_pending(tkt):
+    if tkt.status != "done" or _review_pending(tkt, state):
         return
     notified = state.setdefault("ceo_done_notified", {})
     marker = _done_marker(tkt)
@@ -468,6 +500,8 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
         last_author = tkt.log[-1].author if tkt.log else ""
         if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":
             return None
+        if _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
+            return None  # пинг-понг: ревьюера не будим, тикет уходит CEO (escalate_review_limit в tick)
         return Decision(role=reviewer, reason="review",
                         header_updates={"status": "in_review"} if status == "done" else None)
 
@@ -1030,6 +1064,14 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     logged = _role_logged(tkt, role, info)  # судья 27.09, п.7: таймаут сам по себе — не провал, если запись успела
     stuck_todo = role == tkt.owner and logged and tkt.status == "todo"  # отчиталась, но не увела статус с todo
     status_changed = tkt.status != info.get("status_at_launch")
+    if role == tkt.reviewer and info.get("status_at_launch") == "in_review" and logged:
+        # запуск ревьюера на ревью: вернул владельцу (todo/in_progress либо `--next` другой роли) — счётчик +1, иначе
+        # (принял, заблокировал, передал CEO) ревью состоялось — серия кончилась
+        returns = state.setdefault("review_returns", {})
+        if tkt.status in ("todo", "in_progress") or (tkt.next_role in ROLE_KEYS and tkt.next_role != role):
+            returns[tid] = returns.get(tid, 0) + 1
+        else:
+            returns.pop(tid, None)
     idle_runs = state.setdefault("idle_runs", {})
     same_runs = state.setdefault("same_status_runs", {})
 
@@ -1197,6 +1239,7 @@ def tick(now=None) -> int:
 
         # CEO получает строку только по: `next: ceo`, blocked/needs_owner, done.
         # @ceo (и любые @упоминания) в тексте записей — просто текст.
+        tkt = escalate_review_limit(path, tkt, state, now)
         handle_next_ceo(path, tkt, state, now)
         notify_status_for_ceo(tkt, state, now)
         notify_done(tkt, state, now)
