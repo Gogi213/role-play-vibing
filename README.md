@@ -46,7 +46,8 @@
 /plugin install role-play-vibing@role-play-vibing
 ```
 
-Скопировать в проект: `.claude/dispatcher`, `.claude/roles`, `.claude/hooks`, `.claude/tickets`.
+Скопировать в проект: `.claude/dispatcher`, `.claude/roles`, `.claude/tickets`. Хуки (`.claude/hooks`) не копировать — их подключает плагин, копия сработает дважды.
+В `.gitignore` проекта: `.claude/roles/.state/`, `.claude/roles/log/`, `.claude/dispatcher/*.log`, `.claude/dispatcher/state.json`.
 Запуск диспетчера и сторожа — `.claude/dispatcher/README.md`.
 
 ## Настроить под проект
