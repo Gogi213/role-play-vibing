@@ -55,7 +55,7 @@
 - Сессия CEO — в названии сессии Claude Desktop слово `CEO`.
 - Зоны и ссылки — `.claude/roles/*.md`.
 - Модели ролей — `dispatch.py`: `CLAUDE_MODEL`, `ROLE_MODEL`.
-- Защита удаления — хук `PreToolUse` (Bash/PowerShell) в `hooks/hooks.json`; корень проекта — `CLAUDE_PROJECT_DIR`; удалённые каталоги, стадия и закрытые хосты — `ALPHA_GUARD_REMOTE_ROOTS`, `ALPHA_GUARD_STAGE`, `ALPHA_GUARD_FORBIDDEN_HOSTS` (без переменных — на удалённых машинах удалять нельзя нигде).
+- Защита удаления — хук `PreToolUse` (Bash/PowerShell) в `hooks/hooks.json`; корень проекта — `CLAUDE_PROJECT_DIR`; удалённые каталоги, стадия и закрытые хосты — `ALPHA_GUARD_REMOTE_ROOTS`, `ALPHA_GUARD_HOST_ROOTS` (`хост=корень,корень;хост2=…` — только при ssh на этот хост), `ALPHA_GUARD_STAGE`, `ALPHA_GUARD_FORBIDDEN_HOSTS` (без переменных — на удалённых машинах удалять нельзя нигде).
 - Хуки запускает `hooks/run-hook.sh`: `python3`, иначе `python`, иначе `py -3`; в проекте без `.claude/roles` хуки молчат.
 - Тесты: `python -m unittest discover -s .claude/dispatcher` и `-s .claude/hooks`.
 - Нужно: Python 3.11, `claude` в `PATH`, git.

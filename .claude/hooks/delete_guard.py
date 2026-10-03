@@ -2,9 +2,9 @@
 
 Вызывается PreToolUse-хуком плагина (`hooks/hooks.json`, Bash/PowerShell): точка входа `main()` читает JSON события со
 stdin, `check(cmd, cwd)` → причина отказа или None. Корень проекта — `CLAUDE_PROJECT_DIR` (иначе cwd); нет `.claude/roles` — молчит.
-Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `ALPHA_GUARD_REMOTE_ROOTS`;
-оперативная стадия — `ALPHA_GUARD_STAGE`. Никогда: хосты из `ALPHA_GUARD_FORBIDDEN_HOSTS`, Storage Box (ssh порт 23),
-записи `root/` и `deep/` (единственные копии). Цель, которую нельзя
+Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `ALPHA_GUARD_REMOTE_ROOTS`
+(и `ALPHA_GUARD_HOST_ROOTS` для своего хоста); оперативная стадия — `ALPHA_GUARD_STAGE`. Никогда: хосты из
+`ALPHA_GUARD_FORBIDDEN_HOSTS`, Storage Box (ssh порт 23), записи `root/` и `deep/` (единственные копии). Цель, которую нельзя
 проверить (переменная без буквального префикса, список из конвейера/xargs, путь из кода), — отказ: переписать явным путём.
 
 Разбор (02.10, аудит: регэксп по всему тексту давал ~52 ложных отказа за 5 дней — на переменную `rd`, слово «rm» в
@@ -17,6 +17,12 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 не существует (создание нового файла); удалённый хост и непроверяемый путь считаются «существует». `git reset --hard`,
 `git clean -f…`, `git push --force/-f/--force-with-lease` — отказ «только через CEO» в любом каталоге. Исключений по имени
 скрипта нет: строка в тексте команды проверку не отключает.
+Корни хоста `HOST_ROOTS` (`ALPHA_GUARD_HOST_ROOTS`) действуют, только если команда идёт по ssh на этот хост;
+`git reset --hard` и `git clean -f…` разрешены в каталоге вне основного дерева, заданном явным путём (`cd <путь>`,
+`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `/opt/alpha-compute/<подкаталог>`, `/tmp/<подкаталог>`, корни
+хоста, связанные worktree внутри папки проекта (`.git` — файл); неизвестная переменная в `cd $W`,
+`--git-dir`/`--work-tree`/GIT_DIR, основное дерево и вложенные репозитории — отказ; `git push --force` —
+всегда отказ; перезапись/усечение (не удаление) разрешены в автопамяти `~/.claude/projects/<проект>/memory/`.
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
@@ -40,31 +46,57 @@ def project_roots(project_dir):
     return (p, f"/{m.group(1)}/{m.group(2)}") if m else (p,)
 
 
+def memory_roots(project_dir):
+    """Автопамять проекта относительно домашнего каталога: `.claude/projects/<путь проекта через «-»>/memory/`."""
+    enc = re.sub(r"[^a-z0-9]", "-", str(project_dir).lower())
+    return (f".claude/projects/{enc}/memory/",)
+
+
+def _env_host_roots():
+    """`ALPHA_GUARD_HOST_ROOTS="хост=корень,корень;хост2=корень"` → {хост: (корни…)} строчными."""
+    out = {}
+    for part in os.environ.get("ALPHA_GUARD_HOST_ROOTS", "").split(";"):
+        host, _, roots = part.partition("=")
+        host = host.strip().lower()
+        if host and roots.strip():
+            out[host] = tuple(r.strip().lower() for r in roots.split(",") if r.strip())
+    return out
+
+
 def configure(project_dir):
-    global LOCAL_ROOTS
+    global LOCAL_ROOTS, WRITE_HOME_ROOTS
     LOCAL_ROOTS = project_roots(project_dir)
+    WRITE_HOME_ROOTS = memory_roots(project_dir)
 
 
-LOCAL_ROOTS = project_roots(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+_PROJECT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+LOCAL_ROOTS = project_roots(_PROJECT)
+WRITE_HOME_ROOTS = memory_roots(_PROJECT)
 SCRATCH = "/appdata/local/temp/claude/"
 # Удалённые машины и закрытые узлы — только из окружения, без умолчаний (через запятую, примеры в README плагина):
-# ALPHA_GUARD_REMOTE_ROOTS — каталоги, где на удалённых машинах можно удалять (нет переменной — нигде);
-# ALPHA_GUARD_STAGE — оперативная стадия (целиком); ALPHA_GUARD_FORBIDDEN_HOSTS — хосты/IP, где нельзя вообще.
+# ALPHA_GUARD_REMOTE_ROOTS — каталоги, где на любых удалённых машинах можно удалять (нет переменной — нигде);
+# ALPHA_GUARD_HOST_ROOTS — то же, но только для ssh на конкретный хост; ALPHA_GUARD_STAGE — оперативная стадия
+# (целиком); ALPHA_GUARD_FORBIDDEN_HOSTS — хосты/IP, где нельзя вообще.
 REMOTE_ROOTS = _env_list("ALPHA_GUARD_REMOTE_ROOTS")
+HOST_ROOTS = _env_host_roots()
 STAGE = (os.environ.get("ALPHA_GUARD_STAGE") or "").strip().lower().rstrip("/")
 FORBIDDEN_SEG = ("root", "deep")
 BOX_RE = re.compile("|".join(["storage-?box", "your-storagebox"] + [re.escape(h) for h in _env_list("ALPHA_GUARD_FORBIDDEN_HOSTS")]),
                     re.I)
 REASON = ("Удаление запрещено вне своей папки. Можно только явным путём внутри папки проекта или scratchpad сессии; на "
-          "удалённых машинах — только каталоги из ALPHA_GUARD_REMOTE_ROOTS. Закрытые узлы (Storage Box, "
-          "ALPHA_GUARD_FORBIDDEN_HOSTS), записи root/ и deep/ — никогда (только владелец через CEO). "
-          "Непроверяемая цель: {t}")
+          "удалённых машинах — только каталоги из ALPHA_GUARD_REMOTE_ROOTS и ALPHA_GUARD_HOST_ROOTS (для этого хоста). "
+          "Закрытые узлы (Storage Box, ALPHA_GUARD_FORBIDDEN_HOSTS), записи root/ и deep/ — никогда (только владелец "
+          "через CEO). Непроверяемая цель: {t}")
 REASON_OVERWRITE = ("Перезапись/усечение файла (`> файл`, truncate, dd of=, cp/mv поверх существующего) вне своей папки "
                     "запрещены, как и удаление: внутри папки проекта или scratchpad сессии; на удалённых машинах — "
-                    "только каталоги из ALPHA_GUARD_REMOTE_ROOTS. Новый локальный файл вне папки можно создать (его "
-                    "ещё нет). Закрытые узлы, записи root/ и deep/ — никогда. Цель: {t}")
+                    "только каталоги из ALPHA_GUARD_REMOTE_ROOTS и ALPHA_GUARD_HOST_ROOTS; автопамять проекта "
+                    "(~/.claude/projects/<проект>/memory/) — можно. Новый локальный файл вне папки можно создать (его ещё "
+                    "нет). Закрытые узлы, записи root/ и deep/ — никогда. Цель: {t}")
 REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO записью "
-                       "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`).")
+                       "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`). `git reset --hard` и "
+                       "`git clean -f` разрешены только в каталоге вне основного дерева, заданном явным путём (`cd <путь>` "
+                       "или `git -C <путь>`): scratchpad сессии, /opt/alpha-compute/<подкаталог>, /tmp/<подкаталог>, "
+                       "корни хоста, связанный worktree (.claude/worktrees/…); `git push --force` — всегда только через CEO.")
 UNKNOWN_TARGET = "<цель из кода не видна>"
 # куда писать можно всегда: не файлы (устройства-стоки, пустышка Windows/PowerShell)
 HARMLESS_SINK = re.compile(r"^(?:/dev/(?:null|stdout|stderr|tty|zero|full|fd/\d+)|/proc/self/fd/\d+|nul|con|\$null)$", re.I)
@@ -83,15 +115,32 @@ def norm(p):
     return p.strip().strip("'\"").replace("\\", "/").lower()
 
 
+def literal_part(p):
+    """Буквальная часть нормализованного пути: до первой неизвестной переменной (`$home` — известна)."""
+    return re.split(r"\$(?!home\b|\{home\})", p, maxsplit=1)[0] if "$" in p else p
+
+
+def host_root_ok(literal, host):
+    """Путь внутри корня хоста (`HOST_ROOTS`): не сам корень, без сегментов root/deep ниже корня."""
+    for root in HOST_ROOTS.get(host or "", ()):
+        if literal.startswith(root):
+            rest = literal[len(root):]
+            if rest.strip("/*") and not any(s in FORBIDDEN_SEG for s in rest.split("/") if s):
+                return True
+    return False
+
+
 def allowed(t, ctx=None):
     """Цель удаления разрешена (путь внутри своей папки)? `ctx.cwd` — рабочий каталог для относительных путей."""
     p = norm(t)
     if not p or p.startswith("<") or "{}" in p:
         return False
-    literal = re.split(r"\$(?!home\b|\{home\})", p, maxsplit=1)[0] if "$" in p else p
+    literal = literal_part(p)
     if not literal or ".." in literal.split("/") or BOX_RE.search(p):
         return False
     if STAGE and (literal == STAGE or literal.startswith(STAGE + "/")):
+        return True
+    if host_root_ok(literal, getattr(ctx, "host", None)):   # корни выделенного сервера — только при ssh на него
         return True
     if any(s in FORBIDDEN_SEG for s in literal.split("/") if s):
         return False
@@ -106,7 +155,81 @@ def allowed(t, ctx=None):
     cwd = getattr(ctx, "cwd", None)
     if not cwd:
         return False
-    return allowed(posixpath.normpath(cwd + "/" + literal), None)
+    return allowed(posixpath.normpath(cwd + "/" + literal), Ctx(None, getattr(ctx, "remote", False),
+                                                                host=getattr(ctx, "host", None)))
+
+
+def home_relative(literal):
+    """Путь относительно домашнего каталога (`~/…`, `$HOME/…`, `/c/Users/<имя>/…`, `C:/Users/<имя>/…`) или None."""
+    for pre in ("~/", "$home/", "${home}/"):
+        if literal.startswith(pre):
+            return literal[len(pre):]
+    m = re.match(r"^(?:/[a-z]|[a-z]:)/users/[^/]+/(.*)$", literal)
+    return m.group(1) if m else None
+
+
+def write_only_ok(t, ctx=None):
+    """Перезапись/усечение (не удаление!) разрешены в автопамяти проекта: `~/.claude/projects/<проект>/memory/`
+    (только локально: на удалённой машине `~` — другой домашний каталог)."""
+    if getattr(ctx, "remote", False):
+        return False
+    p = norm(t)
+    if not p or p.startswith("<") or "{}" in p:
+        return False
+    literal = literal_part(p)
+    if not literal or ".." in literal.split("/") or BOX_RE.search(p):
+        return False
+    rel = home_relative(literal)
+    if rel is not None:
+        return any(rel.startswith(r) and bool(rel[len(r):].strip("/*")) for r in WRITE_HOME_ROOTS)
+    if literal.startswith(("/", "$", "c:", "%")) or re.match(r"[a-z]:", literal):
+        return False
+    cwd = getattr(ctx, "cwd", None)                         # относительный путь — от известного рабочего каталога
+    return bool(cwd) and write_only_ok(posixpath.normpath(cwd + "/" + literal), None)
+
+
+def linked_worktree(p):
+    """Каталог внутри связанного git-worktree в папке проекта (`.claude/worktrees/agent-*`): ближайший `.git` вверх по
+    пути — файл (у основного дерева и вложенных репозиториев это каталог). Только локально, по файловой системе."""
+    cur = p.rstrip("/")
+    for _ in range(40):
+        if cur + "/" in LOCAL_ROOTS:
+            return False
+        fp = fs_path(cur + "/.git", None)
+        if fp is None:
+            return False
+        if os.path.isfile(fp):
+            return True
+        if os.path.isdir(fp):
+            return False
+        parent = posixpath.dirname(cur)
+        if parent == cur:
+            return False
+        cur = parent
+    return False
+
+
+def scratch_repo_ok(d, ctx):
+    """`git reset --hard` / `git clean -f` не трогают основное дерево: каталог репозитория известен явным путём (не
+    переменная, не относительный без cwd) и лежит вне папки проекта — scratch (scratchpad сессии, свои удалённые корни
+    вроде /opt/alpha-compute/<подкаталог>, корни хоста), `/tmp/<подкаталог>` либо связанный worktree внутри папки
+    проекта (`.git` — файл)."""
+    p = norm(d) if d else ""
+    if not p or "$" in p or ".." in p.split("/") or BOX_RE.search(p):
+        return False
+    host = getattr(ctx, "host", None)
+    if host == CLOSED_HOST or (host and BOX_RE.search(host)):        # git на закрытом узле — как и удаление там
+        return False
+    if not (p.startswith(("/", "~")) or re.match(r"[a-z]:", p)):
+        return False
+    if any(sg in FORBIDDEN_SEG for sg in p.split("/") if sg) and not host_root_ok(p, host):
+        return False
+    probe = p.rstrip("/") + "/"
+    if any(probe.startswith(r) for r in LOCAL_ROOTS):                # папка проекта: только связанный worktree
+        return not getattr(ctx, "remote", False) and linked_worktree(p)
+    if re.match(r"^/tmp/[^/*]+", p):
+        return True
+    return allowed(p, Ctx(None, getattr(ctx, "remote", False), host=host))
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -454,15 +577,25 @@ def tokenize(s, depth=0):
 # ------------------------------------------------------------------------------------------------------------
 
 class Ctx:
-    __slots__ = ("cwd", "remote", "funcs")
+    __slots__ = ("cwd", "remote", "funcs", "host")
 
-    def __init__(self, cwd=None, remote=False, funcs=frozenset()):
+    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None):
         self.cwd = cwd          # нормализованный каталог или None (неизвестен)
         self.remote = remote
         self.funcs = funcs      # имена функций оболочки, объявленных в этой же команде (`rsh() { ssh …; }`)
+        self.host = host        # хост ssh без `user@`, строчными (для HOST_ROOTS) или None
 
     def copy(self):
-        return Ctx(self.cwd, self.remote, self.funcs)
+        return Ctx(self.cwd, self.remote, self.funcs, self.host)
+
+
+CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (Storage Box, коллектор, порт 23, хост не определён)
+
+
+def host_of(arg):
+    """`root@203.0.113.3` / `host:path` → `203.0.113.3` (строчными) или None."""
+    h = re.sub(r"^[^@\s]*@", "", arg or "").split(":", 1)[0].strip().strip("[]").lower()
+    return h if h and "$" not in h else None
 
 
 ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -823,20 +956,27 @@ def rsync_scan(args, ctx):
         if host and (bad or BOX_RE.search(host)):
             yield (f"<rsync: {arg} — закрытый узел>", ctx.copy())
         elif host:
-            yield (path, Ctx(None, True))
+            yield (path, Ctx(None, True, host=host_of(arg)))
         else:
             yield (path, ctx.copy())
 
 
-def git_scan(args, ctx, vars_):
+def git_scan(args, ctx, vars_, redirected=False):
+    """`redirected` — GIT_DIR/GIT_WORK_TREE в окружении команды: каталог репозитория не равен рабочему."""
     j = 0
     base = None
+    bases = []
+    exotic = redirected or any(k in vars_ for k in ("GIT_DIR", "GIT_WORK_TREE"))
     while j < len(args):
         a = args[j]
         if a == "-C" and j + 1 < len(args):
             base = args[j + 1]
+            bases.append(base)
             j += 2
-        elif a in ("-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"):
+        elif a in ("--git-dir", "--work-tree") or a.startswith(("--git-dir=", "--work-tree=")):
+            exotic = True
+            j += 1 if "=" in a else 2
+        elif a in ("-c", "--namespace", "--exec-path"):
             j += 2
         elif a.startswith("-"):
             j += 1
@@ -845,8 +985,11 @@ def git_scan(args, ctx, vars_):
     if j >= len(args):
         return
     sub, rest = args[j], args[j + 1:]
+    repo = None if exotic else ctx.cwd                    # каталог репозитория: cwd, сдвинутый цепочкой `-C`
+    for b in bases:                                       # абсолютный `-C` задаёт каталог и при неизвестном cwd
+        repo = None if exotic else join_cwd(repo, b, vars_)
     if sub == "reset":
-        if "--hard" in rest:
+        if "--hard" in rest and not (not exotic and scratch_repo_ok(repo, ctx)):
             yield (Forbid("git reset --hard"), ctx.copy())
         return
     if sub == "push":
@@ -859,7 +1002,8 @@ def git_scan(args, ctx, vars_):
     if any(a == "--dry-run" or (a.startswith("-") and not a.startswith("--") and "n" in a) for a in rest):
         return
     if any(a == "--force" or (a.startswith("-") and not a.startswith("--") and "f" in a[1:]) for a in rest):
-        yield (Forbid("git clean -f"), ctx.copy())
+        if not (not exotic and scratch_repo_ok(repo, ctx)):
+            yield (Forbid("git clean -f"), ctx.copy())
         return
     after = rest[rest.index("--") + 1:] if "--" in rest else []
     specs = after or [a for a in rest if not a.startswith("-")]
@@ -1017,7 +1161,7 @@ def ssh_scan(args, ctx, vars_, stdin, depth):
     rest = args[j + 1:]
     host = expand_vars(host, vars_)
     bad = (port == "23" or bool(BOX_RE.search(host + " " + " ".join(ident))) or "$" in host)
-    remote = Ctx(None, True)
+    remote = Ctx(None, True, host=CLOSED_HOST if bad else host_of(host))
     if rest:
         found = list(scan_text(" ".join(rest), remote, stdin, depth + 1))
     else:                                       # оболочка на стороне ssh читает stdin (heredoc / конвейер)
@@ -1139,7 +1283,8 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     elif name == "dd":
         yield from dd_scan(args, ctx, vars_)
     elif name == "git":
-        yield from git_scan(args, ctx, vars_)
+        redirected = any(re.match(r"(?:GIT_DIR|GIT_WORK_TREE)=", x) for x in words[:i])
+        yield from git_scan(args, ctx, vars_, redirected)
     elif name == "rclone":
         if args and args[0] in ("delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup"):
             yield (f"<rclone {args[0]}>", ctx.copy())
@@ -1297,7 +1442,7 @@ def check(cmd, cwd):
         if isinstance(target, Forbid):
             return REASON_IRREVERSIBLE.format(t=target)
         if isinstance(target, Over):
-            if not allowed(target, ctx) and may_exist(target, ctx):
+            if not (allowed(target, ctx) or write_only_ok(target, ctx)) and may_exist(target, ctx):
                 return REASON_OVERWRITE.format(t=target)
             continue
         if not allowed(target, ctx):

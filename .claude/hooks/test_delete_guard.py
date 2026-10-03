@@ -13,6 +13,7 @@ from pathlib import Path
 # проверки написаны на примере проекта alpha: корень и удалённые каталоги задаём окружением ДО импорта (умолчаний нет)
 os.environ["CLAUDE_PROJECT_DIR"] = r"C:\visual projects\alpha"
 os.environ["ALPHA_GUARD_REMOTE_ROOTS"] = "~/alpha/,$home/alpha/,${home}/alpha/,/home/deck/alpha/,/opt/alpha-compute/"
+os.environ["ALPHA_GUARD_HOST_ROOTS"] = "203.0.113.3=/home/deck/alpha/,/root/tk0,/data/tk0,/tmp/"
 os.environ["ALPHA_GUARD_STAGE"] = "/dev/shm/alpha-stage"
 os.environ["ALPHA_GUARD_FORBIDDEN_HOSTS"] = "203.0.113.1"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -727,6 +728,175 @@ class GitIrreversible(unittest.TestCase):
         self.ok('git commit -m "не делать git reset --hard и git push --force"')
         self.ok("echo git clean -fd")
         self.ok("grep -n 'git push -f' README.md")
+
+
+class CeoResources0310(unittest.TestCase):
+    """Решение CEO 03.10 по ресурсам: (1) корни выделенного сервера, (2) git reset --hard / clean -f вне основного дерева,
+    (3) автопамять проекта — запись/перезапись."""
+
+    DED = "root@203.0.113.3"
+    WT = SCRATCH + "/wt"
+    MEM = "C--visual-projects-alpha/memory"
+
+    def ok(self, cmd, cwd=CWD):
+        reason = dg.check(cmd, cwd)
+        self.assertIsNone(reason, f"ложный отказ: {cmd!r} → {reason}")
+
+    def no(self, cmd, cwd=CWD):
+        self.assertIsNotNone(dg.check(cmd, cwd), f"пропущено: {cmd!r}")
+
+    # --- (1) выделенный сервер: /home/deck/alpha/, /root/tk0*, /data/tk0*, /tmp/
+    def test_host_roots_delete(self):
+        for path in ("/root/tk031/out", "/data/tk034/x", "/tmp/x", "/tmp/judge-g33/a.log", "/home/deck/alpha/tk031/y",
+                     "/root/tk035raw10/plan10.txt"):
+            self.ok(f"ssh -i ~/.ssh/id_rsa {self.DED} 'rm -rf {path}'")
+        self.ok("ssh 203.0.113.3 'rm -f /tmp/x'")                     # без user@
+
+    def test_host_roots_overwrite(self):
+        self.ok(f"ssh {self.DED} 'echo x > /root/tk035new/imp.sh'")
+        self.ok(f"ssh {self.DED} 'echo x > /tmp/dbg.out'")
+        self.ok(f"ssh {self.DED} 'cp a.py /data/tk035/daily.py'")
+        self.ok(f"ssh {self.DED} <<'EOF'\ncat > /root/tk037-probe.sh <<'X'\nid\nX\nEOF")
+        self.ok(f"ssh {self.DED} 'truncate -s 0 /data/tk034/s.out'")
+
+    def test_host_roots_with_cd_and_rsync(self):
+        self.ok(f"ssh {self.DED} 'cd /data/tk034 && rm -rf out'")
+        self.ok(f"ssh {self.DED} 'cd /tmp/work && rm -rf *.log'")
+        self.ok(f"rsync -a --delete /x/ {self.DED}:/data/tk031/stage/")
+
+    def test_host_data_copy_stays_closed(self):
+        for path in ("/data/alpha/x", "/data/alpha/derived/deck-study", "/data/alpha/root/f"):
+            self.no(f"ssh {self.DED} 'rm -rf {path}'")
+        self.no(f"ssh {self.DED} 'echo x > /data/alpha/derived/y.csv'")
+        self.no(f"ssh {self.DED} 'cd /data/alpha && rm -rf derived'")
+        self.no(f"ssh {self.DED} 'mv new.csv /data/alpha/derived/y.csv'")
+        self.no(f"rsync -a --delete /x/ {self.DED}:/data/alpha/derived/")
+
+    def test_host_roots_are_not_the_roots_themselves_or_broader(self):
+        for path in ("/root/.ssh", "/root/tk0", "/root/tk0/", "/data/tk0", "/tmp", "/tmp/", "/tmp/*", "/root",
+                     "/data", "/etc/x", "/root/tk031/../.ssh", "/tmp/../data/alpha/x", "/root/tk031/root/x",
+                     "/data/tk031/deep/x", "/home/deck/alpha"):
+            self.no(f"ssh {self.DED} 'rm -rf {path}'")
+
+    def test_host_roots_do_not_apply_to_other_hosts_or_local(self):
+        for host in ("root@203.0.113.2", "deck@192.0.2.49", "root@203.0.113.1"):
+            self.no(f"ssh {host} 'rm -rf /root/tk031/x'")
+            self.no(f"ssh {host} 'rm -rf /data/tk031/x'")
+            self.no(f"ssh {host} 'rm -rf /tmp/x'")
+        self.no("rm -rf /root/tk031/x")                                  # локально
+        self.no("rm -rf /tmp/x")
+        self.no("ssh $H 'rm -rf /tmp/x'")                                # хост не определён
+        self.no(f"ssh {self.DED} 'ssh root@203.0.113.2 rm -rf /tmp/x'")  # вложенный ssh — уже другой хост
+
+    # --- (2) git reset --hard / clean -f вне основного дерева
+    def test_git_in_scratch_dir_by_cd_variable_and_git_c(self):
+        self.ok(f'cd "{self.WT}" && git reset -q --hard abc123')
+        self.ok(f'W="{self.WT}" && cd "$W" && git reset -q --hard abc123 && git apply t.patch')
+        self.ok(f'cd "C:/visual projects/alpha" && W="{self.WT}" && git diff > "$W/t.patch" && cd "$W" && git reset --hard d1')
+        self.ok(f'git -C "{self.WT}" reset --hard HEAD~1')
+        self.ok(f'git -C "{self.WT}" clean -fdx')
+        self.ok("git reset --hard", cwd=self.WT.replace("/", "\\"))      # рабочий каталог вызова — scratch
+        self.ok("git clean -fd", cwd=self.WT)
+
+    def test_git_in_remote_and_tmp_dirs(self):
+        self.ok("ssh root@203.0.113.2 'cd /opt/alpha-compute/wt1 && git reset --hard X && git clean -fdx'")
+        self.ok("ssh root@203.0.113.2 'git -C /opt/alpha-compute/wt1 reset --hard X'")
+        self.ok("ssh root@203.0.113.2 'cd /tmp/wt && git clean -fd'")
+        self.ok("cd /tmp/wt && git clean -fd")
+        self.ok(f"ssh {self.DED} 'cd /root/tk035/wt && git reset --hard HEAD'")
+        self.ok(f"ssh {self.DED} 'git -C /data/tk034/repo clean -fd'")
+
+    def test_git_main_tree_still_refused(self):
+        self.no('cd "C:/visual projects/alpha" && git reset --hard')
+        self.no('cd "C:/visual projects/alpha/data" && git clean -fd')
+        self.no('cd "C:/visual projects/alpha/.claude/wt" && git reset --hard')
+        self.no('git -C "C:/visual projects/alpha" reset --hard', cwd=self.WT)
+        self.no('git -C "/c/visual projects/alpha" clean -fd', cwd=self.WT)
+        self.no("git reset --hard")                                       # рабочий каталог — основное дерево
+        self.no(f'git -C "{self.WT}/../../../../../../../../visual projects/alpha" reset --hard')
+
+    def test_git_unknown_or_indirect_dir_refused(self):
+        self.no('cd $W && git reset --hard')                              # неизвестная переменная
+        self.no('cd "$W" && git clean -fd')
+        self.no('W=$(mktemp -d); cd "$W" && git reset --hard')
+        self.no('git -C "$W" reset --hard', cwd=self.WT)
+        self.no(f'GIT_DIR="C:/visual projects/alpha/.git" git -C "{self.WT}" reset --hard')
+        self.no(f'export GIT_WORK_TREE="C:/visual projects/alpha"; cd "{self.WT}" && git reset --hard')
+        self.no('git --git-dir="C:/visual projects/alpha/.git" reset --hard', cwd=self.WT)
+        self.no('git --work-tree="C:/visual projects/alpha" reset --hard', cwd=self.WT)
+        self.no('cd wt && git reset --hard', cwd=None)                    # относительный путь без известного cwd
+
+    def test_git_remote_roots_themselves_and_other_places_refused(self):
+        self.no("ssh deck@192.0.2.49 'cd ~/alpha && git clean -fd'")
+        self.no("ssh root@203.0.113.2 'cd /opt/alpha-compute && git reset --hard'")
+        self.no("ssh root@203.0.113.2 'cd /root/x && git reset --hard'")
+        self.no("ssh root@203.0.113.2 'cd /tmp && git reset --hard'")
+        self.no("cd /tmp && git reset --hard")
+        self.no("ssh root@203.0.113.1 'cd /tmp/wt && git reset --hard'")      # коллектор — закрытый узел
+        self.no("ssh root@203.0.113.2 'cd /tmp/wt/../../root/x && git clean -fd'")
+
+    def test_git_push_force_always_refused(self):
+        self.no(f'cd "{self.WT}" && git push --force')
+        self.no("git push -f", cwd=self.WT)
+        self.no("ssh root@203.0.113.2 'cd /opt/alpha-compute/wt1 && git push --force-with-lease'")
+
+    def test_git_linked_worktree_inside_project_allowed_nested_repo_and_main_not(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory(prefix="dg-proj-") as d:
+            root = Path(d)
+            (root / ".git").mkdir()
+            (root / "data").mkdir()
+            (root / "wt" / "sub").mkdir(parents=True)
+            (root / "wt" / ".git").write_text("gitdir: ../.git/worktrees/wt", encoding="utf-8")   # связанный worktree
+            (root / "nested" / ".git").mkdir(parents=True)                                       # вложенный репозиторий
+            base = dg.norm(root.as_posix())
+            with mock.patch.object(dg, "LOCAL_ROOTS", (base + "/",)):
+                self.ok(f'cd "{base}/wt" && git reset --hard X')
+                self.ok(f'cd "{base}/wt/sub" && git clean -fd')
+                self.ok(f'git -C "{base}/wt" reset --hard X')
+                self.no(f'cd "{base}" && git reset --hard X')
+                self.no(f'cd "{base}/data" && git clean -fd')
+                self.no(f'cd "{base}/nested" && git reset --hard X')
+                self.no(f'cd "{base}/ghost" && git reset --hard X')                               # нет такого каталога
+                self.no(f'cd "{base}/wt" && git push --force')
+                self.no(f"ssh root@203.0.113.2 'cd {base}/wt && git reset --hard X'")           # не локальная ФС
+
+    def test_git_refusal_message_explains_the_rule(self):
+        reason = dg.check("git reset --hard", CWD)
+        self.assertIn("через CEO", reason)
+        self.assertIn("явным путём", reason)
+
+    # --- (3) автопамять: запись/перезапись, не удаление
+    def test_memory_overwrite_allowed(self):
+        for base in ("~/.claude/projects/" + self.MEM, "$HOME/.claude/projects/" + self.MEM,
+                     '"$HOME/.claude/projects/' + self.MEM + '"', "/c/Users/user/.claude/projects/" + self.MEM,
+                     "C:/Users/user/.claude/projects/" + self.MEM,
+                     "C:\\Users\\user\\.claude\\projects\\C--visual-projects-alpha\\memory"):
+            self.ok(f"echo x > {base}/MEMORY.md")
+            self.ok(f"echo x >| {base}/alpha-state.md")
+        home = "~/.claude/projects/" + self.MEM
+        self.ok(f"cp /c/tmp/new.md {home}/x.md")
+        self.ok(f"mv /c/tmp/new.md {home}/x.md")
+        self.ok(f"truncate -s 0 {home}/x.md")
+        self.ok(f"dd if=a of={home}/x.md")
+        self.ok(f"cd {home} && echo x > MEMORY.md")
+
+    def test_memory_deletion_other_projects_and_remote_stay_closed(self):
+        home = "~/.claude/projects/" + self.MEM
+        self.no(f"rm {home}/x.md")                                        # только запись, удаление — нет
+        self.no(f"rm -rf {home}")
+        self.no("ssh deck@192.0.2.49 'echo x > ~/.claude/projects/" + self.MEM + "/x.md'")   # удалённый ~ — другой
+        with tempfile.TemporaryDirectory(prefix="dg-mem-") as d:
+            base = Path(d) / ".claude" / "projects"
+            for proj in ("c--other-project", "c--visual-projects-alpha"):
+                (base / proj / "memory").mkdir(parents=True)
+                (base / proj / "memory" / "x.md").write_text("x", encoding="utf-8")
+            # существующие файлы: чужая автопамять и та же, но не под домашним каталогом — отказ
+            self.no(f"echo x > {(base / 'c--other-project' / 'memory' / 'x.md').as_posix()}")
+            self.no(f"echo x > {(base / 'c--visual-projects-alpha' / 'memory' / 'x.md').as_posix()}")
+        self.assertFalse(dg.write_only_ok("~/.claude/projects/C--visual-projects-alpha/memory/../../../settings.json"))
+        self.assertFalse(dg.write_only_ok("~/.claude/projects/C--visual-projects-alpha/memory"))   # сам каталог — нет
+        self.no("ssh root@203.0.113.2 'echo x > ~/.claude/settings.json'")
 
 
 class HookEntryPoint(unittest.TestCase):

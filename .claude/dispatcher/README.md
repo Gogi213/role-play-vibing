@@ -29,4 +29,6 @@ needs_owner. Будят: `todo`, `in_progress`, выполненный `wait_for
 | `ALPHA_DISPATCH_MODEL` / `_ROLE_MODEL` / `_EFFORT` | модель и усилие ролей, `роль:значение,…` |
 | `ALPHA_WATCH_INTERVAL` / `_ORPHAN_HOURS` | цикл сторожа (120 с) / порог сирот (2 ч) |
 | `ALPHA_DECK_HOST` (+ `_KEY`, `_KNOWN_HOSTS`) | вторая машина для ssh-проверок; **нет хоста — проверки выключены**; флаг-файл `.claude/dispatcher/deck-off` — тоже |
-| `ALPHA_GUARD_REMOTE_ROOTS` / `_STAGE` / `_FORBIDDEN_HOSTS` | страж удаления: где можно удалять на удалённых машинах / стадия / закрытые хосты (через запятую; нет — нигде) |
+| `ALPHA_GUARD_REMOTE_ROOTS` / `_HOST_ROOTS` / `_STAGE` / `_FORBIDDEN_HOSTS` | страж удаления: где можно удалять на любых удалённых машинах / только при ssh на хост (`хост=корень,корень;хост2=…`) / стадия / закрытые хосты (через запятую; нет — нигде) |
+
+`git reset --hard` и `git clean -f` страж пропускает только в каталоге вне основного дерева, заданном явным путём (scratchpad, корни из переменных выше, `/tmp/<подкаталог>`, связанный worktree); `git push --force` — никогда. Перезапись файлов в автопамяти проекта (`~/.claude/projects/<проект>/memory/`) разрешена.
