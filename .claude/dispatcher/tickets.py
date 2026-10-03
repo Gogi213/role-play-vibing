@@ -71,11 +71,12 @@ def cmd_comment(args) -> int:
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
-    T.append_log(path, args.author, args.text)
-    if args.next:
-        # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
-        T.write_header_updates(path, {"next": args.next}, stamp_updated=False)
-    moved = T.compact_log(path)
+    with T.ticket_lock(path):  # запись, `next` и сжатие лога — одним куском (диспетчер правит шапку тем же замком)
+        T.append_log(path, args.author, args.text)
+        if args.next:
+            # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
+            T.write_header_updates(path, {"next": args.next}, stamp_updated=False)
+        moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {args.next}" if args.next else "")
           + (f"; в архив перенесено записей: {moved}" if moved else ""))
     return 0
@@ -87,11 +88,12 @@ def cmd_start(args) -> int:
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
-    tkt = T.read_ticket(path)
-    if tkt.status != "backlog":
-        print(f"{args.id}: status={tkt.status!r}, не backlog — не трогаю", file=sys.stderr)
-        return 1
-    T.write_header_updates(path, {"status": "todo"})
+    with T.ticket_lock(path):
+        tkt = T.read_ticket(path)
+        if tkt.status != "backlog":
+            print(f"{args.id}: status={tkt.status!r}, не backlog — не трогаю", file=sys.stderr)
+            return 1
+        T.write_header_updates(path, {"status": "todo"})
     print(f"{args.id}: backlog → todo")
     return 0
 

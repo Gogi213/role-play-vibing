@@ -91,13 +91,24 @@ def stamp(iso):
         return "?"
 
 
+def digest_dir(role):
+    """Каталог конспектов: запуск диспетчера по тикету (`ALPHA_TICKET`) — подкаталог тикета (роль, взявшая новый
+    тикет, не получает конспект чужого; аудит 03.10), иначе каталог роли."""
+    base = os.path.join(LOG_DIR, role)
+    if env_role():
+        tid = ticket_id()
+        if tid:
+            return os.path.join(base, tid)
+    return base
+
+
 def digest_path(role, cli_id):
     """Путь конспекта: существующий для этой сессии CLI или новый по текущему времени."""
-    old = glob.glob(os.path.join(glob.escape(os.path.join(LOG_DIR, role)), f"*-{cli_id[:8]}.md"))
+    old = glob.glob(os.path.join(glob.escape(digest_dir(role)), f"*-{cli_id[:8]}.md"))
     if old:
         return old[0]
     name = datetime.datetime.now(GMT4).strftime("%Y-%m-%d_%H%M") + f"-{cli_id[:8]}.md"
-    return os.path.join(LOG_DIR, role, name)
+    return os.path.join(digest_dir(role), name)
 
 
 def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
@@ -144,7 +155,7 @@ def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
 
 
 def latest_digest(role, exclude_cli):
-    files = sorted(glob.glob(os.path.join(glob.escape(os.path.join(LOG_DIR, role)), "*.md")))
+    files = sorted(glob.glob(os.path.join(glob.escape(digest_dir(role)), "*.md")))
     files = [f for f in files if not (exclude_cli and f.endswith(f"-{exclude_cli[:8]}.md"))]
     return files[-1] if files else None
 
@@ -155,7 +166,7 @@ def on_session_start(hook_in, role, title):
     state = load_state(role)
     prev_cli, prev_tr = state.get("cli"), state.get("transcript")
     if prev_cli and prev_cli != cli_id and not glob.glob(os.path.join(
-            glob.escape(os.path.join(LOG_DIR, role)), f"*-{prev_cli[:8]}.md")):
+            glob.escape(digest_dir(role)), f"*-{prev_cli[:8]}.md")):
         write_digest(prev_tr, role, title, prev_cli, "догнан при следующем старте")
     if prev_cli != cli_id:
         save_state({"cli": cli_id, "transcript": transcript, "n": 0}, role)

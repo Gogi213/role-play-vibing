@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -35,7 +36,7 @@ RUNS_LOG = DISPATCHER_DIR / "runs.log"
 CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
 CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # короткая копия каждой строки ceo-inbox — CEO держит на ней Monitor
 
-CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or r"<HOME>\.local\bin\claude"
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"  # имя из PATH, без зашитых путей
 PID_EXPECT_NAME = "claude"  # _pid_alive: подстрока имени образа процесса; тесты подменяют на "python"
 POLL_INTERVAL = float(os.environ.get("ALPHA_DISPATCH_INTERVAL", "15"))
 # v2 (02.10, аудит ролевой системы): всего параллельно ≤ 3 запусков и не больше ОДНОГО запуска на роль
@@ -46,11 +47,17 @@ RUN_TIMEOUT = float(os.environ.get("ALPHA_DISPATCH_TIMEOUT", str(20 * 60)))
 
 # Защита от петли (владелец 27.09, v1.1). MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — троттлинг решений (а)-(г):
 # тикет просто пропускается этот тик, без ceo-inbox (не ошибка, а пауза); ретраи правила (д) их не считают —
-# они и так ограничены одной попыткой. Лимитов денег (на тикет, в час, в сутки) НЕТ: В-149 снял часовой и
-# суточный, В-173 (03.10) — на тикет; деньги только учитываются (runs.log, state.json) и ограничиваются
-# потолком ОДНОГО запуска (RUN_CAP_USD ниже).
+# они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
+# В-173 (03.10) — на тикет, владелец 03.10 («бюджет до конца убирай») — и потолок запуска; траты только считаются
+# (runs.log, state.json).
 MAX_RUNS_PER_TICKET_HOUR = int(os.environ.get("ALPHA_DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
 MIN_GAP_S = float(os.environ.get("ALPHA_DISPATCH_MIN_GAP_S", "60"))
+# Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Оба числа НАЗНАЧЕНЫ
+# CEO 03.10, не измерены: MAX_SAME_STATUS_RUNS — роль пишет запись, а статус (in_progress; waiting при выполненном
+# wait_for) не меняется → тикет blocked + одна строка CEO; MAX_IDLE_RUNS — запуски без записи и без смены статуса
+# (холостой ход) → blocked (первый холостой — обычный один повтор, см. _finish_role_part).
+MAX_SAME_STATUS_RUNS = int(os.environ.get("ALPHA_DISPATCH_MAX_SAME_STATUS_RUNS", "6"))
+MAX_IDLE_RUNS = int(os.environ.get("ALPHA_DISPATCH_MAX_IDLE_RUNS", "2"))
 
 # Модель и перерасход (владелец 27.09, v1.2 — пилот Судьи на умолчаниях CLI стоил $6,8 на Fable 5.1
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
@@ -111,13 +118,6 @@ def _expected_model_family(info: dict) -> str:
 CLAUDE_HAIKU_MODEL = os.environ.get("ALPHA_DISPATCH_HAIKU_MODEL", "claude-haiku-4-5-20251001")
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish"}
 
-# Потолок ОДНОГО запуска (--max-budget-usd, встроенный флаг CLI) — защита от зацикливания внутри запуска; от
-# денег задачи не зависит (В-173: лимитов на тикет нет). Учёт трат (по задаче, за сутки, скользящий час) —
-# state.json (`ticket_cost`, `daily_cost`, `cost_history`) и runs.log, только как показатель.
-RUN_CAP_USD = float(os.environ.get("ALPHA_DISPATCH_RUN_CAP_USD", "8"))
-# Холостой ход (запуск владельца: ни записи, ни смены статуса): дороже этой доли потолка запуска — сразу blocked.
-IDLE_RUN_CAP_FRACTION = 0.5
-
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
 # Область сессии на роль (владелец 27.09): "ticket" — сессия на (задача, роль), --resume в пределах
@@ -137,6 +137,9 @@ if os.environ.get("ALPHA_DISPATCH_SESSION_SCOPE"):
 # --resume) и получает в промпте напоминание перечитать блокнот и прежние решения по нужной задаче.
 # v2: 250 000 → 120 000 — при окне Sonnet 200 тыс. прежний порог не срабатывал (TK-025: одна сессия $36).
 ROTATE_TOKENS = int(os.environ.get("ALPHA_DISPATCH_ROTATE_TOKENS", "120000"))
+# транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
+# `usage.iterations` (см. _context_tokens_last)
+CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
 
 # v2 (02.10): промпт без призыва @-упоминать роли — будит только явный `--next`; читать шапку, описание и
 # последние записи лога (старое — в archive/<ID>-log.md); никаких фоновых помощников/задач внутри сессии.
@@ -241,13 +244,14 @@ def _deck_file_exists(remote_path: str) -> bool:
     now_ts = time.time()
     if cached and (now_ts - cached[0]) < DECK_CHECK_CACHE_S:
         return cached[1]
-    # Кириллический HOME на этой машине ломает умолчания ssh (В-см. windows-ssh-cyrillic-home) —
-    # ключ, known_hosts и хост берём явно, не полагаясь на ~/.ssh по умолчанию.
-    host = os.environ.get("ALPHA_DECK_HOST", "deck@<HOST_DECK>")
-    key = os.environ.get("ALPHA_DECK_KEY", r"<HOME>/.ssh/id_rsa")
-    known_hosts = os.environ.get("ALPHA_DECK_KNOWN_HOSTS", r"<HOME>/.ssh/known_hosts")
-    cmd = ["ssh", "-i", key, "-o", f"UserKnownHostsFile={known_hosts}", "-o", "BatchMode=yes",
-           "-o", "ConnectTimeout=8", host, f"test -e {_remote_test_arg(remote_path)}"]
+    # Машина для ssh-проверок — только из окружения, без умолчаний: нет ALPHA_DECK_HOST — проверка выключена.
+    host = os.environ.get("ALPHA_DECK_HOST")
+    if not host:
+        return False
+    key = os.environ.get("ALPHA_DECK_KEY")
+    known_hosts = os.environ.get("ALPHA_DECK_KNOWN_HOSTS")
+    cmd = (["ssh"] + (["-i", key] if key else []) + (["-o", f"UserKnownHostsFile={known_hosts}"] if known_hosts else [])
+           + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, f"test -e {_remote_test_arg(remote_path)}"])
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=15)
         result = r.returncode == 0
@@ -449,17 +453,19 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
             return Decision(role=owner, reason="wait_for-met")
         return None
 
-    # (г) done при заданном reviewer → in_review, будит ревьюера — но не когда последняя запись лога
-    # уже от самого ревьюера (или dispatcher): это штатный конец состоявшегося ревью, не новый раунд.
-    # Раньше проверялось по updated-таймстампу — тот становится новее записи ревьюера, стоит роли
-    # проставить status ПОСЛЕ append_log, и (г) будило ревьюера повторно за его же вердикт (судья
-    # 27.09, п.3 «обязательно»).
-    if status == "done" and tkt.reviewer in ROLE_KEYS:
+    # (г) done или in_review при заданном reviewer → будит ревьюера (done ставит in_review) — но не когда последняя
+    # запись лога уже от самого ревьюера (или dispatcher): это штатный конец состоявшегося ревью, не новый раунд.
+    # Раньше проверялось по updated-таймстампу — тот становится новее записи ревьюера, стоит роли проставить
+    # status ПОСЛЕ append_log, и (г) будило ревьюера повторно за его же вердикт (судья 27.09, п.3 «обязательно»).
+    # in_review (аудит 03.10): ревьюер упал/убит без записи — тикет не висит вечно; повторы режут MAX_IDLE_RUNS и
+    # MAX_SAME_STATUS_RUNS.
+    if status in ("done", "in_review") and tkt.reviewer in ROLE_KEYS:
         reviewer = tkt.reviewer
-        last_author = tkt.log[-1].author.lower() if tkt.log else None
-        if last_author in (reviewer.lower(), "dispatcher"):
+        last_author = tkt.log[-1].author if tkt.log else ""
+        if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":
             return None
-        return Decision(role=reviewer, reason="review", header_updates={"status": "in_review"})
+        return Decision(role=reviewer, reason="review",
+                        header_updates={"status": "in_review"} if status == "done" else None)
 
     return None
 
@@ -485,22 +491,74 @@ def _context_tokens_sum(usage: dict) -> int:
     return _tokens_of(usage)
 
 
+def _transcript_last_turn_tokens(session_id) -> int:
+    """Контекст ПОСЛЕДНЕГО хода сессии по её транскрипту (usage последнего ответа модели); 0 — транскрипта нет."""
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
+        return 0
+    try:
+        path = next(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
+        if path is None:
+            return 0
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            start = max(0, fh.tell() - 600_000)
+            fh.seek(start)
+            lines = fh.read().decode("utf-8", "replace").splitlines()
+        if start:
+            lines = lines[1:]  # первая строка хвоста может быть оборвана
+        for line in reversed(lines):
+            if '"usage"' not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if row.get("isSidechain"):
+                continue
+            n = _tokens_of((row.get("message") or {}).get("usage"))
+            if n:
+                return n
+    except Exception:
+        pass
+    return 0
+
+
 def _context_tokens_last(result: dict) -> int:
     """Контекст, который реально понесёт следующий `--resume` — последний ход ЭТОГО запуска, не сумма
     по всем его ходам: usage в JSON claude -p суммирует по ходам, и на многоходовом запуске это
     завышает контекст в разы, рвя ротацию раньше времени (CEO 27.09, живой прогон: ctx_sum=333 886
     при реальном контексте хода ~52 тыс.). usage.iterations[-1] — контекст последнего хода; нет
-    iterations — запасной вариант ctx_sum // num_turns."""
+    iterations (аудит 03.10) — последний ход из транскрипта сессии; нет и его — запасная оценка
+    ctx_sum // num_turns (среднее по ходам, занижена: см. _context_tokens_for_store)."""
     usage = result.get("usage") or {}
     iterations = usage.get("iterations")
     if isinstance(iterations, list) and iterations:
         return _tokens_of(iterations[-1])
+    last = _transcript_last_turn_tokens(result.get("session_id"))
+    if last:
+        return last
     total = _context_tokens_sum(usage)
     try:
         num_turns = int(result.get("num_turns") or 1) or 1
     except (TypeError, ValueError):
         num_turns = 1
     return total // num_turns
+
+
+def _context_tokens_for_store(result: dict, previous: int) -> int:
+    """Что записать в `last_context_tokens` сессии после запуска (аудит 03.10): нет JSON (таймаут/убит) или usage
+    пуст (ответ-ошибка) — НЕ обнулять, остаётся последнее известное; есть ход (iterations/транскрипт) — он; иначе
+    запасная оценка-среднее, но не ниже известного (контекст сессии без сжатия только растёт)."""
+    usage = (result or {}).get("usage") or {}
+    if not _tokens_of(usage):
+        return previous
+    iterations = usage.get("iterations")
+    if isinstance(iterations, list) and iterations and _tokens_of(iterations[-1]):
+        return _tokens_of(iterations[-1])
+    last = _transcript_last_turn_tokens(result.get("session_id"))
+    if last:
+        return last
+    return max(previous, _context_tokens_last(result))
 
 
 def _role_busy(role: str) -> bool:
@@ -755,7 +813,6 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
                      "запрошенное и запиши итог.")
         extra_note = " ".join(x for x in (extra_note, next_note) if x)
     prompt = build_prompt(role, tid, extra_note)
-    run_cap = RUN_CAP_USD  # потолок одного запуска; от денег задачи не зависит (В-173)
     try:
         launch_tkt = T.read_ticket(ticket_path)
         status_at_launch = launch_tkt.status
@@ -769,8 +826,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     # new и haiku_refused_reason() в tick()); здесь только сама подмена модели.
     model = CLAUDE_HAIKU_MODEL if executor == "haiku" else ROLE_MODEL.get(role, CLAUDE_MODEL)
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", effort,
-           "--max-budget-usd", f"{run_cap:.2f}"]
+           "--model", model, "--effort", effort]
     if sid:
         cmd += ["--resume", sid]
 
@@ -783,6 +839,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         if "HOST_SESSION" in _k.upper():
             env.pop(_k, None)
     env["ALPHA_ROLE"] = role
+    env["ALPHA_TICKET"] = tid  # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
@@ -790,7 +847,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     RUNNING[tid] = {
         "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
-        "run_cap_usd": run_cap, "status_at_launch": status_at_launch, "executor": executor,
+        "status_at_launch": status_at_launch, "executor": executor,
         "log_keys_at_launch": log_keys_at_launch, "effort": effort,
     }
     # last_woken — приоритет очереди запусков внутри роли (кто дольше не запускался — тот первый, см. tick);
@@ -802,7 +859,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     state.setdefault("active_runs", {})[tid] = {
         "role": role, "pid": popen.pid, "started": T.now_iso(now), "attempt": attempt,
         "run_file": str(run_file), "err_file": str(err_file), "reason": reason,
-        "run_cap_usd": run_cap, "status_at_launch": status_at_launch, "executor": executor,
+        "status_at_launch": status_at_launch, "executor": executor,
         "log_keys_at_launch": log_keys_at_launch, "effort": effort,
     }
     save_state(state)
@@ -856,10 +913,26 @@ def _block_ticket(path: Path, tid: str, role: str, why: str, state: dict, now, l
     # просьбой к роли
     T.append_log(path, "dispatcher", log_text, now=now)
     append_ceo_inbox(tid, "blocked", f"{role}: {why}", now)
+    # одна строка CEO: маркер статуса, чтобы notify_status_for_ceo следующим тиком не написал вторую; счётчики
+    # тормозов цикла сброшены — CEO сам решит, что дальше
+    state.setdefault("ceo_status_notified", {})[tid] = f"blocked@{T.now_iso(now)}"
+    state.setdefault("idle_runs", {}).pop(f"{tid}::{role}", None)
+    state.setdefault("same_status_runs", {}).pop(f"{tid}::{role}", None)
 
 
-def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, resolved_cost: float,
-                      result: dict) -> None:
+def _same_status_loop(tkt: T.Ticket, logged: bool, status_changed: bool) -> bool:
+    """Запуск оставил запись, а статус тот же: in_progress, либо waiting при УЖЕ выполненном wait_for (иначе ждать
+    — штатно). Подряд MAX_SAME_STATUS_RUNS таких запусков — петля (аудит 03.10)."""
+    if not logged or status_changed:
+        return False
+    if tkt.status == "in_progress":
+        return True
+    if tkt.status == "waiting":
+        return check_wait_for(tkt.header.get("wait_for", ""))
+    return False
+
+
+def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, result: dict) -> None:
     """Что делать с тикетом после запуска (деньги/модель уже учтены в _finish_run)."""
     role = info["role"]
     key = f"{tid}::{role}"
@@ -867,7 +940,8 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     store = _resume_store(state, tid, role)  # session_id/токены — по SESSION_SCOPE[role]
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
-    store["last_context_tokens"] = _context_tokens_last(result)  # контекст последнего хода, не сумма по ходам
+    # контекст последнего хода; нет JSON/usage (таймаут, ответ-ошибка) — прежнее значение, не ноль
+    store["last_context_tokens"] = _context_tokens_for_store(result, store.get("last_context_tokens", 0))
 
     path = TICKETS_DIR / f"{tid}.md"
     if not path.exists():
@@ -875,37 +949,49 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
         return
     tkt = T.read_ticket(path)
 
-    # v2 (02.10): провалом считается только запуск ВЛАДЕЛЬЦА задачи без новой записи. Ревьюер/адресат
-    # `--next` без записи — не провал и тикет не блокирует (раньше «дважды без записи» блокировало задачу
-    # владельца из-за чужого холостого запуска — TK-027 04:04).
-    if role != tkt.owner:
-        sess["retries"] = 0
-        save_state(state)
-        return
-
-    # Судья 27.09, п.7: таймаут сам по себе — не провал, если роль успела записать прогресс до убийства.
-    logged = _role_logged(tkt, role, info)
-    stuck_todo = logged and tkt.status == "todo"  # роль отчиталась, но забыла увести статус с todo
+    # аудит 03.10: запуск ЛЮБОЙ роли (владелец, ревьюер, адресат `--next`) без новой записи — провал: один повтор,
+    # затем blocked (раньше чужой холостой запуск молчал, и тикет `in_review` висел вечно).
+    logged = _role_logged(tkt, role, info)  # судья 27.09, п.7: таймаут сам по себе — не провал, если запись успела
+    stuck_todo = role == tkt.owner and logged and tkt.status == "todo"  # отчиталась, но не увела статус с todo
     status_changed = tkt.status != info.get("status_at_launch")
+    idle_runs = state.setdefault("idle_runs", {})
+    same_runs = state.setdefault("same_status_runs", {})
 
-    # Холостой ход (п.5, владелец 27.09; В-173: от потолка запуска, не от бюджета задачи): запуск стоил дороже
-    # половины потолка запуска и не оставил ни записи, ни смены статуса — сразу blocked, без обычного одного
-    # повтора (повтор может сжечь столько же так же безрезультатно) — защита от зацикливания.
-    if (not logged) and (not status_changed) and resolved_cost > IDLE_RUN_CAP_FRACTION * RUN_CAP_USD:
-        _block_ticket(path, tid, role, f"холостой ход, ${resolved_cost:.2f} без результата", state, now,
-                      f"Запуск роли {role} стоил ${resolved_cost:.2f} (> половины потолка запуска "
-                      f"${RUN_CAP_USD:.2f}) и не оставил ни записи, ни смены статуса — холостой ход, задача "
-                      "заблокирована, нужен CEO.")
-        sess["retries"] = 0
-        save_state(state)
-        return
+    # холостой ход: нет записи и статус не сменён — считаем подряд (число, не деньги); первый — обычный повтор ниже
+    if (not logged) and (not status_changed):
+        idle_runs[key] = idle_runs.get(key, 0) + 1
+        if idle_runs[key] >= MAX_IDLE_RUNS:
+            n = idle_runs[key]
+            _block_ticket(path, tid, role, f"холостой ход ×{n}", state, now,
+                          f"Запусков роли {role} подряд без записи и без смены статуса: {n} — холостой ход, "
+                          "задача заблокирована, нужен CEO.")
+            sess["retries"] = 0
+            save_state(state)
+            return
+    else:
+        idle_runs.pop(key, None)
+
+    # тормоз цикла: запись есть, статус не меняется N запусков подряд
+    if _same_status_loop(tkt, logged, status_changed):
+        same_runs[key] = same_runs.get(key, 0) + 1
+        if same_runs[key] >= MAX_SAME_STATUS_RUNS:
+            n = same_runs[key]
+            _block_ticket(path, tid, role, f"{n} запусков подряд: запись есть, статус {tkt.status} не меняется",
+                          state, now,
+                          f"Роль {role}: {n} запусков подряд оставляют запись, а статус остаётся {tkt.status} — "
+                          "петля, задача заблокирована, нужен CEO.")
+            sess["retries"] = 0
+            save_state(state)
+            return
+    elif status_changed or tkt.status not in ("in_progress", "waiting"):
+        same_runs.pop(key, None)
 
     if logged and not stuck_todo:
         sess["retries"] = 0
         save_state(state)
         return
 
-    # (д) запуск владельца завершился без пригодного результата — один повтор, затем blocked
+    # (д) запуск завершился без пригодного результата — один повтор, затем blocked
     if info.get("attempt", 0) < 1:
         if not logged:
             note = ("Предыдущий запуск не оставил новую запись в «## Лог» — обязательно допиши итог "
@@ -956,7 +1042,7 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool) -> None
     if model_warn:
         route_ceo_signal(tid, "model", model_warn, state, now)
 
-    _finish_role_part(tid, info, state, now, timed_out, resolved_cost, result)
+    _finish_role_part(tid, info, state, now, timed_out, result)
 
 
 def _poll_running(state: dict, now) -> None:
@@ -986,7 +1072,7 @@ def recover_active_runs(state: dict, now) -> None:
             "started": T.parse_dt(saved["started"]), "attempt": saved.get("attempt", 0),
             "run_file": Path(saved["run_file"]), "err_file": Path(saved.get("err_file") or ""),
             "out_fh": None, "err_fh": None, "reason": saved.get("reason", "recovered"),
-            "run_cap_usd": saved.get("run_cap_usd", 0.0), "status_at_launch": saved.get("status_at_launch"),
+            "status_at_launch": saved.get("status_at_launch"),
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }

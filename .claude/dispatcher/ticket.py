@@ -20,12 +20,25 @@ dispatcher), не русские названия: так упоминания �
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:  # кроссплатформенная блокировка файла: msvcrt на Windows, fcntl иначе
+    import msvcrt
+except ImportError:  # pragma: no cover
+    msvcrt = None
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 HEADER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
 LOG_HEADING_RE = re.compile(r"^##\s*Лог\s*$", re.M)
@@ -169,18 +182,98 @@ def role_entry_keys(tkt: "Ticket", role: str) -> list:
 
 def atomic_write_text(path, text: str, retries: int = 8) -> None:
     """Запись через временный файл + os.replace. На Windows replace падает с PermissionError, пока
-    другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов."""
+    другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи
+    оставляет прежний файл целым и не оставляет `.tmp`."""
     path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8", newline="\n")
-    for i in range(retries):
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        for i in range(retries):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if i == retries - 1:
+                    raise
+                time.sleep(0.05 * (i + 1))
+    finally:
         try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:
-            if i == retries - 1:
-                raise
-            time.sleep(0.05 * (i + 1))
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+# --- блокировка на тикет (аудит 03.10): диспетчер, tickets.py и роли пишут один файл из разных процессов ------------
+LOCK_TIMEOUT_S = float(os.environ.get("ALPHA_TICKET_LOCK_TIMEOUT", "120"))
+_LOCKS_DIR = Path(tempfile.gettempdir()) / "alpha-ticket-locks"  # вне репозитория: тикетный каталог не засоряется
+_thread_locks: dict = {}
+_thread_locks_guard = threading.Lock()
+_held = threading.local()
+
+
+def _os_lock(fh) -> None:
+    if msvcrt is not None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    elif fcntl is not None:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _os_unlock(fh) -> None:
+    try:
+        if msvcrt is not None:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        elif fcntl is not None:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+@contextmanager
+def ticket_lock(path, timeout: float = None):
+    """Эксклюзивная блокировка на файл тикета (или любой путь): между потоками — threading.Lock, между процессами —
+    файл-замок ОС (снимается сам при смерти процесса). Повторный вход из того же потока допускается."""
+    key = hashlib.sha1(str(Path(path).resolve()).lower().encode("utf-8")).hexdigest()[:24]
+    depth = getattr(_held, "depth", None)
+    if depth is None:
+        depth = _held.depth = {}
+    if depth.get(key):
+        depth[key] += 1
+        try:
+            yield
+        finally:
+            depth[key] -= 1
+        return
+    timeout = LOCK_TIMEOUT_S if timeout is None else timeout
+    deadline = time.time() + timeout
+    with _thread_locks_guard:
+        tlock = _thread_locks.setdefault(key, threading.Lock())
+    if not tlock.acquire(timeout=timeout):
+        raise TimeoutError(f"блокировка тикета {Path(path).name}: занята дольше {timeout:.0f} с")
+    fh = None
+    try:
+        _LOCKS_DIR.mkdir(parents=True, exist_ok=True)
+        fh = open(_LOCKS_DIR / f"{key}.lock", "a+b")
+        while True:
+            try:
+                _os_lock(fh)
+                break
+            except OSError:
+                if time.time() >= deadline:
+                    raise TimeoutError(f"блокировка тикета {Path(path).name}: занята дольше {timeout:.0f} с")
+                time.sleep(0.05)
+        depth[key] = 1
+        try:
+            yield
+        finally:
+            depth.pop(key, None)
+            _os_unlock(fh)
+    finally:
+        if fh is not None:
+            fh.close()
+        tlock.release()
 
 
 def _entry_starts(body: str) -> list:
@@ -201,9 +294,14 @@ def compact_log(path, keep: int = None, limit_bytes: int = None) -> int:
     `*.md` верхнего уровня), в логе остаётся одна строка-указатель. Запись атомарная (tmp + replace);
     сперва архив, потом тикет — при сбое между ними записи продублируются, но не потеряются.
     Возвращает число перенесённых записей (0 — ничего не делали)."""
+    path = Path(path)
+    with ticket_lock(path):
+        return _compact_log_locked(path, keep, limit_bytes)
+
+
+def _compact_log_locked(path, keep, limit_bytes) -> int:
     keep = LOG_KEEP_ENTRIES if keep is None else keep
     limit_bytes = LOG_COMPACT_BYTES if limit_bytes is None else limit_bytes
-    path = Path(path)
     text = path.read_text(encoding="utf-8")
     if len(text.encode("utf-8")) <= limit_bytes:
         return 0
@@ -251,46 +349,47 @@ def read_ticket(path) -> Ticket:
 
 
 def write_header_updates(path, updates: dict, now: datetime = None, stamp_updated: bool = True) -> None:
-    """Точечно правит строки шапки (значения `updates`), тело файла не трогает."""
+    """Точечно правит строки шапки (значения `updates`), тело файла не трогает. Под блокировкой тикета, запись атомарная."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
-    m = _match_header(text)
-    lines = m.group(1).splitlines()
-    updates = dict(updates)
-    if stamp_updated and "updated" not in updates:
-        updates["updated"] = now_iso(now)
-    seen = set()
-    new_lines = []
-    for line in lines:
-        key = line.split(":", 1)[0].strip() if ":" in line else None
-        if key in updates:
-            new_lines.append(f"{key}: {updates[key]}")
-            seen.add(key)
-        else:
-            new_lines.append(line)
-    for key, value in updates.items():
-        if key not in seen:
-            new_lines.append(f"{key}: {value}")
-    new_header = "---\n" + "\n".join(new_lines) + "\n---\n"
-    # newline="\n" — иначе на Windows write_text переводит \n в CRLF (судья 27.09: `git commit`
-    # предупреждал «CRLF will be replaced by LF», цель fc2faa3 «задачи всегда LF» не держалась)
-    path.write_text(new_header + text[m.end():], encoding="utf-8", newline="\n")
+    with ticket_lock(path):
+        text = path.read_text(encoding="utf-8")
+        m = _match_header(text)
+        lines = m.group(1).splitlines()
+        updates = dict(updates)
+        if stamp_updated and "updated" not in updates:
+            updates["updated"] = now_iso(now)
+        seen = set()
+        new_lines = []
+        for line in lines:
+            key = line.split(":", 1)[0].strip() if ":" in line else None
+            if key in updates:
+                new_lines.append(f"{key}: {updates[key]}")
+                seen.add(key)
+            else:
+                new_lines.append(line)
+        for key, value in updates.items():
+            if key not in seen:
+                new_lines.append(f"{key}: {value}")
+        new_header = "---\n" + "\n".join(new_lines) + "\n---\n"
+        # LF, не CRLF: `git commit` на Windows иначе предупреждает (судья 27.09) — atomic_write_text пишет newline="\n"
+        atomic_write_text(path, new_header + text[m.end():])
 
 
 def append_log(path, author: str, text: str, now: datetime = None) -> None:
-    """Дописывает запись `### <время> <автор>` в конец файла (лог — последняя секция)."""
+    """Дописывает запись `### <время> <автор>` в конец файла (лог — последняя секция). Под блокировкой, атомарно."""
     path = Path(path)
-    content = path.read_text(encoding="utf-8")
-    if not content.endswith("\n"):
-        content += "\n"
-    if not LOG_HEADING_RE.search(content):
+    with ticket_lock(path):
+        content = path.read_text(encoding="utf-8")
+        if not content.endswith("\n"):
+            content += "\n"
+        if not LOG_HEADING_RE.search(content):
+            if not content.endswith("\n\n"):
+                content += "\n"
+            content += "## Лог\n"
         if not content.endswith("\n\n"):
             content += "\n"
-        content += "## Лог\n"
-    if not content.endswith("\n\n"):
-        content += "\n"
-    content += f"### {now_iso(now)} {author}\n{text.strip()}\n"
-    path.write_text(content, encoding="utf-8", newline="\n")
+        content += f"### {now_iso(now)} {author}\n{text.strip()}\n"
+        atomic_write_text(path, content)
 
 
 def next_ticket_id(tickets_dir, prefix: str = "TK-") -> str:
@@ -311,6 +410,13 @@ def create_ticket(tickets_dir, owner: str, title: str, reviewer: str = None,
                    kind: str = None, effort: str = None) -> Path:
     tickets_dir = Path(tickets_dir)
     tickets_dir.mkdir(parents=True, exist_ok=True)
+    with ticket_lock(tickets_dir / ".new-ticket"):      # номер и файл — под одной блокировкой, id не повторяются
+        return _create_ticket_locked(tickets_dir, owner, title, reviewer, description, wait_for, now, prefix,
+                                      status, executor, kind, effort)
+
+
+def _create_ticket_locked(tickets_dir, owner, title, reviewer, description, wait_for, now, prefix, status, executor,
+                           kind, effort) -> Path:
     tid = next_ticket_id(tickets_dir, prefix)
     lines = [f"id: {tid}", f"title: {title}", f"owner: {owner}", f"status: {status}"]
     if reviewer:
@@ -328,7 +434,7 @@ def create_ticket(tickets_dir, owner: str, title: str, reviewer: str = None,
         text += description.strip() + "\n\n"
     text += "## Лог\n"
     path = tickets_dir / f"{tid}.md"
-    path.write_text(text, encoding="utf-8", newline="\n")
+    atomic_write_text(path, text)
     return path
 
 

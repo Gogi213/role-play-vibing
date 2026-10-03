@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_context.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_context.py\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_context.py\"",
             "timeout": 30
           }
         ]
@@ -16,7 +16,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/delete_guard.py\"",
             "timeout": 10
           }
         ]
@@ -28,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
             "timeout": 10
           }
         ]
@@ -39,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
             "timeout": 30
           }
         ]
@@ -50,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\" || py -3 \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/role_memory.py\"",
             "timeout": 10
           }
         ]
