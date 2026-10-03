@@ -1,8 +1,11 @@
-"""Диспетчер задач alpha (по образцу Paperclip) — вместо постоянных чатов ролей.
+"""Диспетчер задач (по образцу Paperclip) — вместо постоянных чатов ролей.
 
 Цикл раз в `POLL_INTERVAL` секунд читает `.claude/tickets/*.md` и решает, кого будить:
 роль-исполнителя (`claude -p ... --resume <session_id>`) или CEO (строка в `ceo-inbox.md`).
 Только stdlib. Подробности формата — `ticket.py`, правила — `README.md`.
+
+Запускается прямо из папки плагина; проект — `--project <путь>`, иначе `RPV_PROJECT` / `CLAUDE_PROJECT_DIR`,
+иначе текущий каталог (см. `project.py`). Состояние — в `<проект>/.claude/dispatcher/`.
 
 Тест: `python -m unittest .claude/dispatcher/test_dispatch.py` (или из каталога — см. README).
 """
@@ -23,55 +26,69 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
-DISPATCHER_DIR = Path(__file__).resolve().parent
-CLAUDE_DIR = DISPATCHER_DIR.parent
-PROJECT_ROOT = CLAUDE_DIR.parent
-TICKETS_DIR = PROJECT_ROOT / ".claude" / "tickets"
-STATE_FILE = DISPATCHER_DIR / "state.json"
-PID_FILE = DISPATCHER_DIR / "dispatch.pid"  # замок единственного экземпляра диспетчера (см. acquire_instance_lock)
-RUNS_DIR = DISPATCHER_DIR / "runs"
-RUNS_LOG = DISPATCHER_DIR / "runs.log"
-CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
-CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # короткая копия каждой строки ceo-inbox — CEO держит на ней Monitor
+CODE_DIR = Path(__file__).resolve().parent  # где лежит сам диспетчер (папка плагина) — к проекту отношения не имеет
+# Пути проекта (PROJECT_ROOT, TICKETS_DIR, DISPATCHER_DIR — каталог СОСТОЯНИЯ в проекте и остальные файлы) выставляет
+# configure_project(): при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/текущему каталогу, в main() — по флагу.
+PROJECT_ROOT = DISPATCHER_DIR = TICKETS_DIR = STATE_FILE = PID_FILE = RUNS_DIR = RUNS_LOG = None
+CEO_INBOX = CEO_WAKE_LOG = None
+
+
+def configure_project(root) -> Path:
+    """Корень проекта и все пути состояния от него (ничего не создаёт — каталоги появляются при записи)."""
+    global PROJECT_ROOT, DISPATCHER_DIR, TICKETS_DIR, STATE_FILE, PID_FILE, RUNS_DIR, RUNS_LOG, CEO_INBOX, CEO_WAKE_LOG
+    PROJECT_ROOT = Path(root).expanduser().resolve()
+    DISPATCHER_DIR = PROJECT_ROOT / ".claude" / "dispatcher"
+    TICKETS_DIR = PROJECT_ROOT / ".claude" / "tickets"
+    STATE_FILE = DISPATCHER_DIR / "state.json"
+    PID_FILE = DISPATCHER_DIR / "dispatch.pid"  # замок единственного экземпляра диспетчера (см. acquire_instance_lock)
+    RUNS_DIR = DISPATCHER_DIR / "runs"
+    RUNS_LOG = DISPATCHER_DIR / "runs.log"
+    CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
+    CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # короткая копия каждой строки ceo-inbox — CEO держит на ней Monitor
+    return PROJECT_ROOT
+
+
+configure_project(P.resolve_project())
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"  # имя из PATH, без зашитых путей
 PID_EXPECT_NAME = "claude"  # _pid_alive: подстрока имени образа процесса; тесты подменяют на "python"
-POLL_INTERVAL = float(os.environ.get("ALPHA_DISPATCH_INTERVAL", "15"))
+POLL_INTERVAL = float(P.env("DISPATCH_INTERVAL", "15"))
 # v2 (02.10, аудит ролевой системы): всего параллельно ≤ 3 запусков и не больше ОДНОГО запуска на роль
 # (по всем тикетам сразу, см. _role_busy); таймаут запуска 20 мин (было 40 — фоновые помощники в `-p` висели
 # до убийства, а цена убитого запуска в учёте — $0).
-MAX_PARALLEL = int(os.environ.get("ALPHA_DISPATCH_MAX_PARALLEL", "3"))
-RUN_TIMEOUT = float(os.environ.get("ALPHA_DISPATCH_TIMEOUT", str(20 * 60)))
+MAX_PARALLEL = int(P.env("DISPATCH_MAX_PARALLEL", "3"))
+RUN_TIMEOUT = float(P.env("DISPATCH_TIMEOUT", str(20 * 60)))
 
 # Защита от петли (владелец 27.09, v1.1). MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — троттлинг решений (а)-(г):
 # тикет просто пропускается этот тик, без ceo-inbox (не ошибка, а пауза); ретраи правила (д) их не считают —
 # они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
 # В-173 (03.10) — на тикет, владелец 03.10 («бюджет до конца убирай») — и потолок запуска; траты только считаются
 # (runs.log, state.json).
-MAX_RUNS_PER_TICKET_HOUR = int(os.environ.get("ALPHA_DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
-MIN_GAP_S = float(os.environ.get("ALPHA_DISPATCH_MIN_GAP_S", "60"))
+MAX_RUNS_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
+MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
 # Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Числа НАЗНАЧЕНЫ CEO 03.10,
 # не измерены: MAX_SAME_STATUS_RUNS (12) — роль пишет запись, а статус (in_progress; waiting при выполненном wait_for) не
 # меняется → на половине (SAME_STATUS_WARN_RUNS, 0 = MAX // 2 = 6) одна строка CEO «loop-warning», на MAX — тикет
 # blocked + строка CEO; MAX_IDLE_RUNS (2) — запуски без записи и без смены статуса (холостой ход) → blocked (первый
 # холостой — обычный один повтор, см. _finish_role_part).
-MAX_SAME_STATUS_RUNS = int(os.environ.get("ALPHA_DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
-SAME_STATUS_WARN_RUNS = int(os.environ.get("ALPHA_DISPATCH_SAME_STATUS_WARN_RUNS", "0"))
-MAX_IDLE_RUNS = int(os.environ.get("ALPHA_DISPATCH_MAX_IDLE_RUNS", "2"))
+MAX_SAME_STATUS_RUNS = int(P.env("DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
+SAME_STATUS_WARN_RUNS = int(P.env("DISPATCH_SAME_STATUS_WARN_RUNS", "0"))
+MAX_IDLE_RUNS = int(P.env("DISPATCH_MAX_IDLE_RUNS", "2"))
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
 # После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher +
 # `next: ceo` (одна строка CEO). Число НАЗНАЧЕНО CEO 03.10, не измерено.
-MAX_REVIEW_RETURNS = int(os.environ.get("ALPHA_DISPATCH_MAX_REVIEW_RETURNS", "3"))
+MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "3"))
 
 # Модель и перерасход (владелец 27.09, v1.2 — пилот Судьи на умолчаниях CLI стоил $6,8 на Fable 5.1
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
 # В-153 (02.10): все роли — Sonnet 5.5 с усилием xhigh. Усилие переопределяемо через
-# ALPHA_DISPATCH_EFFORT=judge:xhigh,engineer:high (или одно значение — на все роли).
-CLAUDE_MODEL = os.environ.get("ALPHA_DISPATCH_MODEL", "claude-sonnet-5-5")
+# RPV_DISPATCH_EFFORT=judge:xhigh,engineer:high (или одно значение — на все роли).
+CLAUDE_MODEL = P.env("DISPATCH_MODEL", "claude-sonnet-5-5")
 # v2 (02.10): усилие — по виду задачи (статья «spending your effort»): исследователь и инженер — high, Судья
 # (вердикт) — xhigh; на тикете переопределяется полем `effort: low|medium|high|xhigh` в шапке
 # (`tickets.py new --effort`), см. effort_for().
@@ -93,12 +110,12 @@ def _parse_role_map(spec: str, base: dict) -> dict:
     return out
 
 
-ROLE_EFFORT = _parse_role_map(os.environ.get("ALPHA_DISPATCH_EFFORT", ""), ROLE_EFFORT)
+ROLE_EFFORT = _parse_role_map(P.env("DISPATCH_EFFORT", ""), ROLE_EFFORT)
 
 # В-153 уточнение (02.10, v1.6.1): на Sonnet 5.5 — только те, кого рационально; Судья (проверяет всех)
-# остаётся на Opus 5.5 xhigh. Переопределение: ALPHA_DISPATCH_ROLE_MODEL=judge:claude-opus-5-5,engineer:...
+# остаётся на Opus 5.5 xhigh. Переопределение: RPV_DISPATCH_ROLE_MODEL=judge:claude-opus-5-5,engineer:...
 # (или одно значение — на все роли). Роль вне словаря и executor haiku — см. launch_run.
-ROLE_MODEL = _parse_role_map(os.environ.get("ALPHA_DISPATCH_ROLE_MODEL", ""),
+ROLE_MODEL = _parse_role_map(P.env("DISPATCH_ROLE_MODEL", ""),
                              {"judge": "claude-opus-5-5", "engineer": CLAUDE_MODEL, "researcher": CLAUDE_MODEL})
 
 
@@ -123,7 +140,7 @@ def _expected_model_family(info: dict) -> str:
 # tickets.py new), приёмка результата — кодом (в конкретных скриптах-проверках по виду, не здесь).
 # Обход Судьи запрещён (условие г): reviewer: judge или owner: researcher — не Haiku, tickets.py new
 # отказывает раньше, чем тикет вообще появится; здесь — вторая защита на случай ручной правки шапки.
-CLAUDE_HAIKU_MODEL = os.environ.get("ALPHA_DISPATCH_HAIKU_MODEL", "claude-haiku-4-5-20251001")
+CLAUDE_HAIKU_MODEL = P.env("DISPATCH_HAIKU_MODEL", "claude-haiku-4-5-20251001")
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
@@ -132,10 +149,10 @@ ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых ди
 # задачи; "role" — одна долгая сессия роли на ВСЕ задачи (в промпте каждый раз названа текущая задача).
 # v2 (02.10): Судья тоже "ticket" — одна сессия на все задачи копила контекст чужих тикетов (аудит).
 # Не больше одного запуска на роль теперь действует всегда (_role_busy), а не только при "role".
-# Переопределяемо через ALPHA_DISPATCH_SESSION_SCOPE=judge:role,engineer:ticket.
+# Переопределяемо через RPV_DISPATCH_SESSION_SCOPE=judge:role,engineer:ticket (прежнее имя — ALPHA_DISPATCH_…).
 SESSION_SCOPE = {"judge": "ticket", "researcher": "ticket", "engineer": "ticket"}
-if os.environ.get("ALPHA_DISPATCH_SESSION_SCOPE"):
-    for _pair in os.environ["ALPHA_DISPATCH_SESSION_SCOPE"].split(","):
+if P.env("DISPATCH_SESSION_SCOPE"):
+    for _pair in P.env("DISPATCH_SESSION_SCOPE").split(","):
         _role, _, _scope = _pair.partition(":")
         if _role and _scope:
             SESSION_SCOPE[_role.strip()] = _scope.strip()
@@ -144,7 +161,7 @@ if os.environ.get("ALPHA_DISPATCH_SESSION_SCOPE"):
 # из JSON-вывода claude) превысил это число токенов — следующий запуск роли начинает новую сессию (без
 # --resume) и получает в промпте напоминание перечитать блокнот и прежние решения по нужной задаче.
 # v2: 250 000 → 120 000 — при окне Sonnet 200 тыс. прежний порог не срабатывал (TK-025: одна сессия $36).
-ROTATE_TOKENS = int(os.environ.get("ALPHA_DISPATCH_ROTATE_TOKENS", "120000"))
+ROTATE_TOKENS = int(P.env("DISPATCH_ROTATE_TOKENS", "120000"))
 # транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
 # `usage.iterations` (см. _context_tokens_last)
 CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
@@ -152,14 +169,14 @@ CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() /
 # v2 (02.10): промпт без призыва @-упоминать роли — будит только явный `--next`; читать шапку, описание и
 # последние записи лога (старое — в archive/<ID>-log.md); никаких фоновых помощников/задач внутри сессии.
 PROMPT_TEMPLATE = (
-    "Ты — {role} команды alpha. Устав: .claude/roles/{role}.md, блокнот: .claude/roles/notes/{role}.md. "
+    "Ты — {role} команды. Устав: .claude/roles/{role}.md, блокнот: .claude/roles/notes/{role}.md. "
     "Задача: .claude/tickets/{tid}.md — прочитай шапку, описание и последние записи «## Лог» (старые записи "
     "лежат в .claude/tickets/archive/{tid}-log.md — grep только при необходимости). Лимит этого запуска — "
-    "{timeout_min} мин. Не запускай в сессии фоновых помощников и фоновых задач; долгая работа — systemd-run "
-    "на машинах (Steam Deck/VPS) + status: waiting + wait_for, и выйди, не жди в сессии. Трать минимум: "
+    "{timeout_min} мин. Не запускай в сессии фоновых помощников и фоновых задач; долгая работа — фоновый "
+    "процесс на машине (systemd-run) + status: waiting + wait_for, и выйди, не жди в сессии. Трать минимум: "
     "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
     "результатом. Сделай следующий шаг и запиши итог командой "
-    "`python .claude/dispatcher/tickets.py comment {tid} --author {role} --text \"...\"` (что сделал, что "
+    "`{tickets_cli} comment {tid} --author {role} --text \"...\"` (что сделал, что "
     "дальше) ДО истечения лимита — запись с твоим заголовком обязательна, частичный прогресс не провал; "
     "status/wait_for в шапке обнови сама (не «todo», если работа не закончена). Передать работу другой "
     "роли — один раз `--next <researcher|engineer|judge>` в той же команде comment, без копий «для "
@@ -241,7 +258,7 @@ def _remote_test_arg(remote_path: str) -> str:
 
 
 _DECK_CACHE = {}  # remote_path -> (time.time() отметка, результат) — см. _deck_file_exists
-DECK_CHECK_CACHE_S = float(os.environ.get("ALPHA_DISPATCH_DECK_CACHE_S", "60"))
+DECK_CHECK_CACHE_S = float(P.env("DISPATCH_DECK_CACHE_S", "60"))
 
 
 def _deck_file_exists(remote_path: str) -> bool:
@@ -252,12 +269,12 @@ def _deck_file_exists(remote_path: str) -> bool:
     now_ts = time.time()
     if cached and (now_ts - cached[0]) < DECK_CHECK_CACHE_S:
         return cached[1]
-    # Машина для ssh-проверок — только из окружения, без умолчаний: нет ALPHA_DECK_HOST — проверка выключена.
-    host = os.environ.get("ALPHA_DECK_HOST")
+    # Машина для ssh-проверок — только из окружения, без умолчаний: нет RPV_DECK_HOST (прежнее ALPHA_DECK_HOST) — проверка выключена.
+    host = P.env("DECK_HOST")
     if not host:
         return False
-    key = os.environ.get("ALPHA_DECK_KEY")
-    known_hosts = os.environ.get("ALPHA_DECK_KNOWN_HOSTS")
+    key = P.env("DECK_KEY")
+    known_hosts = P.env("DECK_KNOWN_HOSTS")
     cmd = (["ssh"] + (["-i", key] if key else []) + (["-o", f"UserKnownHostsFile={known_hosts}"] if known_hosts else [])
            + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, f"test -e {_remote_test_arg(remote_path)}"])
     try:
@@ -289,7 +306,7 @@ def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
 # Неизвестный вид (кто-то добавит новый append_ceo_inbox без обновления таблицы) — по умолчанию "wake",
 # безопасная сторона асимметрии.
 SIGNAL_SUMMARY_KINDS = {"model"}  # уже само по себе диагностика/лог, не требует немедленной реакции
-SUMMARY_EVERY_HOURS = float(os.environ.get("ALPHA_DISPATCH_SUMMARY_HOURS", "1"))
+SUMMARY_EVERY_HOURS = float(P.env("DISPATCH_SUMMARY_HOURS", "1"))
 
 
 def classify_signal(kind: str) -> str:
@@ -879,14 +896,20 @@ def _popen(cmd, **kwargs):
 
 def effort_for(role: str, tkt=None) -> str:
     """v2: усилие запуска — поле `effort:` тикета, иначе умолчание роли (ROLE_EFFORT: исследователь/инженер
-    high, Судья xhigh; env ALPHA_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
+    high, Судья xhigh; env RPV_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
     if tkt is not None and getattr(tkt, "effort", ""):
         return tkt.effort
     return ROLE_EFFORT.get(role, "high")
 
 
+def tickets_cli() -> str:
+    """Команда tickets.py из папки плагина: проект роль берёт из RPV_PROJECT (его ставит launch_run) и своего cwd."""
+    return "python " + shlex.quote((CODE_DIR / "tickets.py").as_posix())
+
+
 def build_prompt(role: str, tid: str, extra_note: str = None) -> str:
-    prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(RUN_TIMEOUT // 60))
+    prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(RUN_TIMEOUT // 60),
+                                    tickets_cli=tickets_cli())
     if extra_note:
         prompt += " " + extra_note
     return prompt
@@ -936,13 +959,16 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     env = dict(os.environ)
     # Судья 27.09, п.4 «обязательно»: без этого дочерний claude наследует CLAUDE_CODE_HOST_SESSION_ID
     # сессии CEO (диспетчер сам запущен из неё) — role_context.py/role_memory.py принимают роль за CEO
-    # (тревоги/inbox/«молчание» ломаются на все роли). ALPHA_ROLE сама по себе не спасает: find_title()
+    # (тревоги/inbox/«молчание» ломаются на все роли). RPV_ROLE сама по себе не спасает: find_title()
     # срабатывает раньше при непустом host_id, если сама переменная не снята.
     for _k in list(env):
         if "HOST_SESSION" in _k.upper():
             env.pop(_k, None)
-    env["ALPHA_ROLE"] = role
-    env["ALPHA_TICKET"] = tid  # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету
+    # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету; обе пары имён — RPV_* новые,
+    # ALPHA_* для хуков, которые ещё читают прежние
+    env["RPV_ROLE"] = env["ALPHA_ROLE"] = role
+    env["RPV_TICKET"] = env["ALPHA_TICKET"] = tid
+    env["RPV_PROJECT"] = str(PROJECT_ROOT)  # tickets.py роли берёт проект отсюда (и из cwd запуска)
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
@@ -1283,11 +1309,12 @@ def tick(now=None) -> int:
     return launched
 
 
-USAGE = """Диспетчер задач alpha (v2, 02.10).
-  python .claude/dispatcher/dispatch.py          # цикл раз в ALPHA_DISPATCH_INTERVAL (15 с) — БОЕВОЙ запуск
-  python .claude/dispatcher/dispatch.py --once   # один тик (тоже боевой: может запустить роли)
-  python .claude/dispatcher/dispatch.py --help   # эта справка (ничего не запускает)
-Правила — .claude/dispatcher/README.md (раздел «v2»)."""
+USAGE = """Диспетчер задач (v2, 02.10). Запускается из папки плагина; проект — --project <путь>, иначе RPV_PROJECT /
+CLAUDE_PROJECT_DIR, иначе текущий каталог. Состояние — <проект>/.claude/dispatcher/.
+  python <плагин>/.claude/dispatcher/dispatch.py --project <проект>          # цикл раз в RPV_DISPATCH_INTERVAL (15 с) — БОЕВОЙ
+  python <плагин>/.claude/dispatcher/dispatch.py --project <проект> --once   # один тик (тоже боевой: может запустить роли)
+  python <плагин>/.claude/dispatcher/dispatch.py --help                      # эта справка (ничего не запускает)
+Правила — README.md рядом с диспетчером."""
 
 
 def main(argv=None) -> int:
@@ -1295,6 +1322,9 @@ def main(argv=None) -> int:
     if "--help" in argv or "-h" in argv:  # раньше любой аргумент запускал боевой цикл
         print(USAGE)
         return 0
+    if P.project_arg(argv):                      # явный --project; без него остаются пути, выставленные при импорте
+        configure_project(P.project_arg(argv))
+    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
     TICKETS_DIR.mkdir(parents=True, exist_ok=True)
     ok, why = acquire_instance_lock(PID_FILE)
     if not ok:                                   # второй диспетчер (в т. ч. ручной --once при живом цикле) — не стартуем

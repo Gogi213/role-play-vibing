@@ -14,8 +14,9 @@ v2 (02.10, аудит ролевой системы — «сторож: трев
 (done/cancelled) тикетам молчат, по открытым повторяются не чаще раза в сутки.
 v3 (03.10, В-173): проверки трат (суточный/часовой расход, бюджет тикета) удалены — лимитов денег нет.
 
-Запуск: python .claude/dispatcher/watch.py --once   (для крона/планировщика Windows)
-        python .claude/dispatcher/watch.py           (цикл раз в WATCH_INTERVAL_S)
+Запуск из папки плагина (проект — --project <путь>, иначе RPV_PROJECT / CLAUDE_PROJECT_DIR / текущий каталог):
+        python <плагин>/.claude/dispatcher/watch.py --project <проект> --once   (для крона/планировщика Windows)
+        python <плагин>/.claude/dispatcher/watch.py --project <проект>          (цикл раз в WATCH_INTERVAL_S)
 """
 from __future__ import annotations
 
@@ -32,27 +33,49 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
+import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
-DISPATCHER_DIR = Path(__file__).resolve().parent
-WATCH_HEARTBEAT_FILE = DISPATCHER_DIR / "watch-heartbeat.json"
-WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (D.acquire_instance_lock)
-WATCH_STATE_FILE = DISPATCHER_DIR / "watch-state.json"
-# Владелец 03.10 04:26: «стимдек больше не трогаем». Файл есть — сторож вообще не ходит на Steam Deck по ssh
-# (ни ALERT-*/HOLD/очередь, ни заморозка); наличие проверяется на КАЖДОМ цикле — перезапуск не нужен.
-DECK_OFF_FLAG = DISPATCHER_DIR / "deck-off"
+# Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
+# D.configure_project() при импорте dispatch (по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd) и в main().
+DISPATCHER_DIR = WATCH_HEARTBEAT_FILE = WATCH_PID_FILE = WATCH_STATE_FILE = DECK_OFF_FLAG = None
 
-WATCH_INTERVAL_S = float(os.environ.get("ALPHA_WATCH_INTERVAL", "120"))
-WATCH_DEDUP_REPEAT_HOURS = float(os.environ.get("ALPHA_WATCH_REPEAT_HOURS", "2"))
+
+def _set_paths() -> None:
+    global DISPATCHER_DIR, WATCH_HEARTBEAT_FILE, WATCH_PID_FILE, WATCH_STATE_FILE, DECK_OFF_FLAG
+    DISPATCHER_DIR = D.DISPATCHER_DIR
+    WATCH_HEARTBEAT_FILE = DISPATCHER_DIR / "watch-heartbeat.json"
+    WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (D.acquire_instance_lock)
+    WATCH_STATE_FILE = DISPATCHER_DIR / "watch-state.json"
+    # Владелец 03.10 04:26: «стимдек больше не трогаем». Файл есть — сторож вообще не ходит на Steam Deck по ssh
+    # (ни ALERT-*/HOLD/очередь, ни заморозка); наличие проверяется на КАЖДОМ цикле — перезапуск не нужен.
+    DECK_OFF_FLAG = DISPATCHER_DIR / "deck-off"
+
+
+_set_paths()
+
+
+def configure_project(root) -> Path:
+    """Переключает проект диспетчера и сторожа (пути состояния — от `<root>/.claude/dispatcher/`)."""
+    D.configure_project(root)
+    _set_paths()
+    return D.PROJECT_ROOT
+
+
+# Корень на второй машине (там очередь заданий, метки HOLD/DISK-FULL): RPV_DECK_ROOT, прежнее ALPHA_DECK_ROOT.
+DECK_ROOT = P.env("DECK_ROOT", "~/rpv")
+
+WATCH_INTERVAL_S = float(P.env("WATCH_INTERVAL", "120"))
+WATCH_DEDUP_REPEAT_HOURS = float(P.env("WATCH_REPEAT_HOURS", "2"))
 # v2: виды находок, которые повторяются не чаще раза в сутки (или пока не изменятся по сути); blocked/needs_owner
 # диспетчер уже сообщил один раз (`ceo-inbox`), сторож лишь страхует — раз в сутки
-WATCH_LONG_REPEAT_HOURS = float(os.environ.get("ALPHA_WATCH_LONG_REPEAT_HOURS", "24"))
+WATCH_LONG_REPEAT_HOURS = float(P.env("WATCH_LONG_REPEAT_HOURS", "24"))
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "deck-alert", "deck-idle-expected", "blocked", "needs_owner"}
 CLOSED_TICKET_STATUSES = ("done", "cancelled")
-DISPATCH_STALE_MINUTES = float(os.environ.get("ALPHA_WATCH_DISPATCH_STALE_MIN", "5"))
-ORPHAN_TICKET_HOURS = float(os.environ.get("ALPHA_WATCH_ORPHAN_HOURS", "2"))
+DISPATCH_STALE_MINUTES = float(P.env("WATCH_DISPATCH_STALE_MIN", "5"))
+ORPHAN_TICKET_HOURS = float(P.env("WATCH_ORPHAN_HOURS", "2"))
 # TK-016: 30 → 10 мин (простой 28.09 07:22–08:31 — очередь стояла 69 мин незамеченной)
-DECK_QUEUE_STALE_MINUTES = float(os.environ.get("ALPHA_WATCH_DECK_QUEUE_STALE_MIN", "10"))
+DECK_QUEUE_STALE_MINUTES = float(P.env("WATCH_DECK_QUEUE_STALE_MIN", "10"))
 
 
 @dataclass
@@ -130,16 +153,16 @@ def check_orphan_tickets(now) -> list:
 
 
 def deck_off() -> bool:
-    """Проверки второй машины пропускаются: флаг `.claude/dispatcher/deck-off` или не задан `ALPHA_DECK_HOST`."""
-    return DECK_OFF_FLAG.exists() or not os.environ.get("ALPHA_DECK_HOST")
+    """Проверки второй машины пропускаются: флаг `.claude/dispatcher/deck-off` или не задан `RPV_DECK_HOST`."""
+    return DECK_OFF_FLAG.exists() or not P.env("DECK_HOST")
 
 
 def _ssh_run_once(cmd_suffix: str, timeout: float = 10.0):
-    host = os.environ.get("ALPHA_DECK_HOST")  # без умолчания: нет переменной — проверки машины выключены (deck_off)
+    host = P.env("DECK_HOST")  # без умолчания: нет переменной — проверки машины выключены (deck_off)
     if not host:
-        return False, "ALPHA_DECK_HOST не задан"
-    key = os.environ.get("ALPHA_DECK_KEY")
-    known_hosts = os.environ.get("ALPHA_DECK_KNOWN_HOSTS")
+        return False, "RPV_DECK_HOST не задан"
+    key = P.env("DECK_KEY")
+    known_hosts = P.env("DECK_KNOWN_HOSTS")
     cmd = (["ssh"] + (["-i", key] if key else []) + (["-o", f"UserKnownHostsFile={known_hosts}"] if known_hosts else [])
            + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, cmd_suffix])
     try:
@@ -152,7 +175,7 @@ def _ssh_run_once(cmd_suffix: str, timeout: float = 10.0):
         return False, f"{type(e).__name__}: {e}"
 
 
-DECK_SSH_IMMEDIATE_RETRIES = int(os.environ.get("ALPHA_WATCH_DECK_SSH_RETRIES", "1"))
+DECK_SSH_IMMEDIATE_RETRIES = int(P.env("WATCH_DECK_SSH_RETRIES", "1"))
 
 
 def _ssh_run(cmd_suffix: str, timeout: float = 10.0):
@@ -186,9 +209,9 @@ def check_steam_deck(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) ->
     if deck_off():
         return []
     out = []
-    ok, alerts = ssh_run("for f in ~/alpha/queue/ALERT-*; do [ -f \"$f\" ] && "
+    ok, alerts = ssh_run(f"for f in {DECK_ROOT}/queue/ALERT-*; do [ -f \"$f\" ] && "
                           "echo \"$(basename $f): $(head -c 200 $f)\"; done; true")
-    ok_hold, hold_out = ssh_run("[ -f ~/alpha/queue/HOLD ] && echo HOLD || echo NOHOLD")
+    ok_hold, hold_out = ssh_run(f"[ -f {DECK_ROOT}/queue/HOLD ] && echo HOLD || echo NOHOLD")
     if ok_hold:
         hold_active = hold_out.strip() == "HOLD"
         if observed is not None:
@@ -211,8 +234,8 @@ def check_steam_deck(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) ->
     elif not hold_active:
         # TK-016: задания gridq — queue/pending/*.job (прежний счёт queue/*.json всегда давал 0 → молчание)
         ok2, status_info = ssh_run(
-            "n=$(ls ~/alpha/queue/pending/ ~/alpha/queue/running/ 2>/dev/null | grep -c '\\.job$'); "
-            "age=$(( $(date +%s) - $(stat -c %Y ~/alpha/queue/STATUS 2>/dev/null || echo 0) )); "
+            f"n=$(ls {DECK_ROOT}/queue/pending/ {DECK_ROOT}/queue/running/ 2>/dev/null | grep -c '\\.job$'); "
+            f"age=$(( $(date +%s) - $(stat -c %Y {DECK_ROOT}/queue/STATUS 2>/dev/null || echo 0) )); "
             "echo \"$n $age\"")
         if not ok2:
             out.append(Finding("deck-ssh-error", "queue", f"не удалось проверить очередь Steam Deck: {status_info}"))
@@ -229,10 +252,10 @@ def check_steam_deck(ssh_run=_ssh_run, hold_hint=None, observed: dict = None) ->
     return out
 
 
-# TK-016: disk-guard.sh замораживает счёт (метка ~/alpha/sync/DISK-FULL) — замороженный gridq сам ALERT-*
+# TK-016: disk-guard.sh замораживает счёт (метка <DECK_ROOT>/sync/DISK-FULL) — замороженная очередь сама ALERT-*
 # не пишет, STATUS стоит. Отдельный запрос: метка (число «frozen» в ней), свободно ГБ, замороженные юниты.
-DECK_FROZEN_CMD = ("if [ -f ~/alpha/sync/DISK-FULL ]; then echo \"mark $(grep -c '^frozen ' ~/alpha/sync/DISK-FULL)\"; "
-                   "else echo nomark; fi; echo \"free $(df --output=avail -BG ~/alpha | tail -1 | tr -dc 0-9)\"; "
+DECK_FROZEN_CMD = (f"if [ -f {DECK_ROOT}/sync/DISK-FULL ]; then echo \"mark $(grep -c '^frozen ' {DECK_ROOT}/sync/DISK-FULL)\"; "
+                   f"else echo nomark; fi; echo \"free $(df --output=avail -BG {DECK_ROOT} | tail -1 | tr -dc 0-9)\"; "
                    "systemctl --user list-units --state=frozen --no-legend --plain | awk '{print \"frozen \" $1}'; true")
 
 
@@ -253,7 +276,7 @@ def check_deck_frozen(ssh_run=_ssh_run) -> list:
             frozen.append(rest.strip())
     if mark_n is None and not frozen:
         return []
-    why = "метка ~/alpha/sync/DISK-FULL (disk-guard)" if mark_n is not None else "без метки DISK-FULL"
+    why = f"метка {DECK_ROOT}/sync/DISK-FULL (disk-guard)" if mark_n is not None else "без метки DISK-FULL"
     n = len(frozen) if frozen else mark_n
     units = ", ".join(frozen[:6]) + (" …" if len(frozen) > 6 else "")
     return [Finding("deck-frozen", "frozen",
@@ -306,13 +329,13 @@ def normalize_signature(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()[:SIGNATURE_MAX_CHARS]
 
 WATCH_SUMMARY_KINDS = {"deck-idle-expected", "deck-ssh-error-transient"}
-WATCH_SUMMARY_EVERY_HOURS = float(os.environ.get("ALPHA_WATCH_SUMMARY_HOURS", "1"))
+WATCH_SUMMARY_EVERY_HOURS = float(P.env("WATCH_SUMMARY_HOURS", "1"))
 
 # CEO 27.09: разовые ssh-таймауты (23:59, 00:11 — сразу после ssh отвечал за 0,44 с, ни нагрузки, ни
 # давления I/O) будили немедленно. Один повтор внутри цикла — в _ssh_run; здесь — устойчивость к
 # ПОДРЯД НЕСКОЛЬКИМ неудачным ЦИКЛАМ: будим только после DECK_SSH_FAIL_STREAK_TO_WAKE подряд (умолч.
 # 3 цикла × WATCH_INTERVAL_S ≈ 6 мин), разовые/парные неудачи — в сводку (deck-ssh-error-transient).
-DECK_SSH_FAIL_STREAK_TO_WAKE = int(os.environ.get("ALPHA_WATCH_DECK_SSH_FAIL_STREAK", "3"))
+DECK_SSH_FAIL_STREAK_TO_WAKE = int(P.env("WATCH_DECK_SSH_FAIL_STREAK", "3"))
 
 
 def _apply_ssh_fail_streak(findings: list, ws: dict) -> list:
@@ -447,6 +470,9 @@ def run_once(now=None, ssh_run=_ssh_run) -> list:
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if P.project_arg(argv):                      # явный --project; без него остаются пути, выставленные при импорте
+        configure_project(P.project_arg(argv))
+    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
     if "--once" in argv:
         posted = run_once()
         print(f"[watch] once: findings={len(posted)}")

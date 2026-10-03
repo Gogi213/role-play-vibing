@@ -1,4 +1,4 @@
-"""Формат тикета диспетчера alpha: `.claude/tickets/<ID>.md`.
+"""Формат тикета диспетчера: `.claude/tickets/<ID>.md`.
 
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -30,6 +31,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project as P  # noqa: E402
 
 try:  # кроссплатформенная блокировка файла: msvcrt на Windows, fcntl иначе
     import msvcrt
@@ -205,8 +209,8 @@ def atomic_write_text(path, text: str, retries: int = 8) -> None:
 
 
 # --- блокировка на тикет (аудит 03.10): диспетчер, tickets.py и роли пишут один файл из разных процессов ------------
-LOCK_TIMEOUT_S = float(os.environ.get("ALPHA_TICKET_LOCK_TIMEOUT", "120"))
-_LOCKS_DIR = Path(tempfile.gettempdir()) / "alpha-ticket-locks"  # вне репозитория: тикетный каталог не засоряется
+LOCK_TIMEOUT_S = float(P.env("TICKET_LOCK_TIMEOUT", "120"))
+_LOCKS_DIR = Path(tempfile.gettempdir()) / "rpv-ticket-locks"  # вне репозитория: тикетный каталог не засоряется
 _thread_locks: dict = {}
 _thread_locks_guard = threading.Lock()
 _held = threading.local()

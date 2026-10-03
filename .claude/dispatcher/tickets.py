@@ -1,14 +1,18 @@
 """CLI для тикетов диспетчера: `new`, `comment`, `start`, `status`. Только stdlib.
 
-    python .claude/dispatcher/tickets.py new --owner researcher --title "..." [--desc "..."]  # ревьюера нет (v2)
-    python .claude/dispatcher/tickets.py new --owner engineer --title "..." --reviewer judge  # Судья — только явно
-    python .claude/dispatcher/tickets.py new --owner engineer --title "..." --effort medium   # low|medium|high|xhigh
-    python .claude/dispatcher/tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
-    python .claude/dispatcher/tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
+Запускается из папки плагина; проект — `--project <путь>` (перед подкомандой), иначе `RPV_PROJECT` /
+`CLAUDE_PROJECT_DIR`, иначе текущий каталог. Тикеты — `<проект>/.claude/tickets/`. Ниже `tickets.py` — это
+`python <плагин>/.claude/dispatcher/tickets.py [--project <проект>]`.
+
+    tickets.py new --owner researcher --title "..." [--desc "..."]  # ревьюера нет (v2)
+    tickets.py new --owner engineer --title "..." --reviewer judge  # Судья — только явно
+    tickets.py new --owner engineer --title "..." --effort medium   # low|medium|high|xhigh
+    tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
+    tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
-    python .claude/dispatcher/tickets.py comment TK-001 --author researcher --text "..." [--next judge]
-    python .claude/dispatcher/tickets.py start TK-001                                     # backlog → todo
-    python .claude/dispatcher/tickets.py status                                           # потрачено по задачам
+    tickets.py comment TK-001 --author researcher --text "..." [--next judge]
+    tickets.py start TK-001                                     # backlog → todo
+    tickets.py status                                           # потрачено по задачам
 
 `--next researcher|engineer|judge|ceo` — единственный способ разбудить другую роль (или CEO) записью лога:
 пишет `next: <роль>` в шапку, диспетчер запускает роль ОДИН раз и очищает поле. @упоминания в тексте никого
@@ -27,10 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import ticket as T  # noqa: E402
 
-TICKETS_DIR = Path(__file__).resolve().parent.parent / "tickets"
-
-
-PROJECT_ROOT = TICKETS_DIR.parent.parent
+# Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd);
+# в main() флаг --project переключает их ещё раз. Тесты подменяют TICKETS_DIR прямо на модуле.
+TICKETS_DIR = D.TICKETS_DIR
+PROJECT_ROOT = D.PROJECT_ROOT
 
 
 def cmd_new(args) -> int:
@@ -129,6 +133,8 @@ def cmd_status(args) -> int:
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     p = argparse.ArgumentParser(prog="tickets.py")
+    p.add_argument("--project", default=None,
+                   help="корень проекта (иначе RPV_PROJECT, CLAUDE_PROJECT_DIR, текущий каталог); перед подкомандой")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_new = sub.add_parser("new")
@@ -166,6 +172,10 @@ def main(argv=None) -> int:
     p_status.set_defaults(func=cmd_status)
 
     args = p.parse_args(argv)
+    if args.project:
+        global TICKETS_DIR, PROJECT_ROOT
+        D.configure_project(args.project)
+        TICKETS_DIR, PROJECT_ROOT = D.TICKETS_DIR, D.PROJECT_ROOT
     return args.func(args)
 
 

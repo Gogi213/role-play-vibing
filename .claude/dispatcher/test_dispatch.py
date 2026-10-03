@@ -22,6 +22,7 @@ from pathlib import Path
 os.environ.setdefault("CLAUDE_PROJECT_DIR", str(Path(__file__).resolve().parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402  (CLI — new/comment/start/status)
 
@@ -366,8 +367,9 @@ class TicketLockTests(unittest.TestCase):
         self.assertIn("из дочернего процесса", self.path.read_text(encoding="utf-8"))
 
     def test_cli_comment_and_start_use_the_lock(self):
+        orig_tickets_dir = TK.TICKETS_DIR
         TK.TICKETS_DIR = self.dir
-        self.addCleanup(lambda: setattr(TK, "TICKETS_DIR", Path(TK.__file__).resolve().parent.parent / "tickets"))
+        self.addCleanup(lambda: setattr(TK, "TICKETS_DIR", orig_tickets_dir))
         held = []
         orig = T.ticket_lock
 
@@ -776,6 +778,9 @@ class DispatchRunTests(unittest.TestCase):
         self.assertNotIn("CLAUDE_CODE_HOST_SESSION_ID", captured_env)
         self.assertEqual(captured_env.get("ALPHA_ROLE"), "researcher")
         self.assertEqual(captured_env.get("ALPHA_TICKET"), path.stem)  # A7: хуки ведут состояние по тикету
+        self.assertEqual(captured_env.get("RPV_ROLE"), "researcher")   # новые имена; ALPHA_* — для хуков, что их читают
+        self.assertEqual(captured_env.get("RPV_TICKET"), path.stem)
+        self.assertEqual(captured_env.get("RPV_PROJECT"), str(self.base))
         for info in list(D.RUNNING.values()):
             info["popen"].wait(timeout=10)
             for fh in (info.get("out_fh"), info.get("err_fh")):
@@ -1140,7 +1145,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.RUNNING, {}, "без повтора")
 
     def test_default_idle_limit_is_two_retry_once_then_block(self):
-        if os.environ.get("ALPHA_DISPATCH_MAX_IDLE_RUNS"):
+        if P.env("DISPATCH_MAX_IDLE_RUNS"):
             self.skipTest("ALPHA_DISPATCH_MAX_IDLE_RUNS задан в окружении")
         self.assertEqual(D.MAX_IDLE_RUNS, 2)
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Дважды холостой",
@@ -1523,7 +1528,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
         """v2: умолчания — исследователь/инженер high, Судья xhigh; `effort:` в шапке тикета — приоритетнее."""
-        if os.environ.get("ALPHA_DISPATCH_EFFORT"):
+        if P.env("DISPATCH_EFFORT"):
             self.skipTest("ALPHA_DISPATCH_EFFORT задан в окружении")
         self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
         cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "xhigh"),
@@ -1679,9 +1684,9 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("status: waiting + wait_for", prompt)
 
     def test_v2_constants(self):
-        for var, expected in (("ALPHA_DISPATCH_MAX_PARALLEL", 3), ("ALPHA_DISPATCH_TIMEOUT", 1200.0),
-                              ("ALPHA_DISPATCH_ROTATE_TOKENS", 120000)):
-            if os.environ.get(var):
+        for var, expected in (("DISPATCH_MAX_PARALLEL", 3), ("DISPATCH_TIMEOUT", 1200.0),
+                              ("DISPATCH_ROTATE_TOKENS", 120000)):
+            if P.env(var):
                 self.skipTest(f"{var} задан в окружении")
         self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT, D.ROTATE_TOKENS), (3, 1200.0, 120000))
         self.assertEqual(set(D.SESSION_SCOPE.values()), {"ticket"})
@@ -1731,7 +1736,9 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_prompt_tells_role_to_use_tickets_comment(self):
         prompt = D.build_prompt("engineer", "TK-005")
-        self.assertIn("tickets.py comment TK-005 --author engineer", prompt)
+        self.assertIn("comment TK-005 --author engineer", prompt)
+        self.assertNotIn("alpha", D.PROMPT_TEMPLATE.lower())  # плагин общий: слова проекта в шаблоне нет
+        self.assertIn((D.CODE_DIR / "tickets.py").as_posix(), prompt)  # запуск прямо из папки плагина
 
     # --- A5: тормоз цикла «запись есть, статус не меняется»
     def same_status_step(self, path, n, status_at_launch, reason="in_progress-resume"):
@@ -1761,12 +1768,12 @@ class DispatchRunTests(unittest.TestCase):
         self.addCleanup(lambda: (setattr(D, "MAX_SAME_STATUS_RUNS", old[0]), setattr(D, "SAME_STATUS_WARN_RUNS", old[1])))
 
     def test_default_same_status_limit_is_twelve_warn_is_half_and_env_name(self):
-        if os.environ.get("ALPHA_DISPATCH_MAX_SAME_STATUS_RUNS") or os.environ.get("ALPHA_DISPATCH_SAME_STATUS_WARN_RUNS"):
+        if P.env("DISPATCH_MAX_SAME_STATUS_RUNS") or P.env("DISPATCH_SAME_STATUS_WARN_RUNS"):
             self.skipTest("порог тормоза цикла задан в окружении")
         self.assertEqual(D.MAX_SAME_STATUS_RUNS, 12)
         self.assertEqual(D.same_status_warn_at(), 6)
         source = Path(D.__file__).read_text(encoding="utf-8")
-        self.assertIn("ALPHA_DISPATCH_MAX_SAME_STATUS_RUNS", source)
+        self.assertIn("DISPATCH_MAX_SAME_STATUS_RUNS", source)
 
     def test_warning_line_at_half_then_block_at_max_each_exactly_one_line(self):
         self.limits(6, 0)                                    # 0 — предупреждение на половине порога (3)
@@ -1904,10 +1911,10 @@ class DispatchRunTests(unittest.TestCase):
         return calls
 
     def test_default_review_returns_limit_is_three_with_env_name(self):
-        if os.environ.get("ALPHA_DISPATCH_MAX_REVIEW_RETURNS"):
+        if P.env("DISPATCH_MAX_REVIEW_RETURNS"):
             self.skipTest("порог задан в окружении")
         self.assertEqual(D.MAX_REVIEW_RETURNS, 3)
-        self.assertIn("ALPHA_DISPATCH_MAX_REVIEW_RETURNS", Path(D.__file__).read_text(encoding="utf-8"))
+        self.assertIn("DISPATCH_MAX_REVIEW_RETURNS", Path(D.__file__).read_text(encoding="utf-8"))
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
         path = self.review_setup()
@@ -2578,7 +2585,7 @@ class MoneyControlsTests(unittest.TestCase):
 
     def test_role_effort_mapping(self):
         # v2 (02.10): исследователь/инженер — high, Судья — xhigh (тест в окружении без ALPHA_DISPATCH_EFFORT)
-        if not os.environ.get("ALPHA_DISPATCH_EFFORT"):
+        if not P.env("DISPATCH_EFFORT"):
             self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
 
     def test_role_effort_env_override(self):
@@ -2592,7 +2599,7 @@ class MoneyControlsTests(unittest.TestCase):
 
     def test_role_model_defaults_and_env_override(self):
         # v1.6.1: Судья — Opus 5.5 (проверка всех не ослабляется), остальные — CLAUDE_MODEL
-        if not os.environ.get("ALPHA_DISPATCH_ROLE_MODEL"):
+        if not P.env("DISPATCH_ROLE_MODEL"):
             self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
                                             "researcher": D.CLAUDE_MODEL})
         base = {"judge": "claude-opus-5-5", "engineer": "claude-sonnet-5-5", "researcher": "claude-sonnet-5-5"}
@@ -3026,6 +3033,76 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
                 D.PID_FILE, D.TICKETS_DIR, D.tick = orig
                 holder.kill()
                 holder.wait(timeout=10)
+
+
+class ProjectRootTests(unittest.TestCase):
+    """Запуск из папки плагина: корень — аргумент/окружение/текущий каталог, не расположение файла."""
+
+    ENV_KEYS = ("RPV_PROJECT", "CLAUDE_PROJECT_DIR", "RPV_DISPATCH_MAX_PARALLEL", "ALPHA_DISPATCH_MAX_PARALLEL")
+
+    def setUp(self):
+        self.saved = {k: os.environ.get(k) for k in self.ENV_KEYS}
+        for k in self.ENV_KEYS:
+            os.environ.pop(k, None)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = Path(self.tmp.name).resolve()
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+        self.tmp.cleanup()
+
+    def test_resolve_order_arg_then_rpv_then_claude_then_cwd(self):
+        a, b, c = (self.proj / n for n in "abc")
+        for d in (a, b, c):
+            d.mkdir()
+        self.assertEqual(P.resolve_project([]), Path.cwd().resolve())
+        os.environ["CLAUDE_PROJECT_DIR"] = str(c)
+        self.assertEqual(P.resolve_project([]), c)
+        os.environ["RPV_PROJECT"] = str(b)
+        self.assertEqual(P.resolve_project([]), b)
+        self.assertEqual(P.resolve_project(["--once", "--project", str(a)]), a)
+        self.assertEqual(P.resolve_project([f"--project={a}"]), a)
+        self.assertEqual(P.strip_project_arg(["--project", str(a), "--once"]), ["--once"])
+
+    def test_env_prefers_rpv_then_alpha_then_default(self):
+        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
+        os.environ["ALPHA_DISPATCH_MAX_PARALLEL"] = "5"
+        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "5")
+        os.environ["RPV_DISPATCH_MAX_PARALLEL"] = "7"
+        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "7")
+
+    def test_configure_project_moves_all_state_paths_into_project(self):
+        import watch as W
+        orig = D.PROJECT_ROOT
+        self.addCleanup(lambda: W.configure_project(orig))
+        W.configure_project(self.proj)
+        state = self.proj / ".claude" / "dispatcher"
+        self.assertEqual(D.TICKETS_DIR, self.proj / ".claude" / "tickets")
+        for path in (D.STATE_FILE, D.PID_FILE, D.RUNS_DIR, D.RUNS_LOG, D.CEO_INBOX, D.CEO_WAKE_LOG,
+                     W.WATCH_HEARTBEAT_FILE, W.WATCH_PID_FILE, W.WATCH_STATE_FILE, W.DECK_OFF_FLAG):
+            self.assertEqual(path.parent, state, path)
+        self.assertNotEqual(D.CODE_DIR, state)  # код диспетчера и состояние проекта — разные каталоги
+
+    def test_tickets_cli_project_flag_writes_into_that_project(self):
+        orig = (TK.TICKETS_DIR, TK.PROJECT_ROOT, D.PROJECT_ROOT)
+        self.addCleanup(lambda: (D.configure_project(orig[2]), setattr(TK, "TICKETS_DIR", orig[0]),
+                                 setattr(TK, "PROJECT_ROOT", orig[1])))
+        self.assertEqual(TK.main(["--project", str(self.proj), "new", "--owner", "engineer", "--title", "Проект"]), 0)
+        self.assertEqual([p.name for p in (self.proj / ".claude" / "tickets").glob("TK-*.md")], ["TK-001.md"])
+
+    def test_scripts_run_from_plugin_folder_keep_state_in_project(self):
+        """dispatch.py / watch.py --once с чужим cwd: состояние появляется в проекте, не рядом с кодом."""
+        env = {k: v for k, v in os.environ.items() if k not in self.ENV_KEYS and k != "CLAUDE_PROJECT_DIR"}
+        with tempfile.TemporaryDirectory() as other_cwd:
+            for script, expect in (("dispatch.py", "state.json"), ("watch.py", "watch-heartbeat.json")):
+                done = subprocess.run([sys.executable, str(D.CODE_DIR / script), "--project", str(self.proj), "--once"],
+                                      cwd=other_cwd, env=env, capture_output=True, text=True, timeout=120)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertTrue((self.proj / ".claude" / "dispatcher" / expect).exists(), script)
+        self.assertTrue((self.proj / ".claude" / "tickets").is_dir())
 
 
 if __name__ == "__main__":
