@@ -36,14 +36,13 @@ class Core(unittest.TestCase):
         self.assertEqual(self.bus.ack("dispatcher", [1]), 1)
         self.assertEqual(self.bus.fetch("dispatcher"), [])
         self.assertEqual(self.bus.ack("dispatcher", [1]), 0)
-        self.assertEqual(len(self.bus.fetch("board")), 1)
 
     def test_routing_failed_goes_to_ceo(self):
         self.bus.post("задача.TK-1.задание.упало")
         self.bus.post("задача.TK-1.задание.ход")
         self.assertEqual(self.addrs("ceo"), ["задача.TK-1.задание.упало"])
         self.assertEqual(self.addrs("dispatcher"), ["задача.TK-1.задание.упало"])
-        self.assertEqual(len(self.addrs("board")), 2)
+        self.assertEqual(self.addrs("board"), [])
 
     def test_unrouted_is_journaled_only(self):
         r = self.bus.post("что.то.левое")
@@ -55,7 +54,6 @@ class Core(unittest.TestCase):
         self.bus.post("задача.TK-9.задание.готово")
         self.bus.post("задача.TK-8.задание.готово")
         self.assertEqual(len(self.bus.fetch("dispatcher")), 1)
-        self.assertEqual(len(self.bus.fetch("board")), 3)
         self.assertEqual(self.bus.health()["queues"]["dispatcher.held"], 1)
         self.bus.post("задача.TK-9.блокер.снят")
         self.assertEqual(self.addrs("dispatcher"), ["задача.TK-9.задание.готово", "задача.TK-8.задание.готово"])
@@ -64,6 +62,10 @@ class Core(unittest.TestCase):
         self.bus.post("задача.TK-9.блокер.поставлен", {"reason": "вопрос"})
         self.bus.post("задача.TK-9.вопрос_владельцу")
         self.assertEqual(self.addrs("ceo"), ["задача.TK-9.вопрос_владельцу"])
+
+    def test_to_ceo_is_not_owner_question(self):
+        self.bus.post("задача.TK-9.к_ceo")
+        self.assertEqual(self.addrs("ceo"), ["задача.TK-9.к_ceo"])
 
     def test_snapshot_replaces_blockers(self):
         self.bus.post("задача.TK-1.блокер.поставлен")
@@ -94,11 +96,10 @@ class Core(unittest.TestCase):
         self.bus.post("задача.TK-5.сдано")
         self.assertEqual(self.bus.scan_stale(), 0)
         self.t[0] += 601
-        self.assertEqual(self.bus.scan_stale(), 4)  # сборка: 2; блокер: board; сдано TK-5: board (dispatcher held)
+        self.assertEqual(self.bus.scan_stale(), 1)  # сборка: dispatcher; сдано TK-5 у dispatcher held
         self.assertEqual(self.bus.scan_stale(), 0)
-        self.assertEqual(len(self.addrs("ceo")), 4)
-        self.assertEqual({(s["recipient"], s["seq"]) for s in self.bus.stale()},
-                         {("dispatcher", 1), ("board", 1), ("board", 2), ("board", 3)})
+        self.assertEqual(len(self.addrs("ceo")), 1)
+        self.assertEqual({(s["recipient"], s["seq"]) for s in self.bus.stale()}, {("dispatcher", 1)})
         self.bus.ack("dispatcher", [1])
         self.assertNotIn(("dispatcher", 1), {(s["recipient"], s["seq"]) for s in self.bus.stale()})
 

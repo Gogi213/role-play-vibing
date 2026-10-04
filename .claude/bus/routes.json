@@ -1,14 +1,12 @@
 {"rules": [
- {"match": "задача.*.задание.готово", "to": ["dispatcher", "board"], "hold": ["dispatcher"]},
- {"match": "задача.*.задание.упало", "to": ["dispatcher", "board", "ceo"], "hold": ["dispatcher"]},
- {"match": "задача.*.задание.старт", "to": ["board"]},
- {"match": "задача.*.задание.ход", "to": ["board"]},
- {"match": "задача.*.сдано", "to": ["dispatcher", "board"], "hold": ["dispatcher"]},
- {"match": "задача.*.статус", "to": ["dispatcher", "board"], "hold": ["dispatcher"]},
- {"match": "задача.*.вопрос_владельцу", "to": ["ceo", "board"]},
- {"match": "задача.*.блокер.*", "to": ["board"]},
- {"match": "машина.*.юнит.остановлен", "to": ["dispatcher", "board"]},
- {"match": "машина.*.юнит.упал", "to": ["dispatcher", "board", "ceo"]},
- {"match": "сборка.*", "to": ["dispatcher", "board"]},
- {"match": "служба.не_обработано", "to": ["ceo", "board"]}
+ {"match": "задача.*.задание.готово", "to": ["dispatcher"], "hold": ["dispatcher"]},
+ {"match": "задача.*.задание.упало", "to": ["dispatcher", "ceo"], "hold": ["dispatcher"]},
+ {"match": "задача.*.сдано", "to": ["dispatcher"], "hold": ["dispatcher"]},
+ {"match": "задача.*.статус", "to": ["dispatcher"], "hold": ["dispatcher"]},
+ {"match": "задача.*.к_ceo", "to": ["ceo"]},
+ {"match": "задача.*.вопрос_владельцу", "to": ["ceo"]},
+ {"match": "машина.*.юнит.остановлен", "to": ["dispatcher"]},
+ {"match": "машина.*.юнит.упал", "to": ["dispatcher", "ceo"]},
+ {"match": "сборка.*", "to": ["dispatcher"]},
+ {"match": "служба.не_обработано", "to": ["ceo"]}
 ]}
