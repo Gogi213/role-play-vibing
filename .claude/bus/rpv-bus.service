@@ -1,0 +1,14 @@
+[Unit]
+Description=Role Play Vibing event bus
+After=network-online.target
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p /opt/rpv-bus/data
+ExecStart=/usr/bin/python3 /opt/rpv-bus/bus.py --port 8788 --db /opt/rpv-bus/data/bus.db --routes /opt/rpv-bus/routes.json --token-file /opt/rpv-bus/token
+Restart=always
+RestartSec=2
+CPUQuota=5%
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

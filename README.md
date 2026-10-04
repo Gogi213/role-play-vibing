@@ -62,6 +62,18 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 
 Корень проекта — `--project`, иначе `RPV_PROJECT`, иначе `CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от текущего с `.claude/roles`; не нашли — ошибка с подсказкой `--project` / `/rpv-init`, каталоги не создаются. Состояние (`state.json`, логи, `ceo-inbox.md`, `ceo-wake.log`) — в `<проект>/.claude/dispatcher/`; тикеты и роли — из проекта. Тикеты заводит CEO: готовая команда с абсолютным путём `python "<плагин>/.claude/dispatcher/tickets.py" --project "<проект>" new …` приходит в начале сессии от хука (для CEO, помеченного `/ceo`, — из команды `/ceo`). Подробнее — `.claude/dispatcher/README.md`.
 
+## Шина событий (1.3.0, необязательно)
+
+Транспортная развязка без модели и без внешних пакетов (Python stdlib, sqlite): задание на удалённой машине кончилось — диспетчер просыпается за секунды, а не на следующем тике. Выключена, пока не задан `RPV_BUS_URL`.
+
+- **Шина** `.claude/bus/bus.py` — на любой машине с адресом: журнал событий с номерами (sqlite, WAL), HTTP с токеном, `POST /event`, `GET /q/<получатель>?after=&wait=` (long-poll), `POST /ack`, `/stats`, `/stale`. До ack событие остаётся в очереди; повтор с тем же `id` не дублируется. Юнит-шаблоны — `.claude/bus/rpv-bus.service`, `rpv-bus-watcher.service` (пути и порт поправить под машину); токен — файл `0600`.
+- **Маршруты** — `.claude/bus/routes.json`: шаблон адреса (`задача.*.задание.упало`) → получатели `dispatcher` / `board` / `ceo`; `hold` — получатели, которым событие держится, пока тикет заблокирован. Блокеры: `задача.<TK>.блокер.поставлен` / `.снят`; диспетчер раз в 5 минут шлёт полный снимок (blocked, needs_owner, waiting на незакрытый `ticket:<ID>`).
+- **Сторож машины** `.claude/bus/watcher.py --host <имя>` — сам видит остановку юнитов `rpv-*` (успех/падение с кодом) и файлы хода `*.json`, шлёт события; юниты править не нужно.
+- **Диспетчер** — два исходящих long-poll (очереди `dispatcher` и `ceo`): событие → тик сразу, ack после тика; события CEO → строки `ceo-inbox.md`/`ceo-wake.log`; шина недоступна → одна строка `bus-down`, диспетчер работает по таймеру и `wait_for`, после возврата — `bus-up`.
+- **Отправители** — `.claude/bus/busclient.py send <адрес> [--payload JSON]`; недоступная шина складывается в spool и дошлётся позже. `tickets.py`-события: добавлены в проекте alpha, в плагин — по запросу.
+- **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
+- Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
+
 ## Настроить под проект
 
 - Переменные — `RPV_*`; прежние `ALPHA_*` — запасные (работают, если `RPV_*` не задана).

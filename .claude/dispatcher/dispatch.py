@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
+import bus_link  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -1482,6 +1483,21 @@ def tick(now=None) -> int:
     return launched
 
 
+def _start_bus_link():
+    """Шина событий: включена, только если задан RPV_BUS_URL (и нет RPV_BUS_DISABLE); любая ошибка — работаем по таймеру."""
+    try:
+        import busclient
+        if os.environ.get("RPV_BUS_DISABLE") or not busclient.config()[0]:
+            return None
+        link = bus_link.Link(lambda kind, note: append_ceo_inbox(
+            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note))
+        link.start()
+        return link
+    except Exception as e:
+        print(f"[dispatch] шина не запущена: {type(e).__name__}: {e}", file=sys.stderr)
+        return None
+
+
 USAGE = """Диспетчер задач (v2, 02.10). Запускается из папки плагина; проект — --project <путь>, иначе RPV_PROJECT /
 CLAUDE_PROJECT_DIR, иначе ближайший каталог вверх с .claude/roles. Состояние — <проект>/.claude/dispatcher/.
   python <плагин>/.claude/dispatcher/dispatch.py --project <проект>          # цикл раз в RPV_DISPATCH_INTERVAL (15 с) — БОЕВОЙ
@@ -1510,12 +1526,23 @@ def main(argv=None) -> int:
         return 0
     print(f"[dispatch] v2 loop every {POLL_INTERVAL}s, MAX_PARALLEL={MAX_PARALLEL}, run timeout "
           f"{RUN_TIMEOUT / 60:.0f} min, CLAUDE_BIN={CLAUDE_BIN}")
+    link = _start_bus_link()
     while True:
+        acks = link.take_ack() if link else set()  # события, полученные ДО этого тика — подтверждаем после него
         try:
             tick()
+            if link:
+                bus_link.ack("dispatcher", acks)
+                link.maybe_snapshot([T.read_ticket(p) for p in T.list_tickets(TICKETS_DIR)])
         except Exception as e:
             print(f"[dispatch] tick error: {type(e).__name__}: {e}", file=sys.stderr)
-        time.sleep(POLL_INTERVAL)
+            if link:
+                link.give_back(acks)  # тик упал — события не подтверждены, следующий тик подтвердит
+        if link:
+            link.wake.wait(POLL_INTERVAL)
+            link.wake.clear()
+        else:
+            time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
