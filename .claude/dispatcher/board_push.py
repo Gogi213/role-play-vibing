@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Сводка команды на веб-табло: тикеты проекта → view2 → POST на RPV_BOARD_URL с ключом RPV_BOARD_KEY (без ssh).
+"""Сводка команды на веб-табло: тикеты проекта → view2 → POST на табло по RPV_BOARD (без ssh).
 
     python board_push.py            # один раз
     python board_push.py --loop 5   # каждые 5 с
     python board_push.py --dry      # напечатать сводку, не слать
 
-RPV_BOARD_URL — адрес табло из окна «+» (https://host/<токен>/; «/ingest» допишется сам); ключ выдаёт «+» на табло и в логах не печатается.
+RPV_BOARD — одна строка подключения из окна «+» (https://host/<токен>/#<ключ>); часть после «#» — ключ, он уходит только
+в заголовке и в логах не печатается.
 """
 from __future__ import annotations
 
@@ -72,9 +73,9 @@ def main(argv=None) -> int:
     if "--dry" in argv:
         print(json.dumps(build_view2(tdir), ensure_ascii=False, indent=1))
         return 0
-    url, key = project.env("BOARD_URL"), project.env("BOARD_KEY")
+    url, _, key = (project.env("BOARD") or "").partition("#")
     if not url or not key:
-        print("задайте RPV_BOARD_URL и RPV_BOARD_KEY (ключ выдаёт «+» на табло)", file=sys.stderr)
+        print("задайте RPV_BOARD — строку подключения из окна «+» на табло", file=sys.stderr)
         return 2
     loop = float(argv[argv.index("--loop") + 1]) if "--loop" in argv else 0
     while True:

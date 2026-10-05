@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -15,7 +16,10 @@ class T(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for i, s in enumerate(["in_progress", "waiting", "done"], 1):
                 (Path(d) / f"TK-00{i}.md").write_text(HDR.format(id=f"TK-00{i}", t="t", s=s), encoding="utf-8")
-            v = B.build_view2(d, now=1000.0)
+            (Path(d) / ".claude" / "tickets").mkdir(parents=True)
+            for f in Path(d).glob("TK-*.md"):
+                f.rename(Path(d) / ".claude" / "tickets" / f.name)
+            v = B.build_view2(Path(d) / ".claude" / "tickets", now=1000.0)
             self.assertEqual(v["counters"]["run"], 1)
             self.assertEqual(v["counters"]["wait"], 1)
             self.assertEqual(v["waves"][0]["procs"][-1], "TK-003")
@@ -32,10 +36,17 @@ class T(unittest.TestCase):
                     pass
 
             srv = HTTPServer(("127.0.0.1", 0), H)
-            threading.Thread(target=srv.handle_request, daemon=True).start()
+            threading.Thread(target=lambda: [srv.handle_request() for _ in range(2)], daemon=True).start()
             self.assertEqual(B.push(f"http://127.0.0.1:{srv.server_port}/x/", "K", v), 200)
-            srv.server_close()
             self.assertEqual(got["key"], "K")
+            got.clear()
+            os.environ["RPV_BOARD"] = f"http://127.0.0.1:{srv.server_port}/x/#K2"
+            try:
+                self.assertEqual(B.main(["--project", d]), 0)
+            finally:
+                del os.environ["RPV_BOARD"]
+            self.assertEqual(got["key"], "K2")
+            srv.server_close()
             self.assertEqual(got["body"]["view2"]["counters"]["done"], 1)
 
 
