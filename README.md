@@ -97,3 +97,8 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 - Хуки запускает `hooks/run-hook.sh`: `python3`, иначе `python`, иначе `py -3`; в проекте без `.claude/roles` хуки молчат.
 - Тесты: `python -m unittest discover -s .claude/dispatcher` и `-s .claude/hooks`.
 - Нужно: Python 3.11, `claude` в `PATH`, git.
+
+## Веб-табло (необязательно)
+
+`python .claude/dispatcher/board_push.py [--loop 5] [--dry]` — сводка тикетов на табло по `RPV_BOARD_URL` (адрес приёма
+`…/<токен>/ingest`) и `RPV_BOARD_KEY` (ключ выдаёт «+» на табло); без ssh, ключ в вывод не попадает.
