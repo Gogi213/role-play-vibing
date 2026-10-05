@@ -5,7 +5,7 @@
     python board_push.py --loop 5   # каждые 5 с
     python board_push.py --dry      # напечатать сводку, не слать
 
-RPV_BOARD_URL — адрес приёма вида https://host/<токен>/ingest; ключ выдаёт «+» на табло и в логах не печатается.
+RPV_BOARD_URL — адрес табло из окна «+» (https://host/<токен>/; «/ingest» допишется сам); ключ выдаёт «+» на табло и в логах не печатается.
 """
 from __future__ import annotations
 
@@ -55,6 +55,8 @@ def build_view2(tickets_dir, now: float | None = None) -> dict:
 
 
 def push(url: str, key: str, view2: dict, timeout: float = 10.0) -> int:
+    if not url.rstrip("/").endswith("/ingest"):
+        url = url.rstrip("/") + "/ingest"
     body = json.dumps({"view2": view2, "built_at": view2["time"]}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST",
                                  headers={"X-Board-Key": key, "Content-Type": "application/json"})

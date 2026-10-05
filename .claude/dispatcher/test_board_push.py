@@ -33,7 +33,7 @@ class T(unittest.TestCase):
 
             srv = HTTPServer(("127.0.0.1", 0), H)
             threading.Thread(target=srv.handle_request, daemon=True).start()
-            self.assertEqual(B.push(f"http://127.0.0.1:{srv.server_port}/x/ingest", "K", v), 200)
+            self.assertEqual(B.push(f"http://127.0.0.1:{srv.server_port}/x/", "K", v), 200)
             srv.server_close()
             self.assertEqual(got["key"], "K")
             self.assertEqual(got["body"]["view2"]["counters"]["done"], 1)

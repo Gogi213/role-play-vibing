@@ -100,5 +100,5 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 
 ## Веб-табло (необязательно)
 
-`python .claude/dispatcher/board_push.py [--loop 5] [--dry]` — сводка тикетов на табло по `RPV_BOARD_URL` (адрес приёма
+`python .claude/dispatcher/board_push.py [--loop 5] [--dry]` — сводка тикетов на табло по `RPV_BOARD_URL` (адрес табло из окна «+»
 `…/<токен>/ingest`) и `RPV_BOARD_KEY` (ключ выдаёт «+» на табло); без ssh, ключ в вывод не попадает.
