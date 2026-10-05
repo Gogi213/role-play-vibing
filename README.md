@@ -62,6 +62,144 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 
 Корень проекта — `--project`, иначе `RPV_PROJECT`, иначе `CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от текущего с `.claude/roles`; не нашли — ошибка с подсказкой `--project` / `/rpv-init`, каталоги не создаются. Состояние (`state.json`, логи, `ceo-inbox.md`, `ceo-wake.log`) — в `<проект>/.claude/dispatcher/`; тикеты и роли — из проекта. Тикеты заводит CEO: готовая команда с абсолютным путём `python "<плагин>/.claude/dispatcher/tickets.py" --project "<проект>" new …` приходит в начале сессии от хука (для CEO, помеченного `/ceo`, — из команды `/ceo`). Подробнее — `.claude/dispatcher/README.md`.
 
+## Установка по платформам
+
+Сам плагин ставится одинаково везде (`/plugin marketplace add …`, `/plugin install …`, затем `/rpv-init` и `/rpv-start` в проекте). Различается запуск в фоне: `start.py` выбирает способ по ОС. Ниже — то, что делает код (`start.py`, `dispatch.py`): поведение на macOS и Linux выведено из него, а примеры автозапуска на этих системах не запускались. `<плагин>` — каталог плагина, где лежит `.claude/dispatcher/start.py`; `<проект>` — корень проекта (где `.claude/roles`).
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| `/rpv-start` запускает через | WMI `Win32_Process.Create` | `Popen` в новой сессии (`start_new_session`) | `systemd-run --user`; нет systemd — как на macOS |
+| закрыли окно Claude | работает дальше | работает дальше | работает дальше |
+| выход из системы | не проверялось | не проверялось | работает дальше при `loginctl enable-linger $USER` |
+| перезагрузка | не переживает | не переживает | не переживает (без постоянного юнита) |
+| остановка | `Stop-Process` по `*.pid` | `kill` по `*.pid` | `systemctl --user stop` |
+| автозапуск | вручную: `/rpv-start` | LaunchAgent (пример ниже) | user-юнит systemd (пример ниже) |
+
+**Нужно на любой ОС**
+
+- Python 3.11 (только stdlib) и команда `python` в `PATH`: роли получают команды вида `python <плагин>/.claude/dispatcher/tickets.py …`. Хуки плагина ищут `python3`, затем `python`, затем `py -3`.
+- git и Claude Code CLI `claude` в `PATH` службы (или `CLAUDE_BIN=<полный путь>`), с выполненным входом под тем же пользователем: роли запускаются как `claude -p … --permission-mode bypassPermissions`. Служба получает от `start.py` только `RPV_*`, `ALPHA_*`, `CLAUDE_BIN`, `CLAUDE_PROJECT_DIR`, `CLAUDE_CONFIG_DIR` и `PATH` (на POSIX); секреты (`ANTHROPIC_*`, токены) не переносятся — если службе нужен такой ключ, задайте его в её окружении сами.
+- ssh-клиент и ключ — только если в тикетах есть `wait_for: host:<алиас>:…`. Хост берётся из `RPV_CALC_HOST` / `RPV_VPS_HOST` / `RPV_DECK_HOST` (что понимает `ssh`: `user@host` или алиас из `~/.ssh/config`), ключ — `RPV_DECK_KEY`, `RPV_DECK_KNOWN_HOSTS`. Вызов идёт с `BatchMode=yes` — пароль не спрашивается, нужен ключ без парольной фразы (или ssh-agent). Удалённая сторона — Linux: проверки выполняются командами `test`, `cat`, `systemctl`, `grep`.
+
+### Windows
+
+- **Заранее:** Python 3.11 (`python` в `PATH`), git (Git for Windows — хукам плагина нужен `sh`), `powershell` (через него `start.py` создаёт процессы в WMI), `ssh.exe` — для `wait_for host:`. `claude` должен быть в `PATH` из реестра (системного или пользовательского): служба, созданная через WMI, берёт `PATH` оттуда, а не из вашей сессии; иначе задайте `CLAUDE_BIN=<полный путь>` (переносится вместе с `RPV_*`).
+- **Установка:** `/plugin marketplace add …`, `/plugin install …`; в проекте `/rpv-init`.
+- **Запуск:** `/rpv-start` или `python "<плагин>\.claude\dispatcher\start.py" --project "<проект>"`. Служба создаётся WMI — вне job-объекта приложения. Печатается pid (это `cmd`; pid самой службы — в `<проект>\.claude\dispatcher\dispatch.pid`, `watch.pid`), «отвязан: да» и лог (`dispatch.run.log`, `watch.run.log` там же). Повторный запуск перезапускает уже работающие.
+- **Остановка:** отдельной команды нет: `Stop-Process -Id (Get-Content "<проект>\.claude\dispatcher\dispatch.pid")` и то же для `watch.pid`. Уже запущенные ролями процессы это не гасит (диспетчер подхватит их по pid при следующем старте); снять роль на тикете — `tickets.py stop <ID> …` (только CEO).
+- **Переживает:** закрытие Claude — да; перезагрузку — нет (код ничего не регистрирует в автозапуске). Поднять снова: `/rpv-start` или строка запуска выше.
+
+### macOS
+
+- **Заранее:** Python 3.11 (`python3`; ролям ещё нужна команда `python` в `PATH` — если в системе только `python3`, добавьте `python` ссылкой или менеджером версий), git, `claude` в `PATH` (`command -v claude`) с выполненным входом, `ssh` — есть в системе.
+- **Установка:** `/plugin marketplace add …`, `/plugin install …`; в проекте `/rpv-init`.
+- **Запуск:** `/rpv-start`. Ни WMI, ни systemd нет — `start.py` берёт запасной путь: `Popen` в новой сессии (`start_new_session`), stdin закрыт, вывод дописывается в `<проект>/.claude/dispatcher/dispatch.run.log`, `watch.run.log`. Строка «отвязан: нет (проверить не удалось)» здесь ожидаема: проверка читает `/proc/<pid>/cgroup`, которого на macOS нет.
+- **Остановка:** `kill "$(cat <проект>/.claude/dispatcher/dispatch.pid)"` и то же для `watch.pid`. Запущенные ролями процессы это не гасит (диспетчер подхватит их при следующем старте); снять роль — `tickets.py stop <ID> …` (только CEO).
+- **Переживает:** закрытие окна Claude — да; перезагрузку — нет. После перезагрузки удалите `<проект>/.claude/dispatcher/*.pid`: без `/proc` код не может проверить, чьё имя у процесса с pid из файла, и устаревший файл (pid уже занят чужим процессом) даёт ложное «уже запущен», а `/rpv-start` пошлёт этому чужому процессу SIGTERM (а если тот не завершится за 10 с — SIGKILL).
+
+#### Автозапуск после входа в систему — LaunchAgent
+
+На macOS не проверялось. Два агента — диспетчер и сторож — запускают `dispatch.py` и `watch.py` напрямую, `KeepAlive` перезапускает упавшие; launchd не раскрывает `~` и переменные в plist, поэтому пути подставляет оболочка при создании файлов:
+
+```sh
+PROJECT=/path/to/project                 # корень проекта (где .claude/roles)
+PLUGIN=/path/to/role-play-vibing         # каталог плагина (где .claude/dispatcher/start.py)
+PY="$(command -v python3)"               # Python 3.11+
+AGENT_PATH="$(dirname "$(command -v claude)"):$(dirname "$PY"):/usr/local/bin:/usr/bin:/bin"
+mkdir -p "$PROJECT/.claude/dispatcher" "$HOME/Library/LaunchAgents"   # каталог лога должен существовать до запуска
+for s in dispatch watch; do
+cat > "$HOME/Library/LaunchAgents/local.rpv.$s.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.rpv.$s</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-u</string>
+    <string>$PLUGIN/.claude/dispatcher/$s.py</string>
+    <string>--project</string>
+    <string>$PROJECT</string>
+  </array>
+  <key>WorkingDirectory</key><string>$PROJECT</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$AGENT_PATH</string>
+    <key>PYTHONUTF8</key><string>1</string>
+    <key>PYTHONIOENCODING</key><string>utf-8</string>
+    <!-- по необходимости добавьте RPV_* из README (RPV_DISPATCH_ROLE_PARALLEL, RPV_BUS_URL, RPV_CALC_HOST, RPV_DECK_KEY) -->
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$PROJECT/.claude/dispatcher/$s.run.log</string>
+  <key>StandardErrorPath</key><string>$PROJECT/.claude/dispatcher/$s.run.log</string>
+</dict>
+</plist>
+EOF
+done
+plutil -lint "$HOME/Library/LaunchAgents/local.rpv."{dispatch,watch}.plist
+for s in dispatch watch; do launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/local.rpv.$s.plist"; done
+```
+
+Проверить: `launchctl print "gui/$(id -u)/local.rpv.dispatch"` и `tail <проект>/.claude/dispatcher/dispatch.run.log`. Перезапуск (например, после обновления плагина): `launchctl kickstart -k "gui/$(id -u)/local.rpv.dispatch"`. Остановка и снятие с автозапуска: `launchctl bootout "gui/$(id -u)/local.rpv.dispatch"` (то же для `watch`) и удалить plist. Старый синтаксис: `launchctl load -w <plist>` / `launchctl unload -w <plist>`. С LaunchAgent не пользуйтесь `/rpv-start`: он остановит процесс по pid-файлу, `launchd` тут же поднимет его снова (`KeepAlive`), `start.py` запустит ещё один — один из двух выйдет по pid-замку. Если после перезагрузки в логе «уже запущен (pid …)», а диспетчера нет, — удалите `dispatch.pid` / `watch.pid` (причина — в пункте «Переживает» выше). Секрет, нужный службе (`ANTHROPIC_API_KEY` при входе по ключу), добавляйте в `EnvironmentVariables` только в своём plist (`chmod 600`), не в репозиторий.
+
+### Linux
+
+- **Заранее:** Python 3.11 (`python` в `PATH`; в Debian/Ubuntu `python` даёт пакет `python-is-python3`), git, `claude` в `PATH` с выполненным входом, `ssh`. Для `/rpv-start` через systemd — работающий `systemctl --user`; на сервере без интерактивной сессии включите `loginctl enable-linger $USER`.
+- **Установка:** `/plugin marketplace add …`, `/plugin install …`; в проекте `/rpv-init`.
+- **Запуск:** `/rpv-start`. Если есть `systemd-run` и отвечает `systemctl --user`, каждая служба — юнит `rpv-<dispatch|watch>-<8 знаков хеша пути проекта>` (`systemd-run --user --collect`, вывод в `<проект>/.claude/dispatcher/<имя>.run.log`), «отвязан: да» — по cgroup юнита. Нет systemd (контейнер и т. п.) — запасной путь как на macOS: `Popen` в новой сессии, остановка по `*.pid`.
+- **Остановка:** `systemctl --user list-units 'rpv-*'` — имена, затем `systemctl --user stop <юнит>`. Остановка юнита гасит и запущенные ролями процессы этого проекта.
+- **Переживает:** закрытие Claude — да; выход из системы — да при `loginctl enable-linger $USER`; перезагрузку — нет: юниты `systemd-run` временные и после неё исчезают.
+
+#### Автозапуск после перезагрузки — постоянный user-юнит
+
+На Linux не проверялось. Юнит вызывает тот же `start.py`: службы поднимаются как по `/rpv-start` (временные юниты `rpv-*`, переменные `RPV_*`, `CLAUDE_BIN` и `PATH` переносятся), а `/rpv-start` и `systemctl --user restart rpv-autostart` остаются перезапуском. Для второго проекта — другое имя файла юнита:
+
+```sh
+PROJECT=/path/to/project                 # корень проекта (где .claude/roles)
+PLUGIN=/path/to/role-play-vibing         # каталог плагина (где .claude/dispatcher/start.py)
+PY="$(command -v python3)"               # Python 3.11+
+UNIT_PATH="$(dirname "$(command -v claude)"):$(dirname "$PY"):/usr/local/bin:/usr/bin:/bin"
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/rpv-autostart.service" <<EOF
+[Unit]
+Description=Role Play Vibing - dispatcher and watcher of the project
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment="PATH=$UNIT_PATH"
+# по необходимости - RPV_* из README, start.py перенесёт их в службы:
+#Environment="RPV_DISPATCH_ROLE_PARALLEL=engineer:3"
+ExecStart="$PY" "$PLUGIN/.claude/dispatcher/start.py" --project "$PROJECT"
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now rpv-autostart.service
+loginctl enable-linger "$USER"           # менеджер пользовательских юнитов стартует при загрузке, без входа в систему
+```
+
+Вывод `start.py` — `journalctl --user -u rpv-autostart`; убрать автозапуск — `systemctl --user disable --now rpv-autostart.service` (службы `rpv-*` остановите отдельно).
+
+#### Сервер шины (необязательно, только Linux)
+
+Поставляемые юниты — системные (`WantedBy=multi-user.target`, `/usr/bin/python3`, каталог `/opt/rpv-bus`); сторож машины опрашивает `systemctl`. Диспетчер на любой ОС подключается к шине клиентом (`RPV_BUS_URL`, `RPV_BUS_TOKEN_FILE`).
+
+```sh
+PLUGIN=/path/to/role-play-vibing         # каталог плагина
+sudo mkdir -p /opt/rpv-bus
+sudo cp "$PLUGIN"/.claude/bus/{bus.py,busclient.py,watcher.py,routes.json} /opt/rpv-bus/
+sudo sh -c 'umask 077; python3 -c "import secrets; print(secrets.token_urlsafe(32))" > /opt/rpv-bus/token'
+sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watcher.service /etc/systemd/system/
+```
+
+Перед запуском поправьте в `rpv-bus-watcher.service` `HOSTNAME` на имя машины, а порт (`--port 8788`) и пути — в обоих юнитах под свою машину. Сторожу машины нужны адрес и токен шины: добавьте в его `[Service]` строки `Environment=RPV_BUS_URL=http://<адрес шины>:8788` и `Environment=RPV_BUS_TOKEN_FILE=/opt/rpv-bus/token`. Затем `sudo systemctl daemon-reload && sudo systemctl enable --now rpv-bus rpv-bus-watcher`. На остальные Linux-машины с заданиями ставятся только `watcher.py`, `busclient.py` и `rpv-bus-watcher.service` (с `RPV_BUS_URL` на машину шины и файлом токена); `rpv-bus` — только на машину шины.
+
+Веб-табло (`board_push.py --loop 5`, `RPV_BOARD` в окружении) `/rpv-start` не запускает; при необходимости оформите его отдельной службой по тем же образцам (скрипт `board_push.py` вместо `dispatch.py`, добавьте аргументы `--loop 5`).
+
 ## Шина событий (1.3.0, необязательно)
 
 Транспортная развязка без модели и без внешних пакетов (Python stdlib, sqlite): задание на удалённой машине кончилось — диспетчер просыпается за секунды, а не на следующем тике. Выключена, пока не задан `RPV_BUS_URL`.
@@ -73,6 +211,10 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 - **Отправители** — `.claude/bus/busclient.py send <адрес> [--payload JSON]`; недоступная шина складывается в spool и дошлётся позже. `tickets.py`-события: добавлены в проекте alpha, в плагин — по запросу.
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
+
+## Что нового в 1.4.1
+
+- **README: «Установка по платформам»** — Windows, macOS, Linux: что нужно заранее, как поставить и запустить, как остановить, переживает ли закрытие Claude и перезагрузку; готовые примеры автозапуска — LaunchAgent (macOS), постоянный user-юнит systemd (Linux), установка сервера шины (Linux). Код не менялся.
 
 ## Что нового в 1.4.0
 
@@ -96,7 +238,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 - Защита удаления — хук `PreToolUse` (страж ловит Bash, PowerShell, Write, Edit, MultiEdit, NotebookEdit) в `hooks/hooks.json`; корень проекта — `CLAUDE_PROJECT_DIR`; удалённые каталоги, стадия и закрытые хосты — `RPV_GUARD_REMOTE_ROOTS`, `RPV_GUARD_HOST_ROOTS` (`хост=корень,корень;хост2=…` — только при ssh на этот хост), `RPV_GUARD_STAGE`, `RPV_GUARD_FORBIDDEN_HOSTS` (без переменных — на удалённых машинах удалять нельзя нигде; прежние `ALPHA_GUARD_*` — запасные).
 - Хуки запускает `hooks/run-hook.sh`: `python3`, иначе `python`, иначе `py -3`; в проекте без `.claude/roles` хуки молчат.
 - Тесты: `python -m unittest discover -s .claude/dispatcher` и `-s .claude/hooks`.
-- Нужно: Python 3.11, `claude` в `PATH`, git.
+- Нужно: Python 3.11, `claude` в `PATH`, git (по ОС — «Установка по платформам»).
 
 ## Веб-табло (необязательно)
 
