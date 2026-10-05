@@ -78,6 +78,33 @@ class LinkTest(unittest.TestCase):
         self.assertTrue(self.link.wake.wait(3))
 
 
+class AckRetryTest(unittest.TestCase):
+    def test_failed_ack_returns_false_and_ceo_retries(self):
+        orig = busclient.request
+        calls = []
+
+        def flaky(path, *a, **k):
+            if path == "/ack":
+                calls.append(1)
+                if len(calls) == 1:
+                    raise OSError("boom")
+                return {}
+            return orig(path, *a, **k)
+
+        busclient.request = flaky
+        try:
+            self.assertFalse(bus_link.ack("x", [1]))
+            self.assertTrue(bus_link.ack("x", [1]))
+            calls.clear()
+            link = bus_link.Link(lambda k, n: None)
+            link._on_ceo([{"seq": 7, "addr": "a", "payload": ""}])
+            self.assertEqual(link.ceo_unacked, {7})
+            link.retry_ceo_ack()
+            self.assertEqual(link.ceo_unacked, set())
+        finally:
+            busclient.request = orig
+
+
 class DownTest(unittest.TestCase):
     def test_down_reports_once_and_up_after(self):
         lines = []

@@ -58,6 +58,19 @@ class Core(unittest.TestCase):
         self.bus.post("задача.TK-9.блокер.снят")
         self.assertEqual(self.addrs("dispatcher"), ["задача.TK-9.задание.готово", "задача.TK-8.задание.готово"])
 
+    def test_released_below_cursor_is_delivered(self):
+        self.bus.post("задача.TK-9.блокер.поставлен", {"reason": "depends TK-3"})
+        self.bus.post("задача.TK-9.задание.готово")
+        self.bus.post("задача.TK-8.задание.готово")
+        got = self.bus.fetch("dispatcher")
+        cur = max(e["seq"] for e in got)
+        self.bus.ack("dispatcher", [e["seq"] for e in got])
+        self.bus.post("задача.TK-9.блокер.снят")
+        late = self.bus.fetch("dispatcher", after=cur)
+        self.assertEqual([e["addr"] for e in late], ["задача.TK-9.задание.готово"])
+        self.bus.ack("dispatcher", [e["seq"] for e in late])
+        self.assertEqual(self.bus.fetch("dispatcher", after=cur), [])
+
     def test_hold_does_not_block_ceo_question(self):
         self.bus.post("задача.TK-9.блокер.поставлен", {"reason": "вопрос"})
         self.bus.post("задача.TK-9.вопрос_владельцу")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Сторож машины (TK-045): сам видит остановку юнитов tk*/alpha-* и ход заданий (/data/progress/*.json) и шлёт события
+"""Сторож машины (TK-045): сам видит остановку юнитов tk*/rpv-* и ход заданий (~/rpv/progress/*.json) и шлёт события
 на шину — ни юниты, ни progress-файлы трогать не нужно. Остановка: машина.<host>.юнит.остановлен (успех) / .упал;
 задание: задача.<TK>.задание.старт|ход|готово, при падении юнита с файлом хода — задача.<TK>.задание.упало."""
 import argparse
@@ -57,7 +57,8 @@ def is_done(o):
 
 class Watcher:
     def __init__(self, host, patterns, exclude, progress_glob, post=busclient.post, snap=snapshot, showf=show,
-                 prog=read_progress):
+                 prog=read_progress, watch_file=os.path.expanduser("~/rpv/progress/watch.list"), exists=os.path.exists):
+        self.watch_file, self.exists, self.files_seen = watch_file, exists, set()
         self.host, self.patterns, self.exclude = host, patterns, exclude
         self.pg, self.post, self.snap, self.showf, self.prog = progress_glob, post, snap, showf, prog
         self.running = {}   # unit -> InvocationID
@@ -121,8 +122,29 @@ class Watcher:
                 ev.append((f"задача.{tk}.задание.ход", pl, f"prog:{self.host}:{job}:step:{step}:{stamp}"))
         return ev
 
+    def file_events(self):
+        """Пути из watch_file (по строке; их дописывает диспетчер) — появление файла = событие; проверка os.path.exists
+        по списку, без обхода каталогов."""
+        ev = []
+        try:
+            with open(self.watch_file, encoding="utf-8") as f:
+                paths = [ln.strip() for ln in f if os.path.isabs(ln.strip())]
+        except OSError:
+            return ev
+        for p in paths:
+            if p in self.files_seen or not self.exists(p):
+                continue
+            self.files_seen.add(p)
+            try:
+                stamp = int(os.stat(p).st_mtime)
+            except OSError:
+                stamp = 0
+            ev.append((f"машина.{self.host}.файл.появился", {"path": p, "host": self.host},
+                       f"file:{self.host}:{p}:{stamp}"))
+        return ev
+
     def run_once(self):
-        events = self.tick(self.prog(self.pg))
+        events = self.tick(self.prog(self.pg)) + self.file_events()
         for addr, payload, eid in events:
             self.post(addr, payload, eid, 5)
         return events
@@ -133,7 +155,7 @@ def main():
     ap.add_argument("--host", required=True)
     ap.add_argument("--patterns", nargs="+", default=["rpv-*"])
     ap.add_argument("--exclude", nargs="*", default=["rpv-bus"])
-    ap.add_argument("--progress-glob", default="/data/progress/*.json")
+    ap.add_argument("--progress-glob", default=os.path.expanduser("~/rpv/progress/*.json"))
     ap.add_argument("--interval", type=float, default=3.0)
     a = ap.parse_args()
     w = Watcher(a.host, a.patterns, a.exclude, a.progress_glob)

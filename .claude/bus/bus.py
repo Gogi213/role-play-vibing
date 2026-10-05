@@ -113,7 +113,8 @@ class Bus:
             while True:
                 rows = self.db.execute(
                     "SELECT e.seq,e.id,e.addr,e.ts,e.payload FROM deliveries d JOIN events e ON e.seq=d.seq "
-                    "WHERE d.recipient=? AND d.state='pending' AND d.seq>? ORDER BY d.seq LIMIT 100",
+                    "WHERE d.recipient=? AND d.state='pending' AND (d.seq>? OR d.held_for IS NOT NULL) "
+                    "ORDER BY d.seq LIMIT 100",
                     (rcp, after)).fetchall()
                 left = end - time.monotonic()
                 if rows or left <= 0:

@@ -129,7 +129,7 @@ def check_blocked_and_needs_owner(now) -> list:
     return out
 
 
-def check_orphan_tickets(now) -> list:
+def check_orphan_tickets(now, skip_ids=()) -> list:
     """п.2б: in_progress/waiting/in_review без новой записи дольше порога — сирота (in_review — аудит 03.10: ревьюер
     мог упасть, и тикет висел бы вечно) (TK-001 п.2, до правила
     (а') это значило «замерла навсегда»; правило (а') её теперь будит, но сторож всё равно следит на
@@ -142,6 +142,8 @@ def check_orphan_tickets(now) -> list:
             continue
         if tkt.status in CLOSED_TICKET_STATUSES or tkt.status not in ("in_progress", "waiting", "in_review"):
             continue
+        if tkt.id in skip_ids:  # цель wait_for жива (TK-056 п.4): долгое ожидание — не сирота
+            continue
         last_ts = tkt.log[-1].ts if tkt.log else T.parse_dt(tkt.header.get("updated")) if tkt.header.get(
             "updated") else None
         if last_ts is None:
@@ -151,6 +153,152 @@ def check_orphan_tickets(now) -> list:
             out.append(Finding("orphan-ticket", tkt.id,
                                 f"{tkt.id}: status={tkt.status} без новой записи {age_h:.1f} ч"))
     return out
+
+
+# --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
+DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
+
+
+def _producer_pattern(path: str) -> str:
+    job = os.path.basename(path.rstrip("/"))
+    job = job.rsplit(".", 1)[0] if "." in job else job
+    job = re.sub(r"[^A-Za-z0-9_-]", "", job)
+    return f"[{job[0]}]{job[1:]}" if len(job) >= 4 else ""
+
+
+def probe_wait_target(alias: str, what: str, arg: str) -> str:
+    """`exists` — путь есть; `producer` — пути нет, но юнит/процесс с именем задания жив; `dead` — нет ни того, ни
+    другого; `unknown` — ssh не ответил (не считаем). Имя задания — basename пути без расширения."""
+    pat = _producer_pattern(arg)
+    if what != "path" or not arg.startswith("/") or not pat:
+        return "unknown"
+    q = D._remote_test_arg(arg)
+    remote = (f"if test -e {q}; then echo exists; "
+              f"elif {{ systemctl list-units --all --plain --no-legend --state=active,activating 2>/dev/null; "
+              f"ps -eo args 2>/dev/null; }} | grep -q -e '{pat}'; then echo producer; else echo dead; fi")
+    try:
+        r = subprocess.run(D._ssh_cmd(alias, remote), capture_output=True, timeout=20)
+    except Exception:
+        return "unknown"
+    out = (r.stdout or b"").decode("utf-8", "replace").strip().splitlines()
+    return out[0] if r.returncode == 0 and out and out[0] in ("exists", "producer", "dead") else "unknown"
+
+
+def _wait_target_state(tkt, probe) -> str:
+    parsed = T.parse_wait_for(tkt.header.get("wait_for") or "")
+    if parsed is None:
+        return "unknown"
+    if parsed[0] == "ticket":
+        return "exists" if (D.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
+    if parsed[0] == "host":
+        return probe(parsed[1], parsed[2], parsed[3])
+    return "unknown"
+
+
+def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
+    """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
+    сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
+    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
+    dead = ws.setdefault("dead_wait", {})
+    alive, seen = set(), set()
+    for path in T.list_tickets(D.TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        if tkt.status != "waiting" or not (tkt.header.get("wait_for") or "").strip():
+            continue
+        spec = tkt.header["wait_for"].strip()
+        st = _wait_target_state(tkt, probe)
+        if st in ("exists", "producer"):
+            alive.add(tkt.id)
+            dead.pop(tkt.id, None)
+            continue
+        if st != "dead":
+            continue
+        seen.add(tkt.id)
+        ent = dead.get(tkt.id) or {}
+        n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+        dead[tkt.id] = {**ent, "spec": spec, "n": n}
+        if n < DEAD_WAIT_STRIKES:
+            continue
+        repeat = spec in ent.get("acted", [])
+        why = f"сторож: цель wait_for `{spec}` не существует и её никто не производит ({n} проверки подряд)"
+        with T.ticket_lock(path):
+            if repeat:
+                T.append_log(path, "watch", why + " — второй раз та же цель, тикет blocked (решение за CEO)", now)
+                T.write_header_updates(path, {"status": "blocked"}, now)
+            else:
+                T.append_log(path, "watch", why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
+                T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
+        dead[tkt.id] = {"spec": spec, "n": 0, "acted": ent.get("acted", []) + [spec]}
+    for tid in list(dead):
+        if tid not in seen and tid not in alive:
+            dead.pop(tid, None)
+    return alive
+
+
+# --- счётчик застоя по runs.log (TK-056 п.4) -----------------------------------------------------
+STALL_RUNS = int(P.env("WATCH_STALL_RUNS", "2"))  # подряд таймаутов / холостых запусков до блока
+_RUN_KV = re.compile(r"(\w+)=(\S+)")
+
+
+def _recent_runs(runs_path, tid: str, limit: int) -> list:
+    """Последние `limit` запусков ролей тикета из runs.log (без on_met/stopped), старые → новые: (ts, роль, статус)."""
+    try:
+        lines = Path(runs_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    rows = []
+    for ln in reversed(lines[-4000:]):
+        parts = ln.split()
+        if len(parts) < 4 or parts[1] != tid or parts[2] == "on_met":
+            continue
+        st = dict(_RUN_KV.findall(ln)).get("status", "?")
+        if st == "stopped":
+            continue
+        rows.append((T.parse_dt(parts[0]), parts[2], st))
+        if len(rows) >= limit:
+            break
+    return rows[::-1]
+
+
+def triage_stalls(ws: dict, now, runs_path=None) -> list:
+    """Застой тикета in_progress: последние STALL_RUNS запуска — все timeout (resume уже пробовался) либо все «холостые»
+    (status=ok, а роль не оставила в логе ни одной записи между концом прежнего запуска тикета и концом этого) → тикет
+    blocked с записью watch (сигнал CEO через находку blocked). Один раз на последний запуск (ws['stall'])."""
+    done = ws.setdefault("stall", {})
+    acted = []
+    for path in T.list_tickets(D.TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        if tkt.status != "in_progress":
+            continue
+        rows = _recent_runs(runs_path or D.RUNS_LOG, tkt.id, STALL_RUNS + 1)
+        if len(rows) < STALL_RUNS or done.get(tkt.id) == T.now_iso(rows[-1][0]):
+            continue
+        last = rows[-STALL_RUNS:]
+        if all(r[2] == "timeout" for r in last):
+            why = f"{STALL_RUNS} таймаута запуска подряд (resume уже пробовался)"
+        elif all(r[2] == "ok" for r in last) and len(rows) > STALL_RUNS:
+            idle = 0
+            for i in range(len(rows) - STALL_RUNS, len(rows)):
+                lo, hi, role = rows[i - 1][0], rows[i][0], rows[i][1]
+                if lo and hi and not any(e.author == role and lo < e.ts <= hi for e in tkt.log):
+                    idle += 1
+            if idle < STALL_RUNS:
+                continue
+            why = f"{STALL_RUNS} холостых запуска подряд (роль не оставила записи в логе)"
+        else:
+            continue
+        with T.ticket_lock(path):
+            T.append_log(path, "watch", f"сторож: {why} — тикет blocked, решение за CEO (по runs.log)", now)
+            T.write_header_updates(path, {"status": "blocked"}, now)
+        done[tkt.id] = T.now_iso(rows[-1][0])
+        acted.append(tkt.id)
+    return acted
 
 
 def deck_off() -> bool:
@@ -286,11 +434,11 @@ def check_deck_frozen(ssh_run=_ssh_run) -> list:
 
 
 def collect_findings(state: dict, now, ssh_run=_ssh_run, started_at=None, hold_hint=None,
-                     observed: dict = None) -> list:
+                     observed: dict = None, alive_waits=()) -> list:
     findings = []
     findings += check_dispatcher_alive(state, now, started_at)
     findings += check_blocked_and_needs_owner(now)
-    findings += check_orphan_tickets(now)
+    findings += check_orphan_tickets(now, alive_waits)
     findings += check_second_machine(ssh_run, hold_hint=hold_hint, observed=observed)
     return findings
 
@@ -459,7 +607,17 @@ def run_once(now=None, ssh_run=_ssh_run) -> list:
     started_at = T.parse_dt(ws["started_at"])
     state = D.load_state()
     observed = {}
-    findings = collect_findings(state, now, ssh_run, started_at, hold_hint=ws.get("deck_hold"), observed=observed)
+    try:
+        alive_waits = triage_waits(ws, now)
+    except Exception as e:  # триаж не должен ронять цикл сторожа
+        print(f"[watch] triage_waits: {type(e).__name__}: {e}", file=sys.stderr)
+        alive_waits = set()
+    try:
+        triage_stalls(ws, now)
+    except Exception as e:
+        print(f"[watch] triage_stalls: {type(e).__name__}: {e}", file=sys.stderr)
+    findings = collect_findings(state, now, ssh_run, started_at, hold_hint=ws.get("deck_hold"), observed=observed,
+                                alive_waits=alive_waits)
     if "hold" in observed:
         ws["deck_hold"] = observed["hold"]  # последнее известное состояние HOLD — на случай таймаута его проверки
     findings = _apply_ssh_fail_streak(findings, ws)

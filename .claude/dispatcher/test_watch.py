@@ -583,9 +583,9 @@ class ContentFingerprintDedupTests(WatchSandbox):
     # --- v2 (02.10): нормализованная сигнатура — реальные тексты ALERT-* из ceo-inbox ---
 
     REWORK_A = ("Вторая машина: ALERT-rework: 2026-10-01T23:12:59Z 1 суток разобраны повторно за 24 ч (всего разборов 3); "
-                "больше всех — /home/deck/alpha/tk022/view/2026-01-01/root-2026-01-01: 3 р")
+                "больше всех — /home/user/rpv/tk022/view/2026-01-01/root-2026-01-01: 3 р")
     REWORK_B = ("Вторая машина: ALERT-rework: 2026-10-02T00:03:40Z 2 суток разобраны повторно за 24 ч (всего разборов 4); "
-                "больше всех — /home/deck/alpha/tk022/view/2026-01-01/root-2026-01-01: 4 р")
+                "больше всех — /home/user/rpv/tk022/view/2026-01-01/root-2026-01-01: 4 р")
     IDLE_A = ("Вторая машина: ALERT-idle-deck: 2026-10-01T22:07:01Z очередь пуста, заданий нет, load1 0.31 — "
               "простой дольше 30 мин")
     IDLE_B = ("Вторая машина: ALERT-idle-deck: 2026-10-01T23:04:30Z очередь пуста, заданий нет, load1 0.76 — "
@@ -694,6 +694,97 @@ class DedupTests(WatchSandbox):
         W.notify_findings([], ws, self.now + timedelta(minutes=5))  # снято
         posted3 = W.notify_findings(f, ws, self.now + timedelta(minutes=6))  # снова — сразу, не ждём окна
         self.assertEqual(len(posted3), 1)
+
+
+class TriageWaitsTests(WatchSandbox):
+    def _waiting(self, spec, hours=5):
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт", status="todo",
+                            now=self.now - timedelta(hours=hours))
+        T.write_header_updates(p, {"status": "waiting", "wait_for": spec}, now=self.now - timedelta(hours=hours))
+        T.append_log(p, "engineer", "жду", now=self.now - timedelta(hours=hours))
+        return p
+
+    def test_alive_target_is_not_orphan(self):
+        self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        ws = {}
+        alive = W.triage_waits(ws, self.now, probe=lambda *a: "producer")
+        self.assertEqual(len(alive), 1)
+        self.assertEqual(W.check_orphan_tickets(self.now, alive), [])
+        self.assertEqual(len(W.check_orphan_tickets(self.now)), 1)
+
+    def test_dead_target_two_strikes_wakes_owner_then_blocks(self):
+        p = self._waiting("host:calc:/var/rpv/progress/rpv-b12flag.json")
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "dead")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now, probe=lambda *a: "dead")
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertEqual(t.log[-1].author, "watch")
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/var/rpv/progress/rpv-b12flag.json"})
+        W.triage_waits(ws, self.now, probe=lambda *a: "dead")
+        W.triage_waits(ws, self.now, probe=lambda *a: "dead")
+        self.assertEqual(T.read_ticket(p).status, "blocked")
+
+    def test_unknown_probe_does_not_count(self):
+        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        ws = {}
+        for _ in range(4):
+            W.triage_waits(ws, self.now, probe=lambda *a: "unknown")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_missing_ticket_target_is_dead(self):
+        p = self._waiting("ticket:TK-999")
+        ws = {}
+        W.triage_waits(ws, self.now)
+        W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+
+class TriageStallsTests(WatchSandbox):
+    def _ticket(self):
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Застой", status="todo",
+                            now=self.now - timedelta(hours=5))
+        T.write_header_updates(p, {"status": "in_progress"}, now=self.now - timedelta(hours=5))
+        return p, T.read_ticket(p).id
+
+    def _runs(self, tid, rows):
+        f = Path(self.tmp.name) / "runs.log"
+        f.write_text("".join(
+            f"{(self.now - timedelta(minutes=m)).isoformat(timespec='seconds')} {tid} engineer reason=next status={st}\n"
+            for m, st in rows), encoding="utf-8")
+        return f
+
+    def test_two_timeouts_in_a_row_block_once(self):
+        p, tid = self._ticket()
+        runs = self._runs(tid, [(60, "ok"), (40, "timeout"), (20, "timeout")])
+        ws = {}
+        self.assertEqual(W.triage_stalls(ws, self.now, runs), [tid])
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.log[-1].author), ("blocked", "watch"))
+        T.write_header_updates(p, {"status": "in_progress"})
+        self.assertEqual(W.triage_stalls(ws, self.now, runs), [])
+
+    def test_timeout_then_ok_is_not_stall(self):
+        p, tid = self._ticket()
+        runs = self._runs(tid, [(40, "timeout"), (20, "ok")])
+        self.assertEqual(W.triage_stalls({}, self.now, runs), [])
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+    def test_two_idle_ok_runs_block_but_productive_run_does_not(self):
+        p, tid = self._ticket()
+        runs = self._runs(tid, [(60, "ok"), (40, "ok"), (20, "ok")])
+        T.append_log(p, "engineer", "сделал", now=self.now - timedelta(minutes=30))  # запуск в -20 не холостой
+        self.assertEqual(W.triage_stalls({}, self.now, runs), [])
+        p2, tid2 = self._ticket()
+        runs2 = self._runs(tid2, [(60, "ok"), (40, "ok"), (20, "ok")])
+        self.assertEqual(W.triage_stalls({}, self.now, runs2), [tid2])
+
+    def test_waiting_ticket_ignored(self):
+        p, tid = self._ticket()
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "file:/x"})
+        runs = self._runs(tid, [(40, "timeout"), (20, "timeout")])
+        self.assertEqual(W.triage_stalls({}, self.now, runs), [])
 
 
 class RunOnceTests(WatchSandbox):

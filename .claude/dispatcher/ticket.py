@@ -3,7 +3,8 @@
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
 (backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner|stopped), `reviewer` (опц.),
-`wait_for` (опц.: `file:<путь>` локально, `deck:<путь>` на второй машине через ssh, `ticket:<ID>`),
+`wait_for` (опц.: `file:<путь>` локально, `host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh
+(`deck:<путь>` — синоним `host:deck:<путь>`), `ticket:<ID>`; разбор — `parse_wait_for`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
 `updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
@@ -59,6 +60,48 @@ LOG_KEEP_ENTRIES = 8
 ARCHIVE_DIRNAME = "archive"
 ARCHIVE_POINTER_PREFIX = "> Архив лога:"
 _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?", re.M)
+
+
+# --- wait_for: допустимые формы (одно место правды: диспетчер, tickets.py, проверка записи) --------------------
+# Алиасы машин для `host:<алиас>:...`; адрес ssh — из окружения (RPV_<АЛИАС>_HOST, прежнее ALPHA_<АЛИАС>_HOST), без умолчаний.
+WAIT_FOR_HOSTS = ("calc", "vps", "deck")
+WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
+                    "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
+                    "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>)")
+_UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
+_TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def parse_wait_for(spec: str):
+    """Разбор `wait_for`. Возвращает ("file", путь) | ("ticket", ID) | ("host", алиас, "path"|"unit", арг) либо None
+    (форма не понята). Пустая строка — None: «ничего не ждём» проверяется отдельно."""
+    spec = (spec or "").strip()
+    if spec.startswith("file:"):
+        arg = spec[len("file:"):].strip()
+        return ("file", arg) if arg else None
+    if spec.startswith("ticket:"):
+        arg = spec[len("ticket:"):].strip()
+        return ("ticket", arg) if _TICKET_ID_RE.match(arg) else None
+    if spec.startswith("deck:"):
+        arg = spec[len("deck:"):].strip()
+        return ("host", "deck", "path", arg) if arg else None
+    if spec.startswith("host:"):
+        alias, sep, rest = spec[len("host:"):].partition(":")
+        rest = rest.strip()
+        if alias not in WAIT_FOR_HOSTS or not sep or not rest:
+            return None
+        if rest.startswith("unit:"):
+            unit = rest[len("unit:"):].strip()
+            return ("host", alias, "unit", unit) if _UNIT_NAME_RE.match(unit) else None
+        return ("host", alias, "path", rest)
+    return None
+
+
+def check_wait_for_format(spec: str) -> None:
+    """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
+    spec = (spec or "").strip()
+    if spec and parse_wait_for(spec) is None:
+        raise ValueError(f"wait_for не понят: {spec!r}. Допустимо: {WAIT_FOR_FORMATS}")
 
 
 def now_iso(now: datetime | None = None) -> str:
@@ -356,6 +399,8 @@ def read_ticket(path) -> Ticket:
 def write_header_updates(path, updates: dict, now: datetime = None, stamp_updated: bool = True) -> None:
     """Точечно правит строки шапки (значения `updates`), тело файла не трогает. Под блокировкой тикета, запись атомарная."""
     path = Path(path)
+    if "wait_for" in updates:
+        check_wait_for_format(updates["wait_for"])  # неизвестная форма — отказ до записи (иначе тикет ждёт вечно)
     with ticket_lock(path):
         text = path.read_text(encoding="utf-8")
         m = _match_header(text)
@@ -413,6 +458,7 @@ def create_ticket(tickets_dir, owner: str, title: str, reviewer: str = None,
                    description: str = "", wait_for: str = "", now: datetime = None,
                    prefix: str = "TK-", status: str = "todo", executor: str = None,
                    kind: str = None, effort: str = None) -> Path:
+    check_wait_for_format(wait_for)
     tickets_dir = Path(tickets_dir)
     tickets_dir.mkdir(parents=True, exist_ok=True)
     with ticket_lock(tickets_dir / ".new-ticket"):      # номер и файл — под одной блокировкой, id не повторяются

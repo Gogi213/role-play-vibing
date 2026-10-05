@@ -8,9 +8,26 @@ class Fake:
         self.units, self.info, self.progress, self.posted = {}, {}, {}, []
 
     def make(self):
-        return W.Watcher("calc", ["tk*"], ["alpha-bus"], "x", post=lambda a, p, i, t: self.posted.append((a, i)),
+        return W.Watcher("calc", ["tk*"], ["rpv-bus"], "x", post=lambda a, p, i, t: self.posted.append((a, i)),
                          snap=lambda pat: dict(self.units), showf=lambda u: self.info.get(u, {"InvocationID": "inv1"}),
                          prog=lambda pg: dict(self.progress))
+
+
+class FileMarkers(unittest.TestCase):
+    def test_file_appears_once(self):
+        import os
+        import tempfile
+        d = tempfile.mkdtemp()
+        lst, marker = os.path.join(d, "watch.list"), os.path.join(d, "DONE")
+        with open(lst, "w", encoding="utf-8") as f:
+            f.write(marker + "\nrelative\n")
+        f = Fake()
+        w = W.Watcher("calc", ["tk*"], [], "x", post=lambda a, p, i, t: f.posted.append((a, i)),
+                      snap=lambda pat: {}, prog=lambda pg: {}, watch_file=lst)
+        self.assertEqual(w.run_once(), [])
+        open(marker, "w").close()
+        self.assertEqual([e[0] for e in w.run_once()], ["машина.calc.файл.появился"])
+        self.assertEqual(w.run_once(), [])
 
 
 class T(unittest.TestCase):
@@ -45,7 +62,7 @@ class T(unittest.TestCase):
 
     def test_exclude(self):
         f = Fake(); w = f.make()
-        f.units = {"alpha-bus.service": "active"}
+        f.units = {"rpv-bus.service": "active"}
         w.run_once()
         f.units = {}
         self.assertEqual(w.run_once(), [])

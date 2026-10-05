@@ -1,4 +1,4 @@
-"""CLI для тикетов диспетчера: `new`, `comment`, `start`, `status`. Только stdlib.
+"""CLI для тикетов диспетчера: `new`, `comment`, `start`, `wait`, `status`. Только stdlib.
 
 Запускается из папки плагина; проект — `--project <путь>` (перед подкомандой), иначе `RPV_PROJECT` /
 `CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от текущего с `.claude/roles`; не нашли — ошибка с подсказкой,
@@ -13,6 +13,7 @@
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
     tickets.py comment TK-001 --author researcher --text "..." [--next judge]
     tickets.py start TK-001                                     # backlog|stopped → todo
+    tickets.py wait TK-001 host:calc:<путь>/<job>.json [--on-met "python tools/x.py арг"]  # status: waiting + wait_for
     tickets.py stop TK-001 --text "..." [--next engineer]       # только CEO: снять роль
     tickets.py status                                           # потрачено по задачам
 
@@ -66,10 +67,14 @@ def cmd_new(args) -> int:
         print("--kind без --executor haiku не имеет смысла", file=sys.stderr)
         return 1
 
-    path = T.create_ticket(TICKETS_DIR, owner=args.owner, title=args.title, reviewer=reviewer,
-                            description=args.desc or "", wait_for=args.wait_for or "",
-                            status="backlog" if args.backlog else "todo",
-                            executor=args.executor, kind=args.kind, effort=args.effort)
+    try:
+        path = T.create_ticket(TICKETS_DIR, owner=args.owner, title=args.title, reviewer=reviewer,
+                                description=args.desc or "", wait_for=args.wait_for or "",
+                                status="backlog" if args.backlog else "todo",
+                                executor=args.executor, kind=args.kind, effort=args.effort)
+    except ValueError as e:  # неизвестная форма wait_for — файл не создан
+        print(e, file=sys.stderr)
+        return 1
     try:
         print(path.relative_to(PROJECT_ROOT))
     except ValueError:
@@ -113,6 +118,29 @@ def cmd_start(args) -> int:
         was = tkt.status
         T.write_header_updates(path, {"status": "todo"})
     print(f"{args.id}: {was} → todo")
+    return 0
+
+
+def cmd_wait(args) -> int:
+    """`status: waiting` + `wait_for: <форма>` одной командой с проверкой формы: неизвестная форма — отказ с подсказкой
+    (диспетчер такой `waiting` снять не умеет — тикет ждал бы вечно)."""
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    spec = args.spec.strip()
+    if not spec:
+        print(f"wait: форма пуста. Допустимо: {T.WAIT_FOR_FORMATS}", file=sys.stderr)
+        return 1
+    try:
+        upd = {"status": "waiting", "wait_for": spec}
+        if getattr(args, "on_met", None):
+            upd["on_met"] = args.on_met.strip()
+        T.write_header_updates(path, upd)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"{args.id}: status: waiting, wait_for: {spec}")
     return 0
 
 
@@ -203,6 +231,13 @@ def main(argv=None) -> int:
     p_start = sub.add_parser("start")
     p_start.add_argument("id")
     p_start.set_defaults(func=cmd_start)
+
+    p_wait = sub.add_parser("wait", help="status: waiting + wait_for (форма проверяется)")
+    p_wait.add_argument("id")
+    p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
+    p_wait.add_argument("--on-met", default=None,
+                        help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
+    p_wait.set_defaults(func=cmd_wait)
 
     p_stop = sub.add_parser("stop", help="только CEO: остановить запущенную роль тикета и дать новую постановку")
     p_stop.add_argument("id")

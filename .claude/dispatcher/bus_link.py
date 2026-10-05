@@ -17,9 +17,9 @@ SNAPSHOT_EVERY_S = float(os.environ.get("RPV_BUS_SNAPSHOT_S") or os.environ.get(
 class Listener(threading.Thread):
     """Читает очередь `recipient`; новые события кладёт в pending и вызывает on_events(events)."""
 
-    def __init__(self, recipient, on_events, on_state=None):
+    def __init__(self, recipient, on_events, on_state=None, tick=None):
         super().__init__(daemon=True, name=f"bus-{recipient}")
-        self.recipient, self.on_events, self.on_state = recipient, on_events, on_state
+        self.recipient, self.on_events, self.on_state, self.tick = recipient, on_events, on_state, tick
         self.after, self.seen, self.up = 0, set(), None
         self.stop_flag = threading.Event()
 
@@ -34,6 +34,8 @@ class Listener(threading.Thread):
                     self.after = max(self.after, e["seq"])
                 if new:
                     self.on_events(new)
+                if self.tick:
+                    self.tick()
             except Exception as e:
                 self._state(False, f"{type(e).__name__}: {e}")
                 self.stop_flag.wait(5)
@@ -45,13 +47,16 @@ class Listener(threading.Thread):
                 self.on_state(up, why)
 
 
-def ack(recipient, seqs):
+def ack(recipient, seqs) -> bool:
+    """True — подтверждено (или нечего). False — не дошло: вызывающий обязан вернуть seqs и повторить
+    (курсор Listener.after уже ушёл вперёд, шина сама их не выдаст — потерянный ack = «не_обработано», TK-055)."""
     if not seqs:
-        return
+        return True
     try:
         busclient.request("/ack", {"recipient": recipient, "seqs": sorted(seqs)}, timeout=5)
+        return True
     except Exception:
-        pass  # не подтверждено — шина выдаст снова после переподключения, дубли отсечёт seen/id
+        return False
 
 
 def blockers_snapshot(tickets) -> dict:
@@ -71,7 +76,8 @@ def blockers_snapshot(tickets) -> dict:
 class Link:
     """Состояние связи для цикла диспетчера: wake.wait(...) вместо sleep; ack — после законченного тика."""
 
-    def __init__(self, ceo_line):
+    def __init__(self, ceo_line, on_event=None):
+        self.on_event = on_event  # callable(event) — wait_for по событию (TK-055), вызывается из потока слушателя
         self.wake = threading.Event()
         self.lock = threading.Lock()
         self.to_ack = set()
@@ -79,13 +85,20 @@ class Link:
         self.down_since = None
         self.last_snapshot = 0.0
         self.disp = Listener("dispatcher", self._on_disp, self._on_state)
-        self.ceo = Listener("ceo", self._on_ceo)
+        self.ceo_unacked = set()
+        self.ceo = Listener("ceo", self._on_ceo, tick=self.retry_ceo_ack)
 
     def start(self):
         self.disp.start()
         self.ceo.start()
 
     def _on_disp(self, events):
+        if self.on_event:
+            for e in events:
+                try:
+                    self.on_event(e)
+                except Exception:
+                    pass  # разбор события не должен терять ack/пробуждение
         with self.lock:
             self.to_ack.update(e["seq"] for e in events)
         self.wake.set()
@@ -93,7 +106,12 @@ class Link:
     def _on_ceo(self, events):
         for e in events:
             self.ceo_line(e["addr"], f"#{e['seq']} {e.get('payload') or ''}"[:300])
-        ack("ceo", [e["seq"] for e in events])
+        self.ceo_unacked.update(e["seq"] for e in events)
+        self.retry_ceo_ack()
+
+    def retry_ceo_ack(self):
+        if self.ceo_unacked and ack("ceo", self.ceo_unacked):
+            self.ceo_unacked.clear()
 
     def _on_state(self, up, why):
         if not up and self.down_since is None:
