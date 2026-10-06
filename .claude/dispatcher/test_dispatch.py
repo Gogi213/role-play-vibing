@@ -4366,4 +4366,138 @@ class LimitAndWaitingTK070Test(unittest.TestCase):
         self.assertFalse(D._limit_paused({}, now))
 
 
+class WaitReconcileTest(unittest.TestCase):
+    """Сверка wait_for: один ssh на машину, регистрация пути у сторожа, тревога «пропуск», аварийный ssh при лежащей шине."""
 
+    def setUp(self):
+        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
+        D._RECON_MISS.clear(); D._WL_REG.clear()
+        self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
+        self._alarm, self.alarms = D.append_ceo_inbox, []
+        self._link = D._LINK
+        D.append_ceo_inbox = lambda *a, **k: self.alarms.append(a)
+        D._ssh_cmd = lambda alias, cmd: ["ssh", alias, cmd]
+        D.WAIT_ASYNC = True
+
+        def boom(*a, **k):
+            raise AssertionError("ssh вне теста")
+        D.subprocess.run = boom
+
+    def tearDown(self):
+        D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd = self._run, self._async, self._sshcmd
+        D.append_ceo_inbox, D._LINK = self._alarm, self._link
+        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
+        D._RECON_MISS.clear(); D._WL_REG.clear()
+
+    def _ssh(self, out: bytes, rc: int = 0):
+        calls = []
+
+        class R:
+            returncode, stderr, stdout = rc, b"", out
+        D.subprocess.run = lambda cmd, **k: (calls.append(cmd[-1]), R())[1]
+        return calls
+
+    def test_json_outside_progress_is_registered_with_watcher(self):
+        calls = self._ssh(b"")
+        D._host_probe("calc", "path", "/data/work/drill.json")
+        D._host_probe("calc", "path", "/data/progress/j1.json")
+        self.assertIn(D.WATCH_LIST, calls[0])
+        self.assertIn("cat ", calls[0])
+        self.assertNotIn(D.WATCH_LIST, calls[1])
+
+    def test_probe_wl_marker_confirms_registration(self):
+        self._ssh(b"@@WL\n")
+        self.assertTrue(D._host_probe("calc", "path", "/data/a.done"))
+        self.assertIn(("calc", "/data/a.done"), D._WL_REG)
+
+    def test_reconcile_one_ssh_per_machine_closes_missed_event(self):
+        """Первая проверка сорвана таймаутом, регистрация не дошла, события нет — сверка одним ssh закрывает все ждущие."""
+        def timeout(*a, **k):
+            raise D.subprocess.TimeoutExpired("ssh", 15)
+        D.subprocess.run = timeout
+        D._host_probe("calc", "path", "/data/w/chain.done")
+        self.assertNotIn(("calc", "/data/w/chain.done"), D._WL_REG)
+        for k in (("calc", "path", "/data/w/chain.done"), ("calc", "unit", "u1"), ("calc", "path", "/data/p/x.json")):
+            D._WAIT_WATCH.add(k)
+        calls = self._ssh(b"@@0\n@@reg\n{\"done\": 1, \"total\": 5}\n@@rc 0\n@@1\n@@reg\n@@rc 0\n@@2\ninactive\n@@rc 0\n")
+        D._reconcile()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(D.WATCH_LIST, calls[0])
+        self.assertTrue(D._WAIT_CACHE[("calc", "path", "/data/w/chain.done")][1])
+        self.assertTrue(D._WAIT_CACHE[("calc", "unit", "u1")][1])
+        self.assertFalse(D._WAIT_CACHE[("calc", "path", "/data/p/x.json")][1])
+        self.assertIn(("calc", "/data/w/chain.done"), D._WL_REG)
+        self.assertTrue(D.check_wait_for("host:calc:/data/w/chain.done"))
+
+    def test_reconcile_miss_alarm_once_per_key_and_none_with_event(self):
+        logged = []
+        orig, D._log_ssh_call = D._log_ssh_call, lambda *a: logged.append(a)
+        self._ssh(b"@@0\n@@reg\n@@rc 0\n@@1\n@@reg\n@@rc 0\n")
+        try:
+            for k in (("calc", "path", "/data/a.done"), ("calc", "path", "/data/b.done")):
+                D._WAIT_WATCH.add(k)
+            D.record_wait_event({"addr": "машина.calc.файл.появился", "payload": {"path": "/data/b.done", "host": "calc"}})
+            D._reconcile()
+            D._reconcile()
+        finally:
+            D._log_ssh_call = orig
+        self.assertEqual([a for a in logged if a[3] == "пропуск"], [("calc", "path", "/data/a.done", "пропуск")])
+        self.assertEqual(len(self.alarms), 1)
+        self.assertEqual(self.alarms[0][1], "recon-miss")
+        self.assertEqual(D.signal_prio("recon-miss"), "urgent")
+
+    def test_reconcile_unwatched_machine_no_miss_alarm(self):
+        D._WAIT_WATCH.add(("vps", "path", "/opt/x.done"))
+        self._ssh(b"@@0\n@@rc 0\n")
+        D._reconcile()
+        self.assertEqual(self.alarms, [])
+
+    def test_reconcile_missing_file_stays_unmet(self):
+        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        self._ssh(b"@@0\n@@reg\n@@rc 1\n")
+        D._reconcile()
+        self.assertFalse(D._WAIT_CACHE[("calc", "path", "/data/a.done")][1])
+        self.assertIn(("calc", "/data/a.done"), D._WL_REG)
+
+    def test_reconcile_ssh_failure_changes_nothing(self):
+        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        self._ssh(b"", rc=255)
+        D._reconcile()
+        self.assertNotIn(("calc", "path", "/data/a.done"), D._WAIT_CACHE)
+
+    def test_ssh_calls_are_logged_with_reason(self):
+        import tempfile as _tf
+        old = D.DISPATCHER_DIR
+        D.DISPATCHER_DIR = Path(_tf.mkdtemp())
+        try:
+            self._ssh(b"")
+            D._LINK = None  # шина не настроена — аварийный путь
+            D._host_probe("calc", "path", "/data/a.done")
+            line = (D.DISPATCHER_DIR / D.SSH_CALLS_LOG_NAME).read_text(encoding="utf-8").splitlines()[0].split("\t")
+            self.assertEqual(line[1:], ["calc", "path", "/data/a.done", "аварийный"])
+        finally:
+            D.DISPATCHER_DIR = old
+
+    def test_bus_down_long_threshold(self):
+        D._LINK = None
+        self.assertTrue(D._bus_down_long())  # шины нет — ssh-опрос как раньше
+
+        class L:
+            down_since = None
+        D._LINK = L()
+        self.assertFalse(D._bus_down_long())
+        D._LINK.down_since = time.time() - 5
+        self.assertFalse(D._bus_down_long())
+        D._LINK.down_since = time.time() - D.BUS_DOWN_SSH_S - 1
+        self.assertTrue(D._bus_down_long())
+
+    def test_needs_probe_only_first_or_emergency(self):
+        class L:
+            down_since = None
+        D._LINK = L()
+        key = ("calc", "path", "/data/a.done")
+        self.assertTrue(D._needs_probe(key))  # первая проверка нового условия
+        D._WAIT_CACHE[key] = (time.time(), False)
+        self.assertFalse(D._needs_probe(key))  # шина жива — ssh не нужен
+        D._LINK.down_since = time.time() - D.BUS_DOWN_SSH_S - 1
+        self.assertTrue(D._needs_probe(key))  # шина лежит — аварийный опрос
