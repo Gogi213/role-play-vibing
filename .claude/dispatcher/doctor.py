@@ -149,6 +149,7 @@ def render(rows: list) -> str:
 
 
 def main(argv=None) -> int:
+    P.utf8_stdio()
     ap = argparse.ArgumentParser()
     ap.add_argument("--project")
     ap.add_argument("--json", action="store_true")

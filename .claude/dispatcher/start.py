@@ -387,4 +387,5 @@ def main(argv=None, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) -> int:
 
 
 if __name__ == "__main__":
+    P.utf8_stdio()
     sys.exit(main())

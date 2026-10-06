@@ -91,6 +91,14 @@ class DoctorTests(unittest.TestCase):
                 raise OSError("refused")
             self.assertEqual(D.check_bus(boom)[1], D.FAIL)
 
+    def test_prints_in_cp1252_environment(self):
+        import subprocess
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252", "RPV_BUS_URL": "", "ALPHA_BUS_URL": ""}
+        done = subprocess.run([sys.executable, str(Path(D.__file__)), "--project", str(self.project)],
+                              capture_output=True, env=env, timeout=60)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("диспетчер", done.stdout.decode("utf-8"))
+
     def test_outside_project_exit_2(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"RPV_PROJECT": "", "CLAUDE_PROJECT_DIR": ""}):
             cwd = os.getcwd()
