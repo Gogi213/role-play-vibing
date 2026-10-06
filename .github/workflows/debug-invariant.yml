@@ -1,0 +1,44 @@
+name: debug-invariant
+on:
+  push:
+    branches: ["debug/tk076-**"]
+jobs:
+  loop:
+    name: ${{ github.ref_name }} ${{ matrix.mode }} py${{ matrix.python }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+        mode: [base, bus, watch]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 10 повторов раунда с логом решений инварианта
+        env:
+          RPV_DEBUG_INVARIANT: "1"
+        run: |
+          mkdir -p out
+          bad=0
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            python .claude/dispatcher/endurance.py --modes ${{ matrix.mode }} --idle-max 30 --keep >out/rep$i.stdout 2>out/rep$i.stderr && rc=0 || rc=1
+            echo "rep $i rc=$rc $(tail -n 3 out/rep$i.stdout | head -n 1 | cut -c1-300)"
+            bad=$((bad+rc))
+            tmp=$(grep -o '/[^ ]*rpv-endurance-[^ ]*' out/rep$i.stderr | tail -n 1)
+            if [ -n "$tmp" ] && [ -d "$tmp" ]; then
+              mkdir -p out/rep$i-proj
+              cp -R "$tmp/proj/.claude" out/rep$i-proj/ || true
+              rm -rf "$tmp"
+            fi
+          done
+          echo "RESULT ${{ github.ref_name }} ${{ matrix.mode }} py${{ matrix.python }}: красных $bad из 10" | tee out/RESULT.txt
+          echo "RESULT ${{ github.ref_name }} ${{ matrix.mode }} py${{ matrix.python }}: красных $bad из 10" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dbg-${{ strategy.job-index }}-${{ matrix.mode }}-py${{ matrix.python }}-${{ github.sha }}
+          path: out
+          retention-days: 7
