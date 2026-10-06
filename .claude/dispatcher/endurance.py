@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -169,8 +170,21 @@ class Harness:
             self.bus.wait(timeout=10)
 
     def inbox(self) -> str:
+        """Сигналы CEO: файл (запасной путь / без шины) + очередь `ceo` шины, прочитанная без ack."""
         f = self.disp / "ceo-inbox.md"
-        return f.read_text(encoding="utf-8") if f.exists() else ""
+        text = f.read_text(encoding="utf-8") if f.exists() else ""
+        if "RPV_BUS_URL" in self.env and "RPV_BUS_DISABLE" not in self.env:
+            try:
+                req = urllib.request.Request(self.env["RPV_BUS_URL"] + "/q/ceo?after=0&wait=0",
+                                             headers={"Authorization": "Bearer " + self.env["RPV_BUS_TOKEN"]})
+                with urllib.request.urlopen(req, timeout=3) as r:
+                    for e in json.loads(r.read())["events"]:
+                        pl = e.get("payload") or {}
+                        tid = e["addr"].split(".")[1] if e["addr"].startswith("задача.") else e["addr"]
+                        text += f"- {tid} [{pl.get('kind', '')}] [{e['addr']}] {pl.get('note', '')}\n"
+            except Exception:
+                pass
+        return text
 
     # --- диспетчер ---
     def start_dispatcher(self):
@@ -255,7 +269,7 @@ class Harness:
             if not ready.exists() and time.time() - flag.stat().st_mtime >= float(flag.read_text() or 5):
                 ready.parent.mkdir(exist_ok=True)
                 ready.write_text("go")
-        inbox = (self.disp / "ceo-inbox.md").read_text(encoding="utf-8") if (self.disp / "ceo-inbox.md").exists() else ""
+        inbox = self.inbox()
         for p in T.list_tickets(self.tdir):
             if f"{p.stem} [next-ceo]" in inbox and p.stem not in self.ceo_seen:
                 self.ceo_seen.add(p.stem)
@@ -389,9 +403,9 @@ class Harness:
         obs.join(5)
         self.kill_dispatcher()
         self.kill_watcher()
+        inbox = self.inbox()  # очередь шины читается до её остановки
         self.kill_bus()
         st = self.statuses()
-        inbox = self.inbox()
         lost = [t for t in ids if f"{t} [done]" not in inbox]
         lost += [e for e in bus_ev if f"[{e}]" not in inbox]
         roles = {t: (self.base / "roles" / f"{t}.txt").read_text(encoding="utf-8").splitlines()

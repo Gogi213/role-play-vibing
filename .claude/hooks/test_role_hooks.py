@@ -398,5 +398,20 @@ class TicketScopedDigests(unittest.TestCase):
         self.assertTrue(last.endswith("-dddddddd.md"))
 
 
+class CeoSignalGuardTest(unittest.TestCase):
+    def test_denied(self):
+        import ceo_signal_guard as g
+        d = g.denied
+        self.assertTrue(d("Write", {"file_path": "C:/x/.claude/dispatcher/ceo-inbox.md"}))
+        self.assertTrue(d("Edit", {"file_path": r"C:\x\ceo-wake.log"}))
+        self.assertTrue(d("Bash", {"command": "echo hi >> .claude/dispatcher/ceo-wake.log"}))
+        self.assertTrue(d("Bash", {"command": "cd x && rm .claude/dispatcher/ceo-inbox.md"}))
+        self.assertFalse(d("Bash", {"command": "tail -20 .claude/dispatcher/ceo-wake.log"}))
+        self.assertFalse(d("Bash", {"command": "grep urgent ceo-inbox.md | head"}))
+        self.assertFalse(d("Write", {"file_path": "C:/x/other.md"}))
+        self.assertFalse(d("Bash", {"command": 'python tickets.py comment TK-1 --author judge --text "проба >> ceo-inbox.md; rm ceo-wake.log"'}))
+        self.assertTrue(d("Bash", {"command": 'python tickets.py comment TK-1 --text "x" >> ceo-inbox.md'}))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -69,19 +69,20 @@ def flush_spool(timeout=5):
             return
 
 
-def post(addr, payload=None, eid=None, timeout=5):
-    """Результат шины {'seq','dup'} или None (событие в spool). Никогда не бросает."""
+def post(addr, payload=None, eid=None, timeout=5, spool=True):
+    """Результат шины {'seq','dup'} или None (событие в spool; spool=False — вызывающий сам идёт запасным путём). Никогда не бросает."""
     if _env("DISABLE"):
         return None
     ev = {"addr": addr, "payload": payload or {}, "id": eid or uuid.uuid4().hex}
     try:
         res = request("/event", ev, timeout)
     except Exception as e:
-        print(f"[bus] {addr}: шина недоступна ({type(e).__name__}), в spool", file=sys.stderr)
-        try:
-            _spool(ev)
-        except OSError:
-            pass
+        print(f"[bus] {addr}: шина недоступна ({type(e).__name__})" + (", в spool" if spool else ""), file=sys.stderr)
+        if spool:
+            try:
+                _spool(ev)
+            except OSError:
+                pass
         return None
     flush_spool(timeout)
     return res

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-os.environ["RPV_BUS_DISABLE"] = ""
+os.environ.setdefault("RPV_BUS_DISABLE", "1")  # не затирать флаг test_dispatch: тесты CLI не шлют события на живую шину
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "bus"))
@@ -28,6 +28,62 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(r, {"A": "blocked", "B": "needs_owner", "C": "depends:A"})
 
 
+class CeoWakeTest(unittest.TestCase):
+    """Будильник CEO: любое правило routes.json с получателем ceo даёт строку-будильник; ack — только у inbox."""
+
+    def setUp(self):
+        import json
+        self.d = tempfile.mkdtemp()
+        self.routes = str(HERE.parent / "bus" / "routes.json")
+        self.rules = json.load(open(self.routes, encoding="utf-8"))["rules"]
+        self.b = bus.Bus(os.path.join(self.d, "b.db"), self.routes)
+        self.srv = bus.ThreadingHTTPServer(("127.0.0.1", 0), bus.make_handler(self.b, "t"))
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.env = {k: os.environ.get(k) for k in ("RPV_BUS_URL", "RPV_BUS_TOKEN", "RPV_BUS_DISABLE")}
+        os.environ.update(RPV_BUS_URL=f"http://127.0.0.1:{self.srv.server_port}", RPV_BUS_TOKEN="t")
+        os.environ.pop("RPV_BUS_DISABLE", None)
+        self.wakes = []
+        self.link = bus_link.Link(lambda k, n: None, ceo_wake=lambda addr, seq: self.wakes.append((addr, seq)))
+        self.link.start()
+        end = time.time() + 10
+        while self.link.ceo.polls < 1 and time.time() < end:  # первый ответ шины — «накопленное»; события теста идут после него
+            time.sleep(0.02)
+        self.assertGreaterEqual(self.link.ceo.polls, 1)
+
+    def tearDown(self):
+        self.link.disp.stop_flag.set()
+        self.link.ceo.stop_flag.set()
+        self.srv.shutdown()
+        for k, v in self.env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        os.environ["RPV_BUS_DISABLE"] = "1"
+
+    def wait_wakes(self, n):
+        end = time.time() + 5
+        while len(self.wakes) < n and time.time() < end:
+            time.sleep(0.05)
+
+    def test_every_ceo_route_wakes_except_k_ceo_and_nothing_is_acked(self):
+        ceo_rules = [r["match"] for r in self.rules if "ceo" in r["to"]]
+        self.assertGreaterEqual(len(ceo_rules), 5)
+        want = 0
+        for i, m in enumerate(ceo_rules):
+            addr = m.replace("*", f"X{i}")
+            self.b.post(addr, {"x": 1}, f"id{i}")
+            want += 0 if addr.endswith(".к_ceo") else 1
+        self.wait_wakes(want)
+        self.assertEqual(len(self.wakes), want, self.wakes)
+        self.assertEqual(len(self.b.fetch("ceo", 0)), len(ceo_rules), "ack только у inbox")
+
+    def test_service_events_wake_ceo(self):
+        self.b.post("служба.простой.превышен", {}, "s1")
+        self.wait_wakes(1)
+        self.assertEqual([a for a, _ in self.wakes], ["служба.простой.превышен"])
+
+
 class LinkTest(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
@@ -43,7 +99,6 @@ class LinkTest(unittest.TestCase):
 
     def tearDown(self):
         self.link.disp.stop_flag.set()
-        self.link.ceo.stop_flag.set()
         self.srv.shutdown()
         for k, v in self.env.items():
             if v is None:
@@ -60,15 +115,12 @@ class LinkTest(unittest.TestCase):
         bus_link.ack("dispatcher", seqs)
         self.assertEqual(self.b.fetch("dispatcher", 0), [])
 
-    def test_ceo_event_goes_to_line_and_is_acked(self):
-        self.b.post("задача.TK-1.задание.упало", {"rc": 3}, "e2")
-        for _ in range(30):
-            if any("задание.упало" in k for k, _ in self.lines):
-                break
-            time.sleep(0.1)
-        self.assertTrue(any(k == "задача.TK-1.задание.упало" for k, _ in self.lines))
-        time.sleep(0.3)
-        self.assertEqual(self.b.fetch("ceo", 0), [])
+    def test_ceo_queue_is_not_read_by_dispatcher(self):
+        # В-192: очередь `ceo` читает и подтверждает CEO (`tickets.py inbox`), диспетчер её не трогает
+        self.b.post("задача.TK-1.к_ceo", {"kind": "done", "prio": "normal"}, "e2")
+        time.sleep(1.0)
+        self.assertEqual(self.lines, [])
+        self.assertEqual(len(self.b.fetch("ceo", 0)), 1)
 
     def test_held_event_does_not_wake_until_unblocked(self):
         self.b.post("задача.TK-9.блокер.поставлен", {"reason": "x"}, "b1")
@@ -79,7 +131,7 @@ class LinkTest(unittest.TestCase):
 
 
 class AckRetryTest(unittest.TestCase):
-    def test_failed_ack_returns_false_and_ceo_retries(self):
+    def test_failed_ack_returns_false_then_retries(self):
         orig = busclient.request
         calls = []
 
@@ -95,12 +147,6 @@ class AckRetryTest(unittest.TestCase):
         try:
             self.assertFalse(bus_link.ack("x", [1]))
             self.assertTrue(bus_link.ack("x", [1]))
-            calls.clear()
-            link = bus_link.Link(lambda k, n: None)
-            link._on_ceo([{"seq": 7, "addr": "a", "payload": ""}])
-            self.assertEqual(link.ceo_unacked, {7})
-            link.retry_ceo_ack()
-            self.assertEqual(link.ceo_unacked, set())
         finally:
             busclient.request = orig
 
@@ -115,7 +161,6 @@ class DownTest(unittest.TestCase):
             link.start()
             time.sleep(4)
             link.disp.stop_flag.set()
-            link.ceo.stop_flag.set()
             self.assertEqual(lines.count("bus-down"), 1)
         finally:
             os.environ["RPV_BUS_DISABLE"] = "1"
