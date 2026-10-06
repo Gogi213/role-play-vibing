@@ -98,13 +98,17 @@ class InstallFilesTest(unittest.TestCase):
     def test_env_snapshot_only_forwarded(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["RPV_TEST_X"], os.environ["ANTHROPIC_API_KEY_TK072"] = "1", "secret"
+            os.environ["RPV_BUS_TOKEN"], os.environ["RPV_BUS_TOKEN_FILE"] = "tok-SECRET", "/p/tok"
             try:
                 V.snapshot_env(Path(d))
                 saved = json.loads((Path(d) / "supervise.env.json").read_text(encoding="utf-8"))
             finally:
                 del os.environ["RPV_TEST_X"], os.environ["ANTHROPIC_API_KEY_TK072"]
+                del os.environ["RPV_BUS_TOKEN"], os.environ["RPV_BUS_TOKEN_FILE"]
             self.assertEqual(saved.get("RPV_TEST_X"), "1")
             self.assertNotIn("ANTHROPIC_API_KEY_TK072", saved)
+            self.assertNotIn("RPV_BUS_TOKEN", saved)
+            self.assertEqual(saved.get("RPV_BUS_TOKEN_FILE"), "/p/tok")
 
 
 if __name__ == "__main__":

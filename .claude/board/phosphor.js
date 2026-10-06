@@ -163,7 +163,7 @@
     else {
       const age = ageAt + (Date.now() - fetchedAt) / 1000, tick = Number(V.tick_s) || 5, limit = 3 * tick + 15;
       if (netFail) { short = "НЕТ СВЯЗИ"; ok = false; msg = ["НЕТ СВЯЗИ", "сервер не отвечает, показана последняя сводка"]; }
-      else if (age > SILENT_S) { short = "КОМАНДА МОЛЧИТ"; ok = false; silent = true; msg = ["КОМАНДА МОЛЧИТ С " + new Date(Date.now() - age * 1000).toLocaleTimeString("ru-RU", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit" }), "ПК не присылает сводку " + fmtAge(age) + ": диспетчер/сторож/сборщик могли упасть, показана последняя сводка"]; }
+      else if (age > SILENT_S) { short = "КОМАНДА МОЛЧИТ"; ok = false; silent = true; msg = ["КОМАНДА МОЛЧИТ С " + new Date(Date.now() - age * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }), "ПК не присылает сводку " + fmtAge(age) + ": диспетчер/сторож/сборщик могли упасть, показана последняя сводка"]; }
       else if (age > limit) { short = "СВОДКА УСТАРЕЛА"; ok = false; msg = ["СВОДКА УСТАРЕЛА " + fmtAge(age), "ПК не передаёт данные, показана последняя сводка"]; }
     }
     banner.hidden = !msg; banner.classList.toggle("silent", silent);

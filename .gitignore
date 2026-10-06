@@ -7,3 +7,4 @@ runs.log
 ceo-inbox.md
 ceo-wake.log
 *.pid
+supervise.env.json

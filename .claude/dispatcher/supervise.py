@@ -82,8 +82,15 @@ def task_name(project: Path) -> str:
     return "rpv-supervise-" + S.unit_name("x", project).rsplit("-", 1)[-1]
 
 
+def _secret_name(k: str) -> bool:
+    """Секреты в файл не пишем; *_FILE (путь к файлу с секретом) — не секрет."""
+    u = k.upper()
+    return not u.endswith("_FILE") and any(w in u for w in ("TOKEN", "KEY", "SECRET", "PASS"))
+
+
 def snapshot_env(state_dir: Path) -> None:
-    keep = {k: v for k, v in os.environ.items() if k.startswith(S.FORWARD_ENV_PREFIXES) or k in S.FORWARD_ENV_NAMES}
+    keep = {k: v for k, v in os.environ.items()
+            if (k.startswith(S.FORWARD_ENV_PREFIXES) or k in S.FORWARD_ENV_NAMES) and not _secret_name(k)}
     (state_dir / "supervise.env.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
 
 
