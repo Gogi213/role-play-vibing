@@ -1583,13 +1583,18 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
 
 # --- лимит сессии (TK-070 п.2): ответ 429 «You've hit your session limit · resets 5am (Asia/Tbilisi)» — не холостой ход ---
 
+LIMIT_LABEL_SLACK = timedelta(minutes=2)
+
+
 def _limit_hit(result: dict) -> bool:
     text = str((result or {}).get("result") or "")
     return (result or {}).get("api_error_status") == 429 or "hit your session limit" in text
 
 
-def _limit_reset_at(result: dict, now) -> datetime:
-    """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится)."""
+def _limit_reset_at(result: dict, now, ref=None) -> datetime:
+    """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится).
+    ref — момент ответа (конец запуска; по умолчанию now): метка раньше него — завтра, но метка в пределах
+    LIMIT_LABEL_SLACK до ответа (минутное округление) — уже прошла: вернём момент <= now, паузы не будет."""
     m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)(?:\s*\(([^)]+)\))?", str((result or {}).get("result") or ""), re.I)
     if not m:
         return now + timedelta(hours=1)
@@ -1601,9 +1606,9 @@ def _limit_reset_at(result: dict, now) -> datetime:
         tz = ZoneInfo(m.group(4)) if m.group(4) else now.tzinfo
     except Exception:
         tz = now.tzinfo
-    local = now.astimezone(tz)
+    local = (ref or now).astimezone(tz)
     at = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if at <= local:
+    if at <= local - LIMIT_LABEL_SLACK:
         at += timedelta(days=1)
     return at + timedelta(minutes=1)
 
@@ -1673,8 +1678,13 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
         route_ceo_signal(tid, "model", model_warn, state, now)
 
     if _limit_hit(result) and not stopped:
-        until = _limit_reset_at(result, now)
-        state["limit_pause_until"] = T.now_iso(until)
+        try:
+            ref = datetime.fromtimestamp(Path(info["run_file"]).stat().st_mtime).astimezone()
+        except OSError:
+            ref = now
+        until = _limit_reset_at(result, now, ref)
+        if until > now:
+            state["limit_pause_until"] = T.now_iso(until)
         key = f"{tid}::{info['role']}"
         state.setdefault("idle_runs", {}).pop(key, None)
         _reset_same_status(state, key)

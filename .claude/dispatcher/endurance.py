@@ -54,8 +54,8 @@ try:
         time.sleep(float(act.split(":")[1])); act = "ok"
     if act == "ok" or act.startswith("after-"):
         entry("done")
-    elif act == "429":
-        at = datetime.now().astimezone() + timedelta(seconds=60)  # «resets H:MMam»: следующая минута, диспетчер добавит ещё минуту
+    elif act in ("429", "429now"):  # 429now: метка = текущая минута (resetsAt уже прошёл к разбору)
+        at = datetime.now().astimezone() + (timedelta(seconds=60) if act == "429" else timedelta(0))  # «resets H:MMam»: следующая минута, диспетчер добавит ещё минуту
         label = at.strftime("%I:%M%p").lstrip("0").lower()
         print(json.dumps({"is_error": True, "api_error_status": 429,
                           "result": f"You've hit your session limit · resets {label}"}))
@@ -104,6 +104,7 @@ PLANS = [  # (владелец, план ролей на запуски подр
     ("engineer", ["handoff:judge", "after-handoff", "ok"]),
     ("researcher", ["handoff:ceo", "after-ceo"]),
     ("engineer", ["waitfile:6", "after-wait"]),
+    ("researcher", ["429now", "ok"]),
 ]
 
 

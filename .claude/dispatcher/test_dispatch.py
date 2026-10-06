@@ -4168,6 +4168,27 @@ class LimitAndWaitingTK070Test(unittest.TestCase):
         self.assertEqual(D._limit_reset_at(r, late).day, 7)
         self.assertEqual(D._limit_reset_at({"result": "?"}, now), now + timedelta(hours=1))
 
+    def test_limit_reset_reference_is_run_end(self):
+        from datetime import datetime, timezone, timedelta
+        tz = timezone(timedelta(hours=4))
+        r = {"api_error_status": 429, "result": "You've hit your session limit · resets 1:33pm"}
+        # метка = минута ответа, разбор на тик позже: метка уже прошла — пауза ≤ 1 мин (запас), не сутки
+        ref = datetime(2026, 10, 6, 13, 33, 0, 500000, tzinfo=tz)
+        now = datetime(2026, 10, 6, 13, 33, 6, tzinfo=tz)
+        self.assertLessEqual(D._limit_reset_at(r, now, ref), now + timedelta(minutes=1))
+        # метка на минуту впереди ответа, разбор уже после метки (сирота): паузы нет
+        ref = datetime(2026, 10, 6, 13, 32, 30, tzinfo=tz)
+        late = datetime(2026, 10, 6, 13, 40, tzinfo=tz)
+        self.assertLessEqual(D._limit_reset_at(r, late, ref), late)
+        # сирота, разобранная через 10 мин после resetsAt при ответе за час до метки
+        ref = datetime(2026, 10, 6, 12, 30, tzinfo=tz)
+        late = datetime(2026, 10, 6, 13, 43, tzinfo=tz)
+        self.assertLessEqual(D._limit_reset_at(r, late, ref), late)
+        # метка раньше ответа на часы — завтра
+        ref = datetime(2026, 10, 6, 22, 0, tzinfo=tz)
+        r5 = {"result": "resets 5am"}
+        self.assertEqual(D._limit_reset_at(r5, ref, ref).day, 7)
+
     def test_limit_pause_flag(self):
         from datetime import datetime, timezone, timedelta
         now = datetime(2026, 10, 6, 4, 46, tzinfo=timezone(timedelta(hours=4)))
