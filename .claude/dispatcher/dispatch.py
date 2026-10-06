@@ -514,13 +514,54 @@ def _ssh_stderr(r) -> str:
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
 
-def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
+# Стандарт сигналов (В-192): при настроенной шине единственный путь сигнала к CEO — событие `задача.<ID|общее>.к_ceo`
+# в очередь `ceo` с приоритетом (urgent — читать первым); CEO читает её `tickets.py inbox`. Файлы ceo-inbox.md и
+# ceo-wake.log при шине — ТОЛЬКО запасной путь, когда шина не приняла событие (строка помечена «[запасной путь]»);
+# без шины (RPV_BUS_URL не задан) файлы — основной путь, как раньше. Неизвестный вид — urgent (безопасная сторона).
+NORMAL_KINDS = {"done", "next-ceo", "wait-for", "model", "watch-summary", "summary", "bus-up"}
+
+
+def signal_prio(kind: str) -> str:
+    return "normal" if kind in NORMAL_KINDS else "urgent"
+
+
+def _ceo_file_write(tid: str, kind: str, note: str, now=None, fallback: bool = False, wake_only: bool = False) -> None:
     CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-    with open(CEO_INBOX, "a", encoding="utf-8") as fh:
-        fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
-    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; ceo-inbox.md остаётся источником деталей
+    if not wake_only:
+        with open(CEO_INBOX, "a", encoding="utf-8") as fh:
+            fh.write(f"- {T.now_iso(now)} {tid} [{kind}]{' [запасной путь]' if fallback else ''} {note}\n")
+    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; детали — в ceo-inbox.md или в очереди шины
     with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
+        fh.write(f"{T.now_iso(now)} {tid} {kind}{' (очередь шины: tickets.py inbox)' if wake_only else ''}\n")
+
+
+def ceo_queue_wake(addr: str, seq: int) -> None:
+    """Будильник на событие очереди ceo, пришедшее мимо append_ceo_inbox (вопрос владельцу, падение юнита, тревога простоя)."""
+    CEO_WAKE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
+        fh.write(f"{T.now_iso()} {addr} #{seq} (очередь шины: tickets.py inbox){chr(10)}")
+
+
+def _bus_configured() -> bool:
+    try:
+        import busclient
+        return not os.environ.get("RPV_BUS_DISABLE") and bool(busclient.config()[0])
+    except Exception:
+        return False
+
+
+def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
+    """Сигнал CEO: шина (очередь `ceo`, ack на стороне CEO); шина не настроена — файл; не приняла — запасной файл."""
+    if not _bus_configured():
+        _ceo_file_write(tid, kind, note, now)
+        return
+    import busclient
+    addr = f"задача.{'общее' if tid == '*' else tid}.к_ceo"
+    payload = {"kind": kind, "note": note, "prio": signal_prio(kind), "ts": T.now_iso(now)}
+    if busclient.post(addr, payload, timeout=3, spool=False) is None:
+        _ceo_file_write(tid, kind, note, now, fallback=True)
+        return
+    _ceo_file_write(tid, kind, note, now, wake_only=True)  # будильник Monitor CEO; детали — в очереди (`tickets.py inbox`)
 
 
 # --- таблица правил «вид сигнала → будить / сводка» (судья TK-002 п.3, взамен привратника TypeSafe) --
@@ -542,12 +583,7 @@ def classify_signal(kind: str) -> str:
 def flush_pending_summary(state: dict, now) -> None:
     pending = state.get("pending_summary") or []
     if pending:
-        line = f"- {T.now_iso(now)} * [summary] {len(pending)} сигнал(ов): " + " | ".join(pending)
-        CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-        with open(CEO_INBOX, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-        with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-            fh.write(f"{T.now_iso(now)} * summary({len(pending)})\n")
+        append_ceo_inbox("*", "summary", f"{len(pending)} сигнал(ов): " + " | ".join(pending), now)
     state["pending_summary"] = []
     state["last_summary_flush"] = T.now_iso(now)
 
@@ -1382,11 +1418,28 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
+    # зеркало в state.json — ДО Popen (pid пока неизвестен): диспетчер убит между запуском роли и записью зеркала —
+    # после рестарта роль не сирота, её находят по session_id (recover_active_runs)
+    mirror = {
+        "role": role, "pid": None, "started": T.now_iso(now), "attempt": attempt,
+        "run_file": str(run_file), "err_file": str(err_file), "reason": reason,
+        "status_at_launch": status_at_launch, "executor": executor,
+        "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
+    }
+    state.setdefault("active_runs", {})[tid] = mirror
+    save_state(state)
     # своя группа процессов (на Windows параметр без действия): остановка CEO снимает роль вместе с потомками
-    popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
-                   start_new_session=True)
+    try:
+        popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
+                       start_new_session=True)
+    except BaseException:
+        state.get("active_runs", {}).pop(tid, None)
+        save_state(state)
+        raise
+    mirror["pid"] = popen.pid
     _drop_ceo_handoff(state, tid)  # любой запуск позже передачи CEO — ход состоялся, метка отработала
     pstart = _proc_start(popen.pid)
+    mirror["pstart"] = pstart
     RUNNING[tid] = {
         "role": role, "popen": popen, "pid": popen.pid, "pstart": pstart, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
@@ -1399,12 +1452,6 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     sess_entry["last_woken"] = T.now_iso(now)
     _record_launch(state, tid, now)
     # зеркало в state.json (pid, задача, роль, старт) — переживает перезапуск диспетчера (recover_active_runs)
-    state.setdefault("active_runs", {})[tid] = {
-        "role": role, "pid": popen.pid, "pstart": pstart, "started": T.now_iso(now), "attempt": attempt,
-        "run_file": str(run_file), "err_file": str(err_file), "reason": reason,
-        "status_at_launch": status_at_launch, "executor": executor,
-        "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
-    }
     save_state(state)
 
 
@@ -1764,6 +1811,38 @@ def _poll_running(state: dict, now) -> None:
         _finish_run(tid, info, state, now, timed_out=False)
 
 
+def _find_pid_by_session(session_id) -> "int | None":
+    """Роль, запущенная перед убийством диспетчера, но не успевшая попасть в зеркало с pid: ищем процесс по
+    `--session-id`/`--resume <id>` в командной строке (id известен до запуска)."""
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
+        return None
+    try:
+        pairs = []  # (pid, ppid) совпавших процессов
+        if os.name == "nt":
+            ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
+                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
+                  "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                                 timeout=30).stdout
+            for ln in out.splitlines():
+                f = ln.split()
+                if len(f) == 2 and all(x.isdigit() for x in f):
+                    pairs.append((int(f[0]), int(f[1])))
+        else:
+            out = subprocess.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
+                                 timeout=10).stdout
+            for ln in out.splitlines():
+                f = ln.split(None, 2)
+                if len(f) == 3 and f[0].isdigit() and f[1].isdigit() and str(session_id) in f[2]:
+                    pairs.append((int(f[0]), int(f[1])))
+        pairs = [(p, pp) for p, pp in pairs if p != os.getpid()]
+        found = {p for p, _ in pairs}
+        roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
+        return min(roots or found) if found else None
+    except Exception:
+        return None
+
+
 def recover_active_runs(state: dict, now) -> None:
     """После перезапуска диспетчера — подхватить зеркало state.json["active_runs"]: живой pid не
     запускаем повторно (просто продолжаем отслеживать по pid), уже закончившийся — обрабатываем как
@@ -1782,8 +1861,21 @@ def recover_active_runs(state: dict, now) -> None:
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }
+        by_session = False
+        if not saved.get("pid"):  # зеркало-намерение: диспетчер убит до записи pid
+            by_session = True
+            found = _find_pid_by_session(saved.get("session_id"))
+            if not found:
+                print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет) — "
+                      "зеркало снято", file=sys.stderr, flush=True)
+                state.get("active_runs", {}).pop(tid, None)
+                continue
+            saved["pid"] = info["pid"] = found
+            saved["pstart"] = info["pstart"] = _proc_start(found)  # метки старта не было — берём текущую: «процесс есть»
+            print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {found} найден по session_id (зеркало было без pid)",
+                  file=sys.stderr, flush=True)
         want, got = saved.get("pstart"), _proc_start(saved.get("pid"))
-        alive = _pid_alive(saved.get("pid"), start=want)
+        alive = _pid_alive(saved.get("pid"), expect_name="" if by_session else None, start=want)
         how = (f"старт записан {want}, сейчас {got}" if want
                else "старт не записан (запуск прежней версии) — по имени образа")
         print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')}, {how}: "
@@ -2052,8 +2144,17 @@ def _drop_ceo_handoff(state: dict, tid: str) -> None:
 def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
     """Метка передачи CEO кончается на тике, как только тикет вышел из ожидания (waiting/in_review): CEO вернул его
     шапкой, done/stopped/blocked. Запуск любой роли и запись CEO снимают её в launch_run / _ceo_handoff_pending."""
-    if tkt.id in (state.get("ceo_handoffs") or {}) and tkt.id not in RUNNING and tkt.status not in ("waiting", "in_review"):
-        _drop_ceo_handoff(state, tkt.id)
+    at = (state.get("ceo_handoffs") or {}).get(tkt.id)
+    if not at or tkt.id in RUNNING or tkt.status in ("waiting", "in_review"):
+        return
+    # `--next ceo` и смена статуса роли — две команды: тик между ними видит старый статус при свежей метке. Статус
+    # сменили после метки (updated новее) — это ход CEO/роли; иначе метку не трогаем, роль ещё допишет `waiting`.
+    try:
+        if tkt.status in ("todo", "in_progress") and T.parse_dt(tkt.header.get("updated", "")) <= T.parse_dt(at):
+            return
+    except (ValueError, TypeError):
+        pass
+    _drop_ceo_handoff(state, tkt.id)
 
 
 def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
@@ -2275,7 +2376,8 @@ def _start_bus_link():
         if os.environ.get("RPV_BUS_DISABLE") or not busclient.config()[0]:
             return None
         link = bus_link.Link(lambda kind, note: append_ceo_inbox(
-            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event)
+            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event,
+            ceo_wake=ceo_queue_wake)
         link.start()
         return link
     except Exception as e:

@@ -28,6 +28,7 @@ _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
+os.environ["RPV_BUS_DISABLE"] = "1"  # тесты не шлют события на живую шину
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import project as P  # noqa: E402
@@ -889,6 +890,16 @@ class DispatchRunTests(unittest.TestCase):
         out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(hours=3))
         self.assertEqual(out.status, "in_progress")
 
+    def test_ceo_handoff_survives_tick_between_next_ceo_and_waiting(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "in_progress", now=t0)
+        state = self._handoff_state(p, t0 + timedelta(seconds=2))  # метка поставлена тиком после `comment --next ceo`
+        D._expire_ceo_handoff(T.read_ticket(p), state)
+        self.assertIn(T.read_ticket(p).id, state["ceo_handoffs"])
+        T.write_header_updates(p, {"status": "waiting"}, now=t0 + timedelta(seconds=9))
+        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=12))
+        self.assertEqual(out.status, "waiting")
+
     def test_ceo_handoff_dropped_on_done(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         p = self.mk("engineer", "waiting", now=t0)
@@ -1569,6 +1580,49 @@ class DispatchRunTests(unittest.TestCase):
         tkt = T.read_ticket(path)
         self.assertEqual(len(tkt.log), 1, "recover не должен был запустить процесс повторно")
         self.assertEqual(tkt.status, "done")
+
+    def test_recover_adopts_role_killed_before_pid_was_mirrored(self):
+        """Диспетчер убит между Popen роли и записью pid: зеркало-намерение без pid — роль находят по session_id."""
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Сирота")
+        sid = "orphan-sid-4242"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "--session-id", sid])
+        self.addCleanup(lambda: (proc.kill(), proc.wait(timeout=10)))
+        state = {"active_runs": {path.stem: {
+            "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
+            "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": str(self.tickets_dir.parent / "r.err"),
+            "reason": "todo", "status_at_launch": "in_progress", "session_id": sid}}}
+        orig = D.PID_EXPECT_NAME
+        D.PID_EXPECT_NAME = ""
+        try:
+            D.recover_active_runs(state, datetime.now().astimezone())
+            self.assertEqual(D.RUNNING[path.stem]["pid"], proc.pid)
+            self.assertEqual(state["active_runs"][path.stem]["pid"], proc.pid)
+        finally:
+            D.PID_EXPECT_NAME = orig
+            D.RUNNING.clear()
+
+    def test_recover_drops_intent_mirror_when_role_never_started(self):
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Не стартовала")
+        state = {"active_runs": {path.stem: {
+            "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
+            "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": "", "reason": "todo",
+            "status_at_launch": "todo", "session_id": "never-started-sid-1"}}}
+        D.recover_active_runs(state, datetime.now().astimezone())
+        self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
+
+    def test_launch_run_mirrors_intent_before_popen(self):
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Намерение")
+        seen = {}
+
+        def boom(cmd, **kw):
+            seen["mirror"] = dict(D.load_state().get("active_runs", {}).get(path.stem) or {})
+            raise OSError("popen failed")
+        state = D.load_state()
+        with mock.patch.object(D, "_popen", boom), self.assertRaises(OSError):
+            D.launch_run(path, "researcher", state, datetime.now().astimezone(), reason="todo")
+        self.assertIsNone(seen["mirror"].get("pid", "x"))
+        self.assertTrue(seen["mirror"].get("session_id"))
+        self.assertNotIn(path.stem, D.load_state().get("active_runs", {}))
 
     def test_recover_active_runs_processes_finished_while_down(self):
         """v1.1: процесс успел закончиться, пока диспетчер не работал — recover доводит его до конца сам."""
