@@ -1021,6 +1021,15 @@ class NoProgressViewTests(WatchSandbox):
         finally:
             D.PROJECT_ROOT = orig_root
 
+    def test_plan_findings_never_reach_ceo_inbox(self):
+        # no-plan / plan-stale / plan-stale-waiting адресуются владельцу тикета; CEO по ним ничего делать не может (TK-079 п.3)
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="План", status="in_progress", now=self.now)
+        tid = T.read_ticket(p).id
+        for kind in ("no-plan", "plan-stale", "plan-stale-waiting"):
+            self.assertEqual(len(W.notify_findings([W.Finding(kind, tid, "x")], {}, self.now)), 1)
+        self.assertFalse(D.CEO_INBOX.exists() and "watch-" in D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertEqual(T.read_ticket(p).next_role, "engineer")  # владелец разбужен
+
     def test_wake_text_points_to_plugin_plan_script(self):
         p = T.create_ticket(self.tickets_dir, owner="engineer", title="Без плана", status="in_progress", now=self.now)
         W.notify_findings([W.Finding("no-plan", T.read_ticket(p).id, "x")], {}, self.now)

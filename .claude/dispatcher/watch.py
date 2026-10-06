@@ -209,6 +209,7 @@ def check_stale_plan(now) -> list:
 
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
+OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # находки адресуются владельцу тикета, не CEO
 SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
@@ -766,7 +767,8 @@ def notify_findings(findings: list, ws: dict, now) -> list:
                 pending = ws.setdefault("pending_summary", [])
                 pending.append(f"{T.now_iso(now)} [{f.kind}] {f.message[:150]}")
             else:
-                D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
+                if f.kind not in OWNER_ONLY_KINDS:  # план шагов — дело владельца тикета, действия CEO тут нет (TK-079 п.3)
+                    D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
                 if f.kind == "no-plan":
                     _wake_for_plan(f.key, now)
                 elif f.kind == "plan-stale":
