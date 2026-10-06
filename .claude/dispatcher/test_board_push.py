@@ -49,6 +49,22 @@ class T(unittest.TestCase):
             srv.server_close()
             self.assertEqual(got["body"]["view2"]["counters"]["done"], 1)
 
+    def test_plan_steps_summary_machines(self):
+        with tempfile.TemporaryDirectory() as d:
+            td = Path(d) / ".claude" / "tickets"
+            td.mkdir(parents=True)
+            (td / "TK-001.md").write_text(HDR.format(id="TK-001", t="тикет", s="in_progress"), encoding="utf-8")
+            pl = Path(d) / ".claude" / "pulse" / "plans"
+            pl.mkdir(parents=True)
+            (pl / "TK-001.json").write_text(json.dumps({"id": "TK-001", "title": "План", "steps": [
+                {"title": "код", "who": "инженер", "on": "pc", "state": "done"},
+                {"title": "счёт", "who": "автомат", "on": "calc", "state": "run", "detail": "3 из 9"},
+                {"title": "проверка", "who": "судья", "on": "pc", "state": "todo"}]}), encoding="utf-8")
+            p = B.build_view2(td, now=1000.0)["processes"][0]
+            self.assertEqual((p["steps_total"], p["step_now"], p["state"], p["summary"]), (3, 2, "run", "тикет"))
+            self.assertEqual([s["wave"] for s in p["steps"]], [1, 2, 3])
+            self.assertEqual([m["id"] for m in B.build_view2(td, now=1000.0)["machines"]], ["pc", "calc"])
+
 
 if __name__ == "__main__":
     unittest.main()
