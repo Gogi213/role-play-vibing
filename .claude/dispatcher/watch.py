@@ -157,6 +157,7 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
 
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
+SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
 def _producer_pattern(path: str) -> str:
@@ -168,7 +169,8 @@ def _producer_pattern(path: str) -> str:
 
 def probe_wait_target(alias: str, what: str, arg: str) -> str:
     """`exists` — путь есть; `producer` — пути нет, но юнит/процесс с именем задания жив; `dead` — нет ни того, ни
-    другого; `unknown` — ssh не ответил (не считаем). Имя задания — basename пути без расширения."""
+    другого; `ssh-error` — ssh не ответил (считается подряд, SSH_FAIL_STRIKES → тревога владельцу); `unknown` — форма
+    не проверяется ssh (условие проверяет диспетчер). Имя задания — basename пути без расширения."""
     pat = _producer_pattern(arg)
     if what != "path" or not arg.startswith("/") or not pat:
         return "unknown"
@@ -179,9 +181,9 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     try:
         r = subprocess.run(D._ssh_cmd(alias, remote), capture_output=True, timeout=20)
     except Exception:
-        return "unknown"
+        return "ssh-error"
     out = (r.stdout or b"").decode("utf-8", "replace").strip().splitlines()
-    return out[0] if r.returncode == 0 and out and out[0] in ("exists", "producer", "dead") else "unknown"
+    return out[0] if r.returncode == 0 and out and out[0] in ("exists", "producer", "dead") else "ssh-error"
 
 
 def _wait_target_state(tkt, probe) -> str:
@@ -202,6 +204,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
     записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
     dead = ws.setdefault("dead_wait", {})
+    ssh_fail = ws.setdefault("ssh_fail_wait", {})
     alive, seen = set(), set()
     for path in T.list_tickets(D.TICKETS_DIR):
         try:
@@ -212,6 +215,21 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
             continue
         spec = tkt.header["wait_for"].strip()
         st = _wait_target_state(tkt, probe)
+        if st == "ssh-error":  # ssh молчит: условие не проверить; N раз подряд — владельцу тикета, не CEO
+            ent = ssh_fail.get(tkt.id) or {}
+            n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+            ssh_fail[tkt.id] = {"spec": spec, "n": n}
+            dead.pop(tkt.id, None)
+            if n < SSH_FAIL_STRIKES:
+                alive.add(tkt.id)
+                continue
+            with T.ticket_lock(path):
+                T.append_log(path, "watch", f"сторож: ssh к машине из `{spec}` молчит {n} проверок подряд — условие "
+                             "не проверить; ожидание снято, владелец будится: проверь машину и задание, поставь wait_for заново", now)
+                T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
+            ssh_fail.pop(tkt.id, None)
+            continue
+        ssh_fail.pop(tkt.id, None)
         if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
             alive.add(tkt.id)
             dead.pop(tkt.id, None)
@@ -237,6 +255,9 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
     for tid in list(dead):
         if tid not in seen and tid not in alive:
             dead.pop(tid, None)
+    for tid in list(ssh_fail):
+        if tid not in alive:
+            ssh_fail.pop(tid, None)
     return alive
 
 
