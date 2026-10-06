@@ -285,6 +285,9 @@ def check_wait_for(spec: str) -> bool:
         return path.exists()
     if parsed[0] == "ticket":
         return _other_ticket_done(parsed[1])
+    if parsed[0] == "ci":
+        import ci_watch
+        return ci_watch.ci_done(parsed[1], parsed[2])
     _, alias, what, arg = parsed
     return _host_wait_met(alias, what, arg)
 
@@ -330,6 +333,18 @@ _UNIT_START = {}     # (алиас, "unit", имя) -> InvocationID послед
 _EVENT_VERIFIED = set()  # ключи, чьё «остановлен» несёт InvocationID того же запуска: ssh-проверка не нужна
 _EVENT_LOCK = threading.Lock()
 _WAIT_NEW = threading.Event()
+
+# Стандарт сигналов: штатно ssh не опрашивает — события сторожа машины закрывают wait_for; ssh — первая проверка нового
+# условия, сверка раз в WAIT_RECON_S и аварийный опрос, пока шина лежит дольше BUS_DOWN_SSH_S (RPV_DISPATCH_BUS_DOWN_SSH_S).
+# Шина не настроена (_LINK is None) — ssh-опрос как раньше.
+BUS_DOWN_SSH_S = float(P.env("DISPATCH_BUS_DOWN_SSH_S", "600"))
+WAIT_RECON_S = float(P.env("DISPATCH_WAIT_RECON_S", "300"))  # сверка всех ждущих host:… одним ssh на машину
+WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "calc").split(",") if a.strip()}  # машины со сторожем: пропуск события там — тревога
+_LINK = None
+_SSH_ALERTED = False
+_RECON_MISS = set()  # ключи, по которым «пропуск» уже записан и тревога уже ушла
+_WL_REG = set()  # (алиас, путь), чья регистрация у сторожа подтверждена ответом машины
+_RECON_LAST = 0.0
 
 
 def _unit_base(name: str) -> str:
@@ -389,17 +404,47 @@ def _drop_event(alias: str, what: str, arg: str) -> None:
         _EVENT_VERIFIED.discard(k)
 
 
+def _bus_down_long() -> bool:
+    """Аварийный путь: ssh-опрос ждущих условий — только когда шина недоступна дольше BUS_DOWN_SSH_S (или отключена)."""
+    if _LINK is None:
+        return True
+    since = _LINK.down_since
+    return since is not None and time.time() - since >= BUS_DOWN_SSH_S
+
+
+def _needs_probe(ckey) -> bool:
+    cached = _WAIT_CACHE.get(ckey)
+    if cached is None or _bus_down_long():
+        return True  # первая проверка нового условия (заодно регистрация пути у сторожа) либо аварийный путь
+    ev_ts = _event_ts(*ckey)  # событие остановки юнита — одна проверка, что это не прежний экземпляр с тем же именем
+    return (ckey[1] == "unit" and ev_ts is not None and cached[0] < ev_ts
+            and (ckey[0], "unit", _unit_base(ckey[2])) not in _EVENT_VERIFIED)
+
+
 def _wait_poller() -> None:
-    """Подстраховка: ssh-опрос ключей из _WAIT_WATCH с шагом WAIT_POLL_S в своём потоке, результат — в _WAIT_CACHE."""
+    """Штатно ssh не опрашивает: события шины (сторож машины) закрывают wait_for; здесь — первая проверка нового условия и
+    аварийный опрос ключей из _WAIT_WATCH с шагом WAIT_POLL_S, пока шина лежит дольше BUS_DOWN_SSH_S."""
+    global _SSH_ALERTED, _RECON_LAST
     while True:
+        if _bus_down_long() and _LINK is not None and not _SSH_ALERTED:
+            _SSH_ALERTED = True
+            _LINK.ceo_line("bus-down-ssh", f"шина лежит дольше {int(BUS_DOWN_SSH_S)} с — включён аварийный ssh-опрос wait_for")
+        elif not _bus_down_long():
+            _SSH_ALERTED = False
         for ckey in list(_WAIT_WATCH):
-            if _event_met(*ckey) and ckey[1] != "unit":
-                continue  # юнит проверяем и при событии: новый запуск с тем же именем сбрасывает прежнее событие
+            if not _needs_probe(ckey):
+                continue
             try:
                 _host_probe(*ckey)
             except Exception as e:
                 _wait_err(f"poller:{ckey}", f"{type(e).__name__}: {e}")
-        _WAIT_NEW.wait(WAIT_POLL_S)
+        if _WAIT_WATCH and not _bus_down_long() and time.time() - _RECON_LAST >= WAIT_RECON_S:
+            _RECON_LAST = time.time()
+            try:
+                _reconcile()
+            except Exception as e:
+                _wait_err("reconcile", f"{type(e).__name__}: {e}")
+        _WAIT_NEW.wait(min(WAIT_POLL_S, WAIT_RECON_S))
         _WAIT_NEW.clear()
 
 
@@ -471,6 +516,27 @@ def _host_wait_met(alias: str, what: str, arg: str) -> bool:
     return _host_probe(alias, what, arg)
 
 
+SSH_CALLS_LOG_NAME = "ssh-calls.log"  # строка на ssh-вызов диспетчера: мерка «сутки без ssh-опроса»
+
+
+def _log_ssh_call(alias: str, what: str, arg: str, reason: str) -> None:
+    try:
+        with open(DISPATCHER_DIR / SSH_CALLS_LOG_NAME, "a", encoding="utf-8") as f:
+            f.write("\t".join((T.now_iso(), alias, what, arg, reason)) + "\n")
+    except OSError:
+        pass
+
+
+def _is_progress_json(arg: str) -> bool:
+    """Файл хода (`<RPV_PROGRESS_DIR>/<job>.json`, done/total) сторож ведёт сам; прочие пути, в т.ч. .json вне каталога, регистрируются.
+    `~` в PROGRESS_DIR — домашний каталог машины: сравниваем по хвосту пути."""
+    if not arg.endswith(".json"):
+        return False
+    d = arg.rsplit("/", 1)[0]
+    pd = PROGRESS_DIR.rstrip("/")
+    return d == pd or (pd.startswith("~/") and d.endswith(pd[1:]))
+
+
 def _host_probe(alias: str, what: str, arg: str) -> bool:
     ckey = (alias, what, arg)
     now_ts = time.time()
@@ -480,15 +546,20 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
         remote = f"cat {_remote_test_arg(arg)}"
     else:
         remote = f"test -e {_remote_test_arg(arg)}"
-    if what == "path" and WAIT_ASYNC and arg.startswith("/") and not arg.endswith(".json"):
-        # заодно регистрируем путь в списке сторожа машины: дальше появление файла придёт событием без ssh
+    if what == "path" and WAIT_ASYNC and arg.startswith("/") and not _is_progress_json(arg):
+        # заодно регистрируем путь в списке сторожа машины: дальше появление файла придёт событием без ssh;
+        # «@@WL» в ответе = регистрация подтверждена (нет — повторит сверка _reconcile)
         remote = (f"{{ grep -qxF {shlex.quote(arg)} {WATCH_LIST} 2>/dev/null || echo {shlex.quote(arg)} >> {WATCH_LIST}; }} "
-                  f">/dev/null 2>&1; {remote}")
+                  f">/dev/null 2>&1 && echo @@WL; {remote}")
     label = f"host:{alias}:{'unit:' if what == 'unit' else ''}{arg}"
     result = False
+    _log_ssh_call(alias, what, arg, "аварийный" if _bus_down_long() else ("первая" if ckey not in _WAIT_CACHE else "событие-юнита"))
     try:
         r = subprocess.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
         out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
+        if out.startswith("@@WL\n") or out.strip() == "@@WL":
+            _WL_REG.add((alias, arg))
+            out = out[len("@@WL"):].lstrip("\r\n")
         if what == "unit":
             state = (out.strip().splitlines() or [""])[0]
             if r.returncode == 255 or not state:
@@ -506,6 +577,90 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
         _wait_err(label, f"ssh: {type(e).__name__}: {e}")
     _WAIT_CACHE[ckey] = (now_ts, result)
     return result
+
+
+def _recon_script(keys: list) -> str:
+    parts = []
+    for i, (alias, what, arg) in enumerate(keys):
+        q = shlex.quote(arg)
+        parts.append(f"echo @@{i}")
+        if what == "unit":
+            parts.append(f"systemctl is-active {q} 2>&1 | head -1; echo '@@rc 0'")
+            continue
+        if arg.startswith("/") and not _is_progress_json(arg):
+            parts.append(f"{{ grep -qxF {q} {WATCH_LIST} 2>/dev/null || echo {q} >> {WATCH_LIST}; }} >/dev/null 2>&1 && echo @@reg")
+        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {q} 2>/dev/null; echo \"@@rc $?\"")
+    return "; ".join(parts)
+
+
+def _parse_recon(out: str, n: int) -> dict:
+    """Ответ _recon_script → {i: {"reg": bool, "rc": int|None, "body": str}}."""
+    res, cur = {}, None
+    for line in out.splitlines():
+        line = line.rstrip("\r")
+        if line.startswith("@@") and line[2:].isdigit() and int(line[2:]) < n:
+            cur = int(line[2:])
+            res[cur] = {"reg": False, "rc": None, "body": []}
+        elif cur is not None and line == "@@reg":
+            res[cur]["reg"] = True
+        elif cur is not None and line.startswith("@@rc "):
+            try:
+                res[cur]["rc"] = int(line[5:])
+            except ValueError:
+                pass
+        elif cur is not None:
+            res[cur]["body"].append(line)
+    for v in res.values():
+        v["body"] = "\n".join(v["body"])
+    return res
+
+
+def _reconcile() -> None:
+    """Страховка: раз в WAIT_RECON_S один ssh на машину проверяет ВСЕ ждущие host:… и повторяет регистрацию путей
+    у сторожа, не подтверждённую ранее. Пропущенное событие или сорванная регистрация стоят не дороже одного шага сверки."""
+    by_alias = {}
+    for k in list(_WAIT_WATCH):
+        by_alias.setdefault(k[0], []).append(k)
+    for alias, keys in by_alias.items():
+        keys.sort()
+        _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
+        try:
+            r = subprocess.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=45)
+        except Exception as e:
+            _wait_err(f"reconcile:{alias}", f"ssh: {type(e).__name__}: {e}")
+            continue
+        out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
+        if r.returncode == 255 or not out.strip():
+            _wait_err(f"reconcile:{alias}", f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
+            continue
+        now_ts = time.time()
+        for i, v in _parse_recon(out, len(keys)).items():
+            if v["rc"] is None:
+                continue
+            _, what, arg = keys[i]
+            if v["reg"]:
+                _WL_REG.add((alias, arg))
+            if what == "unit":
+                state = (v["body"].strip().splitlines() or [""])[0]
+                if not state:
+                    continue
+                result = state not in _UNIT_RUNNING
+                if not result:
+                    _drop_event(alias, what, arg)
+            elif v["rc"] == 0:
+                progress = _progress_done(v["body"]) if arg.endswith(".json") else None
+                result = True if progress is None else progress
+            elif v["rc"] == 1:
+                result = False
+            else:
+                continue
+            prev = _WAIT_CACHE.get(keys[i])
+            if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _event_ts(*keys[i]) is None
+                    and keys[i] not in _RECON_MISS):
+                _RECON_MISS.add(keys[i])  # запасной путь сработал, события не было — сторож не справился
+                _log_ssh_call(alias, what, arg, "пропуск")
+                append_ceo_inbox("*", "recon-miss", f"сверка закрыла host:{alias}:{'unit:' if what == 'unit' else ''}{arg} без события шины — проверить сторож машины")
+            _WAIT_CACHE[keys[i]] = (now_ts, result)
 
 
 def _ssh_stderr(r) -> str:
@@ -1075,7 +1230,54 @@ def resolve_run_cost(state: dict, result: dict):
     return cost, usage_diff, note
 
 
-def _pid_alive(pid, expect_name: str = None) -> bool:
+def _proc_start(pid):
+    """Метка времени старта процесса (строка) — вместе с pid однозначно называет процесс, переиспользованный pid даёт
+    другую метку. Windows — GetProcessTimes (ctypes), Linux — поле 22 `/proc/<pid>/stat`, иначе `ps -o lstart=`.
+    None — процесса нет или метку узнать нельзя."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return None
+            try:
+                c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+                if not k32.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e), ctypes.byref(k), ctypes.byref(u)):
+                    return None
+                return str((c.dwHighDateTime << 32) | c.dwLowDateTime)
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            return None
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            return "t" + fh.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        pass
+    got = _ps_field(pid, "lstart")
+    return "s" + " ".join(got.split()) if got else None
+
+
+def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
+    """Жив ли pid. `start` — метка старта, записанная при запуске (`_proc_start`): сверка pid + старт вместо имени
+    образа (роль под npm-установкой — `node`, не `claude`); не совпала — pid занят другим процессом, мёртв; метку узнать
+    нельзя — только «процесс есть». Дальше — прежнее: """
+    if start:
+        now_start = _proc_start(pid)
+        if now_start is not None:
+            return now_start == start and _pid_alive(pid, "")
+        return _pid_alive_name(pid, "")  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
+    return _pid_alive_name(pid, expect_name)
+
+
+def _pid_alive_name(pid, expect_name: str = None) -> bool:
     """Жив ли pid — и похож ли на наш `claude` (судья 27.09, «можно потом»): подстрочный поиск pid в
     `tasklist` ловил чужие совпадения (123 ⊂ 1234), а pid мог переиспользоваться ОС после перезагрузки
     — точное сравнение PID-колонки через `/FO CSV` + проверка имени образа снижают оба риска (не
@@ -1102,7 +1304,8 @@ def _ps_field(pid, field: str):
     None — ps нет или процесса нет."""
     try:
         out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(int(pid))], capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=5)
+                             encoding="utf-8", errors="replace", timeout=5,
+                             env=dict(os.environ, LC_ALL="C", TZ="UTC0"))  # lstart зависит от локали и пояса
     except Exception:
         return None
     return out.stdout.strip() if out.returncode == 0 else None
@@ -1212,7 +1415,7 @@ def release_instance_lock(pid_file) -> None:
 def _proc_alive(info: dict) -> bool:
     if info.get("popen") is not None:
         return info["popen"].poll() is None
-    return _pid_alive(info.get("pid"))
+    return _pid_alive(info.get("pid"), start=info.get("pstart"))
 
 
 def _kill_proc(info: dict) -> None:
@@ -1390,8 +1593,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         raise
     mirror["pid"] = popen.pid
     _drop_ceo_handoff(state, tid)  # любой запуск позже передачи CEO — ход состоялся, метка отработала
+    pstart = _proc_start(popen.pid)
+    mirror["pstart"] = pstart
     RUNNING[tid] = {
-        "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
+        "role": role, "popen": popen, "pid": popen.pid, "pstart": pstart, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
         "status_at_launch": status_at_launch, "executor": executor,
         "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
@@ -1767,21 +1972,28 @@ def _find_pid_by_session(session_id) -> "int | None":
     if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
         return None
     try:
+        pairs = []  # (pid, ppid) совпавших процессов
         if os.name == "nt":
             ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
-                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | ForEach-Object {{ $_.ProcessId }}")
+                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
+                  "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
             out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
                                  timeout=30).stdout
-            pids = [int(x) for x in out.split()]
-        else:
-            out = subprocess.run(["ps", "-ww", "-eo", "pid=,args="], capture_output=True, text=True, timeout=10).stdout
-            pids = []
             for ln in out.splitlines():
-                pid_s, _, args = ln.strip().partition(" ")
-                if pid_s.isdigit() and str(session_id) in args:
-                    pids.append(int(pid_s))
-        pids = [p for p in pids if p != os.getpid()]
-        return min(pids) if pids else None
+                f = ln.split()
+                if len(f) == 2 and all(x.isdigit() for x in f):
+                    pairs.append((int(f[0]), int(f[1])))
+        else:
+            out = subprocess.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
+                                 timeout=10).stdout
+            for ln in out.splitlines():
+                f = ln.split(None, 2)
+                if len(f) == 3 and f[0].isdigit() and f[1].isdigit() and str(session_id) in f[2]:
+                    pairs.append((int(f[0]), int(f[1])))
+        pairs = [(p, pp) for p, pp in pairs if p != os.getpid()]
+        found = {p for p, _ in pairs}
+        roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
+        return min(roots or found) if found else None
     except Exception:
         return None
 
@@ -1796,7 +2008,7 @@ def recover_active_runs(state: dict, now) -> None:
         if tid in RUNNING:
             continue  # уже отслеживаем в этом процессе (это не перезапуск)
         info = {
-            "role": saved.get("role"), "popen": None, "pid": saved.get("pid"),
+            "role": saved.get("role"), "popen": None, "pid": saved.get("pid"), "pstart": saved.get("pstart"),
             "started": T.parse_dt(saved["started"]), "attempt": saved.get("attempt", 0),
             "run_file": Path(saved["run_file"]), "err_file": Path(saved.get("err_file") or ""),
             "out_fh": None, "err_fh": None, "reason": saved.get("reason", "recovered"),
@@ -1804,19 +2016,35 @@ def recover_active_runs(state: dict, now) -> None:
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }
+        by_session = False
         if not saved.get("pid"):  # зеркало-намерение: диспетчер убит до записи pid
+            by_session = True
             found = _find_pid_by_session(saved.get("session_id"))
             if not found:
-                print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет) — "
-                      "зеркало снято", file=sys.stderr, flush=True)
                 state.get("active_runs", {}).pop(tid, None)
+                try:
+                    has_output = info["run_file"].stat().st_size > 0
+                except OSError:
+                    has_output = False
+                if has_output:  # роль отработала, пока диспетчер лежал: итог прогона не терять
+                    print(f"[dispatch] {T.now_iso(now)} подхват {tid}: процесса нет, вывод есть — разбираю как завершённый",
+                          file=sys.stderr, flush=True)
+                    _finish_run(tid, info, state, now, timed_out=False)
+                else:
+                    print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет, "
+                          "вывода нет) — зеркало снято", file=sys.stderr, flush=True)
                 continue
             saved["pid"] = info["pid"] = found
+            saved["pstart"] = info["pstart"] = _proc_start(found)  # метки старта не было — берём текущую: «процесс есть»
             print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {found} найден по session_id (зеркало было без pid)",
                   file=sys.stderr, flush=True)
-        alive = _pid_alive(saved.get("pid"))
-        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')} "
-              f"{'жив — слежу' if alive else 'не найден или чужое имя образа — разбираю как завершённый'}", file=sys.stderr, flush=True)
+        want, got = saved.get("pstart"), _proc_start(saved.get("pid"))
+        alive = _pid_alive(saved.get("pid"), expect_name="" if by_session else None, start=want)
+        how = (f"старт записан {want}, сейчас {got}" if want
+               else "старт не записан (запуск прежней версии) — по имени образа")
+        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')}, {how}: "
+              f"{'жив — слежу' if alive else 'не найден или занят другим процессом — разбираю как завершённый'}",
+              file=sys.stderr, flush=True)
         if alive:
             RUNNING[tid] = info
         else:
@@ -2350,7 +2578,8 @@ def main(argv=None) -> int:
     print(f"[dispatch] v2 loop every {POLL_INTERVAL}s, MAX_PARALLEL={MAX_PARALLEL}, run timeout "
           f"{RUN_TIMEOUT / 60:.0f} min, CLAUDE_BIN={CLAUDE_BIN}")
     link = _start_bus_link()
-    global WAIT_ASYNC
+    global WAIT_ASYNC, _LINK
+    _LINK = link
     WAIT_ASYNC = True
     threading.Thread(target=_wait_poller, daemon=True, name="wait-poller").start()
     while True:

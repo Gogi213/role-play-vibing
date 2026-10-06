@@ -12,6 +12,7 @@
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
     tickets.py comment TK-001 --author researcher --text "..." [--next judge]
+    tickets.py accept TK-001 --pr 7 --sha <голова>              # только Судья: принято на этой голове → вливает merge_rule
     tickets.py start TK-001                                     # backlog|stopped → todo
     tickets.py wait TK-001 host:calc:<путь>/<job>.json [--on-met "python tools/x.py арг"]  # status: waiting + wait_for
     tickets.py stop TK-001 --text "..." [--next engineer]       # только CEO: снять роль
@@ -31,6 +32,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -190,6 +192,32 @@ def _caller_role() -> str:
     return (D.P.env("ROLE", "") or "").strip().lower()
 
 
+def cmd_accept(args) -> int:
+    """Судья: машиночитаемый вердикт «принято» на конкретной голове PR (TK-079 п.2). Вливает программа (merge_rule), когда
+    на этой голове CI зелёный и PR без конфликтов; сменится голова — вердикт не действует, нужен новый."""
+    role = _caller_role()
+    if role and role != "judge":
+        print("accept: только Судья", file=sys.stderr)
+        return 1
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
+        print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
+        return 1
+    with T.ticket_lock(path):
+        T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}. "
+                     + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."))
+        import merge_rule
+        acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
+        acc[int(args.pr)] = args.sha  # вердикты по другим PR тикета не трогаем
+        T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc)}, stamp_updated=False)
+    bus_emit(args.id, "статус", {"accepted": f"{args.pr}@{args.sha}"})
+    print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]}")
+    return 0
+
+
 def cmd_start(args) -> int:
     """backlog → todo: задача, перенесённая из TASKS.md, берётся в работу — диспетчер начинает её видеть. stopped → todo:
     CEO возвращает остановленную (`stop` без `--next`) задачу в работу."""
@@ -322,6 +350,13 @@ def main(argv=None) -> int:
     p_comment.add_argument("--next", choices=["researcher", "engineer", "judge", "ceo"], default=None,
                             help="разбудить эту роль один раз (ceo — только blocked/нужно решение владельца)")
     p_comment.set_defaults(func=cmd_comment)
+
+    p_accept = sub.add_parser("accept", help="Судья: принято, PR N на голове SHA (вливает merge_rule по правилу)")
+    p_accept.add_argument("id")
+    p_accept.add_argument("--pr", type=int, required=True)
+    p_accept.add_argument("--sha", required=True)
+    p_accept.add_argument("--text", default="")
+    p_accept.set_defaults(func=cmd_accept)
 
     p_start = sub.add_parser("start")
     p_start.add_argument("id")

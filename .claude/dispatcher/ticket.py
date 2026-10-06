@@ -67,9 +67,10 @@ _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?
 WAIT_FOR_HOSTS = ("calc", "vps", "deck")
 WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
                     "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
-                    "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>)")
+                    "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён)")
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 _TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_CI_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
 
 
 def parse_wait_for(spec: str):
@@ -82,6 +83,9 @@ def parse_wait_for(spec: str):
     if spec.startswith("ticket:"):
         arg = spec[len("ticket:"):].strip()
         return ("ticket", arg) if _TICKET_ID_RE.match(arg) else None
+    if spec.startswith("ci:"):
+        m = _CI_RE.match(spec[len("ci:"):].strip())
+        return ("ci", m.group(1), int(m.group(2))) if m else None
     if spec.startswith("deck:"):
         arg = spec[len("deck:"):].strip()
         return ("host", "deck", "path", arg) if arg else None
