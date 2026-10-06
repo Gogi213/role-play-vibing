@@ -3610,6 +3610,25 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
         finally:
             D.os.kill, D._proc_state = orig_kill, orig_state
 
+    def test_without_proc_name_and_state_come_from_ps(self):
+        """macOS: нет /proc — имя образа и состояние берутся из ps; чужой процесс с живым pid — не наш."""
+        o_kill, o_ps, o_open = D.os.kill, D._ps_field, D.open if hasattr(D, "open") else None
+        D.os.kill = lambda pid, sig: None
+        D.open = lambda *a, **k: (_ for _ in ()).throw(OSError("нет /proc"))
+        try:
+            vals = {"stat": "S", "comm": "/usr/bin/vim"}
+            D._ps_field = lambda pid, field: vals.get(field)
+            self.assertFalse(D._pid_alive_posix(4242, "claude"))
+            vals["comm"] = "/opt/homebrew/bin/claude"
+            self.assertTrue(D._pid_alive_posix(4242, "claude"))
+            vals["stat"] = "Z"
+            self.assertFalse(D._pid_alive_posix(4242, "claude"))
+            vals.clear()                                          # ps ничего не знает — как раньше, по kill -0
+            self.assertTrue(D._pid_alive_posix(4242, "claude"))
+        finally:
+            D.os.kill, D._ps_field = o_kill, o_ps
+            del D.open
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "зомби и /proc — только Linux")
     def test_real_zombie_child_is_not_alive(self):
         child = subprocess.Popen([sys.executable, "-c", "pass"])

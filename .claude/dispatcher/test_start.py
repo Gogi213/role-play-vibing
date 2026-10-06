@@ -51,6 +51,18 @@ def wait_alive(pid, want=True, timeout=10.0):
 
 
 class StartTests(unittest.TestCase):
+    def test_board_service_only_with_rpv_board(self):
+        old = os.environ.pop("RPV_BOARD", None), os.environ.pop("ALPHA_BOARD", None)
+        try:
+            self.assertEqual(S.services(), S.SERVICES)
+            os.environ["RPV_BOARD"] = "http://x/#k"
+            self.assertEqual(S.services(), S.SERVICES + ("board_push",))
+        finally:
+            os.environ.pop("RPV_BOARD", None)
+            for k, v in zip(("RPV_BOARD", "ALPHA_BOARD"), old):
+                if v is not None:
+                    os.environ[k] = v
+
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)   # Popen-объекты фоновых процессов не ждём — они живут дальше
         self.tmp = tempfile.TemporaryDirectory()

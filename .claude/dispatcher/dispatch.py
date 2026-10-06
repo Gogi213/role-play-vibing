@@ -236,7 +236,9 @@ PROMPT_TEMPLATE = (
     "status/wait_for в шапке обнови сама (не «todo», если работа не закончена). Передать работу другой "
     "роли — один раз `--next <researcher|engineer|judge>` в той же команде comment, без копий «для "
     "сведения»; владелец после передачи ставит status: waiting (иначе его запустят снова). `--next ceo` — "
-    "только если задача заблокирована или нужно решение владельца. @упоминания в тексте никого не будят."
+    "только если задача заблокирована или нужно решение владельца. @упоминания в тексте никого не будят. "
+    "Табло: нет плана шагов — в начале работы `{plan_cli} set {tid} --title \"...\" --step \"название|кто|где|для чего\" ...` "
+    "(3–6 шагов по-людски, `{plan_cli} --help`); в конце запуска — `{plan_cli} step {tid} <N> <run|done|todo>` по факту."
 )
 
 RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, out_fh, err_fh, reason}
@@ -1001,34 +1003,59 @@ def _pid_alive(pid, expect_name: str = None) -> bool:
     return _pid_alive_posix(pid, expect_name)
 
 
+def _ps_field(pid, field: str):
+    """Поле процесса из `ps -o <field>= -p <pid>` (macOS/BSD, где нет /proc; stdlib). Строка (может быть пустой),
+    None — ps нет или процесса нет."""
+    try:
+        out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(int(pid))], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=5)
+    except Exception:
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
 def _proc_state(pid):
-    """Буква состояния процесса по `/proc/<pid>/status` (Linux: R, S, D, T, Z, X…) или None, если /proc недоступен."""
+    """Буква состояния процесса: Linux — `/proc/<pid>/status` (R, S, D, T, Z, X…), иначе (macOS) — `ps -o stat=`;
+    None — узнать нельзя."""
     try:
         with open(f"/proc/{pid}/status", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 if line.startswith("State:"):
                     return line.split(":", 1)[1].strip()[:1] or None
-    except OSError:
         return None
-    return None
+    except OSError:
+        pass
+    return (_ps_field(pid, "stat") or "")[:1] or None
+
+
+def _proc_comm(pid):
+    """Имя образа процесса: `/proc/<pid>/comm` или `ps -o comm=` (macOS: путь к исполняемому — берём имя файла).
+    None — узнать нельзя."""
+    try:
+        with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as fh:
+            return fh.read().strip()
+    except OSError:
+        pass
+    comm = _ps_field(pid, "comm")
+    return os.path.basename(comm) if comm else None
 
 
 def _pid_alive_posix(pid, expect_name: str = None) -> bool:
     """Живость pid на Linux/macOS: `kill -0` отвечает и на зомби (завершился, но родитель не вызвал wait) — такой
-    процесс мёртв, иначе подхват «живого» прогона после перезапуска ждёт вечно (состояние Z или X в /proc)."""
+    процесс мёртв, иначе подхват «живого» прогона после перезапуска ждёт вечно (состояние Z или X). Имя образа
+    сверяется всегда, когда его можно узнать (без /proc — через ps): чужой процесс с переиспользованным pid — не наш."""
     try:
         os.kill(pid, 0)
+    except PermissionError:
+        pass  # процесс есть, но чужого пользователя — имя проверим ниже
     except Exception:
         return False
     if _proc_state(pid) in ("Z", "X"):
         return False
     if not expect_name:
         return True
-    try:
-        with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as fh:
-            return expect_name.lower() in fh.read().lower()
-    except OSError:
-        return True  # /proc недоступен (не Linux) — не валим проверку живости из-за этого
+    comm = _proc_comm(pid)
+    return True if comm is None else expect_name.lower() in comm.lower()  # имя узнать нельзя — не валим живость
 
 
 def _pid_kill(pid) -> None:
@@ -1167,9 +1194,14 @@ def tickets_cli() -> str:
     return "python " + shlex.quote((CODE_DIR / "tickets.py").as_posix())
 
 
+def plan_cli() -> str:
+    """plan.py из папки плагина (шаги ролей для веб-табло): проект роль берёт из RPV_PROJECT, как и tickets.py."""
+    return "python " + shlex.quote((CODE_DIR / "plan.py").as_posix())
+
+
 def build_prompt(role: str, tid: str, extra_note: str = None) -> str:
     prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(RUN_TIMEOUT // 60),
-                                    tickets_cli=tickets_cli())
+                                    tickets_cli=tickets_cli(), plan_cli=plan_cli())
     if extra_note:
         prompt += " " + extra_note
     return prompt

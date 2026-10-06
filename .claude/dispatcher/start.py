@@ -38,6 +38,12 @@ import project as P  # noqa: E402
 
 CODE_DIR = Path(__file__).resolve().parent
 SERVICES = ("dispatch", "watch")   # порядок запуска: сначала диспетчер, потом сторож, который за ним следит
+BOARD_SERVICE = "board_push"       # третья служба — отправка на веб-табло; стартует, только если задан RPV_BOARD
+BOARD_ARGS = ("--loop", "5")
+
+
+def services() -> tuple:
+    return SERVICES + ((BOARD_SERVICE,) if P.env("BOARD") else ())
 LOCK_IMAGE = "py"                  # подстрока имени образа процесса, как в dispatch.acquire_instance_lock
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом
@@ -70,7 +76,7 @@ def read_pid(pid_file: Path) -> int:
 
 
 def _cmdline(pid: int) -> str | None:
-    """Командная строка процесса или None (узнать нельзя). Linux — /proc, Windows — PowerShell/CIM."""
+    """Командная строка процесса или None (узнать нельзя). Linux — /proc, macOS — ps, Windows — PowerShell/CIM."""
     if os.name == "nt":
         try:
             out = subprocess.run(
@@ -304,14 +310,14 @@ def _popen_detached(cmd: list, project: Path, log: Path) -> Started:
     return Started(p.pid, "popen", popen=p)
 
 
-def spawn(script: Path, project: Path, log: Path) -> Started:
+def spawn(script: Path, project: Path, log: Path, extra: tuple = ()) -> Started:
     """Фоновый процесс `python -u script --project <проект>`, отвязанный от этой сессии (Windows — WMI, Linux — юнит
     systemd, иначе Popen; не получилось — запасной путь Popen); вывод — в `log` (дописывается)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
         out.write(f"\n=== {datetime.now().astimezone().isoformat(timespec='seconds')} старт {script.name} ===\n"
                   .encode("utf-8"))
-    cmd = [sys.executable, "-u", str(script), "--project", str(project)]
+    cmd = [sys.executable, "-u", str(script), "--project", str(project), *extra]
     how = _launcher()
     try:
         if how == "wmi":
@@ -331,11 +337,12 @@ def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) ->
     state_dir.mkdir(parents=True, exist_ok=True)
     use_systemd = _launcher() == "systemd"
     procs = []
-    for name in SERVICES:
+    for name in services():
         restarted = stop_running(state_dir / f"{name}.pid", f"{name}.py",
                                  unit=unit_name(name, project) if use_systemd else None)
         log = state_dir / f"{name}.run.log"
-        procs.append((name, spawn(code_dir / f"{name}.py", project, log), log, restarted))
+        procs.append((name, spawn(code_dir / f"{name}.py", project, log, BOARD_ARGS if name == BOARD_SERVICE else ()),
+                      log, restarted))
     time.sleep(settle)
     rows = []
     for name, p, log, restarted in procs:

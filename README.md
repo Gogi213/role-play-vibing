@@ -198,7 +198,7 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 
 Перед запуском поправьте в `rpv-bus-watcher.service` `HOSTNAME` на имя машины, а порт (`--port 8788`) и пути — в обоих юнитах под свою машину. Сторожу машины нужны адрес и токен шины: добавьте в его `[Service]` строки `Environment=RPV_BUS_URL=http://<адрес шины>:8788` и `Environment=RPV_BUS_TOKEN_FILE=/opt/rpv-bus/token`. Затем `sudo systemctl daemon-reload && sudo systemctl enable --now rpv-bus rpv-bus-watcher`. На остальные Linux-машины с заданиями ставятся только `watcher.py`, `busclient.py` и `rpv-bus-watcher.service` (с `RPV_BUS_URL` на машину шины и файлом токена); `rpv-bus` — только на машину шины.
 
-Веб-табло (`board_push.py --loop 5`, `RPV_BOARD` в окружении) `/rpv-start` не запускает; при необходимости оформите его отдельной службой по тем же образцам (скрипт `board_push.py` вместо `dispatch.py`, добавьте аргументы `--loop 5`).
+Веб-табло (`board_push.py --loop 5`) `/rpv-start` запускает сам, если в окружении задан `RPV_BOARD`.
 
 ## Шина событий (1.3.0, необязательно)
 
@@ -211,6 +211,16 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Отправители** — `.claude/bus/busclient.py send <адрес> [--payload JSON]`; недоступная шина складывается в spool и дошлётся позже. `tickets.py`-события: добавлены в проекте alpha, в плагин — по запросу.
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
+
+## Что нового в 1.5.0
+
+- **Табло наполняется шагами:** роли пишут план командой `plan.py set/step` (правило в промпте диспетчера), `board_push.py`
+  шлёт на табло шаги, сводку и машины (ПК/VPS/СЧЁТ/КОЛ/ВЫ из поля «где» шага), а не один шаг на тикет. План — `<проект>/.claude/pulse/plans/<ТК>.json`.
+- **Отправка стартует вместе с диспетчером:** задан `RPV_BOARD` — `/rpv-start` запускает и `board_push.py --loop 5` (Windows, macOS, Linux),
+  при перезапуске он перезапускается, сам гаснет, когда диспетчера нет дольше 2 минут.
+- **macOS:** проверка живого pid без `/proc` — через `ps` (состояние и имя образа), чужой процесс с живым pid больше не принимается за наш.
+
+Командам на macOS: обновить плагин до 1.5.0, задать `RPV_BOARD` (строка из окна «+»), выполнить `/rpv-start`.
 
 ## Что нового в 1.4.2
 
