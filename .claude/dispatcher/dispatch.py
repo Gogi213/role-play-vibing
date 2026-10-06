@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import bus_link  # noqa: E402
+import downtime  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -1932,6 +1933,50 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
     return True
 
 
+IDLE_SLO_MIN = float(P.env("IDLE_SLO_MIN", "10"))
+IDLE_GRACE_S = 600.0
+
+
+def _waits_without_condition(tkt: T.Ticket, now) -> bool:
+    if tkt.status != "waiting" or tkt.owner not in ROLE_KEYS or tkt.next_role:
+        return False
+    if (tkt.header.get("wait_for") or "").strip():
+        return False
+    try:
+        return (now - T.parse_dt(tkt.header.get("updated", ""))).total_seconds() > IDLE_GRACE_S
+    except Exception:
+        return False
+
+
+def _alert_idle(day: str, rec: dict, now) -> None:
+    note = (f"простой за {day}: {downtime.total_min(rec):.0f} мин при SLO {IDLE_SLO_MIN:.0f} "
+            f"(готовая работа без исполнителя {rec['idle_s'] / 60:.0f}, ожидание без условия {rec['wait_s'] / 60:.0f}, "
+            f"молчание диспетчера {rec['stall_s'] / 60:.0f}, тормоз запусков {rec.get('throttle_s', 0) / 60:.0f}; "
+            f"сумма корзин)")
+    try:
+        import busclient
+        if not os.environ.get("RPV_BUS_DISABLE") and busclient.config()[0]:
+            busclient.post("служба.простой.превышен", {"note": note}, f"idle-slo-{day}")  # недоступна — spool, дошлётся
+            return
+    except Exception:
+        pass
+    append_ceo_inbox("*", "idle-slo", note, now)  # шина выключена — файл
+
+
+def _account_downtime(state: dict, now, **flags) -> None:
+    try:
+        day, rec, breached = downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)
+        try:
+            import busclient
+            state["bus_url"] = "" if os.environ.get("RPV_BUS_DISABLE") else busclient.config()[0]
+        except Exception:
+            state["bus_url"] = ""
+        if breached:
+            _alert_idle(day, rec, now)
+    except Exception as e:  # счётчик не должен ронять тик
+        print(f"[dispatch] downtime: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def tick(now=None) -> int:
     now = now or datetime.now().astimezone()
     state = load_state()
@@ -1944,6 +1989,7 @@ def tick(now=None) -> int:
     unblock_limit_victims(now)
     paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
+    waiting_nocond = False  # TK-076 п.4: роль ждёт без условия (ни wait_for, ни next) дольше IDLE_GRACE_S
     for path in T.list_tickets(TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
@@ -1975,6 +2021,8 @@ def tick(now=None) -> int:
             tkt = T.read_ticket(path)
         decision = decide(tkt, state, now)
         if decision is None:
+            if _waits_without_condition(tkt, now):
+                waiting_nocond = True
             continue
         haiku_reason = haiku_refused_reason(tkt)
         if haiku_reason:
@@ -1985,6 +2033,7 @@ def tick(now=None) -> int:
         candidates.append((path, tkt, decision))
 
     launched = 0
+    throttled = 0
     for path, tkt, decision in sorted(candidates, key=lambda c: _candidate_sort_key(state, c[1], c[2])):
         tid = tkt.id
         if paused or len(RUNNING) >= MAX_PARALLEL:
@@ -1994,12 +2043,17 @@ def tick(now=None) -> int:
         if _role_busy(decision.role):
             continue  # у роли уже предел запусков (на любых задачах) — ждёт следующего тика
         if _rate_limited(state, tid, now):
+            throttled += 1
             continue  # MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — пауза, не ошибка; попробуем следующим тиком
         if decision.header_updates:
             _apply_header_updates(path, decision.header_updates, now)
         launch_run(path, decision.role, state, now, reason=decision.reason)
         launched += 1
 
+    idle_now = not RUNNING and not launched and not paused
+    _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
+                      throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
+                      work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
     return launched

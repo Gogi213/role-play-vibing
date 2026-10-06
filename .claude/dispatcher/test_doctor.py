@@ -99,6 +99,49 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("диспетчер", done.stdout.decode("utf-8"))
 
+    def test_idle_row_and_bus_url_from_dispatcher_state(self):
+        now = time.time()
+        day = datetime.fromtimestamp(now).date().isoformat()
+        (self.sd / "state.json").write_text(json.dumps({
+            "last_tick": iso(now), "bus_url": "http://disp:1",
+            "downtime": {day: {"idle_s": 900, "wait_s": 0, "stall_s": 0, "alerted": True}}}), encoding="utf-8")
+        rows = self.rows(now=now, bus_request=lambda path: (_ for _ in ()).throw(OSError("x")))
+        self.assertEqual(rows["простой сегодня"][1], D.FAIL)
+        self.assertIn("15 мин из 10", rows["простой сегодня"][2])
+        self.assertIn("http://disp:1", rows["шина"][2])  # адрес диспетчера, а не оболочки (в ней RPV_BUS_URL пуст)
+
+    def test_bus_polled_at_dispatcher_address_when_shell_env_empty(self):
+        import io
+        seen = []
+
+        class R(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=0):
+            seen.append(req.full_url)
+            return R(b'{"ok": true, "last_seq": 3, "queues": {}, "blocked": {}}')
+
+        with mock.patch.dict(os.environ, {"RPV_BUS_URL": "", "ALPHA_BUS_URL": ""}),                 mock.patch("urllib.request.urlopen", fake_urlopen):
+            row = D.check_bus(None, "http://disp:9")
+        self.assertEqual(seen, ["http://disp:9/stats"])
+        self.assertEqual(row[1], D.OK)
+
+    def test_idle_row_shows_throttle_and_limit_buckets(self):
+        now = time.time()
+        day = datetime.fromtimestamp(now).date().isoformat()
+        (self.sd / "state.json").write_text(json.dumps({
+            "last_tick": iso(now),
+            "downtime": {day: {"idle_s": 0, "wait_s": 0, "stall_s": 0, "throttle_s": 720, "limit_s": 3600,
+                               "alerted": True}}}), encoding="utf-8")
+        r = self.rows(now=now)["простой сегодня"]
+        self.assertEqual(r[1], D.FAIL)
+        self.assertIn("тормоз запусков 12", r[2])
+        self.assertIn("вне SLO 60", r[2])
+
     def test_outside_project_exit_2(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"RPV_PROJECT": "", "CLAUDE_PROJECT_DIR": ""}):
             cwd = os.getcwd()
