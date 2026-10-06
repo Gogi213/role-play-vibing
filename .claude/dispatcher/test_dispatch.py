@@ -1581,6 +1581,49 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(len(tkt.log), 1, "recover не должен был запустить процесс повторно")
         self.assertEqual(tkt.status, "done")
 
+    def test_recover_adopts_role_killed_before_pid_was_mirrored(self):
+        """Диспетчер убит между Popen роли и записью pid: зеркало-намерение без pid — роль находят по session_id."""
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Сирота")
+        sid = "orphan-sid-4242"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "--session-id", sid])
+        self.addCleanup(lambda: (proc.kill(), proc.wait(timeout=10)))
+        state = {"active_runs": {path.stem: {
+            "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
+            "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": str(self.tickets_dir.parent / "r.err"),
+            "reason": "todo", "status_at_launch": "in_progress", "session_id": sid}}}
+        orig = D.PID_EXPECT_NAME
+        D.PID_EXPECT_NAME = ""
+        try:
+            D.recover_active_runs(state, datetime.now().astimezone())
+            self.assertEqual(D.RUNNING[path.stem]["pid"], proc.pid)
+            self.assertEqual(state["active_runs"][path.stem]["pid"], proc.pid)
+        finally:
+            D.PID_EXPECT_NAME = orig
+            D.RUNNING.clear()
+
+    def test_recover_drops_intent_mirror_when_role_never_started(self):
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Не стартовала")
+        state = {"active_runs": {path.stem: {
+            "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
+            "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": "", "reason": "todo",
+            "status_at_launch": "todo", "session_id": "never-started-sid-1"}}}
+        D.recover_active_runs(state, datetime.now().astimezone())
+        self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
+
+    def test_launch_run_mirrors_intent_before_popen(self):
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Намерение")
+        seen = {}
+
+        def boom(cmd, **kw):
+            seen["mirror"] = dict(D.load_state().get("active_runs", {}).get(path.stem) or {})
+            raise OSError("popen failed")
+        state = D.load_state()
+        with mock.patch.object(D, "_popen", boom), self.assertRaises(OSError):
+            D.launch_run(path, "researcher", state, datetime.now().astimezone(), reason="todo")
+        self.assertIsNone(seen["mirror"].get("pid", "x"))
+        self.assertTrue(seen["mirror"].get("session_id"))
+        self.assertNotIn(path.stem, D.load_state().get("active_runs", {}))
+
     def test_recover_active_runs_processes_finished_while_down(self):
         """v1.1: процесс успел закончиться, пока диспетчер не работал — recover доводит его до конца сам."""
         self.set_fake_bin(FAKE_BIN_OK)
