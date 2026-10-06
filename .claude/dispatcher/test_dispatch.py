@@ -829,6 +829,21 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(tkt.status, "in_progress")
         self.assertTrue(any(e.author == "dispatcher" and "без wait_for" in e.text for e in tkt.log))
 
+    def test_waiting_after_next_ceo_consumed_by_tick_is_not_refused(self):
+        """TK-076 п.2: `--next ceo`, съеденный тиком при живой роли, не делает её waiting «без условия»."""
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Передача CEO", now=t0)
+        T.append_log(path, "engineer", "нужно решение", now=t0 + timedelta(seconds=5))
+        T.write_header_updates(path, {"next": "ceo"}, now=t0 + timedelta(seconds=5))
+        state = D.load_state()
+        D.handle_next_ceo(path, T.read_ticket(path), state, t0 + timedelta(seconds=6))
+        T.write_header_updates(path, {"status": "waiting", "wait_for": ""}, now=t0 + timedelta(seconds=8))
+        D._finish_role_part(path.stem, {"role": "engineer", "status_at_launch": "in_progress", "started": t0},
+                            state, t0 + timedelta(seconds=9), False, {})
+        tkt = T.read_ticket(path)
+        self.assertEqual(tkt.status, "waiting")
+        self.assertFalse(any("без wait_for" in e.text for e in tkt.log))
+
     def test_waiting_with_condition_untouched(self):
         now = dt("2026-10-06T12:00:00+04:00")
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Ожидание", now=now)
@@ -4152,6 +4167,27 @@ class LimitAndWaitingTK070Test(unittest.TestCase):
         late = datetime(2026, 10, 6, 6, 0, tzinfo=timezone(timedelta(hours=4)))
         self.assertEqual(D._limit_reset_at(r, late).day, 7)
         self.assertEqual(D._limit_reset_at({"result": "?"}, now), now + timedelta(hours=1))
+
+    def test_limit_reset_reference_is_run_end(self):
+        from datetime import datetime, timezone, timedelta
+        tz = timezone(timedelta(hours=4))
+        r = {"api_error_status": 429, "result": "You've hit your session limit · resets 1:33pm"}
+        # метка = минута ответа, разбор на тик позже: метка уже прошла — пауза ≤ 1 мин (запас), не сутки
+        ref = datetime(2026, 10, 6, 13, 33, 0, 500000, tzinfo=tz)
+        now = datetime(2026, 10, 6, 13, 33, 6, tzinfo=tz)
+        self.assertLessEqual(D._limit_reset_at(r, now, ref), now + timedelta(minutes=1))
+        # метка на минуту впереди ответа, разбор уже после метки (сирота): паузы нет
+        ref = datetime(2026, 10, 6, 13, 32, 30, tzinfo=tz)
+        late = datetime(2026, 10, 6, 13, 40, tzinfo=tz)
+        self.assertLessEqual(D._limit_reset_at(r, late, ref), late)
+        # сирота, разобранная через 10 мин после resetsAt при ответе за час до метки
+        ref = datetime(2026, 10, 6, 12, 30, tzinfo=tz)
+        late = datetime(2026, 10, 6, 13, 43, tzinfo=tz)
+        self.assertLessEqual(D._limit_reset_at(r, late, ref), late)
+        # метка раньше ответа на часы — завтра
+        ref = datetime(2026, 10, 6, 22, 0, tzinfo=tz)
+        r5 = {"result": "resets 5am"}
+        self.assertEqual(D._limit_reset_at(r5, ref, ref).day, 7)
 
     def test_limit_pause_flag(self):
         from datetime import datetime, timezone, timedelta

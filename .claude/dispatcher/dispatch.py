@@ -267,9 +267,7 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(STATE_FILE)
+    T.atomic_write_text(STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True))  # с повторами: на Windows читатель держит файл
 
 
 # --- wait_for ---------------------------------------------------------------------------------
@@ -580,6 +578,18 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
     who = f"{last.author}: " if last else ""
     append_ceo_inbox(tkt.id, "next-ceo", f"{who}{_first_line(last.text if last else '')}", now)
     T.write_header_updates(path, {"next": ""}, now=now, stamp_updated=False)
+    state.setdefault("ceo_handoffs", {})[tkt.id] = T.now_iso(now)  # next съеден тиком при живой роли — её waiting не «без условия»
+
+
+def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
+    """Роль передала CEO (`--next ceo`) во время запуска: тик уже доставил сигнал и очистил поле — ожидание валидно."""
+    at = (state.get("ceo_handoffs") or {}).pop(tid, None)
+    try:
+        started = info["started"]
+        started = T.parse_dt(started) if isinstance(started, str) else started
+        return bool(at) and T.parse_dt(at) >= started.replace(microsecond=0)
+    except (ValueError, TypeError, KeyError):
+        return False
 
 
 def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
@@ -1484,8 +1494,9 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
         save_state(state)
         return
     tkt = T.read_ticket(path)
+    handed_to_ceo = _ceo_handoff_during_run(state, tid, info)
     if (role == tkt.owner and tkt.status == "waiting" and not (tkt.header.get("wait_for") or "").strip()
-            and not tkt.next_role):
+            and not tkt.next_role and not handed_to_ceo):
         # TK-070 п.3: ожидание без условия пробуждения — отказ (иначе тикет молчит до эскалации); вернуть в работу
         T.write_header_updates(path, {"status": "in_progress"}, now=now)
         T.append_log(path, "dispatcher", "status: waiting без wait_for и без next — отказ: ожидание без условия "
@@ -1572,13 +1583,18 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
 
 # --- лимит сессии (TK-070 п.2): ответ 429 «You've hit your session limit · resets 5am (Asia/Tbilisi)» — не холостой ход ---
 
+LIMIT_LABEL_SLACK = timedelta(minutes=2)
+
+
 def _limit_hit(result: dict) -> bool:
     text = str((result or {}).get("result") or "")
     return (result or {}).get("api_error_status") == 429 or "hit your session limit" in text
 
 
-def _limit_reset_at(result: dict, now) -> datetime:
-    """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится)."""
+def _limit_reset_at(result: dict, now, ref=None) -> datetime:
+    """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится).
+    ref — момент ответа (конец запуска; по умолчанию now): метка раньше него — завтра, но метка в пределах
+    LIMIT_LABEL_SLACK до ответа (минутное округление) — уже прошла: вернём момент <= now, паузы не будет."""
     m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)(?:\s*\(([^)]+)\))?", str((result or {}).get("result") or ""), re.I)
     if not m:
         return now + timedelta(hours=1)
@@ -1590,9 +1606,9 @@ def _limit_reset_at(result: dict, now) -> datetime:
         tz = ZoneInfo(m.group(4)) if m.group(4) else now.tzinfo
     except Exception:
         tz = now.tzinfo
-    local = now.astimezone(tz)
+    local = (ref or now).astimezone(tz)
     at = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if at <= local:
+    if at <= local - LIMIT_LABEL_SLACK:
         at += timedelta(days=1)
     return at + timedelta(minutes=1)
 
@@ -1662,8 +1678,13 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
         route_ceo_signal(tid, "model", model_warn, state, now)
 
     if _limit_hit(result) and not stopped:
-        until = _limit_reset_at(result, now)
-        state["limit_pause_until"] = T.now_iso(until)
+        try:
+            ref = datetime.fromtimestamp(Path(info["run_file"]).stat().st_mtime).astimezone()
+        except OSError:
+            ref = now
+        until = _limit_reset_at(result, now, ref)
+        if until > now:
+            state["limit_pause_until"] = T.now_iso(until)
         key = f"{tid}::{info['role']}"
         state.setdefault("idle_runs", {}).pop(key, None)
         _reset_same_status(state, key)

@@ -1,0 +1,20 @@
+name: endurance
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Длительность прогона, часов"
+        default: "2"
+jobs:
+  endurance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 400
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Прогон на выносливость
+        run: python .claude/dispatcher/endurance.py --hours "${{ github.event.inputs.hours || '2' }}" --idle-max 30 --keep
