@@ -21,6 +21,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 # проект-пустышка с `.claude/roles` (после /rpv-init): тесты не касаются ни папки плагина, ни рабочего проекта выше неё
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
@@ -579,6 +580,7 @@ class DispatchDecisionTests(unittest.TestCase):
 FAKE_BIN_OK = r"""
 import json, os, re, sys
 from pathlib import Path
+from unittest import mock
 TICKETS_DIR = Path(os.environ["FAKE_TICKETS_DIR"])
 args = sys.argv[1:]
 prompt = args[args.index("-p") + 1]
@@ -609,6 +611,7 @@ print(json.dumps({"session_id": "sess-silent", "total_cost_usd": 0.0}))
 FAKE_BIN_RECORD = r"""
 import json, os, re, sys
 from pathlib import Path
+from unittest import mock
 TICKETS_DIR = Path(os.environ["FAKE_TICKETS_DIR"])
 args = sys.argv[1:]
 prompt = args[args.index("-p") + 1]
@@ -638,6 +641,7 @@ print(json.dumps({"session_id": f"sess-{role}-{tid}", "total_cost_usd": 0.01, "n
 FAKE_BIN_STUCK_TODO = r"""
 import json, os, re, sys
 from pathlib import Path
+from unittest import mock
 TICKETS_DIR = Path(os.environ["FAKE_TICKETS_DIR"])
 args = sys.argv[1:]
 prompt = args[args.index("-p") + 1]
@@ -658,6 +662,7 @@ print(json.dumps({"session_id": f"sess-{tid}-{role}", "total_cost_usd": 0.05, "u
 FAKE_BIN_SLOW_OK = r"""
 import json, os, re, sys, time
 from pathlib import Path
+from unittest import mock
 time.sleep(1.5)
 TICKETS_DIR = Path(os.environ["FAKE_TICKETS_DIR"])
 args = sys.argv[1:]
@@ -682,6 +687,7 @@ print(json.dumps({"session_id": f"sess-{tid}-{role}", "total_cost_usd": 0.01, "u
 FAKE_BIN_TREE = r"""
 import os, subprocess, sys, time
 from pathlib import Path
+from unittest import mock
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
 (Path(os.environ["FAKE_TICKETS_DIR"]).parent / "child.pid").write_text(str(child.pid))
 time.sleep(120)
@@ -762,6 +768,20 @@ class DispatchRunTests(unittest.TestCase):
             D.save_state(state)
             time.sleep(0.05)
         self.assertFalse(D.RUNNING, "фейковый прогон не завершился за отведённое время")
+
+    def test_downtime_counts_waiting_without_condition_and_alerts_once(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт", now=t0 - timedelta(hours=1))
+        T.write_header_updates(path, {"status": "waiting", "wait_for": ""}, now=t0 - timedelta(hours=1))
+        with mock.patch.dict(os.environ, {"RPV_BUS_DISABLE": "1"}):
+            D.tick(t0)
+            D.tick(t0 + timedelta(seconds=300))
+            D.tick(t0 + timedelta(seconds=900))  # 15 мин > SLO 10
+            D.tick(t0 + timedelta(seconds=1000))
+        rec = D.load_state()["downtime"]["2026-10-06"]
+        self.assertEqual(rec["wait_s"], 1000)
+        self.assertTrue(rec["alerted"])
+        self.assertEqual(self.dispatcher_dir.joinpath("ceo-inbox.md").read_text(encoding="utf-8").count("[idle-slo]"), 1)
 
     def test_todo_ticket_runs_logs_and_saves_session(self):
         self.set_fake_bin(FAKE_BIN_OK)

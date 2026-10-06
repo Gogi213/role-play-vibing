@@ -99,6 +99,17 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("диспетчер", done.stdout.decode("utf-8"))
 
+    def test_idle_row_and_bus_url_from_dispatcher_state(self):
+        now = time.time()
+        day = datetime.fromtimestamp(now).date().isoformat()
+        (self.sd / "state.json").write_text(json.dumps({
+            "last_tick": iso(now), "bus_url": "http://disp:1",
+            "downtime": {day: {"idle_s": 900, "wait_s": 0, "stall_s": 0, "alerted": True}}}), encoding="utf-8")
+        rows = self.rows(now=now, bus_request=lambda path: (_ for _ in ()).throw(OSError("x")))
+        self.assertEqual(rows["простой сегодня"][1], D.FAIL)
+        self.assertIn("15 мин из 10", rows["простой сегодня"][2])
+        self.assertIn("http://disp:1", rows["шина"][2])  # адрес диспетчера, а не оболочки (в ней RPV_BUS_URL пуст)
+
     def test_outside_project_exit_2(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"RPV_PROJECT": "", "CLAUDE_PROJECT_DIR": ""}):
             cwd = os.getcwd()

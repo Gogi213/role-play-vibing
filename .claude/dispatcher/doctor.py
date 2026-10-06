@@ -84,9 +84,10 @@ def _log_lines_since(path: Path, since: float) -> list:
     return out
 
 
-def check_bus(request=None) -> tuple:
+def check_bus(request=None, state_url: str | None = None) -> tuple:
     import busclient as B
     url, _tok = B.config()
+    url = state_url if state_url is not None else url  # адрес, с которым живёт диспетчер (state.json), главнее оболочки
     if not url:
         return "шина", OFF, "выключена (RPV_BUS_URL не задан) — сигналы идут файлами"
     request = request or B.request
@@ -134,12 +135,34 @@ def check_errors(state_dir: Path, now: float) -> tuple:
     return "ошибки за сутки", (WARN if bad else OK), detail
 
 
+def check_idle(state_dir: Path, now: float, slo_min: float = 10.0) -> tuple:
+    import downtime
+    try:
+        st = json.loads((state_dir / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "простой сегодня", OFF, "диспетчер ещё не вёл счёт"
+    rec = (st.get("downtime") or {}).get(datetime.fromtimestamp(now).date().isoformat())
+    if not rec:
+        return "простой сегодня", OK, "0 мин"
+    m = downtime.total_min(rec)
+    detail = (f"{m:.0f} мин из {slo_min:.0f} (готовая работа без исполнителя {rec['idle_s'] / 60:.0f}, "
+              f"ожидание без условия {rec['wait_s'] / 60:.0f}, молчание диспетчера {rec['stall_s'] / 60:.0f})")
+    return "простой сегодня", (FAIL if m > slo_min else OK), detail
+
+
+def _state_bus_url(sd: Path):
+    try:
+        return json.loads((sd / "state.json").read_text(encoding="utf-8")).get("bus_url")
+    except (OSError, ValueError):
+        return None
+
+
 def run_checks(project: Path, now: float | None = None, installed=scheduler_installed, bus_request=None) -> list:
     now = time.time() if now is None else now
     sd = project / ".claude" / "dispatcher"
     rows = [check_service("dispatch", sd, now), check_service("watch", sd, now),
-            check_supervise(project, sd, now, installed), check_bus(bus_request), *check_queue(project, sd),
-            check_errors(sd, now)]
+            check_supervise(project, sd, now, installed), check_bus(bus_request, _state_bus_url(sd)),
+            check_idle(sd, now, float(P.env("IDLE_SLO_MIN", "10"))), *check_queue(project, sd), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
 
 
