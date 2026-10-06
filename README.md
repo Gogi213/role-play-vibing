@@ -212,6 +212,14 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Что нового в 1.7.1
+
+- **Уникальный запуск + InvocationID** — `.claude/bus/jobrun.sh <метка> -- <команда>` (Linux, systemd): юнит `<метка>-<MMDDhhmmss>-<4hex>`, запись `{unit, runid, invocation, started}` в `$RPV_RUNS_DIR` (по умолчанию `/var/lib/rpv/runs`). `wait_for: host:<машина>:unit:<имя>`.
+- **Конец задания — событием шины, без опроса**: `watcher.py` шлёт `машина.<хост>.юнит.запущен` и `…остановлен/упал` с `invocation`; диспетчер засчитывает остановку без ssh, если InvocationID совпал с запуском; остановка старого экземпляра с тем же именем игнорируется. Запасной ssh-опрос — раз в 300 с (`RPV_DISPATCH_WAIT_POLL_S`).
+- **Присмотр за диспетчером и сторожем** — `python .claude/dispatcher/supervise.py --install [--project P]`: раз в 5 мин задание ОС (Windows — Планировщик заданий, Linux — `systemd --user` timer, macOS — launchd) проверяет сердцебиение (`state.json`/`watch-heartbeat.json` старше 10 мин или процесса нет) и поднимает службу через `start.py` (WMI/systemd/Popen); строки — в `.claude/dispatcher/supervise.log`. Окружение `RPV_*`/`CLAUDE_*` запоминается в `supervise.env.json`. Снять — `--uninstall`.
+- **Плашка «КОМАНДА МОЛЧИТ С HH:MM»** (красная) в Диспетчерской, когда сводка команды не приходила > 10 мин, — считает сервер табло, не сторож и не сессия CEO.
+- Диспетчер и сторож с выводом в файл игнорируют чужой Ctrl+C общей консоли (иначе тихо умирали); службы стартуют под `python.exe`, а не `pythonw.exe`.
+
 ## Что нового в 1.7.0
 
 - **По умолчанию включены** строки Haiku (`RPV_PLAIN=0` — выключить; без `claude` — строка по фактам плана) и загрузка «этого ПК» (`RPV_PC=0` — без неё), в том числе на macOS/Windows без `/proc`.

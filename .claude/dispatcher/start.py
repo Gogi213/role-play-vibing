@@ -311,6 +311,12 @@ def _popen_detached(cmd: list, project: Path, log: Path) -> Started:
     return Started(p.pid, "popen", popen=p)
 
 
+def _python() -> str:
+    """Интерпретатор службы: pythonw (его зовёт Планировщик присмотра) без консоли — дети службы получили бы окна."""
+    exe = Path(sys.executable)
+    return str(exe.with_name("python.exe")) if exe.name.lower() == "pythonw.exe" else sys.executable
+
+
 def spawn(script: Path, project: Path, log: Path, extra: tuple = ()) -> Started:
     """Фоновый процесс `python -u script --project <проект>`, отвязанный от этой сессии (Windows — WMI, Linux — юнит
     systemd, иначе Popen; не получилось — запасной путь Popen); вывод — в `log` (дописывается)."""
@@ -318,7 +324,7 @@ def spawn(script: Path, project: Path, log: Path, extra: tuple = ()) -> Started:
     with open(log, "ab") as out:
         out.write(f"\n=== {datetime.now().astimezone().isoformat(timespec='seconds')} старт {script.name} ===\n"
                   .encode("utf-8"))
-    cmd = [sys.executable, "-u", str(script), "--project", str(project), *extra]
+    cmd = [_python(), "-u", str(script), "--project", str(project), *extra]
     how = _launcher()
     try:
         if how == "wmi":

@@ -322,11 +322,13 @@ _UNIT_RUNNING = ("active", "activating", "reloading", "deactivating", "refreshin
 
 # TK-055: wait_for host:… закрывается событием сторожа машины (.claude/bus/watcher.py); ssh — редкая подстраховка в потоке.
 WAIT_ASYNC = False  # True ставит main() для боевого цикла; тесты и --once — синхронный путь как раньше
-WAIT_POLL_S = float(P.env("DISPATCH_WAIT_POLL_S", "120"))
+WAIT_POLL_S = float(P.env("DISPATCH_WAIT_POLL_S", "300"))
 PROGRESS_DIR = P.env("PROGRESS_DIR", "~/rpv/progress")  # каталог файлов хода заданий на машинах (RPV_PROGRESS_DIR)
 WATCH_LIST = PROGRESS_DIR + "/watch.list"  # пути, которые сторож машины проверяет сам (по строке на путь)
 _WAIT_WATCH = set()  # ключи (алиас, what, арг), которые ждут тикеты — их опрашивает _wait_poller
 _EVENT_MET = {}      # (алиас, "unit"|"path", арг) -> time.time() прихода события
+_UNIT_START = {}     # (алиас, "unit", имя) -> InvocationID последнего запуска по событию «юнит.запущен»
+_EVENT_VERIFIED = set()  # ключи, чьё «остановлен» несёт InvocationID того же запуска: ssh-проверка не нужна
 _EVENT_LOCK = threading.Lock()
 _WAIT_NEW = threading.Event()
 
@@ -344,8 +346,22 @@ def record_wait_event(ev: dict) -> None:
     parts = addr.split(".")
     host = pl.get("host") or (parts[1] if len(parts) > 1 else "")
     keys = []
+    if addr.startswith("машина.") and addr.endswith(".юнит.запущен") and pl.get("unit") and pl.get("invocation"):
+        k = (host, "unit", _unit_base(str(pl["unit"])))
+        with _EVENT_LOCK:  # новый запуск: прежнее «остановлен» этого имени недействительно
+            _UNIT_START[k] = str(pl["invocation"])
+            _EVENT_MET.pop(k, None)
+            _EVENT_VERIFIED.discard(k)
+        return
     if addr.startswith("машина.") and addr.endswith((".юнит.остановлен", ".юнит.упал")) and pl.get("unit"):
-        keys.append((host, "unit", _unit_base(str(pl["unit"]))))
+        k = (host, "unit", _unit_base(str(pl["unit"])))
+        inv, began = str(pl.get("invocation") or ""), _UNIT_START.get(k)
+        if inv and began and inv != began:
+            return  # остановка не последнего запуска (старый экземпляр с тем же именем) — игнорируем
+        if inv and began == inv:
+            with _EVENT_LOCK:
+                _EVENT_VERIFIED.add(k)
+        keys.append(k)
     elif addr.startswith("машина.") and addr.endswith(".файл.появился") and pl.get("path"):
         keys.append((host, "path", str(pl["path"])))
     elif addr.startswith("задача.") and addr.endswith(".задание.готово") and pl.get("job"):
@@ -369,7 +385,9 @@ def _event_ts(alias: str, what: str, arg: str):
 
 def _drop_event(alias: str, what: str, arg: str) -> None:
     with _EVENT_LOCK:
-        _EVENT_MET.pop((alias, what, _unit_base(arg) if what == "unit" else arg), None)
+        k = (alias, what, _unit_base(arg) if what == "unit" else arg)
+        _EVENT_MET.pop(k, None)
+        _EVENT_VERIFIED.discard(k)
 
 
 def _wait_poller() -> None:
@@ -429,8 +447,8 @@ def _host_wait_met(alias: str, what: str, arg: str) -> bool:
     ckey = (alias, what, arg)
     ev_ts = _event_ts(alias, what, arg)
     if ev_ts is not None:
-        if what != "unit":
-            return True
+        if what != "unit" or (alias, what, _unit_base(arg)) in _EVENT_VERIFIED:
+            return True  # путь, либо остановка того же InvocationID, что и запуск: ssh не нужен (TK-072)
         # событие юнита может быть от прежнего экземпляра с тем же именем: засчитываем, только если проверка
         # ПОСЛЕ прихода события видела юнит не работающим (работает — _host_probe сбросит событие)
         cached = _WAIT_CACHE.get(ckey)
@@ -2054,4 +2072,7 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    if not sys.stdout.isatty():  # демон с перенаправленным выводом: чужой Ctrl+C общей консоли его не убивает (TK-072)
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
     sys.exit(main())

@@ -38,7 +38,16 @@ class T(unittest.TestCase):
         f.units = {}                                 # юнит собран GC после успеха
         ev = w.run_once()
         self.assertEqual([e[0] for e in ev], ["машина.calc.юнит.остановлен"])
+        self.assertEqual(ev[0][1]["invocation"], "inv1")
         self.assertEqual(w.run_once(), [])          # без повторов
+
+    def test_start_event_carries_invocation(self):
+        f = Fake(); w = f.make()
+        w.run_once()                                 # baseline без юнитов
+        f.units = {"tk1-a.service": "active"}
+        ev = w.run_once()
+        self.assertEqual([(e[0], e[1]["invocation"]) for e in ev], [("машина.calc.юнит.запущен", "inv1")])
+        self.assertEqual(w.run_once(), [])
 
     def test_failure_maps_to_ticket(self):
         f = Fake(); w = f.make()

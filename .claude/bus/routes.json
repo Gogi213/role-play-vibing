@@ -5,6 +5,7 @@
  {"match": "задача.*.статус", "to": ["dispatcher"], "hold": ["dispatcher"]},
  {"match": "задача.*.к_ceo", "to": ["ceo"]},
  {"match": "задача.*.вопрос_владельцу", "to": ["ceo"]},
+ {"match": "машина.*.юнит.запущен", "to": ["dispatcher"]},
  {"match": "машина.*.юнит.остановлен", "to": ["dispatcher"]},
  {"match": "машина.*.юнит.упал", "to": ["dispatcher", "ceo"]},
  {"match": "машина.*.файл.появился", "to": ["dispatcher"]},
