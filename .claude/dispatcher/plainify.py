@@ -37,7 +37,7 @@ def _haiku(text: str, timeout: float = 40.0) -> str | None:
     if not exe:
         return None
     try:
-        r = subprocess.run([exe, "-p", "--model", "haiku", PROMPT + text], capture_output=True, text=True,
+        r = subprocess.run([exe, "-p", "--model", "haiku", PROMPT + text], capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=timeout, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return None

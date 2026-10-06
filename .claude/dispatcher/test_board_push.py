@@ -12,7 +12,7 @@ import board_push as B
 HDR = "---\nid: {id}\ntitle: {t}\nowner: engineer\nstatus: {s}\n---\n\nописание\n\n## Лог\n"
 
 
-os.environ.setdefault("RPV_PLAIN", "off")
+os.environ["RPV_PLAIN"] = "off"
 
 
 class T(unittest.TestCase):
@@ -108,7 +108,7 @@ class PlainifyTest(unittest.TestCase):
         try:
             plainify.apply(procs, Path(tempfile.mkdtemp()))
         finally:
-            del os.environ["RPV_PLAIN"]
+            os.environ["RPV_PLAIN"] = "off"
         self.assertEqual(procs[0]["summary"], "s")
         self.assertIsNone(procs[1]["summary"])
 
