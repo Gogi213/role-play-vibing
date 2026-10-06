@@ -2034,7 +2034,10 @@ def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | N
     if tkt.next_role or tkt.status not in ("waiting", "in_review"):
         return None
     try:
-        if (now - T.parse_dt(tkt.header.get("updated", ""))).total_seconds() <= INVARIANT_GRACE_S:
+        last = T.parse_dt(tkt.header.get("updated", ""))
+        # `tickets.py comment` без --next `updated` не двигает: запись CEO и смена статуса — две команды, грейс считаем и от записи
+        stamps = [e.ts for e in tkt.log[-1:] if e.ts <= now.replace(microsecond=0)]
+        if (now - max([last] + stamps)).total_seconds() <= INVARIANT_GRACE_S:
             return None
     except Exception:
         return None

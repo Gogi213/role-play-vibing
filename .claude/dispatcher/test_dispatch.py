@@ -846,6 +846,15 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(out.status, "in_progress")
         self.assertEqual(state["ceo_handoffs"], {})
 
+    def test_ceo_comment_without_status_change_gets_grace_from_the_entry(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
+        T.append_log(p, "ceo", "принято", now=t0 + timedelta(minutes=30))  # как tickets.py comment: updated не двигается
+        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=30, seconds=5), state))
+        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=45))
+        self.assertEqual(out.status, "in_progress")
+
     def _handoff_state(self, p, t0):
         return {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
 
