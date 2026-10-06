@@ -1,0 +1,799 @@
+{
+ "view2": {
+  "time": "04:05",
+  "built_ts": 1791072300.0,
+  "tick_s": 5,
+  "headline": {
+   "state": "wait",
+   "text": "ждёт вас: 2"
+  },
+  "counters": {
+   "done": 5,
+   "run": 1,
+   "review": 1,
+   "repair": 1,
+   "wait": 2,
+   "todo": 10,
+   "bad": 1
+  },
+  "progress": {
+   "pct": 31,
+   "done": 5.62,
+   "total": 18,
+   "eta": {
+    "lo_min": 8,
+    "hi_min": 14,
+    "measured": 2,
+    "chain": [
+     {
+      "process": "TK-042",
+      "n": 3
+     },
+     {
+      "process": "TK-042",
+      "n": 4
+     }
+    ]
+   },
+   "spent_min": 214
+  },
+  "tags": {
+   "pc": {
+    "tag": "ПК",
+    "name": "этот ПК",
+    "color": "purple"
+   },
+   "vps": {
+    "tag": "VPS",
+    "name": "VPS София",
+    "color": "teal"
+   },
+   "calc": {
+    "tag": "СЧЁТ",
+    "name": "сервер счёта",
+    "color": "blue"
+   },
+   "col": {
+    "tag": "КОЛ",
+    "name": "коллектор",
+    "color": "gray"
+   },
+   "you": {
+    "tag": "ВЫ",
+    "name": "вы",
+    "color": "amber"
+   }
+  },
+  "machines": [
+   {
+    "id": "pc",
+    "state": "ok",
+    "load": "инженер · Правка проверки порчи; судья · Полнота данных пула",
+    "now": {
+     "state": "wait",
+     "text": "ждёт вас"
+    },
+    "orphans": 0,
+    "cpu": 10,
+    "mem": 76,
+    "disk_mb_s": null
+   },
+   {
+    "id": "vps",
+    "state": "ok",
+    "load": "без хозяина ×2",
+    "now": {
+     "state": "wait",
+     "text": "ждёт вас"
+    },
+    "orphans": 2,
+    "cpu": 3,
+    "mem": 22,
+    "disk_mb_s": 0
+   },
+   {
+    "id": "calc",
+    "state": "ok",
+    "load": "автомат · Добор и проверка данных",
+    "now": {
+     "state": "run",
+     "text": "добор суток ~4 мин"
+    },
+    "orphans": 0,
+    "cpu": 18,
+    "mem": 2,
+    "disk_mb_s": 77
+   },
+   {
+    "id": "col",
+    "state": "off",
+    "load": "выключен вами",
+    "now": {
+     "state": "off",
+     "text": "задач нет"
+    },
+    "orphans": 0,
+    "cpu": 1,
+    "mem": 14,
+    "disk_mb_s": 0
+   }
+  ],
+  "waves": [
+   {
+    "n": 1,
+    "label": "ВОЛНА 1 · 4 процесса параллельно",
+    "state": "run",
+    "procs": [
+     "TK-042",
+     "TK-044",
+     "TK-046",
+     "TK-048"
+    ]
+   },
+   {
+    "n": 2,
+    "label": "ВОЛНА 2 · ждёт волну 1",
+    "state": "todo",
+    "procs": [
+     "TK-047"
+    ]
+   },
+   {
+    "n": 3,
+    "label": "ВОЛНА 3 · ждёт волну 2",
+    "state": "todo",
+    "procs": [
+     "TK-049"
+    ]
+   },
+   {
+    "n": null,
+    "label": "БЕЗ ХОЗЯИНА",
+    "state": "bad",
+    "procs": [
+     "orphans-vps"
+    ]
+   }
+  ],
+  "processes": [
+   {
+    "id": "TK-042",
+    "n": 1,
+    "title": "Добор и проверка данных",
+    "summary": "Недостающие данные докачиваются, дальше сверка — 2 из 5 готово",
+    "wave": 1,
+    "depends": [],
+    "flow": [
+     {
+      "text": "делается на",
+      "on": "calc"
+     }
+    ],
+    "for": {
+     "text": "база дней",
+     "on": "calc"
+    },
+    "state": "run",
+    "step_now": 3,
+    "steps_total": 5,
+    "eta_min": 4,
+    "wait_min": null,
+    "steps": [
+     {
+      "n": 1,
+      "title": "найти пропуски",
+      "who": "автомат",
+      "on": "calc",
+      "for": "список",
+      "state": "done",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "00:45",
+      "finished": "00:48",
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "добор монет",
+      "who": "автомат",
+      "on": "calc",
+      "for": "база дней",
+      "state": "done",
+      "pct": 100,
+      "detail": "93 из 93 суток",
+      "eta_min": null,
+      "started": "00:48",
+      "finished": "00:51",
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     },
+     {
+      "n": 3,
+      "title": "добор суток",
+      "who": "автомат",
+      "on": "calc",
+      "for": "база дней",
+      "state": "run",
+      "pct": 62,
+      "detail": "57 из 92 суток",
+      "eta_min": 4,
+      "started": "00:49",
+      "finished": null,
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     },
+     {
+      "n": 4,
+      "title": "сверка",
+      "who": "автомат",
+      "on": "calc",
+      "for": "база дней",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": 6,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       2,
+       3
+      ],
+      "wave": 3
+     },
+     {
+      "n": 5,
+      "title": "запись в базу",
+      "who": "автомат",
+      "on": "calc",
+      "for": "база дней",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       4
+      ],
+      "wave": 4
+     }
+    ]
+   },
+   {
+    "id": "TK-044",
+    "n": 2,
+    "title": "Умная проверка данных",
+    "summary": "Проверка данных на порчу готова к запуску, ждёт вашего решения — 2 из 5 готово",
+    "wave": 1,
+    "depends": [],
+    "flow": [
+     {
+      "text": "код пишет",
+      "on": "pc"
+     },
+     {
+      "text": "запускает и проверяет",
+      "on": "vps"
+     }
+    ],
+    "for": {
+     "text": "данные дней",
+     "on": "vps"
+    },
+    "state": "wait",
+    "step_now": 3,
+    "steps_total": 5,
+    "eta_min": null,
+    "wait_min": 6,
+    "steps": [
+     {
+      "n": 1,
+      "title": "правила проверки",
+      "who": "инженер",
+      "on": "pc",
+      "for": "код для VPS",
+      "state": "done",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "01:16",
+      "finished": "02:16",
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "сборка кода",
+      "who": "автомат",
+      "on": "vps",
+      "for": "запуск на VPS",
+      "state": "done",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "02:17",
+      "finished": "02:22",
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     },
+     {
+      "n": 3,
+      "title": "вопрос владельцу",
+      "who": "вы",
+      "on": "you",
+      "for": "правило для шага 4",
+      "state": "wait",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "02:24",
+      "finished": null,
+      "question": "q-TK-044-1",
+      "after": [
+       2
+      ],
+      "wave": 3
+     },
+     {
+      "n": 4,
+      "title": "прогон проверки",
+      "who": "автомат",
+      "on": "vps",
+      "for": "данные на VPS",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       3
+      ],
+      "wave": 4
+     },
+     {
+      "n": 5,
+      "title": "отчёт",
+      "who": "инженер",
+      "on": "pc",
+      "for": "для вас",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       4
+      ],
+      "wave": 5
+     }
+    ]
+   },
+   {
+    "id": "TK-046",
+    "n": 3,
+    "title": "Правка проверки порчи",
+    "summary": "Проверка порчи правится после замечаний судьи — 0 из 2 готово",
+    "wave": 1,
+    "depends": [],
+    "flow": [
+     {
+      "text": "код правит",
+      "on": "pc"
+     }
+    ],
+    "for": {
+     "text": "проверка данных",
+     "on": "vps"
+    },
+    "state": "repair",
+    "step_now": 1,
+    "steps_total": 2,
+    "eta_min": null,
+    "wait_min": null,
+    "steps": [
+     {
+      "n": 1,
+      "title": "правки по замечаниям Судьи",
+      "who": "инженер",
+      "on": "pc",
+      "for": "код для VPS",
+      "state": "repair",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "03:21",
+      "finished": null,
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "повторная проверка",
+      "who": "судья",
+      "on": "pc",
+      "for": "приёмка",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     }
+    ]
+   },
+   {
+    "id": "TK-048",
+    "n": 4,
+    "title": "Полнота данных пула",
+    "summary": "Полнота данных посчитана, судья проверяет итог — 1 из 2 готово",
+    "wave": 1,
+    "depends": [],
+    "flow": [
+     {
+      "text": "считает",
+      "on": "calc"
+     },
+     {
+      "text": "проверяет",
+      "on": "pc"
+     }
+    ],
+    "for": {
+     "text": "отчёт о полноте",
+     "on": "pc"
+    },
+    "state": "review",
+    "step_now": 2,
+    "steps_total": 2,
+    "eta_min": null,
+    "wait_min": null,
+    "steps": [
+     {
+      "n": 1,
+      "title": "сверка полноты",
+      "who": "автомат",
+      "on": "calc",
+      "for": "25 100 из 25 107",
+      "state": "done",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "02:10",
+      "finished": "02:40",
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "проверка судьи",
+      "who": "судья",
+      "on": "pc",
+      "for": "приёмка",
+      "state": "review",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "03:50",
+      "finished": null,
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     }
+    ]
+   },
+   {
+    "id": "TK-047",
+    "n": 5,
+    "title": "Сводка по месяцам",
+    "summary": null,
+    "wave": 2,
+    "depends": [
+     "TK-044"
+    ],
+    "flow": [
+     {
+      "text": "считает",
+      "on": "calc"
+     }
+    ],
+    "for": {
+     "text": "отчёт для вас",
+     "on": "pc"
+    },
+    "state": "todo",
+    "step_now": 1,
+    "steps_total": 2,
+    "eta_min": null,
+    "wait_min": null,
+    "steps": [
+     {
+      "n": 1,
+      "title": "расчёт сводки",
+      "who": "автомат",
+      "on": "calc",
+      "for": "по месяцам",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "отчёт",
+      "who": "инженер",
+      "on": "pc",
+      "for": "для вас",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     }
+    ]
+   },
+   {
+    "id": "TK-049",
+    "n": 6,
+    "title": "Выводы для бота",
+    "summary": null,
+    "wave": 3,
+    "depends": [
+     "TK-047"
+    ],
+    "flow": [
+     {
+      "text": "код пишет",
+      "on": "pc"
+     }
+    ],
+    "for": {
+     "text": "решение владельца",
+     "on": "pc"
+    },
+    "state": "todo",
+    "step_now": 1,
+    "steps_total": 2,
+    "eta_min": null,
+    "wait_min": null,
+    "steps": [
+     {
+      "n": 1,
+      "title": "разбор итогов",
+      "who": "инженер",
+      "on": "pc",
+      "for": "для вас",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "проверка судьи",
+      "who": "судья",
+      "on": "pc",
+      "for": "приёмка",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       1
+      ],
+      "wave": 2
+     }
+    ]
+   },
+   {
+    "id": "orphans-vps",
+    "n": 7,
+    "title": "Старые задачи без хозяина ×2",
+    "summary": null,
+    "wave": null,
+    "depends": [],
+    "flow": [
+     {
+      "text": "висят на",
+      "on": "vps"
+     }
+    ],
+    "for": {
+     "text": "кто запустил — неизвестно",
+     "on": null
+    },
+    "state": "bad",
+    "step_now": 2,
+    "steps_total": 3,
+    "eta_min": null,
+    "wait_min": 48,
+    "steps": [
+     {
+      "n": 1,
+      "title": "без хозяина",
+      "who": "автомат",
+      "on": "vps",
+      "for": "2 шт.",
+      "state": "bad",
+      "pct": null,
+      "detail": "заливка на Storage Box с 02.10; пересылка (jall) с 28.09",
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [],
+      "wave": 1
+     },
+     {
+      "n": 2,
+      "title": "вопрос владельцу",
+      "who": "вы",
+      "on": "you",
+      "for": "остановить?",
+      "state": "wait",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": "03:17",
+      "finished": null,
+      "question": "q-orphans-vps-1",
+      "after": [
+       1
+      ],
+      "wave": 2
+     },
+     {
+      "n": 3,
+      "title": "остановить",
+      "who": "автомат",
+      "on": "vps",
+      "for": "VPS София",
+      "state": "todo",
+      "pct": null,
+      "detail": null,
+      "eta_min": null,
+      "started": null,
+      "finished": null,
+      "question": null,
+      "after": [
+       2
+      ],
+      "wave": 3
+     }
+    ]
+   }
+  ],
+  "questions": [
+   {
+    "id": "q-TK-044-1",
+    "n": 1,
+    "process": "TK-044",
+    "from": "инженер",
+    "on": "pc",
+    "text": "Признак «цены не было в стакане в окне минуты/часа»: только число в отчёте или браковать сутки?",
+    "options": [
+     {
+      "key": "a",
+      "label": "только число",
+      "effect": "прогон идёт как идёт; признак — число в отчёте (рекомендация инженера)"
+     },
+     {
+      "key": "b",
+      "label": "браковать сутки",
+      "effect": "~20 % суток малоликвидных монет уйдут в брак без порчи данных"
+     }
+    ],
+    "default": "a",
+    "since": "03:59",
+    "wait_min": 6
+   },
+   {
+    "id": "q-orphans-vps-1",
+    "n": 2,
+    "process": "orphans-vps",
+    "from": "CEO",
+    "on": "vps",
+    "text": "Остановить 2 старые задачи на VPS (заливка архива на Storage Box с 02.10, пересылка jall с 28.09)?",
+    "options": [
+     {
+      "key": "y",
+      "label": "остановить обе",
+      "effect": "остановит юниты на VPS, ничего не удаляет"
+     },
+     {
+      "key": "n",
+      "label": "оставить",
+      "effect": "всё как есть"
+     }
+    ],
+    "default": null,
+    "since": "03:17",
+    "wait_min": 48
+   }
+  ],
+  "feed": [
+   {
+    "time": "02:16",
+    "state": "done",
+    "on": [
+     "pc"
+    ],
+    "to": null,
+    "text": "правила проверки"
+   },
+   {
+    "time": "02:51",
+    "state": "done",
+    "on": [
+     "calc"
+    ],
+    "to": null,
+    "text": "добор монет 93 из 93 суток"
+   },
+   {
+    "time": "03:50",
+    "state": "done",
+    "on": [
+     "pc"
+    ],
+    "to": null,
+    "text": "судье отдана проверка полноты данных"
+   },
+   {
+    "time": "03:59",
+    "state": "wait",
+    "on": [
+     "pc"
+    ],
+    "to": "you",
+    "text": "вопрос: признак «цены не было»…"
+   }
+  ]
+ }
+}

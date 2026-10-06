@@ -94,7 +94,29 @@ def build_view2(tickets_dir, now: float | None = None, plans_dir=None) -> dict:
         if isinstance(d, dict) and isinstance(d.get("steps"), list):
             plans[p.stem] = d
     allq = [q for q in (PD.read_json(p) for p in sorted((pulse / "questions").glob("q-*.json"))) if isinstance(q, dict)]
-    return V2.make(tickets, plans, allq, now)
+    v = V2.make(tickets, plans, allq, now)
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "board"))
+        import machines as M
+        ms, tags = M.collect()
+        if not v.get("machines"):
+            v["machines"] = ms
+        v["tags"] = {**tags, **(v.get("tags") or {})}
+    except Exception as e:  # ssh/платформа не должны ронять сводку
+        print("машины: " + type(e).__name__, file=sys.stderr)
+    _write_status(pulse, v)
+    return v
+
+
+def _write_status(pulse: Path, v: dict) -> None:
+    """status.json для TUI (board.py) и MCP — атомарно."""
+    try:
+        pulse.mkdir(parents=True, exist_ok=True)
+        tmp = pulse / "status.json.tmp"
+        tmp.write_text(json.dumps({"view2": v, "built_at": v.get("time"), "built_ts": time.time()}, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(pulse / "status.json")
+    except OSError:
+        pass
 
 
 def push(url: str, key: str, view2: dict, timeout: float = 10.0) -> int:
