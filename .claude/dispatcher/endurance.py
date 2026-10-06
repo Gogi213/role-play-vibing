@@ -8,6 +8,7 @@
 («есть готовая работа, никто не работает», вне паузы лимита) ≤ --idle-max. Код возврата 0 — критерий выполнен."""
 from __future__ import annotations
 
+import shutil
 import argparse
 import json
 import os
@@ -226,10 +227,18 @@ class Harness:
 
         return supervise.run_once(self.proj, spawn=spawn, stop=supervise.S.stop_running)
 
+    def _snap_state(self, tag):
+        src = self.disp / "state.json"
+        if src.exists():
+            self._snaps = getattr(self, "_snaps", 0) + (tag == "before")
+            shutil.copyfile(src, self.disp / f"state.{tag}-kill-{self._snaps}.json")
+
     def kill_dispatcher(self):
         if self.proc and self.proc.poll() is None:
+            self._snap_state("before")
             self.proc.kill()
             self.proc.wait(timeout=10)
+            self._snap_state("after")
         (self.disp / "dispatch.pid").unlink(missing_ok=True)
 
     # --- наблюдатель простоя: считает независимо от диспетчера ---

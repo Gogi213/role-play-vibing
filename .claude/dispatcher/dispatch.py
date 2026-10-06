@@ -256,6 +256,12 @@ class Decision:
 
 # --- состояние ------------------------------------------------------------------------------
 
+def _dbg(msg: str) -> None:
+    if os.environ.get("RPV_DEBUG_INVARIANT"):
+        print(f"[dbg] {datetime.now().astimezone().isoformat(timespec='milliseconds')} pid{os.getpid()} {msg}",
+              file=sys.stderr, flush=True)
+
+
 def load_state() -> dict:
     if STATE_FILE.exists():
         try:
@@ -768,6 +774,8 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
     # повторно (строка CEO может задвоиться, но передача не теряется и ожидание роли не станет «без условия»)
     state.setdefault("ceo_handoffs", {})[tkt.id] = T.now_iso(now)  # next съеден тиком при живой роли — её waiting не «без условия»
     save_state(state)
+    _dbg(f"handle_next_ceo {tkt.id}: метка поставлена at={state['ceo_handoffs'][tkt.id]} status={tkt.status} "
+         f"running={tkt.id in RUNNING}")
     append_ceo_inbox(tkt.id, "next-ceo", f"{who}{_first_line(last.text if last else '')}", now)
     T.write_header_updates(path, {"next": ""}, now=now, stamp_updated=False)
 
@@ -2297,7 +2305,8 @@ def _open_owner_question(tid: str) -> bool:
     return False
 
 
-def _drop_ceo_handoff(state: dict, tid: str) -> None:
+def _drop_ceo_handoff(state: dict, tid: str, why: str = "launch_run") -> None:
+    _dbg(f"drop_ceo_handoff {tid}: {why}; метка={(state.get('ceo_handoffs') or {}).get(tid)}")
     (state.get("ceo_handoffs") or {}).pop(tid, None)
     (state.get("ceo_handoff_reminded") or {}).pop(tid, None)
 
@@ -2315,7 +2324,7 @@ def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
             return
     except (ValueError, TypeError):
         pass
-    _drop_ceo_handoff(state, tkt.id)
+    _drop_ceo_handoff(state, tkt.id, f"expire: status={tkt.status} running={list(RUNNING)}")
 
 
 def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
@@ -2324,6 +2333,7 @@ def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
     handoffs = state.get("ceo_handoffs") or {}
     at = handoffs.get(tkt.id)
     if not at:
+        _dbg(f"handoff_pending {tkt.id}: метки НЕТ (handoffs={handoffs}) status={tkt.status}")
         return False
     try:
         at_dt = T.parse_dt(at)
@@ -2332,6 +2342,8 @@ def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
         return False
     if tkt.status not in ("waiting", "in_review") or any(
             T.author_is(e.author, "ceo") and e.ts >= at_dt.replace(microsecond=0) for e in tkt.log):
+        _dbg(f"handoff_pending {tkt.id}: метка снята at={at} status={tkt.status} "
+             f"ceo_entries={[e.ts.isoformat() for e in tkt.log if T.author_is(e.author, 'ceo')]}")
         handoffs.pop(tkt.id, None)
         return False
     if (now - at_dt).total_seconds() > INVARIANT_GRACE_S:
@@ -2377,6 +2389,9 @@ def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ti
     reason = _no_move_reason(tkt, now, state)
     if not reason:
         return tkt
+    _dbg(f"НАРУШЕНИЕ {tkt.id}: reason={reason!r} status={tkt.status} updated={tkt.header.get('updated')} now={now.isoformat()} "
+         f"last_entry={[(e.author, e.ts.isoformat()) for e in tkt.log[-2:]]} handoffs={state.get('ceo_handoffs')} "
+         f"running={list(RUNNING)} active_runs={list((state.get('active_runs') or {}))}")
     key = f"{tkt.id}|{tkt.header.get('updated', '')}"
     sig = state.setdefault("invariant_signaled", {})
     if sig.get(tkt.id) != key:
