@@ -216,6 +216,10 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Стандарт сигналов (шина, необязательно)
+
+При заданном `RPV_BUS_URL` единственный путь сигнала к CEO — событие `задача.<ID|общее>.к_ceo` в очередь `ceo` с приоритетом (`urgent` — читать первым; обычные — `done`, `next-ceo`, `wait-for`, `model`, `summary`, `watch-summary`, `bus-up`; неизвестный вид — urgent). CEO читает её командой `python .claude/dispatcher/tickets.py inbox` (подтверждает пачкой; `--peek` — без подтверждения; шина недоступна — код 1 и запасные строки). Файлы `ceo-inbox.md` и `ceo-wake.log` при шине — только запасной путь, если шина не приняла событие (строка помечена `[запасной путь]`, `inbox` покажет её один раз); без шины файлы работают как раньше. Запись без `--next` от Судьи сама передаёт ход CEO/исполнителю по её итогу, вопрос владельцу (`ВОПРОС ВЛАДЕЛЬЦУ…`) уходит срочно. Хук `ceo_signal_guard` не даёт писать `ceo-inbox`/`ceo-wake` мимо стандарта. Очередь `ceo` считается просроченной только через 2 часа (CEO опрашивает редко).
+
 ## Что нового в 1.7.1
 
 - **Уникальный запуск + InvocationID** — `.claude/bus/jobrun.sh <метка> -- <команда>` (Linux, systemd): юнит `<метка>-<MMDDhhmmss>-<4hex>`, запись `{unit, runid, invocation, started}` в `$RPV_RUNS_DIR` (по умолчанию `/var/lib/rpv/runs`). `wait_for: host:<машина>:unit:<имя>`.

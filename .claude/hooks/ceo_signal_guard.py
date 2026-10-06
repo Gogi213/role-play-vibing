@@ -1,4 +1,4 @@
-"""PreToolUse (TK-074, В-192): сигналы CEO идут только через шину; ceo-inbox.md и ceo-wake.log пишет один код —
+"""PreToolUse (В-192): сигналы CEO идут только через шину; ceo-inbox.md и ceo-wake.log пишет один код —
 dispatch.append_ceo_inbox (запасной путь при лежащей шине). Запись из сессии (Write/Edit/Bash) отказ; чтение — свободно."""
 import json
 import re
