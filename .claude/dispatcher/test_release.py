@@ -9,14 +9,20 @@ import release
 
 
 class FakeClaude:
-    def __init__(self, versions, fail_on=None):
-        self.versions, self.calls, self.fail_on = list(versions), [], fail_on
+    def __init__(self, versions, fail_on=None, tags=("1.7.1",), pinned=None):
+        self.versions, self.calls, self.fail_on, self.tags, self.pinned = list(versions), [], fail_on, tags, pinned
 
     def __call__(self, cmd, **kw):
         self.calls.append(cmd[1:])
         if cmd[1:3] == ["plugin", "list"]:
             v = self.versions[0] if len(self.versions) == 1 else self.versions.pop(0)
             return subprocess.CompletedProcess(cmd, 0, f"  ❯ {release.NAME}@{release.NAME}\n    Version: {v}\n", "")
+        if cmd[0] == "git":
+            out = "".join(f"abc\trefs/tags/v{t}\n" for t in self.tags if cmd[-1] == f"refs/tags/v{t}")
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+        if cmd[1:4] == ["plugin", "marketplace", "list"]:
+            ref = f"@{self.pinned}" if self.pinned else ""
+            return subprocess.CompletedProcess(cmd, 0, f"  ❯ {release.NAME}\n    Source: GitHub ({release.REPO}{ref})\n", "")
         return subprocess.CompletedProcess(cmd, 1 if cmd[1:4] == self.fail_on else 0, "", "boom")
 
 
@@ -64,7 +70,33 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             st = Path(t) / "none.json"
             self.assertEqual(release.rollback(None, FakeClaude(["1"]), st), 2)
-            self.assertEqual(release.rollback("1.0.0", FakeClaude(["1"], fail_on=["plugin", "marketplace", "add"]), st), 1)
+
+    def test_rollback_missing_tag_touches_nothing(self):
+        with tempfile.TemporaryDirectory() as t:
+            fake = FakeClaude(["1.8.0"], tags=())
+            self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 3)
+            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
+
+    def test_rollback_failure_restores_previous_marketplace(self):
+        with tempfile.TemporaryDirectory() as t:
+            fake = FakeClaude(["1.8.0"], fail_on=["plugin", "install", f"{release.NAME}@{release.NAME}"])
+            self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 1)
+            adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
+            self.assertEqual(adds, [["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"],
+                                    ["plugin", "marketplace", "add", release.REPO]])
+
+    def test_update_unpins_marketplace_from_tag(self):
+        with tempfile.TemporaryDirectory() as t:
+            fake = FakeClaude(["1.7.1", "1.8.0"], pinned="v1.7.1")
+            self.assertEqual(release.update(fake, Path(t) / "s.json"), 0)
+            self.assertIn(["plugin", "marketplace", "add", release.REPO], fake.calls)
+            self.assertNotIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"], fake.calls)
+
+    def test_update_on_main_does_not_reinstall(self):
+        with tempfile.TemporaryDirectory() as t:
+            fake = FakeClaude(["1.7.1", "1.8.0"])
+            release.update(fake, Path(t) / "s.json")
+            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
 
 
 if __name__ == "__main__":

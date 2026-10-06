@@ -5,7 +5,8 @@
     python release.py update                обновить установленный плагин до последнего выпуска (версия до/после)
     python release.py rollback [X.Y.Z]      вернуть прошлую версию (по умолчанию — записанная перед последним update)
     python release.py check                 версии в plugin.json, marketplace.json и CHANGELOG.md совпадают
-Откат ставит маркетплейс с тегом vX.Y.Z (`owner/repo#vX.Y.Z`); обновить обратно — `update` (маркетплейс на main)."""
+Откат: проверка тега на GitHub до любых изменений, маркетплейс `owner/repo#vX.Y.Z`, при сбое — возврат прежнего;
+update снимает прибивку к тегу и возвращает маркетплейс на main."""
 from __future__ import annotations
 
 import json
@@ -69,18 +70,50 @@ def _save_prev(version: str | None, state: Path) -> None:
         state.write_text(json.dumps({"previous": version}), encoding="utf-8")
 
 
+def _tag_exists(version: str, run=subprocess.run) -> bool:
+    r = _run(["git", "ls-remote", "--tags", f"https://github.com/{REPO}", f"refs/tags/v{version}"], run)
+    return r.returncode == 0 and f"refs/tags/v{version}" in r.stdout
+
+
+def pinned_ref(run=subprocess.run) -> str | None:
+    """Тег, к которому прибит маркетплейс («Source: GitHub (owner/repo@vX.Y.Z)»); None — на main."""
+    out = _run(["claude", "plugin", "marketplace", "list"], run).stdout
+    m = re.search(rf"{re.escape(REPO)}@(\S+?)\)", out)
+    return m.group(1) if m else None
+
+
+def _fail(cmd: list, r) -> int:
+    print(f"[release] {' '.join(cmd)} -> код {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}", file=sys.stderr)
+    return 1
+
+
+def _reinstall(source: str, run) -> int:
+    """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него."""
+    for cmd in (["claude", "plugin", "marketplace", "remove", NAME],
+                ["claude", "plugin", "marketplace", "add", source],
+                ["claude", "plugin", "install", f"{NAME}@{NAME}"]):
+        r = _run(cmd, run)
+        if r.returncode:
+            return _fail(cmd, r)
+    return 0
+
+
 def update(run=subprocess.run, state: Path = STATE) -> int:
     before = installed_version(run)
+    pin = pinned_ref(run)
+    if pin:  # после отката маркетплейс прибит к тегу — вернуть на main
+        if _reinstall(REPO, run):
+            return 1
     for cmd in (["claude", "plugin", "marketplace", "update", NAME],
                 ["claude", "plugin", "update", f"{NAME}@{NAME}"]):
         r = _run(cmd, run)
         if r.returncode:
-            print(f"[release] {' '.join(cmd)} -> код {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}", file=sys.stderr)
-            return 1
+            return _fail(cmd, r)
     after = installed_version(run)
     if before != after:
         _save_prev(before, state)
-    print(f"[release] {before} -> {after} (перезапустить Claude Code для применения)")
+    print(f"[release] {before} -> {after}" + (f" (маркетплейс снят с {pin}, снова на main)" if pin else "")
+          + " (перезапустить Claude Code для применения)")
     return 0
 
 
@@ -93,14 +126,15 @@ def rollback(version: str | None = None, run=subprocess.run, state: Path = STATE
     if not version or not SEMVER.fullmatch(version):
         print("[release] не знаю, на какую версию откатывать: укажите `rollback X.Y.Z`", file=sys.stderr)
         return 2
+    if not _tag_exists(version, run):  # до любых изменений на машине
+        print(f"[release] тега v{version} нет в {REPO} — ничего не тронуто", file=sys.stderr)
+        return 3
     before = installed_version(run)
-    for cmd in (["claude", "plugin", "marketplace", "remove", NAME],
-                ["claude", "plugin", "marketplace", "add", f"{REPO}#v{version}"],
-                ["claude", "plugin", "install", f"{NAME}@{NAME}"]):
-        r = _run(cmd, run)
-        if r.returncode:
-            print(f"[release] {' '.join(cmd)} -> код {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}", file=sys.stderr)
-            return 1
+    old_pin = pinned_ref(run)
+    if _reinstall(f"{REPO}#v{version}", run):
+        print(f"[release] откат не удался — возвращаю прежний маркетплейс ({old_pin or 'main'})", file=sys.stderr)
+        _reinstall(f"{REPO}#{old_pin}" if old_pin else REPO, run)
+        return 1
     _save_prev(before, state)
     print(f"[release] {before} -> {installed_version(run)} (откат на v{version}; перезапустить Claude Code)")
     return 0
