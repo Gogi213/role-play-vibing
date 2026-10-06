@@ -1030,6 +1030,26 @@ class NoProgressViewTests(WatchSandbox):
         self.assertFalse(D.CEO_INBOX.exists() and "watch-" in D.CEO_INBOX.read_text(encoding="utf-8"))
         self.assertEqual(T.read_ticket(p).next_role, "engineer")  # владелец разбужен
 
+    def test_watch_plan_reminder_keeps_ceo_handoff_alive(self):
+        # напоминание сторожа не считается ответом CEO: метка передачи жива, «ждёт-ceo» придёт (ревью #27)
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Передача", status="waiting", now=self.now)
+        tid = T.read_ticket(p).id
+        W._remind_plan_waiting(tid)
+        self.assertTrue(T.author_is(T.read_ticket(p).log[-1].author, "watch"))
+        state = {"ceo_handoffs": {tid: T.now_iso(self.now - timedelta(minutes=1))}}
+        self.assertTrue(D._ceo_handoff_pending(T.read_ticket(p), state, self.now + timedelta(hours=1)))
+        self.assertIn(tid, state["ceo_handoffs"])
+        self.assertIn("[ждёт-ceo]", D.CEO_INBOX.read_text(encoding="utf-8"))
+
+    def test_watch_entries_do_not_reset_orphan_timer(self):
+        # запись сторожа (напоминание, ssh-тревога) не сбрасывает таймер сироты (ревью #27)
+        old = self.now - timedelta(hours=5)
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Сирота", status="todo", now=old)
+        T.write_header_updates(p, {"status": "waiting"}, now=old)
+        T.append_log(p, "engineer", "жду", now=old)
+        T.append_log(p, "watch", "напоминание", now=self.now - timedelta(minutes=5))
+        self.assertEqual([f.kind for f in W.check_orphan_tickets(self.now)], ["orphan-ticket"])
+
     def test_wake_text_points_to_plugin_plan_script(self):
         p = T.create_ticket(self.tickets_dir, owner="engineer", title="Без плана", status="in_progress", now=self.now)
         W.notify_findings([W.Finding("no-plan", T.read_ticket(p).id, "x")], {}, self.now)
