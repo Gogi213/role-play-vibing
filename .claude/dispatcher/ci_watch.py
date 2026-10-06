@@ -40,8 +40,9 @@ def save_state(st: dict) -> None:
     T.atomic_write_text(state_path(), json.dumps(st, ensure_ascii=False, indent=1))
 
 
-def gh_api(path: str):
-    r = subprocess.run(["gh", "api", path], capture_output=True, timeout=60)
+def gh_api(path: str, method: str = "GET", **fields):
+    args = ["gh", "api", "-X", method, path] + [x for k, v in fields.items() for x in ("-f", f"{k}={v}")]
+    r = subprocess.run(args, capture_output=True, timeout=60)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or b"").decode("utf-8", "replace").strip()[:200])
     return json.loads(r.stdout.decode("utf-8"))
@@ -147,6 +148,10 @@ def main(argv=None) -> int:
         try:
             for n, s7, state, woke in run_once(repo):
                 print(f"[ci_watch] PR #{n} {s7}: {state}" + (f" → {woke}" if woke else ""))
+            import merge_rule
+            import tickets
+            for n, what in merge_rule.merge_once(repo, bus=tickets.bus_emit):
+                print(f"[merge_rule] PR #{n}: {what}")
         except Exception as e:
             print(f"[ci_watch] цикл: {type(e).__name__}: {e}", file=sys.stderr)
         if "--once" in argv:
