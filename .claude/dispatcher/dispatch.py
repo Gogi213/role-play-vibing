@@ -1077,11 +1077,12 @@ def _proc_start(pid):
 def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
     """Жив ли pid. `start` — метка старта, записанная при запуске (`_proc_start`): сверка pid + старт вместо имени
     образа (роль под npm-установкой — `node`, не `claude`); не совпала — pid занят другим процессом, мёртв; метку узнать
-    нельзя — прежняя проверка по имени. Дальше — прежнее: """
+    нельзя — только «процесс есть». Дальше — прежнее: """
     if start:
         now_start = _proc_start(pid)
         if now_start is not None:
             return now_start == start and _pid_alive(pid, "")
+        return _pid_alive_name(pid, "")  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
     return _pid_alive_name(pid, expect_name)
 
 
@@ -1112,7 +1113,8 @@ def _ps_field(pid, field: str):
     None — ps нет или процесса нет."""
     try:
         out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(int(pid))], capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=5)
+                             encoding="utf-8", errors="replace", timeout=5,
+                             env=dict(os.environ, LC_ALL="C", TZ="UTC0"))  # lstart зависит от локали и пояса
     except Exception:
         return None
     return out.stdout.strip() if out.returncode == 0 else None

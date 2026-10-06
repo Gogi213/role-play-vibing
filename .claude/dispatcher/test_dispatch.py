@@ -1647,6 +1647,41 @@ class DispatchRunTests(unittest.TestCase):
             child.wait(timeout=10)
         self.assertFalse(D._pid_alive(child.pid, "", start=mark))
 
+    @unittest.skipIf(os.name == "nt", "ps lstart — только Linux/macOS")
+    def test_ps_start_mark_does_not_depend_on_locale_or_timezone(self):
+        """#16: диспетчер под launchd (локаль C) и из терминала (ru_RU, свой пояс) получают одну метку старта."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        saved = {k: os.environ.get(k) for k in ("LANG", "LC_ALL", "LC_TIME", "TZ")}
+        try:
+            os.environ.update(LANG="ru_RU.UTF-8", LC_TIME="ru_RU.UTF-8", TZ="Asia/Dubai")
+            os.environ.pop("LC_ALL", None)
+            first = D._ps_field(child.pid, "lstart")
+            for k in saved:
+                os.environ.pop(k, None)
+            second = D._ps_field(child.pid, "lstart")
+            self.assertTrue(first)
+            self.assertEqual(first, second)
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
+            child.kill()
+            child.wait(timeout=10)
+
+    def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
+        """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        orig = D._proc_start
+        try:
+            D._proc_start = lambda pid: None
+            self.assertTrue(D._pid_alive(child.pid, "no-such-image", start="123"))
+        finally:
+            D._proc_start = orig
+            child.kill()
+            child.wait(timeout=10)
+        self.assertFalse(D._pid_alive(child.pid, "", start="123"))
+
     def test_ceo_mention_in_text_is_plain_text_status_signals_still_work(self):
         """v2: @ceo в записи — обычный текст, строки CEO нет и роль не стартует; сигнал даёт статус needs_owner."""
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Для CEO",
