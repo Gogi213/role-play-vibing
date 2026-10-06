@@ -75,6 +75,10 @@ class Watcher:
         for u, st in cur.items():
             if st in RUNNING and u not in self.running:
                 self.running[u] = self.showf(u).get("InvocationID", "")
+                if not self.first:
+                    events.append((f"машина.{self.host}.юнит.запущен",
+                                   {"unit": u, "host": self.host, "invocation": self.running[u]},
+                                   f"unitstart:{self.host}:{u}:{self.running[u]}"))
             if st == "failed" and (u, "f") not in self.failed_seen:
                 self.failed_seen.add((u, "f"))
                 if not self.first and u not in self.running:
@@ -94,7 +98,7 @@ class Watcher:
         ok = info.get("Result", "success") == "success"
         base = unit[:-8] if unit.endswith(".service") else unit
         payload = {"unit": unit, "host": self.host, "result": info.get("Result", "success"),
-                   "exit": info.get("ExecMainStatus", "0")}
+                   "exit": info.get("ExecMainStatus", "0"), "invocation": inv}
         ev = [(f"машина.{self.host}.юнит.{'остановлен' if ok else 'упал'}", payload,
                f"unit:{self.host}:{unit}:{inv}")]
         tk = (self.prog(self.pg).get(base) or {}).get("ticket")

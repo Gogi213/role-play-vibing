@@ -155,16 +155,18 @@
   B.defaultOpen = defaultOpen;
 
   const fmtAge = (s) => (s < 90 ? Math.round(s) + " с" : fmtMin(s / 60));
+  const SILENT_S = 600;
   function paintLink() {
     const banner = document.getElementById("banner"), lnk = document.getElementById("lnk"), stt = document.getElementById("stt"), led = document.querySelector(".led");
-    let msg = null, short = "связь есть", ok = true;
+    let msg = null, short = "связь есть", ok = true, silent = false;
     if (!loaded) { short = netFail ? "НЕТ СВЯЗИ" : "загрузка"; ok = false; if (netFail) msg = ["НЕТ СВЯЗИ", "сервер не отвечает, сводки ещё нет"]; }
     else {
       const age = ageAt + (Date.now() - fetchedAt) / 1000, tick = Number(V.tick_s) || 5, limit = 3 * tick + 15;
       if (netFail) { short = "НЕТ СВЯЗИ"; ok = false; msg = ["НЕТ СВЯЗИ", "сервер не отвечает, показана последняя сводка"]; }
+      else if (age > SILENT_S) { short = "КОМАНДА МОЛЧИТ"; ok = false; silent = true; msg = ["КОМАНДА МОЛЧИТ С " + new Date(Date.now() - age * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }), "ПК не присылает сводку " + fmtAge(age) + ": диспетчер/сторож/сборщик могли упасть, показана последняя сводка"]; }
       else if (age > limit) { short = "СВОДКА УСТАРЕЛА"; ok = false; msg = ["СВОДКА УСТАРЕЛА " + fmtAge(age), "ПК не передаёт данные, показана последняя сводка"]; }
     }
-    banner.hidden = !msg;
+    banner.hidden = !msg; banner.classList.toggle("silent", silent);
     if (msg) banner.innerHTML = `<span>${E(msg[0])}</span><span>${E(msg[1])}</span>`;
     if (lnk) lnk.textContent = short;
     if (loaded && stt) stt.textContent = "сводка " + (V.time || "--:--");

@@ -744,4 +744,7 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    if not sys.stdout.isatty():  # демон с перенаправленным выводом: чужой Ctrl+C общей консоли его не убивает (TK-072)
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
     sys.exit(main())

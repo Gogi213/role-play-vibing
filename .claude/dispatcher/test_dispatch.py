@@ -3873,7 +3873,7 @@ class WaitByEventTest(unittest.TestCase):
     """TK-055: wait_for host:… закрывается событием шины; в асинхронном режиме основной поток ssh не зовёт."""
 
     def setUp(self):
-        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear()
+        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
         self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
 
         def boom(*a, **k):
@@ -3882,7 +3882,7 @@ class WaitByEventTest(unittest.TestCase):
 
     def tearDown(self):
         D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd = self._run, self._async, self._sshcmd
-        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear()
+        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
 
     def _probe_state(self, state: bytes):
         class R:
@@ -3917,6 +3917,25 @@ class WaitByEventTest(unittest.TestCase):
         self._probe_state(b"inactive")
         D._host_probe("calc", "unit", "tk065-gate2")
         self.assertTrue(D.check_wait_for("host:calc:unit:tk065-gate2"))
+
+    def test_unit_stop_with_matching_invocation_needs_no_ssh(self):
+        """TK-072: «запущен» (inv A) + «остановлен» (inv A) — wait_for выполнен без ssh; остановка старого запуска (inv A) после
+        нового запуска (inv B) — игнорируется."""
+        D.WAIT_ASYNC = True
+        def boom(*a, **k):
+            raise AssertionError("ssh не нужен")
+        D.subprocess.run = boom
+        ev = lambda kind, inv: D.record_wait_event({"addr": f"машина.calc.юнит.{kind}", "payload": {"unit": "tk9-x.service", "host": "calc", "invocation": inv}})
+        ev("запущен", "A")
+        self.assertFalse(D.check_wait_for("host:calc:unit:tk9-x"))
+        ev("остановлен", "A")
+        self.assertTrue(D.check_wait_for("host:calc:unit:tk9-x"))
+        ev("запущен", "B")  # второй запуск с тем же именем
+        self.assertFalse(D.check_wait_for("host:calc:unit:tk9-x"))
+        ev("остановлен", "A")  # запоздавшее событие старого запуска
+        self.assertFalse(D.check_wait_for("host:calc:unit:tk9-x"))
+        ev("остановлен", "B")
+        self.assertTrue(D.check_wait_for("host:calc:unit:tk9-x"))
 
     def test_stale_unit_event_sync_mode(self):
         D.WAIT_ASYNC = False

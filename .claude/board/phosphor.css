@@ -40,6 +40,7 @@ a{color:inherit}
 .banner{position:sticky;top:0;z-index:3;display:flex;flex-wrap:wrap;gap:.1em 1.6ch;align-items:baseline;padding:.45em var(--pad-x);
   background:var(--fg);color:var(--bg);text-shadow:none;font-weight:700;letter-spacing:.04em;box-shadow:0 0 22px rgba(var(--fg-rgb),.55)}
 .banner span+span{font-weight:400;letter-spacing:0}
+.banner.silent{background:#ff3b30;color:#fff;box-shadow:0 0 22px rgba(255,59,48,.7)}
 .toast{position:fixed;z-index:20;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);max-width:calc(100vw - 24px);
   padding:.55em 1.6ch;font:600 13px/1.4 var(--f-chrome,monospace);background:var(--fg,#33ff66);color:var(--bg,#031a07);box-shadow:0 0 24px rgba(var(--fg-rgb,51,255,102),.6);
   --fg:#33ff66;--fg-rgb:51,255,102;--bg:#031a07}
