@@ -212,6 +212,12 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Что нового в 1.6.2
+
+- **Судью не снимает CEO.** В шаблонах ролей (`templates/roles/ceo.md`, README «Судья и договор») записано правило
+  владельца: Судья — единственный кросс-аудитор и валидатор качества; CEO запрещено убирать его с задачи, останавливать
+  его запуск или закрывать/вливать работу мимо его приёмки. Снять Судью может только владелец прямой цитатой.
+
 ## Что нового в 1.6.1
 
 - **macOS: проверка «наш ли живой процесс» по pid без `/proc` доведена.** В 1.5.0 `start.py` не читал командную строку без `/proc` и принимал
