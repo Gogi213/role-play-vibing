@@ -9,7 +9,7 @@ RPV_BOARD — одна строка подключения из окна «+» (
 в заголовке и в логах не печатается. Без RPV_BOARD сводка только пишется в `<проект>/.claude/pulse/status.json`
 (его читают `.claude/board/board.py` и `mcp_server.py`).
 
-Необязательно (каталог `.claude/board/`): RPV_MACHINES — загрузка машин по ssh (`machines.py`), RPV_PLAIN=1 — человеческие
+Необязательно (каталог `.claude/board/`): RPV_MACHINES — загрузка машин по ssh (`machines.py`), RPV_PLAIN=0 — выключить человеческие
 строки процессов от Haiku (`plainify.py`). Сбой любой из них кадр не роняет.
 """
 from __future__ import annotations
@@ -83,7 +83,7 @@ def _pstate(steps: list, st: str) -> str:
 
 
 def build_view2(tickets_dir, now: float | None = None, plans_dir=None, wait: bool = False) -> dict:
-    """view2 как у alpha: тикеты + планы шагов + вопросы владельцу (V2.make); плюс машины (RPV_MACHINES) и строки (RPV_PLAIN)."""
+    """view2 как у alpha: тикеты + планы шагов + вопросы владельцу (V2.make); плюс машины (RPV_MACHINES) и строки (Haiku, RPV_PLAIN=0 — без них)."""
     now = time.time() if now is None else now
     tickets_dir = Path(tickets_dir)
     pulse = tickets_dir.parent / "pulse"
@@ -105,14 +105,13 @@ def build_view2(tickets_dir, now: float | None = None, plans_dir=None, wait: boo
 
 
 def _extras(view2: dict, pulse: Path, wait: bool = False) -> dict:
-    """Машины по ssh (RPV_MACHINES) и человеческие строки (RPV_PLAIN=1); ошибка любой из них кадр не роняет."""
-    if project.env("MACHINES"):
-        try:
-            import machines
-            machines.merge(view2, *machines.collect())
-        except Exception as e:
-            print("машины: " + type(e).__name__, file=sys.stderr)
-    if project.env("PLAIN") == "1":
+    """Машины по ssh (RPV_MACHINES) и человеческие строки (по умолчанию, RPV_PLAIN=0 — без них); ошибка любой из них кадр не роняет."""
+    try:  # «этот ПК» всегда (RPV_PC=0 — без него) + RPV_MACHINES по ssh
+        import machines
+        machines.merge(view2, *machines.collect())
+    except Exception as e:
+        print("машины: " + type(e).__name__, file=sys.stderr)
+    if project.env("PLAIN") != "0":  # строки Haiku по умолчанию; RPV_PLAIN=0 — выключить
         try:
             import plainify
             plainify.apply(view2, pulse / "plain-auto.json", wait=wait)

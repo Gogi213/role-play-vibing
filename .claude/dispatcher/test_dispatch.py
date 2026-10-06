@@ -36,6 +36,12 @@ import tickets as TK  # noqa: E402  (CLI — new/comment/start/status)
 TZ = timezone(timedelta(hours=4))  # GMT+4 (память проекта)
 
 
+def python_image_name() -> str:
+    """Подстрока имени образа, под которым ОС видит наш python (фейковая «claude» в тестах — это он). Не stem от
+    sys.executable: у framework-python на macOS образ — .../Python.app/Contents/MacOS/Python («Python»), не «python3.14»."""
+    return (D._proc_comm(os.getpid()) if os.name != "nt" else None) or Path(sys.executable).stem
+
+
 def dt(s: str) -> datetime:
     return T.parse_dt(s)
 
@@ -707,7 +713,7 @@ class DispatchRunTests(unittest.TestCase):
         D.CEO_WAKE_LOG = self.dispatcher_dir / "ceo-wake.log"
         D.STOP_DIR = self.dispatcher_dir / "stop"
         # фейковый "claude" в тестах — это sys.executable (python.exe/python3), не claude.exe
-        D.PID_EXPECT_NAME = Path(sys.executable).stem
+        D.PID_EXPECT_NAME = python_image_name()
         D.RUNNING.clear()
         self._orig_popen = D._popen
         self._orig_scope = dict(D.SESSION_SCOPE)
@@ -1416,7 +1422,7 @@ class DispatchRunTests(unittest.TestCase):
     # --- `tickets.py stop`: остановка роли посреди запуска (CEO, 03.10) ------------------------------------------------
 
     def _alive(self, pid):
-        return D._pid_alive(pid, Path(sys.executable).stem)
+        return D._pid_alive(pid, python_image_name())
 
     def start_tree_run(self, owner="researcher"):
         """Фейковая роль с потомком, оба «висят»: (путь тикета, pid потомка)."""
