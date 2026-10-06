@@ -31,10 +31,31 @@ def _save(st: dict) -> None:
     T.atomic_write_text(merge_state_path(), json.dumps(st, ensure_ascii=False, indent=1))
 
 
+def parse_accepted(value) -> dict:
+    """`accepted: 22@sha, 23@sha` → {22: 'sha', 23: 'sha'} (несколько PR одного тикета)."""
+    out = {}
+    for part in str(value or "").split(","):
+        num, _, sha = part.partition("@")
+        if num.strip().isdigit() and sha.strip():
+            out[int(num)] = sha.strip()
+    return out
+
+
+def format_accepted(acc: dict) -> str:
+    return ", ".join(f"{n}@{s}" for n, s in sorted(acc.items()))
+
+
 def accepted_head(tkt, pr_number: int):
-    """sha из `accepted: <PR>@<sha>` для этого PR, иначе None."""
-    num, _, sha = str(tkt.header.get("accepted") or "").partition("@")
-    return sha.strip() if num.strip() == str(pr_number) and sha.strip() else None
+    """sha из `accepted` для этого PR, иначе None."""
+    return parse_accepted(tkt.header.get("accepted")).get(pr_number)
+
+
+def _drop_accepted(tkt, pr_number: int) -> None:
+    with T.ticket_lock(tkt.path):
+        cur = T.read_ticket(tkt.path)
+        acc = parse_accepted(cur.header.get("accepted"))
+        if acc.pop(pr_number, None) is not None:
+            T.write_header_updates(tkt.path, {"accepted": format_accepted(acc)}, stamp_updated=False)
 
 
 def _note(tkt, text: str, wake_owner: bool = False, bus=None) -> None:
@@ -99,6 +120,7 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
             continue
         if gh(f"repos/{repo}/pulls/{n}").get("merged"):
             _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).", bus=bus)
+            _drop_accepted(tkt, n)
             st[key] = {"merged": sha}
             out.append((n, "влит"))
         else:

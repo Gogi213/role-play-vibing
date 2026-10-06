@@ -209,7 +209,10 @@ def cmd_accept(args) -> int:
     with T.ticket_lock(path):
         T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}. "
                      + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."))
-        T.write_header_updates(path, {"accepted": f"{args.pr}@{args.sha}"}, stamp_updated=False)
+        import merge_rule
+        acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
+        acc[int(args.pr)] = args.sha  # вердикты по другим PR тикета не трогаем
+        T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc)}, stamp_updated=False)
     bus_emit(args.id, "статус", {"accepted": f"{args.pr}@{args.sha}"})
     print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]}")
     return 0
