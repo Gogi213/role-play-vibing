@@ -187,6 +187,40 @@ def cmd_comment(args) -> int:
     return 0
 
 
+def cmd_result(args) -> int:
+    """Сдать шаг: итог из закрытого списка + зачем + доказательство; кого будить — таблица routes.py (TK-079 п.0).
+    Неполная команда — отказ с текстом, что исправить; запись в лог тикета ставит сама команда."""
+    import routes
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    role = _caller_role()
+    err = routes.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
+                       form=args.form or "", root=PROJECT_ROOT)
+    if err:
+        print(f"result: {err}", file=sys.stderr)
+        return 1
+    tkt = T.read_ticket(path)
+    why = args.why.strip()
+    proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": "", "return": f" голова {(args.sha or '')[:7]}",
+             "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
+    if args.result == "accept":
+        return cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why})())
+    with T.ticket_lock(path):
+        T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
+        if args.result == "pr":
+            prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
+            T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
+    if args.result == "wait":
+        return cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
+    upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""))
+    T.write_header_updates(path, upd)
+    bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
+    print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
+    return 0
+
+
 def _caller_role() -> str:
     """Роль вызывающей сессии: диспетчер ставит `RPV_ROLE` (и `ALPHA_ROLE`) запускам ролей; у CEO и владельца её нет."""
     return (D.P.env("ROLE", "") or "").strip().lower()
@@ -357,6 +391,16 @@ def main(argv=None) -> int:
     p_accept.add_argument("--sha", required=True)
     p_accept.add_argument("--text", default="")
     p_accept.set_defaults(func=cmd_accept)
+
+    p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
+    p_result.add_argument("id")
+    p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait")
+    p_result.add_argument("--why", default="", help="зачем/почему, ≤ 200 знаков (обязательно)")
+    p_result.add_argument("--pr", type=int, default=None, help="pr, accept: номер PR")
+    p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")
+    p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
+    p_result.add_argument("--form", default=None, help="wait: форма wait_for")
+    p_result.set_defaults(func=cmd_result)
 
     p_start = sub.add_parser("start")
     p_start.add_argument("id")
