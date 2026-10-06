@@ -90,6 +90,7 @@ RUNNER = r'''
 import subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import dispatch as D
+D.PID_EXPECT_NAME = ""  # фейковая роль — python, а не «claude»: иначе подхват после kill диспетчера считает живую роль мёртвой и снимает метку передачи CEO
 D._popen = lambda cmd, **kw: subprocess.Popen([sys.executable, sys.argv[2]] + list(cmd[1:]), **kw)
 sys.exit(D.main(["--project", sys.argv[3]]))
 '''

@@ -1733,7 +1733,10 @@ def recover_active_runs(state: dict, now) -> None:
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }
-        if _pid_alive(saved.get("pid")):
+        alive = _pid_alive(saved.get("pid"))
+        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')} "
+              f"{'жив — слежу' if alive else 'не найден или чужое имя образа — разбираю как завершённый'}", file=sys.stderr, flush=True)
+        if alive:
             RUNNING[tid] = info
         else:
             state.get("active_runs", {}).pop(tid, None)
