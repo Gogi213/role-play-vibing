@@ -1774,7 +1774,7 @@ def _find_pid_by_session(session_id) -> "int | None":
                                  timeout=30).stdout
             pids = [int(x) for x in out.split()]
         else:
-            out = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=10).stdout
+            out = subprocess.run(["ps", "-ww", "-eo", "pid=,args="], capture_output=True, text=True, timeout=10).stdout
             pids = []
             for ln in out.splitlines():
                 pid_s, _, args = ln.strip().partition(" ")
