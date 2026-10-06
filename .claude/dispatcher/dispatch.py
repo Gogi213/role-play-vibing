@@ -1951,15 +1951,16 @@ def _waits_without_condition(tkt: T.Ticket, now) -> bool:
 def _alert_idle(day: str, rec: dict, now) -> None:
     note = (f"простой за {day}: {downtime.total_min(rec):.0f} мин при SLO {IDLE_SLO_MIN:.0f} "
             f"(готовая работа без исполнителя {rec['idle_s'] / 60:.0f}, ожидание без условия {rec['wait_s'] / 60:.0f}, "
-            f"молчание диспетчера {rec['stall_s'] / 60:.0f})")
+            f"молчание диспетчера {rec['stall_s'] / 60:.0f}, тормоз запусков {rec.get('throttle_s', 0) / 60:.0f}; "
+            f"сумма корзин)")
     try:
         import busclient
-        if not os.environ.get("RPV_BUS_DISABLE") and busclient.config()[0] and busclient.post(
-                "служба.простой.превышен", {"note": note}, f"idle-slo-{day}"):
+        if not os.environ.get("RPV_BUS_DISABLE") and busclient.config()[0]:
+            busclient.post("служба.простой.превышен", {"note": note}, f"idle-slo-{day}")  # недоступна — spool, дошлётся
             return
     except Exception:
         pass
-    append_ceo_inbox("*", "idle-slo", note, now)  # шины нет или недоступна — файл
+    append_ceo_inbox("*", "idle-slo", note, now)  # шина выключена — файл
 
 
 def _account_downtime(state: dict, now, **flags) -> None:
@@ -2049,8 +2050,9 @@ def tick(now=None) -> int:
         launch_run(path, decision.role, state, now, reason=decision.reason)
         launched += 1
 
-    _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and not RUNNING
-                                                  and not launched and not paused),
+    idle_now = not RUNNING and not launched and not paused
+    _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
+                      throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
