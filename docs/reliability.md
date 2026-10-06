@@ -53,7 +53,8 @@ python <плагин>/.claude/dispatcher/supervise.py --uninstall [--project <п
 | `dispatcher-down` | диспетчер не тикает дольше порога | CEO (поднять службу) |
 | `blocked`, `needs_owner` | тикет в этом статусе | CEO (решение владельца) |
 | `ticket-unreadable` | тикет не разбирается | CEO |
-| `orphan-ticket` | `in_progress`/`in_review`/`waiting` без записи > порога **и** без годного `wait_for`; `waiting`, у которого условие проверяется (`file:`, `unit:`, `ticket:`, `ci:`, ssh-цель) и ещё не наступило, — не сирота | CEO сейчас; владельцу тикета — после таблицы маршрутов (TK-079 п.0) |
+| `orphan-ticket` | `in_progress`/`in_review`/`waiting` без записи > порога **и** без годного `wait_for`; `waiting`, у которого условие проверяется (`file:`, `unit:`, `ticket:`, `ci:`, ssh-цель) и ещё не наступило, — не сирота (молчание ssh считается отдельно — строка ниже) | CEO сейчас; владельцу тикета — после таблицы маршрутов (TK-079 п.0) |
+| сбой ssh к цели `wait_for` | ssh к машине из `host:…` молчит `WATCH_SSH_FAIL_STRIKES` (5) проверок подряд: ожидание снимается, запись `watch` в тикете | владелец тикета (не CEO) |
 | `server-idle` | машина счёта простаивает при готовой работе | владелец тикета; CEO — если владельца не определить |
 | `deck-alert`, `deck-queue-stale`, `deck-frozen`, `deck-ssh-error` | вторая машина | CEO |
 | `deck-idle-expected` | HOLD активен — ожидаемо | только строка в сводку, не будит |
