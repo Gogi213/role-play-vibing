@@ -4403,7 +4403,27 @@ class WaitReconcileTest(unittest.TestCase):
         D._host_probe("calc", "path", "/data/progress/j1.json")
         self.assertIn(D.WATCH_LIST, calls[0])
         self.assertIn("cat ", calls[0])
-        self.assertNotIn(D.WATCH_LIST, calls[1])
+        self.assertIn(D.WATCH_LIST, calls[1])
+
+    def test_progress_json_in_default_dir_is_not_registered(self):
+        """Каталог хода по умолчанию плагина (~/rpv/progress): файл хода не попадает в watch.list — иначе «файл появился» закрыл бы ожидание на старте."""
+        self.assertTrue(D.PROGRESS_DIR.startswith("~/"))
+        calls = self._ssh(b"")
+        D._host_probe("calc", "path", "/home/u/rpv/progress/j1.json")
+        D._host_probe("calc", "path", "/home/u/rpv/other/j1.json")
+        self.assertNotIn(D.WATCH_LIST, calls[0])
+        self.assertIn(D.WATCH_LIST, calls[1])
+        self.assertTrue(D._is_progress_json("/home/u/rpv/progress/j1.json"))
+        self.assertFalse(D._is_progress_json("/home/u/rpv/progress/j1.done"))
+
+    def test_progress_json_in_absolute_dir_is_not_registered(self):
+        old = D.PROGRESS_DIR
+        D.PROGRESS_DIR = "/data/progress"
+        try:
+            self.assertTrue(D._is_progress_json("/data/progress/j1.json"))
+            self.assertFalse(D._is_progress_json("/data/work/j1.json"))
+        finally:
+            D.PROGRESS_DIR = old
 
     def test_probe_wl_marker_confirms_registration(self):
         self._ssh(b"@@WL\n")

@@ -525,8 +525,13 @@ def _log_ssh_call(alias: str, what: str, arg: str, reason: str) -> None:
 
 
 def _is_progress_json(arg: str) -> bool:
-    """Файл хода (`/data/progress/<job>.json`, done/total) сторож ведёт сам; прочие пути, в т.ч. .json вне каталога, регистрируются."""
-    return arg.endswith(".json") and arg.rsplit("/", 1)[0] == "/data/progress"
+    """Файл хода (`<RPV_PROGRESS_DIR>/<job>.json`, done/total) сторож ведёт сам; прочие пути, в т.ч. .json вне каталога, регистрируются.
+    `~` в PROGRESS_DIR — домашний каталог машины: сравниваем по хвосту пути."""
+    if not arg.endswith(".json"):
+        return False
+    d = arg.rsplit("/", 1)[0]
+    pd = PROGRESS_DIR.rstrip("/")
+    return d == pd or (pd.startswith("~/") and d.endswith(pd[1:]))
 
 
 def _host_probe(alias: str, what: str, arg: str) -> bool:
