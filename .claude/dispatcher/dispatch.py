@@ -331,6 +331,18 @@ _EVENT_VERIFIED = set()  # ключи, чьё «остановлен» несё�
 _EVENT_LOCK = threading.Lock()
 _WAIT_NEW = threading.Event()
 
+# Стандарт сигналов: штатно ssh не опрашивает — события сторожа машины закрывают wait_for; ssh — первая проверка нового
+# условия, сверка раз в WAIT_RECON_S и аварийный опрос, пока шина лежит дольше BUS_DOWN_SSH_S (RPV_DISPATCH_BUS_DOWN_SSH_S).
+# Шина не настроена (_LINK is None) — ssh-опрос как раньше.
+BUS_DOWN_SSH_S = float(P.env("DISPATCH_BUS_DOWN_SSH_S", "600"))
+WAIT_RECON_S = float(P.env("DISPATCH_WAIT_RECON_S", "300"))  # сверка всех ждущих host:… одним ssh на машину
+WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "calc").split(",") if a.strip()}  # машины со сторожем: пропуск события там — тревога
+_LINK = None
+_SSH_ALERTED = False
+_RECON_MISS = set()  # ключи, по которым «пропуск» уже записан и тревога уже ушла
+_WL_REG = set()  # (алиас, путь), чья регистрация у сторожа подтверждена ответом машины
+_RECON_LAST = 0.0
+
 
 def _unit_base(name: str) -> str:
     return name[:-8] if name.endswith(".service") else name
@@ -389,17 +401,47 @@ def _drop_event(alias: str, what: str, arg: str) -> None:
         _EVENT_VERIFIED.discard(k)
 
 
+def _bus_down_long() -> bool:
+    """Аварийный путь: ssh-опрос ждущих условий — только когда шина недоступна дольше BUS_DOWN_SSH_S (или отключена)."""
+    if _LINK is None:
+        return True
+    since = _LINK.down_since
+    return since is not None and time.time() - since >= BUS_DOWN_SSH_S
+
+
+def _needs_probe(ckey) -> bool:
+    cached = _WAIT_CACHE.get(ckey)
+    if cached is None or _bus_down_long():
+        return True  # первая проверка нового условия (заодно регистрация пути у сторожа) либо аварийный путь
+    ev_ts = _event_ts(*ckey)  # событие остановки юнита — одна проверка, что это не прежний экземпляр с тем же именем
+    return (ckey[1] == "unit" and ev_ts is not None and cached[0] < ev_ts
+            and (ckey[0], "unit", _unit_base(ckey[2])) not in _EVENT_VERIFIED)
+
+
 def _wait_poller() -> None:
-    """Подстраховка: ssh-опрос ключей из _WAIT_WATCH с шагом WAIT_POLL_S в своём потоке, результат — в _WAIT_CACHE."""
+    """Штатно ssh не опрашивает: события шины (сторож машины) закрывают wait_for; здесь — первая проверка нового условия и
+    аварийный опрос ключей из _WAIT_WATCH с шагом WAIT_POLL_S, пока шина лежит дольше BUS_DOWN_SSH_S."""
+    global _SSH_ALERTED, _RECON_LAST
     while True:
+        if _bus_down_long() and _LINK is not None and not _SSH_ALERTED:
+            _SSH_ALERTED = True
+            _LINK.ceo_line("bus-down-ssh", f"шина лежит дольше {int(BUS_DOWN_SSH_S)} с — включён аварийный ssh-опрос wait_for")
+        elif not _bus_down_long():
+            _SSH_ALERTED = False
         for ckey in list(_WAIT_WATCH):
-            if _event_met(*ckey) and ckey[1] != "unit":
-                continue  # юнит проверяем и при событии: новый запуск с тем же именем сбрасывает прежнее событие
+            if not _needs_probe(ckey):
+                continue
             try:
                 _host_probe(*ckey)
             except Exception as e:
                 _wait_err(f"poller:{ckey}", f"{type(e).__name__}: {e}")
-        _WAIT_NEW.wait(WAIT_POLL_S)
+        if _WAIT_WATCH and not _bus_down_long() and time.time() - _RECON_LAST >= WAIT_RECON_S:
+            _RECON_LAST = time.time()
+            try:
+                _reconcile()
+            except Exception as e:
+                _wait_err("reconcile", f"{type(e).__name__}: {e}")
+        _WAIT_NEW.wait(min(WAIT_POLL_S, WAIT_RECON_S))
         _WAIT_NEW.clear()
 
 
@@ -471,6 +513,27 @@ def _host_wait_met(alias: str, what: str, arg: str) -> bool:
     return _host_probe(alias, what, arg)
 
 
+SSH_CALLS_LOG_NAME = "ssh-calls.log"  # строка на ssh-вызов диспетчера: мерка «сутки без ssh-опроса»
+
+
+def _log_ssh_call(alias: str, what: str, arg: str, reason: str) -> None:
+    try:
+        with open(DISPATCHER_DIR / SSH_CALLS_LOG_NAME, "a", encoding="utf-8") as f:
+            f.write("\t".join((T.now_iso(), alias, what, arg, reason)) + "\n")
+    except OSError:
+        pass
+
+
+def _is_progress_json(arg: str) -> bool:
+    """Файл хода (`<RPV_PROGRESS_DIR>/<job>.json`, done/total) сторож ведёт сам; прочие пути, в т.ч. .json вне каталога, регистрируются.
+    `~` в PROGRESS_DIR — домашний каталог машины: сравниваем по хвосту пути."""
+    if not arg.endswith(".json"):
+        return False
+    d = arg.rsplit("/", 1)[0]
+    pd = PROGRESS_DIR.rstrip("/")
+    return d == pd or (pd.startswith("~/") and d.endswith(pd[1:]))
+
+
 def _host_probe(alias: str, what: str, arg: str) -> bool:
     ckey = (alias, what, arg)
     now_ts = time.time()
@@ -480,15 +543,20 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
         remote = f"cat {_remote_test_arg(arg)}"
     else:
         remote = f"test -e {_remote_test_arg(arg)}"
-    if what == "path" and WAIT_ASYNC and arg.startswith("/") and not arg.endswith(".json"):
-        # заодно регистрируем путь в списке сторожа машины: дальше появление файла придёт событием без ssh
+    if what == "path" and WAIT_ASYNC and arg.startswith("/") and not _is_progress_json(arg):
+        # заодно регистрируем путь в списке сторожа машины: дальше появление файла придёт событием без ssh;
+        # «@@WL» в ответе = регистрация подтверждена (нет — повторит сверка _reconcile)
         remote = (f"{{ grep -qxF {shlex.quote(arg)} {WATCH_LIST} 2>/dev/null || echo {shlex.quote(arg)} >> {WATCH_LIST}; }} "
-                  f">/dev/null 2>&1; {remote}")
+                  f">/dev/null 2>&1 && echo @@WL; {remote}")
     label = f"host:{alias}:{'unit:' if what == 'unit' else ''}{arg}"
     result = False
+    _log_ssh_call(alias, what, arg, "аварийный" if _bus_down_long() else ("первая" if ckey not in _WAIT_CACHE else "событие-юнита"))
     try:
         r = subprocess.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
         out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
+        if out.startswith("@@WL\n") or out.strip() == "@@WL":
+            _WL_REG.add((alias, arg))
+            out = out[len("@@WL"):].lstrip("\r\n")
         if what == "unit":
             state = (out.strip().splitlines() or [""])[0]
             if r.returncode == 255 or not state:
@@ -506,6 +574,90 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
         _wait_err(label, f"ssh: {type(e).__name__}: {e}")
     _WAIT_CACHE[ckey] = (now_ts, result)
     return result
+
+
+def _recon_script(keys: list) -> str:
+    parts = []
+    for i, (alias, what, arg) in enumerate(keys):
+        q = shlex.quote(arg)
+        parts.append(f"echo @@{i}")
+        if what == "unit":
+            parts.append(f"systemctl is-active {q} 2>&1 | head -1; echo '@@rc 0'")
+            continue
+        if arg.startswith("/") and not _is_progress_json(arg):
+            parts.append(f"{{ grep -qxF {q} {WATCH_LIST} 2>/dev/null || echo {q} >> {WATCH_LIST}; }} >/dev/null 2>&1 && echo @@reg")
+        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {q} 2>/dev/null; echo \"@@rc $?\"")
+    return "; ".join(parts)
+
+
+def _parse_recon(out: str, n: int) -> dict:
+    """Ответ _recon_script → {i: {"reg": bool, "rc": int|None, "body": str}}."""
+    res, cur = {}, None
+    for line in out.splitlines():
+        line = line.rstrip("\r")
+        if line.startswith("@@") and line[2:].isdigit() and int(line[2:]) < n:
+            cur = int(line[2:])
+            res[cur] = {"reg": False, "rc": None, "body": []}
+        elif cur is not None and line == "@@reg":
+            res[cur]["reg"] = True
+        elif cur is not None and line.startswith("@@rc "):
+            try:
+                res[cur]["rc"] = int(line[5:])
+            except ValueError:
+                pass
+        elif cur is not None:
+            res[cur]["body"].append(line)
+    for v in res.values():
+        v["body"] = "\n".join(v["body"])
+    return res
+
+
+def _reconcile() -> None:
+    """Страховка: раз в WAIT_RECON_S один ssh на машину проверяет ВСЕ ждущие host:… и повторяет регистрацию путей
+    у сторожа, не подтверждённую ранее. Пропущенное событие или сорванная регистрация стоят не дороже одного шага сверки."""
+    by_alias = {}
+    for k in list(_WAIT_WATCH):
+        by_alias.setdefault(k[0], []).append(k)
+    for alias, keys in by_alias.items():
+        keys.sort()
+        _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
+        try:
+            r = subprocess.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=45)
+        except Exception as e:
+            _wait_err(f"reconcile:{alias}", f"ssh: {type(e).__name__}: {e}")
+            continue
+        out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
+        if r.returncode == 255 or not out.strip():
+            _wait_err(f"reconcile:{alias}", f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
+            continue
+        now_ts = time.time()
+        for i, v in _parse_recon(out, len(keys)).items():
+            if v["rc"] is None:
+                continue
+            _, what, arg = keys[i]
+            if v["reg"]:
+                _WL_REG.add((alias, arg))
+            if what == "unit":
+                state = (v["body"].strip().splitlines() or [""])[0]
+                if not state:
+                    continue
+                result = state not in _UNIT_RUNNING
+                if not result:
+                    _drop_event(alias, what, arg)
+            elif v["rc"] == 0:
+                progress = _progress_done(v["body"]) if arg.endswith(".json") else None
+                result = True if progress is None else progress
+            elif v["rc"] == 1:
+                result = False
+            else:
+                continue
+            prev = _WAIT_CACHE.get(keys[i])
+            if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _event_ts(*keys[i]) is None
+                    and keys[i] not in _RECON_MISS):
+                _RECON_MISS.add(keys[i])  # запасной путь сработал, события не было — сторож не справился
+                _log_ssh_call(alias, what, arg, "пропуск")
+                append_ceo_inbox("*", "recon-miss", f"сверка закрыла host:{alias}:{'unit:' if what == 'unit' else ''}{arg} без события шины — проверить сторож машины")
+            _WAIT_CACHE[keys[i]] = (now_ts, result)
 
 
 def _ssh_stderr(r) -> str:
@@ -2350,7 +2502,8 @@ def main(argv=None) -> int:
     print(f"[dispatch] v2 loop every {POLL_INTERVAL}s, MAX_PARALLEL={MAX_PARALLEL}, run timeout "
           f"{RUN_TIMEOUT / 60:.0f} min, CLAUDE_BIN={CLAUDE_BIN}")
     link = _start_bus_link()
-    global WAIT_ASYNC
+    global WAIT_ASYNC, _LINK
+    _LINK = link
     WAIT_ASYNC = True
     threading.Thread(target=_wait_poller, daemon=True, name="wait-poller").start()
     while True:
