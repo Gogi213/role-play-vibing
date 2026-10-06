@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project  # noqa: E402
 import pulsedata as PD  # noqa: E402
 import ticket  # noqa: E402
+import view2 as V2  # noqa: E402
 
 STATE = {"in_progress": "run", "in_review": "review", "waiting": "wait", "blocked": "bad", "needs_owner": "wait",
          "stopped": "bad", "done": "done", "todo": "todo", "backlog": "todo"}
@@ -75,42 +76,25 @@ def _pstate(steps: list, st: str) -> str:
 
 
 def build_view2(tickets_dir, now: float | None = None, plans_dir=None) -> dict:
+    """view2 как у alpha: тикеты + планы шагов + вопросы владельцу (V2.make)."""
     now = time.time() if now is None else now
     tickets_dir = Path(tickets_dir)
-    plans_dir = Path(plans_dir) if plans_dir else tickets_dir.parent / "pulse" / "plans"
-    procs, counters = [], {"done": 0, "run": 0, "review": 0, "repair": 0, "wait": 0, "todo": 0, "bad": 0}
-    used = set()
+    pulse = tickets_dir.parent / "pulse"
+    plans_dir = Path(plans_dir) if plans_dir else pulse / "plans"
+    tickets = {}
     for p in ticket.list_tickets(tickets_dir):
         try:
             t = ticket.read_ticket(p)
         except Exception:
             continue
-        st = STATE.get(t.status, "todo")
-        plan = PD.read_json(plans_dir / f"{t.id}.json")
-        title = t.header.get("title", "")
-        steps = _plan_steps(plan, st, t.owner, title)
-        ps = _pstate(steps, st) if st not in ("done", "bad") else st
-        counters[ps] += 1
-        used.update(s["on"] for s in steps)
-        now_i = next((s["n"] for s in steps if s["state"] in ACTIVE + ("wait", "bad")), None) or             next((s["n"] for s in steps if s["state"] == "todo"), len(steps))
-        flow = [x for x in (plan or {}).get("flow", []) if isinstance(x, dict)] if isinstance(plan, dict) else []
-        forp = (plan or {}).get("for") if isinstance(plan, dict) else None
-        procs.append({"id": t.id, "n": len(procs) + 1, "title": (plan or {}).get("title") or title if isinstance(plan, dict) else title,
-                      "summary": title if isinstance(plan, dict) else None, "wave": 1, "depends": [], "flow": flow,
-                      "for": forp or None, "state": ps, "step_now": now_i, "steps_total": len(steps),
-                      "eta_min": None, "wait_min": None, "steps": steps})
-    open_ = [x for x in procs if x["state"] != "done"]
-    open_.sort(key=lambda x: x["state"] == "todo")
-    done = [x for x in procs if x["state"] == "done"]
-    ordered = open_ + done
-    wait = counters["wait"]
-    machines = [{"id": m, **TAGS[m], "state": "ok", "jobs": []} for m in MORDER if m in used]
-    return {"time": datetime.fromtimestamp(now, TZ).strftime("%H:%M"), "built_ts": now, "tick_s": 5,
-            "headline": {"state": "bad" if counters["bad"] else "wait" if wait else "ok",
-                         "text": f"ждёт вас: {wait}" if wait else "идёт"},
-            "counters": counters, "progress": None, "tags": {m: TAGS[m] for m in used if m in TAGS}, "machines": machines,
-            "waves": [{"n": 1, "label": "ТИКЕТЫ", "state": "run" if open_ else "done", "procs": [x["id"] for x in ordered]}],
-            "processes": ordered, "questions": []}
+        tickets[t.id] = t
+    plans = {}
+    for p in sorted(plans_dir.glob("*.json")):
+        d = PD.read_json(p)
+        if isinstance(d, dict) and isinstance(d.get("steps"), list):
+            plans[p.stem] = d
+    allq = [q for q in (PD.read_json(p) for p in sorted((pulse / "questions").glob("q-*.json"))) if isinstance(q, dict)]
+    return V2.make(tickets, plans, allq, now)
 
 
 def push(url: str, key: str, view2: dict, timeout: float = 10.0) -> int:
