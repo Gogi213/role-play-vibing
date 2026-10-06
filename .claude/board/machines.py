@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import sys
 
 SSH_TIMEOUT_S = 8
 COLORS = ("teal", "blue", "purple", "gray")
@@ -69,6 +71,71 @@ def parse_output(text: str) -> dict | None:
     return got if all(k in got for k in ("up", "cpu", "sect", "mem")) else None
 
 
+def _run(cmd: list, timeout: float = 6) -> str:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def pc_load() -> dict:
+    """{'cpu': %, 'mem': %} этого ПК (None, если не узнать): Linux /proc, macOS sysctl/vm_stat, Windows ctypes."""
+    cpus = os.cpu_count() or 1
+    cpu = mem = None
+    if hasattr(os, "getloadavg"):
+        try:
+            cpu = min(100, round(os.getloadavg()[0] / cpus * 100))
+        except OSError:
+            pass
+    if sys.platform.startswith("linux"):
+        try:
+            m = dict(re.findall(r"(\w+):\s+(\d+)", open("/proc/meminfo").read()))
+            mem = round(100 - int(m["MemAvailable"]) / int(m["MemTotal"]) * 100)
+        except (OSError, KeyError):
+            pass
+    elif sys.platform == "darwin":
+        total = int((_run(["sysctl", "-n", "hw.memsize"]) or "0").strip() or 0)
+        vm = _run(["vm_stat"])
+        page = int((re.search(r"page size of (\d+)", vm) or [0, 4096])[1])
+        free = sum(int(x) for _, x in re.findall(r"Pages (free|inactive|speculative):\s+(\d+)", vm))
+        if total:
+            mem = round(100 - free * page / total * 100)
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [("l", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in "abcdefg"]
+            ms = MS()
+            ms.l = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms))
+            mem = int(ms.load)
+            if cpu is None:
+                class FT(ctypes.Structure):
+                    _fields_ = [("lo", ctypes.c_ulong), ("hi", ctypes.c_ulong)]
+                i, k, u = FT(), FT(), FT()
+                t = []
+                for _ in range(2):
+                    ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(i), ctypes.byref(k), ctypes.byref(u))
+                    t.append(tuple((x.hi << 32) | x.lo for x in (i, k, u)))
+                    if len(t) == 1:
+                        import time
+                        time.sleep(0.2)
+                di, dk, du = (t[1][n] - t[0][n] for n in range(3))
+                tot = dk + du
+                cpu = round(100 * (1 - di / tot)) if tot > 0 else None
+        except Exception:
+            pass
+    return {"cpu": cpu, "mem": mem}
+
+
+def pc_view() -> dict:
+    ld = pc_load()
+    txt = "этот ПК"
+    return {"id": "pc", "state": "ok", "orphans": 0, "cpu": ld["cpu"], "mem": ld["mem"], "disk_mb_s": None,
+            "load": txt, "now": {"state": "idle", "text": txt}}
+
+
 def _now(jobs: dict) -> dict:
     """«Что сейчас» по файлам хода: не дошедшие до total — run, иначе idle."""
     run = []
@@ -114,8 +181,11 @@ def ssh_sample(target: str, progress_dir: str, run=subprocess.run) -> dict | Non
 
 
 def collect(sampler=ssh_sample) -> tuple[list, dict]:
-    """(machines, tags) по RPV_MACHINES; переменная пуста — ([], {}). `sampler(адрес, каталог хода)` подменяется в тестах."""
+    """(machines, tags): «этот ПК» (RPV_PC=0 — без него) + RPV_MACHINES по ssh. `sampler(адрес, каталог хода)` подменяется в тестах."""
     machines, tags = [], {}
+    if os.environ.get("RPV_PC", "1") != "0":
+        machines.append(pc_view())
+        tags["pc"] = {"tag": "ПК", "name": "этот ПК", "color": "gray"}
     progress_dir = os.environ.get("RPV_PROGRESS_DIR", "")
     for i, (mid, target, off) in enumerate(parse_spec(os.environ.get("RPV_MACHINES"))):
         sample = None if off else sampler(target, progress_dir)

@@ -5,6 +5,8 @@ import unittest
 
 import machines as M
 
+os.environ["RPV_PC"] = "0"
+
 OUT = """up 1000.5
 cpu 5000 4000
 sect 2000
@@ -129,3 +131,18 @@ class MergeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PcTest(unittest.TestCase):
+    def test_pc_view_and_collect(self):
+        v = M.pc_view()
+        self.assertEqual(v["id"], "pc")
+        for k in ("cpu", "mem"):
+            self.assertTrue(v[k] is None or 0 <= v[k] <= 100)
+        os.environ["RPV_PC"] = "1"
+        try:
+            ms, tags = M.collect(lambda *a: None)
+        finally:
+            os.environ["RPV_PC"] = "0"
+        self.assertEqual([m["id"] for m in ms], ["pc"])
+        self.assertIn("pc", tags)
