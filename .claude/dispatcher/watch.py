@@ -187,7 +187,9 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
 def _wait_target_state(tkt, probe) -> str:
     parsed = T.parse_wait_for(tkt.header.get("wait_for") or "")
     if parsed is None:
-        return "unknown"
+        return "invalid"
+    if parsed[0] == "file":
+        return "exists"
     if parsed[0] == "ticket":
         return "exists" if (D.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
     if parsed[0] == "host":
@@ -210,7 +212,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
             continue
         spec = tkt.header["wait_for"].strip()
         st = _wait_target_state(tkt, probe)
-        if st in ("exists", "producer"):
+        if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
             alive.add(tkt.id)
             dead.pop(tkt.id, None)
             continue

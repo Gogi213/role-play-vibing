@@ -733,6 +733,16 @@ class TriageWaitsTests(WatchSandbox):
             W.triage_waits(ws, self.now, probe=lambda *a: "unknown")
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
+    def test_unknown_probe_is_not_orphan(self):
+        self._waiting("host:calc:unit:rpv-job")
+        alive = W.triage_waits({}, self.now, probe=lambda *a: "unknown")
+        self.assertEqual(W.check_orphan_tickets(self.now, alive), [])
+
+    def test_file_form_is_not_orphan(self):
+        self._waiting("file:/tmp/rpv-flag")
+        alive = W.triage_waits({}, self.now, probe=lambda *a: "dead")
+        self.assertEqual(W.check_orphan_tickets(self.now, alive), [])
+
     def test_missing_ticket_target_is_dead(self):
         p = self._waiting("ticket:TK-999")
         ws = {}
