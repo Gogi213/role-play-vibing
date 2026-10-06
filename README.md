@@ -338,3 +338,7 @@ cat /etc/rpv-board/token                  # адрес страницы: http://
 Без systemd: macOS — LaunchAgent с `python3 /путь/server.py` (по образцу автозапуска выше) и теми же переменными в `EnvironmentVariables`;
 Windows — служба или задача планировщика, запускающая `python server.py` с этими переменными (токен — файл `RPV_BOARD_TOKEN_FILE`).
 Контракт данных — `.claude/board/VIEW2.md`.
+
+## Выпуск, обновление, откат
+
+`python .claude/dispatcher/release.py bump X.Y.Z [--push]` — версия в `plugin.json`/`marketplace.json`, раздел в `CHANGELOG.md` обязателен, коммит и тег `vX.Y.Z`. `release.py update` — обновить установленный плагин (прежняя версия запоминается). `release.py rollback [X.Y.Z]` — вернуть прошлую версию одной командой (маркетплейс с тегом `vX.Y.Z`; без аргумента — версия, записанная перед последним `update`). `release.py check` — версии согласованы (его же проверяет тест в CI). После `update`/`rollback` — перезапустить Claude Code.

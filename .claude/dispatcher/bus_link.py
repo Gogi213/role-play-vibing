@@ -26,7 +26,9 @@ class Listener(threading.Thread):
     def run(self):
         while not self.stop_flag.is_set():
             try:
-                r = busclient.request(f"/q/{self.recipient}?after={self.after}&wait={WAIT_S}", timeout=WAIT_S + 10)
+                # связь не подтверждена (старт/после падения) — короткий запрос: «шина снова доступна» без ожидания long-poll
+                wait = WAIT_S if self.up else 0
+                r = busclient.request(f"/q/{self.recipient}?after={self.after}&wait={wait}", timeout=WAIT_S + 10)
                 self._state(True)
                 new = [e for e in r["events"] if e["seq"] not in self.seen]
                 for e in new:
