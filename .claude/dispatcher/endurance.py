@@ -240,6 +240,10 @@ class Harness:
         time.sleep(self.rng.uniform(1, 3))
         self.start_bus()
         up = self.wait(lambda: "[bus-up]" in self.inbox(), 30, "bus-up в ceo-inbox")
+        if not up:
+            self.log_fh.flush()
+            tail = (self.disp / "endurance-dispatch.log").read_text(encoding="utf-8", errors="replace").splitlines()
+            print("[endurance] хвост лога диспетчера и шины:\n" + "\n".join(tail[-25:]), file=sys.stderr)
         busclient.post("машина.ghost.юнит.упал", {"unit": "нет-такого"}, f"en-ghost-{n}-{time.time()}")  # ложное событие
         sent.append("машина.ghost.юнит.упал")
         return sent if ok and up else sent + ["bus-down/up не замечены"]
