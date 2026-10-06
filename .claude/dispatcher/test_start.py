@@ -154,6 +154,7 @@ class StartTests(unittest.TestCase):
         plain = Path(self.tmp.name).resolve() / "plain"
         plain.mkdir()
         env = {k: v for k, v in os.environ.items() if k not in ("RPV_PROJECT", "CLAUDE_PROJECT_DIR")}
+        env["PYTHONIOENCODING"] = "utf-8"
         for args, cwd in (([], plain), (["--project", str(plain)], plain)):
             done = subprocess.run([sys.executable, str(Path(S.__file__)), *args], cwd=str(cwd), env=env,
                                   capture_output=True, text=True, encoding="utf-8", timeout=120)
