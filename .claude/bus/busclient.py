@@ -9,6 +9,7 @@ import tempfile
 import urllib.request
 import uuid
 
+DEFAULT_URL = ""  # шина выключена, пока не задан RPV_BUS_URL (README, «Шина событий»)
 
 
 def _env(name, default=""):
