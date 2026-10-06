@@ -3,6 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -89,6 +90,73 @@ class T(unittest.TestCase):
             by = {p["id"]: p for p in v["processes"]}
             self.assertEqual((by["TK-001"]["wave"], by["TK-002"]["wave"], by["TK-002"]["depends"]), (1, 2, ["TK-001"]))
             self.assertIn("feed", v)
+
+
+class ExtrasTest(unittest.TestCase):
+    """1.7.0: status.json без RPV_BOARD, машины (RPV_MACHINES) и строки (RPV_PLAIN) в кадре."""
+
+    def _project(self, d):
+        td = Path(d) / ".claude" / "tickets"
+        td.mkdir(parents=True)
+        (td / "TK-001.md").write_text(HDR.format(id="TK-001", t="тикет", s="in_progress"), encoding="utf-8")
+        pl = Path(d) / ".claude" / "pulse" / "plans"
+        pl.mkdir(parents=True)
+        (pl / "TK-001.json").write_text(json.dumps({"id": "TK-001", "title": "План", "steps": [
+            {"title": "код", "who": "инженер", "on": "pc", "state": "done"},
+            {"title": "счёт", "who": "автомат", "on": "calc", "state": "run"}]}), encoding="utf-8")
+        return td
+
+    def test_local_status_without_board(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._project(d)
+            os.environ.pop("RPV_BOARD", None)
+            os.environ.pop("ALPHA_BOARD", None)
+            self.assertEqual(B.main(["--project", d]), 0)
+            doc = json.loads((Path(d) / ".claude" / "pulse" / "status.json").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(doc), ["built_at", "view2"])
+            self.assertEqual(doc["view2"]["counters"]["run"], 1)
+            self.assertFalse((Path(d) / ".claude" / "pulse" / "status.json.tmp").exists())
+
+    def test_machines_merged_and_failure_survives(self):
+        from unittest import mock
+        found = ([{"id": "calc", "state": "ok", "load": "", "orphans": 0, "cpu": 40, "mem": 10, "disk_mb_s": 1.5,
+                   "now": {"state": "idle", "text": "простаивает"}},
+                  {"id": "srv", "state": "down", "load": "нет связи", "orphans": 0, "cpu": None, "mem": None, "disk_mb_s": None,
+                   "now": {"state": "bad", "text": "нет связи"}}],
+                 {"srv": {"tag": "SRV", "name": "srv", "color": "teal"}})
+        with tempfile.TemporaryDirectory() as d:
+            td = self._project(d)
+            os.environ["RPV_MACHINES"] = "calc=x,srv=y"
+            try:
+                with mock.patch("machines.collect", return_value=found):
+                    v = B.build_view2(td, now=1000.0)
+                by = {m["id"]: m for m in v["machines"]}
+                self.assertEqual((by["calc"]["cpu"], by["calc"]["disk_mb_s"], by["calc"]["now"]["state"]), (40, 1.5, "run"))
+                self.assertEqual(by["srv"]["state"], "down")
+                self.assertIn("srv", v["tags"])
+                self.assertEqual(v["tags"]["calc"]["name"], "сервер счёта")  # метка из плана не затёрта
+                with mock.patch("machines.collect", side_effect=RuntimeError("ssh")):
+                    self.assertEqual(B.build_view2(td, now=1000.0)["counters"]["run"], 1)  # сбой сбора кадр не роняет
+            finally:
+                del os.environ["RPV_MACHINES"]
+
+    def test_plain_off_by_default_and_on_with_cache(self):
+        import plainify
+        with tempfile.TemporaryDirectory() as d:
+            td = self._project(d)
+            base = B.build_view2(td, now=1000.0)["processes"][0]["summary"]
+            self.assertEqual(base, "сделано: код — 1 из 2")
+            os.environ["RPV_PLAIN"] = "1"
+            try:
+                p = B.build_view2(td, now=1000.0)["processes"][0]
+                (Path(d) / ".claude" / "pulse" / "plain-auto.json").write_text(
+                    json.dumps({"items": {plainify.key_of(plainify.payload(p)): "Код готов, идёт счёт"}}), encoding="utf-8")
+                plainify._INSTANCES.clear()
+                with unittest.mock.patch("plainify.find_claude", return_value=None):
+                    self.assertEqual(B.build_view2(td, now=1000.0)["processes"][0]["summary"], "Код готов, идёт счёт — 1 из 2 готово")
+            finally:
+                del os.environ["RPV_PLAIN"]
+                plainify._INSTANCES.clear()
 
 
 if __name__ == "__main__":

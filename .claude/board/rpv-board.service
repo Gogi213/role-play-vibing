@@ -1,0 +1,31 @@
+[Unit]
+Description=rpv board: веб-табло «Диспетчерская» (порт 8787)
+After=network.target
+
+[Service]
+# Пример для Linux с systemd: код в /opt/rpv-board, данные в /var/lib/rpv-board, токен в /etc/rpv-board/token (chmod 600).
+# Подготовка: sudo useradd -r -s /usr/sbin/nologin rpv-board && sudo mkdir -p /opt/rpv-board /etc/rpv-board
+#   sudo cp <плагин>/.claude/board/{server.py,dispetcher.html,phosphor.css,phosphor.js} /opt/rpv-board/
+#   sudo sh -c 'umask 077; python3 -c "import secrets; print(secrets.token_urlsafe(32))" > /etc/rpv-board/token'
+#   sudo chown rpv-board /etc/rpv-board/token
+User=rpv-board
+Group=rpv-board
+Environment=RPV_BOARD_DATA=/var/lib/rpv-board
+Environment=RPV_BOARD_TOKEN_FILE=/etc/rpv-board/token
+Environment=RPV_BOARD_PORT=8787
+StateDirectory=rpv-board
+ExecStart=/usr/bin/python3 -u /opt/rpv-board/server.py
+Restart=always
+RestartSec=3
+Nice=10
+CPUQuota=20%
+MemoryMax=200M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/rpv-board
+
+[Install]
+WantedBy=multi-user.target

@@ -6,11 +6,16 @@
     python board_push.py --dry      # напечатать сводку, не слать
 
 RPV_BOARD — одна строка подключения из окна «+» (https://host/<токен>/#<ключ>); часть после «#» — ключ, он уходит только
-в заголовке и в логах не печатается.
+в заголовке и в логах не печатается. Без RPV_BOARD сводка только пишется в `<проект>/.claude/pulse/status.json`
+(его читают `.claude/board/board.py` и `mcp_server.py`).
+
+Необязательно (каталог `.claude/board/`): RPV_MACHINES — загрузка машин по ssh (`machines.py`), RPV_PLAIN=1 — человеческие
+строки процессов от Haiku (`plainify.py`). Сбой любой из них кадр не роняет.
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -22,6 +27,8 @@ import project  # noqa: E402
 import pulsedata as PD  # noqa: E402
 import ticket  # noqa: E402
 import view2 as V2  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "board"))  # machines.py, plainify.py — по желанию
 
 STATE = {"in_progress": "run", "in_review": "review", "waiting": "wait", "blocked": "bad", "needs_owner": "wait",
          "stopped": "bad", "done": "done", "todo": "todo", "backlog": "todo"}
@@ -75,8 +82,8 @@ def _pstate(steps: list, st: str) -> str:
     return "done" if states and all(x == "done" for x in states) else st if st in ("done", "bad") else "todo"
 
 
-def build_view2(tickets_dir, now: float | None = None, plans_dir=None) -> dict:
-    """view2 как у alpha: тикеты + планы шагов + вопросы владельцу (V2.make)."""
+def build_view2(tickets_dir, now: float | None = None, plans_dir=None, wait: bool = False) -> dict:
+    """view2 как у alpha: тикеты + планы шагов + вопросы владельцу (V2.make); плюс машины (RPV_MACHINES) и строки (RPV_PLAIN)."""
     now = time.time() if now is None else now
     tickets_dir = Path(tickets_dir)
     pulse = tickets_dir.parent / "pulse"
@@ -94,7 +101,32 @@ def build_view2(tickets_dir, now: float | None = None, plans_dir=None) -> dict:
         if isinstance(d, dict) and isinstance(d.get("steps"), list):
             plans[p.stem] = d
     allq = [q for q in (PD.read_json(p) for p in sorted((pulse / "questions").glob("q-*.json"))) if isinstance(q, dict)]
-    return V2.make(tickets, plans, allq, now)
+    return _extras(V2.make(tickets, plans, allq, now), pulse, wait)
+
+
+def _extras(view2: dict, pulse: Path, wait: bool = False) -> dict:
+    """Машины по ssh (RPV_MACHINES) и человеческие строки (RPV_PLAIN=1); ошибка любой из них кадр не роняет."""
+    if project.env("MACHINES"):
+        try:
+            import machines
+            machines.merge(view2, *machines.collect())
+        except Exception as e:
+            print("машины: " + type(e).__name__, file=sys.stderr)
+    if project.env("PLAIN") == "1":
+        try:
+            import plainify
+            plainify.apply(view2, pulse / "plain-auto.json", wait=wait)
+        except Exception as e:
+            print("строки: " + type(e).__name__, file=sys.stderr)
+    return view2
+
+
+def write_status(pulse: Path, view2: dict) -> None:
+    """Кадр для TUI и MCP: `<pulse>/status.json` = {"view2": …, "built_at": …}, замена файла целиком (читатель не видит половину)."""
+    pulse.mkdir(parents=True, exist_ok=True)
+    tmp = pulse / "status.json.tmp"
+    tmp.write_text(json.dumps({"view2": view2, "built_at": view2["time"]}, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, pulse / "status.json")
 
 
 def push(url: str, key: str, view2: dict, timeout: float = 10.0) -> int:
@@ -117,8 +149,9 @@ def main(argv=None) -> int:
         return 0
     url, _, key = (project.env("BOARD") or "").partition("#")
     if not url or not key:
-        print("задайте RPV_BOARD — строку подключения из окна «+» на табло", file=sys.stderr)
-        return 2
+        url = key = ""
+        print("RPV_BOARD не задан — кадр только пишется в .claude/pulse/status.json (строка подключения — в окне «+» на табло)",
+              file=sys.stderr)
     loop = float(argv[argv.index("--loop") + 1]) if "--loop" in argv else 0
     pid_file = root / ".claude" / "dispatcher" / "board_push.pid"
     if loop:  # служба: один экземпляр на проект, живёт, пока жив диспетчер
@@ -149,9 +182,13 @@ def _dispatcher_gone(dpid_file: Path, started: float, grace: float = 120.0) -> b
 
 
 def _loop(tdir, url, key, loop, dpid_file, started) -> int:
+    pulse = Path(tdir).parent / "pulse"
     while True:
         try:
-            push(url, key, build_view2(tdir))
+            v2 = build_view2(tdir, wait=not loop)  # разовый запуск ждёт строки модели, в цикле они придут на следующих кадрах
+            write_status(pulse, v2)
+            if url:
+                push(url, key, v2)
         except Exception as e:  # сеть/табло недоступны — не падать в цикле, ключ в текст не попадает
             print("табло: " + type(e).__name__, file=sys.stderr)
             if not loop:
