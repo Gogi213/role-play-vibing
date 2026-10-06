@@ -25,6 +25,15 @@ class ProjectNotFound(Exception):
     """Корень проекта не задан и не найден поиском вверх от текущего каталога."""
 
 
+def utf8_stdio() -> None:
+    """stdout/stderr — utf-8: на Windows с не-кириллической локалью (cp1252) кириллица иначе роняет печать в трубу."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
 def env(name: str, default=None):
     """Значение `RPV_<name>`, иначе `ALPHA_<name>`, иначе `default` (пустая строка — как «не задано»)."""
     for prefix in ENV_PREFIXES:
