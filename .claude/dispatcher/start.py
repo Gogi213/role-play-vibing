@@ -78,14 +78,18 @@ def read_pid(pid_file: Path) -> int:
 def _cmdline(pid: int) -> str | None:
     """Командная строка процесса или None (узнать нельзя). Linux — /proc, macOS — ps, Windows — PowerShell/CIM."""
     if os.name == "nt":
-        try:
-            out = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
-            return out.stdout.strip() or None
-        except Exception:
-            return None
+        for attempt in range(3):  # холодный PowerShell на нагруженном раннере: таймаут/пустой ответ — повтор, не «узнать нельзя»
+            try:
+                out = subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                     f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+                if out.stdout.strip():
+                    return out.stdout.strip()
+            except Exception:
+                pass
+            time.sleep(0.5)
+        return None
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
             return fh.read().replace(b"\0", b" ").decode("utf-8", "replace").strip() or None

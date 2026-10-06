@@ -287,7 +287,13 @@ class Harness:
         return False
 
     def statuses(self) -> dict:
-        return {p.stem: T.read_ticket(p).status for p in T.list_tickets(self.tdir)}
+        out = {}
+        for p in T.list_tickets(self.tdir):
+            try:
+                out[p.stem] = T.read_ticket(p).status
+            except (OSError, ValueError):  # Windows: диспетчер/роль пишет тикет в этот момент — нет статуса «done» на этом обходе
+                out[p.stem] = "?"
+        return out
 
     def bus_faults(self, n: int) -> list:
         """Шина падает посреди раунда: диспетчер обязан заметить (bus-down), работать по таймеру, события, брошенные
@@ -408,6 +414,16 @@ class Harness:
             lost.append(f"{nv}: ревьюер без вердикта — владелец не разбужен инвариантом ({roles[nv]})")
         if f"{nv} [нет-хода]" not in inbox:
             lost.append(f"{nv}: нарушение инварианта не дошло до ceo-inbox")
+        if lost:  # диагностика красного раунда в логе CI: тикет, записи ролей, строки ceo-inbox, метки передачи CEO
+            for t in ids:
+                if any(t in x for x in lost):
+                    print(f"[endurance] разбор {t}: роли {roles.get(t)}; ceo_handoffs {self.state().get('ceo_handoffs')}; "
+                          f"inbox {[l for l in inbox.splitlines() if t in l]}", file=sys.stderr)
+                    print((self.tdir / f"{t}.md").read_text(encoding="utf-8")[-1800:], file=sys.stderr)
+            dl = self.disp / "endurance-dispatch.log"
+            if dl.exists():
+                tail = dl.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+                print("[endurance] хвост лога диспетчера:\n" + "\n".join(tail), file=sys.stderr)
         blocked = [t for t, s in st.items() if s == "blocked"]
         res = {"round": n, "mode": mode, "done": done, "blocked": blocked, "lost_signals": lost, "faults": faults,
                "max_idle_s": round(max(self.idle_episodes, default=0.0), 1)}
