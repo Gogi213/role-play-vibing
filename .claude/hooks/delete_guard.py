@@ -45,7 +45,13 @@ import base64
 import os
 import posixpath
 import re
+import sys
 import textwrap
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:                                   # heavy_guard лежит рядом; страж могли загрузить по пути файла
+    sys.path.insert(0, _HERE)
+import heavy_guard  # noqa: E402
 
 
 def _env(name, default=""):
@@ -121,6 +127,13 @@ REASON_FILE = ("Запись в файл вне своей папки ({t}) за
                "меняют существующие файлы только внутри папки проекта, scratchpad сессии, временного каталога и автопамяти "
                "проекта (~/.claude/projects/<проект>/memory/). Новый файл вне папки создать можно (его ещё нет). Записи "
                "root/ и deep/, закрытые узлы — никогда. Нужна правка вне папки — через владельца/CEO.")
+REASON_HEAVY = ("Тяжёлая команда на машине замеров ({h}) вне замка замеров запрещена ({{t}}). Почему: замок не видит "
+                "ssh-сессии и не замораживает их, а du/find/tar/rsync/cp -r/vmtouch, md5sum и cmp по каталогам, cat больших "
+                "файлов и python-скрипты из ssh едят диск и ЦП во время замеров и портят их. Как надо: юнитом — "
+                "ssh … 'systemd-run --unit <имя> --collect -p CPUQuota=<N>% <обёртка замера> <команда>', вывод в файл, затем "
+                "читать его tail/cat. Без юнита можно: короткие cat/tail/head/ls/grep по файлам, systemctl, uptime, "
+                "sha256sum отдельных файлов, python3 -m py_compile, python3 -c до 200 символов, выкладка cat > файл && mv, "
+                "tar x со stdin.{hint}")
 REASON_CRASH = ("Страж удаления упал ({e}) — отказ по умолчанию (fail-closed), а не пропуск. Исправьте "
                 ".claude/hooks/delete_guard.py плагина вручную (вне этой сессии) или отключите плагин; не получилось — "
                 "сообщите владельцу/CEO.")
@@ -132,6 +145,10 @@ MAX_DEPTH = 8
 
 class Over(str):
     """Цель перезаписи/усечения (не удаления): вне корней отказ, только если файл существует или это неизвестно."""
+
+
+class Heavy(str):
+    """Тяжёлая команда на машине замеров вне замка (heavy_guard): отказ «через systemd-run под обёрткой замера»."""
 
 
 class Forbid(str):
@@ -668,16 +685,17 @@ def tokenize(s, depth=0):
 # ------------------------------------------------------------------------------------------------------------
 
 class Ctx:
-    __slots__ = ("cwd", "remote", "funcs", "host")
+    __slots__ = ("cwd", "remote", "funcs", "host", "exempt")
 
-    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None):
+    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None, exempt=False):
         self.cwd = cwd          # нормализованный каталог или None (неизвестен)
         self.remote = remote
         self.funcs = funcs      # имена функций оболочки, объявленных в этой же команде (`rsh() { ssh …; }`)
         self.host = host        # хост ssh без `user@`, строчными (для HOST_ROOTS) или None
+        self.exempt = exempt    # команда обёрнута в systemd-run: замок замеров (heavy_guard) её не трогает
 
     def copy(self):
-        return Ctx(self.cwd, self.remote, self.funcs, self.host)
+        return Ctx(self.cwd, self.remote, self.funcs, self.host, self.exempt)
 
 
 CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (Storage Box, коллектор, порт 23, хост не определён)
@@ -722,7 +740,7 @@ XARGS_VAL = {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a", "--max-args", "--ma
 SYSTEMD_VAL = {"-u", "--unit", "-p", "--property", "-E", "--setenv", "--working-directory", "--description",
                "--slice", "--on-active", "--on-boot", "--on-startup", "--on-unit-active", "--on-unit-inactive",
                "--on-calendar", "--timer-property", "--uid", "--gid", "--nice", "--machine", "-M", "-H", "--host",
-               "--service-type", "-G"}
+               "--service-type"}      # `-G` у systemd-run — `--collect`, без значения (съедал команду: `systemd-run -G rm …` проходил)
 WRAPPERS = {
     "sudo": SUDO_VAL, "doas": {"-u", "-C"}, "env": {"-u", "-C", "-S"}, "nice": {"-n", "--adjustment"},
     "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"}, "nohup": set(), "time": set(),
@@ -1009,7 +1027,7 @@ def find_scan(args, ctx, vars_, depth):
                 sub.append(expr[k])
                 k += 1
             inner = list(scan_one(Cmd(sub), ctx, vars_, (), depth + 1))
-            if any(not isinstance(x[0], (Over, Forbid)) for x in inner):
+            if any(not isinstance(x[0], (Over, Forbid, Heavy)) for x in inner):
                 deleting = True                     # внутри -exec удаление: целью становятся и пути find
             for x in inner:
                 if isinstance(x[0], Over) and "{}" in x[0]:
@@ -1031,7 +1049,7 @@ def find_scan(args, ctx, vars_, depth):
             yield (p, ctx.copy())
         yield from extra
     else:
-        yield from (x for x in extra if isinstance(x[0], (Over, Forbid)))
+        yield from (x for x in extra if isinstance(x[0], (Over, Forbid, Heavy)))
 
 
 def rsync_scan(args, ctx):
@@ -1507,6 +1525,7 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
             record_var(vars_, w, depth)
         return
     xargs = False
+    exempt = False
     i = 0
     for _ in range(40):
         if i >= len(words):
@@ -1524,6 +1543,7 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
             if j is None:
                 return
             xargs = xargs or name == "xargs"
+            exempt = exempt or name == "systemd-run"
             i = j
             continue
         if w.startswith("$") and not w.startswith("$(") and expand_vars(w, vars_) != w:
@@ -1539,6 +1559,13 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     w = words[i]
     name = cmd_name(w)
     args = expand_args(words[i + 1:], vars_)
+    if exempt and not ctx.exempt:                    # `systemd-run … <команда>`: юнит под замком, внутри тоже не трогаем
+        ctx = ctx.copy()
+        ctx.exempt = True
+    if heavy_guard.HEAVY_HOST and ctx.remote and ctx.host == heavy_guard.HEAVY_HOST and not ctx.exempt:
+        label = heavy_guard.heavy_label(name, args, sin, xargs)
+        if label:
+            yield (Heavy(label), ctx.copy())
     if name in ("export", "declare", "local", "readonly", "typeset"):
         for a in words[i + 1:]:
             if ASSIGN.match(a):
@@ -1800,6 +1827,11 @@ def hard_forbidden_file(path, ctx):
     return any(s in FORBIDDEN_SEG for s in literal_part(p).split("/") if s)
 
 
+def heavy_reason(t):
+    hint = _env("GUARD_HEAVY_HINT").strip()
+    return REASON_HEAVY.format(h=heavy_guard.HEAVY_HOST, hint=(" " + hint) if hint else "").format(t=t)
+
+
 def check(cmd, cwd):
     """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed)."""
     cmd = cmd or ""
@@ -1810,7 +1842,12 @@ def check(cmd, cwd):
             found = list(scan_text(cmd, start))
         except ParseError:                          # незакрытая кавычка и т. п. — прежний регэксп как страховка
             found = legacy_found(cmd, cwd)
+            heavy = heavy_guard.legacy_heavy(cmd)
+            if heavy:
+                return heavy_reason(heavy)
         for target, ctx in found:
+            if isinstance(target, Heavy):
+                return heavy_reason(target)
             if isinstance(target, Forbid):
                 return REASON_IRREVERSIBLE.format(t=target)
             why = protected(target, ctx, role, deleting=not isinstance(target, Over))

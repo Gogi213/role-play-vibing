@@ -16,6 +16,8 @@ os.environ["RPV_GUARD_REMOTE_ROOTS"] = "~/alpha/,$home/alpha/,${home}/alpha/,/ho
 os.environ["RPV_GUARD_HOST_ROOTS"] = "203.0.113.3=/home/deck/alpha/,/root/tk0,/data/tk0,/tmp/"
 os.environ["RPV_GUARD_STAGE"] = "/dev/shm/alpha-stage"
 os.environ["RPV_GUARD_FORBIDDEN_HOSTS"] = "203.0.113.1"
+os.environ["RPV_GUARD_HEAVY_HOST"] = "203.0.113.3"
+os.environ["RPV_GUARD_HEAVY_HINT"] = "Обёртка замера: /data/benchrun.sh stand <команда> (волна — wave)."
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import delete_guard as dg  # noqa: E402
 
@@ -1409,6 +1411,209 @@ class ThirdAudit(unittest.TestCase):
         self.as_role(None)
         self.assertIsNone(self.tool("Edit", "C:/visual projects/alpha/.claude/settings.json"))
         self.assertIsNone(dg.check("echo '{}' > .claude/settings.local.json", CWD))
+
+
+class BenchLock(unittest.TestCase):
+    """Замок замеров (CEO 06.10): на машине замеров (RPV_GUARD_HEAVY_HOST) тяжёлые команды из ssh-сессии (du, find, python-скрипты,
+    md5sum/cmp по каталогам, tar, rsync, cp -r, vmtouch, cat бинлогов) — отказ, если не обёрнуты в systemd-run и не идут через
+    /data/benchrun.sh | /data/tk052/benchrun2.sh. Короткие чтения, systemctl, выкладка `cat > файл && mv` — свободно."""
+
+    DED = "root@203.0.113.3"
+    SSH = "ssh -i ~/.ssh/id_rsa -o UserKnownHostsFile=~/.ssh/known_hosts " + DED
+    MARK = "Тяжёлая команда на машине замеров"
+
+    def remote(self, text, prefix=None):
+        import shlex
+        return f"{prefix or self.SSH} {shlex.quote(text)}"
+
+    def no(self, text, **kw):
+        reason = dg.check(self.remote(text, **kw), CWD)
+        self.assertIsNotNone(reason, f"пропущено: {text!r}")
+        self.assertIn(self.MARK, reason, f"отказ по другой причине: {text!r} → {reason}")
+
+    def ok(self, text, **kw):
+        reason = dg.check(self.remote(text, **kw), CWD)
+        self.assertIsNone(reason, f"ложный отказ: {text!r} → {reason}")
+
+    # --- запрещено (инциденты 06.10: find, du -sh /data/tk046, python3 tk040-complete.py)
+    def test_incident_commands(self):
+        self.no("du -sh /data/tk046")
+        self.no("find /data/tk046 -name '*.out' -newer /data/x")
+        self.no("cd /data/tk040 && python3 tk040-complete.py")
+        self.no("nohup python3 -u /data/tk040/tk040-complete.py > /data/tk040/c.log 2>&1 &")
+
+    def test_other_heavy_tools(self):
+        for cmd in ("rsync -a /data/tk046/ /data/tk047/", "cp -r /data/tk046/two /data/tk047/", "cp -a /data/tk046 /data/x",
+                    "cp -Rp /data/tk046 /data/x", "cp --recursive /data/tk046 /data/x", "vmtouch -t /data/alpha/epochs",
+                    "tar czf /data/x.tgz /data/tk046", "tar -tf /data/x.tar", "tar xf /data/tk046/x.tar",
+                    "ls -lR /data/tk046", "grep -r foo /data/tk046", "ncdu /data", "tree /data",
+                    "diff -r /data/tk046/a /data/tk046/b", "diff -rq /data/a /data/b"):
+            with self.subTest(cmd=cmd):
+                self.no(cmd)
+
+    def test_hash_and_compare_over_directories_masks_lists(self):
+        for cmd in ("md5sum /data/tk046/two/*", "sha256sum /data/tk046/two/", "sha256sum /data/tk046/*/*.out",
+                    "b3sum -c /data/tk046/sums.b3", "sha256sum --check /data/x.sum",
+                    "ls /data/tk046 | xargs sha256sum", "find /data/a -type f | xargs -P8 md5sum",
+                    "for f in /data/a/*.out; do cmp $f /data/b/${f##*/}; done", "md5sum $F",
+                    "sha256sum /data/alpha/epochs/e-aug/root/HYPEUSDT-2026-08-20.binlog",
+                    "cmp /data/alpha/a.binlog /data/alpha/b.binlog", "md5sum /data/tk046/x.abin"):
+            with self.subTest(cmd=cmd):
+                self.no(cmd)
+
+    def test_cat_of_big_binlogs(self):
+        self.no("cat /data/alpha/epochs/e-aug/root/HYPEUSDT-2026-08-20.binlog | md5sum")
+        self.no("cat /data/alpha/epochs/e-aug/root/*.binlog | wc -c")
+        self.no("cat /data/alpha/epochs/e-aug/root/*")
+        self.no("cp /data/alpha/epochs/e-aug/root/X.binlog /data/tk040/")
+        self.ok("cat /data/alpha/root/instruments.csv")
+        self.ok("cat /data/tk040/progress.txt /data/tk0*/x.csv")
+
+    def test_python_scripts(self):
+        for cmd in ("python3 /data/tk040/x.py", "python3 -u /data/tk040/x.py", "python x.py", "python3.11 -B x.py",
+                    "/usr/bin/python3 /data/x.py arg", "python3 -W ignore /data/x.py", "env A=1 python3 x.py",
+                    "timeout 600 python3 /data/x.py", "sudo -u nobody nice python3 /data/x.py", "python3 -m cProfile x.py",
+                    "python3 -m http.server", "python3 -c '" + "x=1;" * 60 + "'", "python3", "python3 -",
+                    "python3 - <<'EOF'\n" + "y = 2\n" * 60 + "EOF"):
+            with self.subTest(cmd=cmd):
+                self.no(cmd)
+
+    def test_python_short_forms_allowed(self):
+        for cmd in ("python3 -m py_compile /data/tk048/registry/snap.py.new", "python3 -c 'print(1)'", "python3 --version",
+                    "python3 -c 'import json; print(json.load(open(\"/data/tk040/p.json\"))[\"n\"])'",
+                    "python3 - <<'EOF'\nprint(1)\nEOF", "python3 -c \"" + "x" * 190 + "\""):
+            with self.subTest(cmd=cmd):
+                self.ok(cmd)
+
+    def test_tar_extract_from_stdin_is_deploy(self):
+        self.ok("tar xzf - -C /data/tk040")
+        self.ok("tar -xf - -C /data/tk040")
+        self.ok("tar x -C /data/tk040")
+        self.ok("tar -xzvf - -C/data/tk040 && ls -l /data/tk040")
+        self.ok("tar --extract --file=- -C /data/tk040")
+        self.no("tar xzf /data/tk046/x.tgz -C /data/tk040")
+        self.no("tar czf - /data/tk046")
+        self.no("tar --create --file - /data/tk046")
+        self.no("tar xzf - -C /data/tk040 && tar czf /data/y.tgz /data/tk040")
+
+    def test_short_reads_and_service_commands_allowed(self):
+        for cmd in ("tail -n 50 /data/tk040/run.log", "tail -f /data/tk040/run.log", "head -3 /data/tk0*/x.csv",
+                    "ls -l /data/tk040 /data/alpha/epochs/e-aug/root | head", "grep -c ^ETHUSDT /data/alpha/root/instruments.csv",
+                    "grep -n err /data/tk0*/*.log", "cat /data/tk040/progress.txt", "systemctl status tk040-run --no-pager",
+                    "systemctl list-units 'tk0*' --state=active", "systemctl freeze tk040-run", "uptime", "free -g; df -h /data",
+                    "journalctl -u tk040-run -n 50 --no-pager", "pgrep -af python3", "ps aux | grep python3",
+                    "sha256sum /data/tk048/benchrun.sh /opt/alpha-compute/bin/alpha-b14", "md5sum /data/tk048/x.bin",
+                    "bash -n /data/tk048/benchrun.sh.new", "diff /data/tk040/a.txt /data/tk040/b.txt",
+                    "cmp /data/tk040/a.out /data/tk040/b.out", "echo $(date) | md5sum", "echo 'du -sh /data' > /data/tk040/n.txt",
+                    "cp /data/tk035raw/plan10.txt /root/tk035raw10/plan10.txt", "mkdir -p /data/tk040 && ls /data/tk040"):
+            with self.subTest(cmd=cmd):
+                self.ok(cmd)
+
+    def test_deploy_cat_and_mv_still_works(self):
+        self.ok("cat > /data/tk040/x.py.new && python3 -m py_compile /data/tk040/x.py.new && mv /data/tk040/x.py.new /data/tk040/x.py")
+        self.ok("mkdir -p /data/tk048/registry && cat > /data/tk048/registry/snap.py.new && chmod +x /data/tk048/registry/snap.py.new")
+        self.ok("cat > /data/tk048/benchrun.sh.new && bash -n /data/tk048/benchrun.sh.new && mv /data/tk048/benchrun.sh.new /data/tk048/benchrun.sh")
+        self.ok("cat > /data/tk040/g.py <<'EOF'\nimport os\nos.walk('/data')\nEOF\nchmod +x /data/tk040/g.py")
+        self.assertIsNone(dg.check(f"cat tools/registry/snap.py | {self.SSH} 'cat > /data/tk048/registry/snap.py.new && "
+                                   "python3 -m py_compile /data/tk048/registry/snap.py.new'", CWD))
+        self.assertIsNone(dg.check(f"tar -cf - -C tools/compute p08-jul.py | {self.SSH} 'tar -xf - -C /data/tk040'", CWD))
+
+    # --- разрешено под замком: systemd-run и benchrun
+    def test_systemd_run_exempts_the_wrapped_command(self):
+        for cmd in ("systemd-run --unit tk046-du -p CPUQuota=100% --collect du -sh /data/tk046",
+                    "systemd-run --unit tk040-c --collect -p CPUQuota=200% python3 /data/tk040/tk040-complete.py",
+                    "systemd-run --unit=tk040-c --collect --property=CPUQuota=200% find /data/tk046 -name '*.out'",
+                    "nohup systemd-run --unit tk040-y python3 /data/tk040/y.py &",
+                    "systemd-run --unit a --collect bash -c 'python3 /data/x.py; find /data -name x; du -sh /data'",
+                    "sudo systemd-run --unit t -p CPUQuota=400% --wait --pipe md5sum /data/tk046/two/*"):
+            with self.subTest(cmd=cmd):
+                self.ok(cmd)
+
+    def test_benchrun_exempts(self):
+        for cmd in ("/data/benchrun.sh stand python3 /data/tk040/x.py", "/data/tk052/benchrun2.sh wave du -sh /data/tk046",
+                    "systemd-run --unit tk040-x --collect -p CPUQuota=800% /data/benchrun.sh stand bash -c "
+                    "'python3 /data/tk040/x.py > /data/tk040/x.out'",
+                    "systemd-run --unit tk052-x /data/tk052/benchrun2.sh wave /opt/alpha-compute/bin/alpha-b14 run",
+                    "bash /data/benchrun.sh stand find /data/tk046 -name '*.out'"):
+            with self.subTest(cmd=cmd):
+                self.ok(cmd)
+
+    def test_exemption_is_per_command(self):
+        self.no("systemd-run --unit tk046-a du -sh /data/tk046; du -sh /data/tk046")
+        self.no("systemd-run --unit a --collect python3 /data/x.py && python3 /data/y.py")
+        self.no("/data/benchrun.sh stand true; python3 /data/y.py")
+        self.no("systemd-run --unit a true | xargs du -sh")
+
+    # --- обёртки и формы вызова ssh
+    def test_wrappers_and_nesting(self):
+        for cmd in ("bash -c 'du -sh /data'", "sh -c \"python3 /data/x.py\"", "ionice -c3 nice du -sh /data/tk046",
+                    "sudo -u nobody du -sh /data", "echo $(du -sh /data)", "du -sh /data/tk046 | sort -h | tail",
+                    "cd /data/tk040; ls; python3 run.py", "env A=1 xargs -n1 md5sum < list.txt", "time find /data -type f",
+                    "busybox du -sh /data", "command du -sh /data", "exec python3 /data/x.py"):
+            with self.subTest(cmd=cmd):
+                self.no(cmd)
+
+    def test_ssh_forms(self):
+        d = self.DED
+        for cmd in (f"ssh {d} du -sh /data/tk046", f"ssh -o BatchMode=yes -p 22 {d} 'echo hi; du -sh /data'",
+                    "ssh 203.0.113.3 'du -sh /data'", f"ssh $K {d} 'find /data -name x'",
+                    f"S='ssh -i k {d}'; $S 'du -sh /data/tk046'", f"K='-i k'; ssh $K {d} python3 /data/x.py",
+                    f"/tmp/sshx {d} 'du -sh /data'", f"ssh {d} <<'EOF'\ncd /data/tk040\npython3 x.py\nEOF",
+                    f"ssh {d} python3 - <<'EOF'\n" + "z = 3\n" * 80 + "EOF",
+                    f"ssh {d} 'du -sh /data/tk046' | tee /tmp/du.txt",
+                    f"powershell -Command \"ssh {d} 'du -sh /data'\"", f"ssh {d} 'du -sh /data/tk046"):  # незакрытая кавычка
+            with self.subTest(cmd=cmd):
+                reason = dg.check(cmd, CWD)
+                self.assertIsNotNone(reason, cmd)
+                self.assertIn(self.MARK, reason, cmd)
+
+    def test_other_hosts_and_local_untouched(self):
+        for host in ("root@203.0.113.9", "deck@192.168.1.49"):
+            self.assertIsNone(dg.check(f"ssh {host} 'du -sh /opt; find /opt -name x; python3 x.py; md5sum /opt/a/*'", CWD), host)
+        self.assertIsNone(dg.check("du -sh data; find . -name '*.rs'; python x.py; md5sum data/*; tar czf /tmp/x.tgz data", CWD))
+        self.assertIsNone(dg.check(f"rsync -a data/ {self.DED}:/data/tk040/x/", CWD))   # локальная сторона: не удалённая команда
+        self.assertIsNone(dg.check(f"echo 'ssh {self.DED} du -sh /data' > /tmp/note.txt", CWD))   # текст, не вызов
+
+    def test_reason_explains_how_to(self):
+        reason = dg.check(self.remote("du -sh /data/tk046"), CWD)
+        for word in ("du", "замок", "не видит ssh-сессии", "systemd-run --unit", "CPUQuota", "py_compile", "200 символов",
+                     "/data/benchrun.sh stand"):      # последнее — из RPV_GUARD_HEAVY_HINT
+            self.assertIn(word, reason)
+
+    def test_deletion_rules_still_first_class(self):
+        reason = dg.check(self.remote("rm -rf /data/alpha/x"), CWD)
+        self.assertIsNotNone(reason)
+        self.assertNotIn(self.MARK, reason)
+        self.assertIsNone(dg.check(self.remote("rm -rf /data/tk046/old"), CWD))
+
+    def test_systemd_run_short_collect_flag_has_no_value(self):
+        """`-G` у systemd-run — `--collect` без значения: раньше он «съедал» команду и `systemd-run -G rm -rf …` проходил."""
+        for cmd in ("systemd-run -G rm -rf /c/Users/x/data", "systemd-run -G --unit a rm -rf /c/Users/x/data",
+                    "sudo systemd-run -G -p CPUQuota=100% rm -rf /etc/x", "systemd-run --collect rm -rf /c/Users/x/data"):
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(dg.check(cmd, CWD), cmd)
+        self.assertIsNotNone(dg.check(self.remote("systemd-run -G rm -rf /data/alpha/x"), CWD))
+        self.assertIsNone(dg.check(self.remote("systemd-run -G --unit tk046-x rm -rf /data/tk046/old"), CWD))
+
+    def test_heavy_label_unit(self):
+        import heavy_guard as bg
+        self.assertEqual(bg.heavy_label("du", ["-sh", "/x"]), "du")
+        self.assertIsNone(bg.heavy_label("ls", ["-l", "/data/tk046"]))
+        self.assertEqual(bg.heavy_label("python3", ["/x.py"]), "python3 /x.py")
+        self.assertIsNone(bg.heavy_label("python3", ["-c", "print(1)"]))
+        self.assertIsNone(bg.heavy_label("python3", ["-"], ["print(1)"]))
+        self.assertIsNotNone(bg.heavy_label("python3", ["-"], ["x=1\n" * 100]))
+        self.assertIsNotNone(bg.heavy_label("python3", ["-"], []))
+        self.assertIsNone(bg.heavy_label("sha256sum", ["/a/b.sh", "-"]))
+        self.assertIsNotNone(bg.heavy_label("sha256sum", [], xargs=True))
+        self.assertIsNone(bg.heavy_label("tar", ["xzf", "-", "-C", "/d"]))
+        self.assertIsNotNone(bg.heavy_label("tar", ["czf", "-", "/d"]))
+        self.assertIsNone(bg.heavy_label("tail", ["-n", "5", "/data/tk040/x.log"]))
+        self.assertIsNone(bg.heavy_label("systemctl", ["status", "x"]))
+        self.assertIsNotNone(bg.legacy_heavy("ssh root@203.0.113.3 'du -sh /x"))
+        self.assertIsNone(bg.legacy_heavy("ssh root@203.0.113.3 'systemd-run du -sh /x"))
+        self.assertIsNone(bg.legacy_heavy("ssh root@203.0.113.9 'du -sh /x"))
+
 
 
 class HookEntryPoint(unittest.TestCase):
