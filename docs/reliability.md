@@ -52,7 +52,7 @@ python <плагин>/.claude/dispatcher/supervise.py --uninstall [--project <п
 |---|---|---|---|
 | `done` | исследователь, инженер | `--path` (существует на диске) | ревьюер (`in_review`), нет ревьюера — `done` |
 | `pr` | инженер, исследователь | `--pr N --sha H` | `in_review`, next — ревьюер (Судья); номер — в `pr:` шапки |
-| `accept` | Судья | `--pr N --sha H` (PR) либо `--path <артефакт проверки>` (без PR) | PR: `accepted:` (список), `waiting` + `wait_for: merged:<репо>#N`, вливает merge_rule, после влития владелец будится (done или следующий шаг), Судья — нет; без PR: `done` |
+| `accept` | Судья | `--pr N --sha H [--repo <владелец/репо>]` (репо — --repo или RPV_CI_REPO, без догадки по cwd; PR и голова сверяются у GitHub, нет — отказ) либо `--path <артефакт проверки>` (без PR) | PR: `accepted:` (список), `waiting` + `wait_for: merged:<репо>#N`, вливает merge_rule, после влития владелец будится (done или следующий шаг), Судья — нет; без PR: `done`, если последний итог владельца — done, иначе `in_progress` + next владелец (проверка перед необратимым шагом) |
 | `return` | Судья | `--sha H` либо `--path <артефакт проверки>` | `in_progress`, next — владелец |
 | `blocked` | любая | — | `blocked`, next — CEO |
 | `ask-owner` | любая | — | `needs_owner`, next — CEO |
