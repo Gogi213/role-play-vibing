@@ -830,6 +830,42 @@ class DispatchRunTests(unittest.TestCase):
         out = D.enforce_move_invariant(p, T.read_ticket(p), {}, t0 + timedelta(minutes=12))
         self.assertEqual(out.status, "in_progress")
 
+    def test_ceo_handoff_is_a_move_until_ceo_answers(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
+        for m in (11, 12, 30):
+            self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=m)).status, "waiting")
+        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        self.assertEqual(inbox.count("[ждёт-ceo]"), 1)
+        self.assertNotIn("[нет-хода]", inbox)
+        T.append_log(p, "ceo", "принято, думаю", now=t0 + timedelta(minutes=31))
+        T.write_header_updates(p, {}, now=t0 + timedelta(minutes=31))  # comment обновляет updated
+        self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=33)).status, "waiting")
+        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=45))
+        self.assertEqual(out.status, "in_progress")
+        self.assertEqual(state["ceo_handoffs"], {})
+
+    def test_ceo_handoff_early_is_silent(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
+        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=5), state))
+        self.assertFalse(D.CEO_INBOX.exists() and "ждёт-ceo" in D.CEO_INBOX.read_text(encoding="utf-8"))
+
+    def test_open_owner_question_is_a_move_answer_ends_it(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        tid = T.read_ticket(p).id
+        qdir = self.tickets_dir.parent / "pulse" / "questions"
+        qdir.mkdir(parents=True, exist_ok=True)
+        qf = qdir / f"q-{tid}-1.json"
+        qf.write_text(json.dumps({"id": f"q-{tid}-1", "process": tid, "answered_at": None}), encoding="utf-8")
+        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=11), {}))
+        self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), {}, t0 + timedelta(minutes=30)).status, "waiting")
+        qf.write_text(json.dumps({"id": f"q-{tid}-1", "process": tid, "answered_at": "2026-10-06T12:20:00+04:00"}), encoding="utf-8")
+        self.assertIsNotNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=31), {}))
+
     def test_done_and_blocked_are_not_violations(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         for st in ("done", "blocked", "needs_owner", "stopped"):

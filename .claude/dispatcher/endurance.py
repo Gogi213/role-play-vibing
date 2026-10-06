@@ -94,6 +94,8 @@ D._popen = lambda cmd, **kw: subprocess.Popen([sys.executable, sys.argv[2]] + li
 sys.exit(D.main(["--project", sys.argv[3]]))
 '''
 
+CEO_REPLY_S = 12.0  # дольше RPV_DISPATCH_INVARIANT_GRACE_S прогона: передача CEO — ход, владельца будить нельзя
+
 PLANS = [  # (владелец, план ролей на запуски подряд)
     ("engineer", ["ok"]),
     ("researcher", ["429", "ok"]),
@@ -257,8 +259,9 @@ class Harness:
             if f"{p.stem} [next-ceo]" in inbox and p.stem not in self.ceo_seen:
                 self.ceo_seen.add(p.stem)
                 self.ceo_at[p.stem] = time.time()
-        for tid, at in list(self.ceo_at.items()):  # CEO читает не мгновенно: 2 с, потом возвращает тикет в работу
-            if time.time() - at >= 2 and T.read_ticket(self.tdir / f"{tid}.md").status == "waiting":
+        for tid, at in list(self.ceo_at.items()):  # CEO отвечает позже грейса инварианта (8 с): 12 с, запись + возврат в работу
+            if time.time() - at >= CEO_REPLY_S and T.read_ticket(self.tdir / f"{tid}.md").status == "waiting":
+                T.append_log(self.tdir / f"{tid}.md", "ceo", "принято, продолжай")
                 T.write_header_updates(self.tdir / f"{tid}.md", {"status": "todo"})
                 del self.ceo_at[tid]
 
@@ -387,6 +390,8 @@ class Harness:
             lost.append(f"{ho_ceo}: --next ceo не дошёл до ceo-inbox")
         if any(r.endswith("handoff:ceo") for r in roles[ho_ceo][1:]) or len(roles[ho_ceo]) < 2:
             lost.append(f"{ho_ceo}: после передачи CEO нет ровно одного возобновления ({roles[ho_ceo]})")
+        if f"{ho_ceo} [нет-хода]" in inbox:
+            lost.append(f"{ho_ceo}: владелец разбужен инвариантом, пока CEO не ответил ({roles[ho_ceo]})")
         if not any(r.endswith("after-wait") for r in roles[wf]):
             lost.append(f"{wf}: владелец не разбужен по wait_for file")
         refused = [t for t in ids if "waiting без wait_for и без next" in (self.tdir / f"{t}.md").read_text(encoding="utf-8")

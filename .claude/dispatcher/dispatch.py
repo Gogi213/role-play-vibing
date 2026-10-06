@@ -583,7 +583,7 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
 
 def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
     """Роль передала CEO (`--next ceo`) во время запуска: тик уже доставил сигнал и очистил поле — ожидание валидно."""
-    at = (state.get("ceo_handoffs") or {}).pop(tid, None)
+    at = (state.get("ceo_handoffs") or {}).get(tid)  # метка живёт до ответа CEO (_ceo_handoff_pending)
     try:
         started = info["started"]
         started = T.parse_dt(started) if isinstance(started, str) else started
@@ -1971,6 +1971,44 @@ def _waits_without_condition(tkt: T.Ticket, now) -> bool:
         return False
 
 
+def _open_owner_question(tid: str) -> bool:
+    """Есть вопрос владельцу (ask.py) по этому тикету без ответа — ожидание ответа и есть ход."""
+    qdir = TICKETS_DIR.parent / "pulse" / "questions"
+    for p in qdir.glob(f"q-{tid}-*.json"):
+        try:
+            q = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(q, dict) and q.get("process") == tid and not q.get("answered_at"):
+            return True
+    return False
+
+
+def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
+    """Передача CEO (`--next ceo`) — ход, пока CEO не ответил: метка живёт до первой записи CEO после неё (или смены
+    статуса на не-ожидание). Без ответа дольше INVARIANT_GRACE_S — одна повторная строка CEO, владельца не будим."""
+    handoffs = state.get("ceo_handoffs") or {}
+    at = handoffs.get(tkt.id)
+    if not at:
+        return False
+    try:
+        at_dt = T.parse_dt(at)
+    except (ValueError, TypeError):
+        handoffs.pop(tkt.id, None)
+        return False
+    if tkt.status not in ("waiting", "in_review") or any(
+            T.author_is(e.author, "ceo") and e.ts >= at_dt.replace(microsecond=0) for e in tkt.log):
+        handoffs.pop(tkt.id, None)
+        return False
+    if (now - at_dt).total_seconds() > INVARIANT_GRACE_S:
+        reminded = state.setdefault("ceo_handoff_reminded", {})
+        if reminded.get(tkt.id) != at:
+            reminded[tkt.id] = at
+            append_ceo_inbox(tkt.id, "ждёт-ceo", f"передача CEO без ответа дольше {int(INVARIANT_GRACE_S // 60)} мин "
+                             f"(владельца не будим, ход за CEO)", now)
+    return True
+
+
 def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | None":
     """TK-076 п.6: у открытого тикета есть ход — роль запущена / next / годный wait_for / вопрос владельцу. Здесь —
     тикет, которого decide() не будит, а хода нет дольше INVARIANT_GRACE_S (от `updated`): причина или None."""
@@ -1980,6 +2018,10 @@ def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | N
         if (now - T.parse_dt(tkt.header.get("updated", ""))).total_seconds() <= INVARIANT_GRACE_S:
             return None
     except Exception:
+        return None
+    if _open_owner_question(tkt.id):
+        return None
+    if state is not None and _ceo_handoff_pending(tkt, state, now):
         return None
     if tkt.status == "waiting":
         spec = (tkt.header.get("wait_for") or "").strip()
