@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import threading
+import os
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -9,6 +10,9 @@ from pathlib import Path
 import board_push as B
 
 HDR = "---\nid: {id}\ntitle: {t}\nowner: engineer\nstatus: {s}\n---\n\nописание\n\n## Лог\n"
+
+
+os.environ.setdefault("RPV_PLAIN", "off")
 
 
 class T(unittest.TestCase):
@@ -90,6 +94,23 @@ class T(unittest.TestCase):
             self.assertEqual((by["TK-001"]["wave"], by["TK-002"]["wave"], by["TK-002"]["depends"]), (1, 2, ["TK-001"]))
             self.assertIn("feed", v)
 
+
+
+class PlainifyTest(unittest.TestCase):
+    def test_facts_and_off(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        import plainify
+        procs = [{"id": "T-1", "title": "x", "summary": "s", "steps": [{"title": "a", "state": "done"}, {"title": "b", "state": "run"}]},
+                 {"id": "T-2", "title": "y", "summary": None, "steps": [{"title": "a", "state": "run"}]}]
+        os.environ["RPV_PLAIN"] = "off"
+        try:
+            plainify.apply(procs, Path(tempfile.mkdtemp()))
+        finally:
+            del os.environ["RPV_PLAIN"]
+        self.assertEqual(procs[0]["summary"], "s")
+        self.assertIsNone(procs[1]["summary"])
 
 if __name__ == "__main__":
     unittest.main()

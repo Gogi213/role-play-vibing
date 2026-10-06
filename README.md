@@ -212,6 +212,23 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Диспетчерская: поднять свою / подключиться к чужой (1.7.0)
+
+Всё в `.claude/board/` (только stdlib Python).
+
+- **Поднять свою:** `python .claude/board/server.py` (порт и ключи — `RPV_*`, см. шапку файла); как служба — `rpv-board.service`
+  (systemd; на macOS/Windows — launchd/Планировщик с той же командой). Страница `dispetcher.html`, окно «+» выдаёт строку подключения.
+- **Слать на чужую:** `RPV_BOARD=https://host/<токен>/#<ключ>`, затем `python .claude/dispatcher/board_push.py --loop 5`.
+- **Машины:** «этот ПК» (Linux/macOS/Windows без /proc) всегда; серверы — `RPV_MACHINES=id=user@host,...` по ssh
+  (`RPV_DECK_KEY`, `RPV_DECK_KNOWN_HOSTS`, `RPV_PROGRESS_DIR`).
+- **Короткие строки:** `RPV_PLAIN=haiku` (по умолчанию; нужен `claude` в PATH, до `RPV_PLAIN_MAX`=3 вызовов за сборку, кэш) или `off` —
+  тогда строка по фактам плана.
+- **TUI** — `python .claude/board/board.py`; **MCP** — `.claude/board/mcp_server.py` (читает `.claude/pulse/status.json`).
+
+## Что нового в 1.7.0
+
+Сервер Диспетчерской, страница, TUI, MCP, машины ПК без /proc, шаги из лога тикета, лента «Недавно», plainify.
+
 ## Что нового в 1.6.0
 
 - **Табло с мака наполняется как у alpha:** `board_push.py` строит полный view2 — прогресс с оценкой срока, ленту событий, вопросы владельцу

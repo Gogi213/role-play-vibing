@@ -96,6 +96,11 @@ def build_view2(tickets_dir, now: float | None = None, plans_dir=None) -> dict:
     allq = [q for q in (PD.read_json(p) for p in sorted((pulse / "questions").glob("q-*.json"))) if isinstance(q, dict)]
     v = V2.make(tickets, plans, allq, now)
     try:
+        import plainify
+        plainify.apply(v.get("processes") or v.get("procs") or [], pulse)
+    except Exception as e:
+        print("plainify: " + type(e).__name__, file=sys.stderr)
+    try:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "board"))
         import machines as M
         ms, tags = M.collect()
