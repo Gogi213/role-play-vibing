@@ -90,7 +90,8 @@ def _cmdline(pid: int) -> str | None:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
             return fh.read().replace(b"\0", b" ").decode("utf-8", "replace").strip() or None
     except OSError:
-        return None
+        pass
+    return D._ps_field(pid, "args") or None   # macOS/BSD: /proc нет
 
 
 def is_ours(pid: int, script_name: str) -> bool:
