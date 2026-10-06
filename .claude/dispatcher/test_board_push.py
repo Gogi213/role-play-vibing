@@ -66,6 +66,16 @@ class T(unittest.TestCase):
             self.assertEqual([s["wave"] for s in p["steps"]], [1, 2, 3])
             self.assertEqual([m["id"] for m in B.build_view2(td, now=1000.0)["machines"]], ["pc", "calc"])
 
+    def test_summary_without_plan_from_log_steps(self):
+        with tempfile.TemporaryDirectory() as d:
+            td = Path(d) / ".claude" / "tickets"
+            td.mkdir(parents=True)
+            (td / "TK-001.md").write_text(HDR.format(id="TK-001", t="Счёт", s="in_progress")
+                                          + "\n### 2026-10-06T06:00:00+04:00 engineer\nСделал каркас счёта.\n", encoding="utf-8")
+            p = B.build_view2(td, now=1000.0)["processes"][0]
+            self.assertFalse(p["plan"])
+            self.assertTrue(p["summary"] and "каркас" in p["summary"])
+
     def test_view2_progress_questions_feed(self):
         with tempfile.TemporaryDirectory() as d:
             td = Path(d) / ".claude" / "tickets"

@@ -352,7 +352,7 @@ def make(tickets: dict, plans: dict, allq: list, now: float) -> dict:
     pw = proc_waves(real, deps)
 
     def summary_of(p):
-        if not p.get("has_plan") or BOARD_RE.search(p["title"]):
+        if BOARD_RE.search(p["title"]):
             return None
         done = [s for s in p["steps"] if s["state"] == "done"]
         if not done:

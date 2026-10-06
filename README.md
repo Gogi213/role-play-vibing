@@ -218,7 +218,7 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Своя «Диспетчерская»:** в плагин перенесён сервер веб-табло (`.claude/board/`: `server.py`, страница `dispetcher.html` на `phosphor.css` / `phosphor.js`,
   юнит `rpv-board.service`) — его можно поднять у себя (раздел «Диспетчерская» ниже), а не только слать на чужой.
 - **Машины:** `RPV_MACHINES` — загрузка ЦП, памяти и диска машин по ssh и ход их заданий (`machines.py`); недоступная машина — «нет связи».
-- **Строки процессов:** `RPV_PLAIN=1` — короткие человеческие строки от Haiku (`plainify.py`), без `claude` или при ошибке остаётся строка по фактам плана.
+- **Строки процессов:** короткие человеческие строки от Haiku (`plainify.py`) — по умолчанию (`RPV_PLAIN=0` — выкл.), в том числе для задач без плана (шаги по логу тикета); без `claude` или при ошибке остаётся строка по фактам.
 - **Кадр на диск:** `board_push.py` пишет `<проект>/.claude/pulse/status.json`, даже если `RPV_BOARD` не задан; его читают TUI `board.py` и MCP `mcp_server.py`.
 - Тесты: `python -m unittest discover -s .claude/board`.
 - Не перенесено: старый TUI v1 (`pulse.py`) — он целиком завязан на сборщик проекта-источника.
@@ -301,7 +301,7 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
   Нужны `ssh` на этом компьютере и Linux на машине (`/proc`). Ключ — `RPV_DECK_KEY`, файл known_hosts — `RPV_DECK_KNOWN_HOSTS` (те же, что у проверки второй машины).
   Ход заданий — `*.json` свежее 30 минут в каталоге `RPV_PROGRESS_DIR` на машине: `{"done": 231, "total": 492, "step": "сверка", "unit": "ед."}`.
   Метки `ПК/VPS/СЧЁТ/КОЛ` — у машин с id `pc/vps/calc/col` (только они принимаются как «где» шага плана `plan.py`); остальные видны в списке машин.
-- `RPV_PLAIN=1` — человеческие строки процессов: `claude -p` (Haiku) из временного каталога вне проекта, кэш `<проект>/.claude/pulse/plain-auto.json`;
+- `RPV_PLAIN` (по умолчанию включено; `0` — выкл.) — человеческие строки процессов: `claude -p` (Haiku) из временного каталога вне проекта, кэш `<проект>/.claude/pulse/plain-auto.json`;
   без `claude` в `PATH` (или `CLAUDE_BIN`) — строка по фактам плана. Модель: `RPV_PLAIN_MODEL`.
 - Рядом с проектом: кадр лежит в `<проект>/.claude/pulse/status.json` — `python .claude/board/board.py [--project <путь>]` рисует его в терминале
   (нужен `pip install textual`; `--sample` — пример), `.claude/board/mcp_server.py` — MCP-сервер «rpv-pulse»: `claude mcp add rpv-pulse -- python "<проект>/.claude/board/mcp_server.py" --project "<проект>"`
