@@ -238,6 +238,90 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
     return alive
 
 
+# --- сервер счёта: задания ждут замка, а машина простаивает (TK-070 п.1) ----------------------------------------------
+SERVER_ALIAS = "calc"
+SERVER_LOAD_MAX = float(P.env("WATCH_SERVER_LOAD_MAX", "4"))
+SERVER_LOCK_WAIT_S = float(P.env("WATCH_SERVER_LOCK_WAIT_MIN", "20")) * 60
+SERVER_WAKE_REPEAT_HOURS = float(P.env("WATCH_SERVER_WAKE_REPEAT_HOURS", "2"))
+SERVER_PROBE = ("echo load $(cut -d' ' -f1 /proc/loadavg); "
+                "ps -eo pid=,ppid=,etimes=,args= | grep -E 'benchrun.sh|flock -[xs] [0-9]' | grep -v grep")
+
+
+def analyze_server(text: str) -> dict:
+    """Вывод SERVER_PROBE → {load, wait_s (самое долгое ожидание замка), holder (args держателя или '')}.
+    Ждущий — `flock -x|-s N` внутри benchrun.sh (его родитель — ждущий benchrun); держатель — benchrun.sh без такого flock."""
+    load, procs = None, []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("load "):
+            try:
+                load = float(line.split()[1])
+            except (ValueError, IndexError):
+                pass
+            continue
+        parts = line.split(None, 3)
+        if len(parts) == 4 and all(x.isdigit() for x in parts[:3]):
+            procs.append((int(parts[0]), int(parts[1]), int(parts[2]), parts[3]))
+    waiting_parents = {pp for _, pp, _, a in procs if a.startswith("flock -")}
+    wait_s = max([e for _, _, e, a in procs if a.startswith("flock -")] or [0])
+    holder = ""
+    for pid, _, _, a in procs:
+        if "benchrun.sh" in a and pid not in waiting_parents:
+            holder = a
+            break
+    return {"load": load, "wait_s": wait_s, "holder": holder}
+
+
+def holder_ticket(holder: str):
+    m = re.search(r"(?<![A-Za-z0-9])tk0?(\d{2,3})", holder, re.I) or re.search(r"TK-0?(\d{2,3})", holder)
+    if not m:
+        return None
+    tid = f"TK-0{int(m.group(1)):02d}" if int(m.group(1)) < 100 else f"TK-{int(m.group(1))}"
+    return tid if (D.TICKETS_DIR / f"{tid}.md").exists() else None
+
+
+def check_server_idle(ws: dict, now, ssh_run=None) -> list:
+    """Нагрузка сервера < SERVER_LOAD_MAX, а задания ждут замка > 20 мин → будим ВЛАДЕЛЬЦА тикета держателя замка
+    (`next: <владелец>` + запись); держатель не определился — строка CEO (эскалация). Работает без сессии CEO."""
+    try:
+        if ssh_run is not None:
+            out = ssh_run(SERVER_PROBE)
+        else:
+            r = subprocess.run(D._ssh_cmd(SERVER_ALIAS, SERVER_PROBE), capture_output=True, timeout=20)
+            out = (r.stdout or b"").decode("utf-8", "replace") if r.returncode in (0, 1) else ""
+    except Exception:
+        return []
+    info = analyze_server(out or "")
+    if info["load"] is None or info["load"] >= SERVER_LOAD_MAX or info["wait_s"] < SERVER_LOCK_WAIT_S:
+        ws.get("server_idle", {}).clear()
+        return []
+    tid = holder_ticket(info["holder"]) or "?"
+    seen = ws.setdefault("server_idle", {})
+    prev = seen.get(tid)
+    if prev:
+        try:
+            if now - T.parse_dt(prev) < timedelta(hours=SERVER_WAKE_REPEAT_HOURS):
+                return []
+        except ValueError:
+            pass
+    seen[tid] = T.now_iso(now)
+    why = (f"сервер счёта простаивает: load1={info['load']:.1f} < {SERVER_LOAD_MAX:g}, задания ждут замка "
+           f"{int(info['wait_s'] // 60)} мин; держатель: {info['holder'][:120] or 'не определён'}")
+    if tid != "?":
+        path = D.TICKETS_DIR / f"{tid}.md"
+        try:
+            with T.ticket_lock(path):
+                tkt = T.read_ticket(path)
+                if tkt.owner in ("researcher", "engineer", "judge"):
+                    T.append_log(path, "watch", why + ". Твоё задание держит замок — проверь, не завис ли шаг, "
+                                 "и освободи замок или поправь задание.", now)
+                    T.write_header_updates(path, {"next": tkt.owner}, stamp_updated=False)
+                    return []
+        except Exception as e:
+            print(f"[watch] server-idle: не разбудил {tid}: {type(e).__name__}: {e}", file=sys.stderr)
+    return [Finding("server-idle", tid, why + " — владельца тикета определить не удалось, решение за CEO")]
+
+
 # --- счётчик застоя по runs.log (TK-056 п.4) -----------------------------------------------------
 STALL_RUNS = int(P.env("WATCH_STALL_RUNS", "2"))  # подряд таймаутов / холостых запусков до блока
 _RUN_KV = re.compile(r"(\w+)=(\S+)")
@@ -616,10 +700,17 @@ def run_once(now=None, ssh_run=_ssh_run) -> list:
         triage_stalls(ws, now)
     except Exception as e:
         print(f"[watch] triage_stalls: {type(e).__name__}: {e}", file=sys.stderr)
+    server_findings = []
+    try:
+        if ssh_run is _ssh_run:  # тесты подставляют свой ssh_run — боевой сервер не трогают
+            server_findings = check_server_idle(ws, now)
+    except Exception as e:
+        print(f"[watch] check_server_idle: {type(e).__name__}: {e}", file=sys.stderr)
     findings = collect_findings(state, now, ssh_run, started_at, hold_hint=ws.get("deck_hold"), observed=observed,
                                 alive_waits=alive_waits)
     if "hold" in observed:
         ws["deck_hold"] = observed["hold"]  # последнее известное состояние HOLD — на случай таймаута его проверки
+    findings += server_findings
     findings = _apply_ssh_fail_streak(findings, ws)
     posted = notify_findings(findings, ws, now)
     save_watch_state(ws)

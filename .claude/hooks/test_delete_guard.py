@@ -855,6 +855,7 @@ class CeoResources0310(unittest.TestCase):
             (root / "wt" / "sub").mkdir(parents=True)
             (root / "wt" / ".git").write_text("gitdir: ../.git/worktrees/wt", encoding="utf-8")   # связанный worktree
             (root / "nested" / ".git").mkdir(parents=True)                                       # вложенный репозиторий
+            (root / ".claude" / "worktrees" / "rpv" / ".git").mkdir(parents=True)                    # TK-070 п.5: клон плагина
             base = dg.norm(root.as_posix())
             with mock.patch.object(dg, "LOCAL_ROOTS", (base + "/",)):
                 self.ok(f'cd "{base}/wt" && git reset --hard X')
@@ -862,6 +863,7 @@ class CeoResources0310(unittest.TestCase):
                 self.ok(f'git -C "{base}/wt" reset --hard X')
                 self.no(f'cd "{base}" && git reset --hard X')
                 self.no(f'cd "{base}/data" && git clean -fd')
+                self.ok(f'cd "{base}/.claude/worktrees/rpv" && git reset --hard X')                     # клон плагина — разрешён
                 self.no(f'cd "{base}/nested" && git reset --hard X')
                 self.no(f'cd "{base}/ghost" && git reset --hard X')                               # нет такого каталога
                 self.no(f'cd "{base}/wt" && git push --force')

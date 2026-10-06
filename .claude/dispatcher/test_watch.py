@@ -831,5 +831,49 @@ class WatchInstanceLockTests(WatchSandbox):
             holder.wait(timeout=10)
 
 
+class ServerIdleTK070Tests(WatchSandbox):
+    """TK-070 п.1: сервер простаивает, задания ждут замка > 20 мин → будим владельца тикета держателя."""
+
+    PROBE_IDLE = ("load 0.8\n"
+                  "100 1 5000 bash /data/benchrun.sh wave systemd-run tk065-gate2 x\n"
+                  "200 1 1900 bash /data/benchrun.sh stand tk071-job\n"
+                  "201 200 1900 flock -x 9\n")
+
+    def _ticket(self):
+        (self.tickets_dir / "TK-065.md").write_text(
+            "---\nid: TK-065\ntitle: t\nowner: engineer\nstatus: waiting\nwait_for: \nupdated: 2026-09-27T11:00:00+04:00\n---\n\nd\n\n## Лог\n",
+            encoding="utf-8")
+
+    def test_analyze(self):
+        info = W.analyze_server(self.PROBE_IDLE)
+        self.assertEqual(info["load"], 0.8)
+        self.assertEqual(info["wait_s"], 1900)
+        self.assertIn("tk065-gate2", info["holder"])
+
+    def test_wakes_owner_of_holder_ticket(self):
+        self._ticket()
+        ws = {}
+        self.assertEqual(W.check_server_idle(ws, self.now, ssh_run=lambda c: self.PROBE_IDLE), [])
+        tkt = T.read_ticket(self.tickets_dir / "TK-065.md")
+        self.assertEqual(tkt.next_role, "engineer")
+        self.assertIn("простаивает", tkt.log_raw)
+        T.write_header_updates(self.tickets_dir / "TK-065.md", {"next": ""}, stamp_updated=False)
+        W.check_server_idle(ws, self.now + timedelta(minutes=10), ssh_run=lambda c: self.PROBE_IDLE)
+        self.assertEqual(T.read_ticket(self.tickets_dir / "TK-065.md").next_role, "")
+
+    def test_busy_server_or_short_wait_is_quiet(self):
+        self._ticket()
+        busy = self.PROBE_IDLE.replace("load 0.8", "load 9.0")
+        self.assertEqual(W.check_server_idle({}, self.now, ssh_run=lambda c: busy), [])
+        short = self.PROBE_IDLE.replace("1900 flock", "100 flock")
+        self.assertEqual(W.check_server_idle({}, self.now, ssh_run=lambda c: short), [])
+        self.assertEqual(T.read_ticket(self.tickets_dir / "TK-065.md").next_role, "")
+
+    def test_unknown_holder_escalates_to_ceo(self):
+        probe = "load 0.5\n300 1 5000 bash /data/benchrun.sh wave foo\n301 1 1900 bash /data/benchrun.sh stand bar\n302 301 1900 flock -x 9\n"
+        f = W.check_server_idle({}, self.now, ssh_run=lambda c: probe)
+        self.assertEqual([x.kind for x in f], ["server-idle"])
+
+
 if __name__ == "__main__":
     unittest.main()
