@@ -77,10 +77,9 @@ def judged_on(tkt, sha: str) -> bool:
 
 
 def decide(tkt, sha: str, state: str, red: list, pr_number: int, repo: str):
-    """(кого будить | None, текст записи). pending и ждущий `ci:` тикет — молчим (владельца будит wait_for)."""
+    """(кого будить | None, текст записи). pending — тишина. Тикет, ждущий `ci:` этого PR, будится так же, как прочие:
+    зелёный → Судья (не владелец: лишний запуск ИИ ради передачи), красный → владелец; ожидание при этом снимает wake()."""
     if state == "pending" or tkt.status not in ACTIVE:
-        return None, ""
-    if (tkt.header.get("wait_for") or "").strip() == f"ci:{repo}#{pr_number}":
         return None, ""
     s7 = sha[:7]
     if state == "failure":
@@ -90,10 +89,22 @@ def decide(tkt, sha: str, state: str, red: list, pr_number: int, repo: str):
     return "judge", f"CI зелёный на {s7} (PR #{pr_number}): проверь голову; вердикт — записью с {s7}."
 
 
-def wake(path, tkt, who: str, text: str) -> None:
+def wake(path, tkt, who: str, text: str, repo: str = "", pr_number: int = 0) -> None:
+    upd = {"next": who}
+    if repo and (tkt.header.get("wait_for") or "").strip() == f"ci:{repo}#{pr_number}":
+        upd.update({"wait_for": "", "on_met": ""})
     with T.ticket_lock(path):
         T.append_log(path, "ci", text)
-        T.write_header_updates(path, {"next": who}, stamp_updated=False)
+        T.write_header_updates(path, upd, stamp_updated=False)
+
+
+def bus_emit(pr_number: int, sha: str, state: str, red: list, who: str, tid: str) -> None:
+    """Событие `ci.<PR>.<sha7>` в шину (журнал для табло/аудита); шины нет или лежит — молча, тикет уже записан."""
+    try:
+        import busclient
+        busclient.post(f"ci.{pr_number}.{sha[:7]}", {"state": state, "red": red, "woke": who, "ticket": tid}, timeout=3)
+    except Exception:
+        pass
 
 
 def run_once(repo: str, gh=gh_api) -> list:
@@ -122,17 +133,27 @@ def run_once(repo: str, gh=gh_api) -> list:
         if state != "pending" and tkt is not None:
             who, text = decide(tkt, sha, state, red, pr["number"], repo)
             if who:
-                wake(tkt.path, tkt, who, text)
+                wake(tkt.path, tkt, who, text, repo, pr["number"])
                 woke = who
+        if state != "pending":
+            bus_emit(pr["number"], sha, state, red, woke, tkt.id if tkt is not None else "")
         st[key] = {"sha": sha, "state": state, "red": red, "woke": woke}
         out.append((pr["number"], sha[:7], state, woke))
     save_state(st)
     return out
 
 
-def ci_done(repo: str, number: int) -> bool:
-    """wait_for `ci:<репо>#<PR>`: CI на последней виденной голове завершён."""
-    return (load_state().get(f"{repo}#{number}") or {}).get("state") in ("success", "failure")
+def ci_done(repo: str, number: int, gh=gh_api) -> bool:
+    """wait_for `ci:<репо>#<PR>`: CI завершён на ТЕКУЩЕЙ голове PR (её спрашиваем у GitHub, не берём из состояния:
+    сразу после пуша состояние ещё хранит старую голову). Не удалось спросить — не готово."""
+    ent = load_state().get(f"{repo}#{number}") or {}
+    if ent.get("state") not in ("success", "failure"):
+        return False
+    try:
+        head = gh(f"repos/{repo}/pulls/{number}")["head"]["sha"]
+    except Exception:
+        return False
+    return head == ent.get("sha")
 
 
 def main(argv=None) -> int:

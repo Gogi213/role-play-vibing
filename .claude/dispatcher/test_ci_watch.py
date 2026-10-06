@@ -14,6 +14,7 @@ from pathlib import Path
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
+os.environ["RPV_BUS_DISABLE"] = "1"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
@@ -86,12 +87,49 @@ class CiWatchTests(unittest.TestCase):
     def test_no_runs_is_pending(self):
         self.assertEqual(C.ci_result([])[0], "pending")
 
-    def test_waiting_on_ci_is_woken_by_wait_for_not_by_event(self):
+    def test_waiting_on_ci_green_wakes_judge_and_clears_wait(self):
         T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"ci:{REPO}#7"}, now=NOW)
         self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(self.run_ci()[0][3], "")
-        self.assertTrue(D.check_wait_for(f"ci:{REPO}#7"))
-        self.assertFalse(D.check_wait_for(f"ci:{REPO}#8"))
+        self.assertEqual(self.run_ci()[0][3], "judge")
+        h = self.tkt().header
+        self.assertEqual((h.get("next"), h.get("wait_for", "")), ("judge", ""))
+
+    def test_waiting_on_ci_red_wakes_owner_and_clears_wait(self):
+        T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"ci:{REPO}#7"}, now=NOW)
+        self.runs = [{"name": "a", "status": "completed", "conclusion": "failure"}]
+        self.assertEqual(self.run_ci()[0][3], "engineer")
+        self.assertEqual(self.tkt().header.get("wait_for", ""), "")
+
+    def test_ci_done_requires_current_head(self):
+        self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
+        self.run_ci()
+        cur = lambda sha: (lambda p: {"head": {"sha": sha}})  # noqa: E731
+        self.assertTrue(C.ci_done(REPO, 7, gh=cur(self.sha)))
+        self.assertFalse(C.ci_done(REPO, 7, gh=cur("c" * 40)))  # пуш после опроса: в состоянии старая голова
+        self.assertFalse(C.ci_done(REPO, 8, gh=cur(self.sha)))
+
+    def test_ci_done_gh_failure_is_not_done(self):
+        self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
+        self.run_ci()
+
+        def boom(p):
+            raise RuntimeError("gh")
+        self.assertFalse(C.ci_done(REPO, 7, gh=boom))
+
+    def test_event_posted_to_bus_once(self):
+        import busclient
+        posted = []
+        orig = busclient.post
+        busclient.post = lambda addr, payload=None, **k: posted.append((addr, payload))
+        try:
+            self.runs = [{"name": "a", "status": "completed", "conclusion": "failure"}]
+            self.run_ci()
+            self.run_ci()
+        finally:
+            busclient.post = orig
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(posted[0][0], f"ci.7.{self.sha[:7]}")
+        self.assertEqual((posted[0][1]["state"], posted[0][1]["red"]), ("failure", ["a"]))
 
     def test_pr_header_field_binds_ticket(self):
         T.write_header_updates(self.path, {"pr": "7"}, now=NOW)
