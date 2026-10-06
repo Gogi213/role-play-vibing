@@ -97,6 +97,33 @@ def parse_wait_for(spec: str):
     return None
 
 
+def wait_cycle(tickets_dir, tid: str, target: str):
+    """Цикл ожиданий (TK-076 п.7): если `tid` будет ждать `ticket:<target>`, а цепочка waiting-тикетов с wait_for
+    `ticket:<ID>` из target возвращается в tid — список [tid, target, ..., tid]; иначе None. Рёбра самого tid не берём
+    (проверяем предлагаемое ребро; для уже существующего — то же, исходящее ребро tid заменяется на себя же)."""
+    edges = {}
+    for path in list_tickets(tickets_dir):
+        try:
+            tkt = read_ticket(path)
+        except Exception:
+            continue
+        if tkt.id == tid or tkt.status != "waiting":
+            continue
+        parsed = parse_wait_for(tkt.header.get("wait_for", ""))
+        if parsed and parsed[0] == "ticket":
+            edges[tkt.id] = parsed[1]
+    chain, seen, cur = [tid, target], {tid}, target
+    while cur != tid:
+        if cur in seen:
+            return None
+        seen.add(cur)
+        cur = edges.get(cur)
+        if cur is None:
+            return None
+        chain.append(cur)
+    return chain
+
+
 def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()

@@ -132,6 +132,13 @@ def cmd_wait(args) -> int:
     if not spec:
         print(f"wait: форма пуста. Допустимо: {T.WAIT_FOR_FORMATS}", file=sys.stderr)
         return 1
+    parsed = T.parse_wait_for(spec)
+    if parsed and parsed[0] == "ticket":
+        cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
+        if cycle:
+            print(f"wait: цикл ожиданий {' -> '.join(cycle)} — каждый ждёт следующего, никто не пойдёт. Ждите "
+                  f"результат (file:/host:…), а не тикет, или разорвите цепочку.", file=sys.stderr)
+            return 1
     try:
         upd = {"status": "waiting", "wait_for": spec}
         if getattr(args, "on_met", None):

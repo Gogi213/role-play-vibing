@@ -76,7 +76,7 @@ try:
         cli("wait", tid, f"file:{base / 'ready' / tid}")
     elif act == "silent":
         pass
-    elif act == "nostatus":
+    elif act in ("nostatus", "noverdict"):  # noverdict: ревьюер пишет запись, статус in_review не меняет, next не ставит
         entry(None)
     elif act == "waitnocond":
         entry("waiting")
@@ -90,9 +90,12 @@ RUNNER = r'''
 import subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import dispatch as D
+D.PID_EXPECT_NAME = ""  # фейковая роль — python, а не «claude»: иначе подхват после kill диспетчера считает живую роль мёртвой и снимает метку передачи CEO
 D._popen = lambda cmd, **kw: subprocess.Popen([sys.executable, sys.argv[2]] + list(cmd[1:]), **kw)
 sys.exit(D.main(["--project", sys.argv[3]]))
 '''
+
+CEO_REPLY_S = 12.0  # дольше RPV_DISPATCH_INVARIANT_GRACE_S прогона: передача CEO — ход, владельца будить нельзя
 
 PLANS = [  # (владелец, план ролей на запуски подряд)
     ("engineer", ["ok"]),
@@ -106,6 +109,7 @@ PLANS = [  # (владелец, план ролей на запуски подр
     ("researcher", ["handoff:ceo", "after-ceo"]),
     ("engineer", ["waitfile:6", "after-wait"]),
     ("researcher", ["429now", "ok"]),
+    ("engineer", ["ok", "noverdict", "ok"], "judge"),  # п.6: ревьюер без вердикта и без next — владелец разбужен сам
 ]
 
 
@@ -131,7 +135,7 @@ class Harness:
         self.env = dict(os.environ, EN_BASE=str(base), EN_TK=str(HERE / "tickets.py"), PYTHONIOENCODING="utf-8", RPV_BUS_DISABLE="1",
                         RPV_DISPATCH_INTERVAL="1", RPV_DISPATCH_MIN_GAP_S="1", RPV_DISPATCH_MAX_PARALLEL="4",
                         RPV_DISPATCH_ROLE_PARALLEL="engineer:3,researcher:3", RPV_DISPATCH_TIMEOUT="60",
-                        RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR="1000", RPV_DISPATCH_MAX_SAME_STATUS_RUNS="1000")
+                        RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR="1000", RPV_DISPATCH_INVARIANT_GRACE_S="8", RPV_DISPATCH_MAX_SAME_STATUS_RUNS="1000")
         self.log_fh = open(self.disp / "endurance-dispatch.log", "a", encoding="utf-8")
 
     # --- шина (настоящий bus.py на свободном порту) ---
@@ -256,8 +260,15 @@ class Harness:
             if f"{p.stem} [next-ceo]" in inbox and p.stem not in self.ceo_seen:
                 self.ceo_seen.add(p.stem)
                 self.ceo_at[p.stem] = time.time()
-        for tid, at in list(self.ceo_at.items()):  # CEO читает не мгновенно: 2 с, потом возвращает тикет в работу
-            if time.time() - at >= 2 and T.read_ticket(self.tdir / f"{tid}.md").status == "waiting":
+        for tid, at in list(self.ceo_at.items()):  # CEO отвечает позже грейса инварианта (8 с): 12 с, запись + возврат в работу
+            if time.time() - at < CEO_REPLY_S:
+                continue
+            try:
+                waiting = T.read_ticket(self.tdir / f"{tid}.md").status == "waiting"
+            except ValueError:  # диспетчер пишет тикет в этот момент — на следующем обходе
+                continue
+            if waiting:
+                T.append_log(self.tdir / f"{tid}.md", "ceo", "принято, продолжай")
                 T.write_header_updates(self.tdir / f"{tid}.md", {"status": "todo"})
                 del self.ceo_at[tid]
 
@@ -277,7 +288,13 @@ class Harness:
         return False
 
     def statuses(self) -> dict:
-        return {p.stem: T.read_ticket(p).status for p in T.list_tickets(self.tdir)}
+        out = {}
+        for p in T.list_tickets(self.tdir):
+            try:
+                out[p.stem] = T.read_ticket(p).status
+            except (OSError, ValueError):  # Windows: диспетчер/роль пишет тикет в этот момент — нет статуса «done» на этом обходе
+                out[p.stem] = "?"
+        return out
 
     def bus_faults(self, n: int) -> list:
         """Шина падает посреди раунда: диспетчер обязан заметить (bus-down), работать по таймеру, события, брошенные
@@ -321,8 +338,8 @@ class Harness:
     # --- раунд ---
     def round(self, n: int, timeout: float = 300.0, mode: str = "base") -> dict:
         ids = []
-        for owner, plan in PLANS:
-            p = T.create_ticket(self.tdir, owner=owner, title=f"раунд {n}", prefix="TK-")
+        for owner, plan, *rev in PLANS:
+            p = T.create_ticket(self.tdir, owner=owner, title=f"раунд {n}", prefix="TK-", reviewer=rev[0] if rev else None)
             (self.base / "plan" / f"{p.stem}.json").write_text(json.dumps(plan))
             ids.append(p.stem)
         self.idle_episodes.clear()
@@ -367,7 +384,7 @@ class Harness:
             self.reboot()
             faults.append("перезагрузка: убиты диспетчер и роли, чистый перезапуск")
         done = self.wait(lambda: all(s == "done" for s in self.statuses().values()), timeout, "все тикеты done")
-        time.sleep(2)  # дать диспетчеру дописать сигналы done
+        self.wait(lambda: all(f"{t} [done]" in self.inbox() for t in ids), 30, "сигналы done в ceo-inbox")  # диспетчер дописывает на следующем тике
         self.stop.set()
         obs.join(5)
         self.kill_dispatcher()
@@ -386,11 +403,28 @@ class Harness:
             lost.append(f"{ho_ceo}: --next ceo не дошёл до ceo-inbox")
         if any(r.endswith("handoff:ceo") for r in roles[ho_ceo][1:]) or len(roles[ho_ceo]) < 2:
             lost.append(f"{ho_ceo}: после передачи CEO нет ровно одного возобновления ({roles[ho_ceo]})")
+        if f"{ho_ceo} [нет-хода]" in inbox:
+            lost.append(f"{ho_ceo}: владелец разбужен инвариантом, пока CEO не ответил ({roles[ho_ceo]})")
         if not any(r.endswith("after-wait") for r in roles[wf]):
             lost.append(f"{wf}: владелец не разбужен по wait_for file")
         refused = [t for t in ids if "waiting без wait_for и без next" in (self.tdir / f"{t}.md").read_text(encoding="utf-8")
                    and t in (ho_judge, ho_ceo)]
         lost += [f"{t}: после --next диспетчер отказал «waiting без условия»" for t in refused]
+        nv = ids[11]
+        if roles[nv] != ["engineer ok", "judge noverdict", "engineer ok", "judge ok"]:
+            lost.append(f"{nv}: ревьюер без вердикта — владелец не разбужен инвариантом ({roles[nv]})")
+        if f"{nv} [нет-хода]" not in inbox:
+            lost.append(f"{nv}: нарушение инварианта не дошло до ceo-inbox")
+        if lost:  # диагностика красного раунда в логе CI: тикет, записи ролей, строки ceo-inbox, метки передачи CEO
+            for t in ids:
+                if any(t in x for x in lost):
+                    print(f"[endurance] разбор {t}: роли {roles.get(t)}; ceo_handoffs {self.state().get('ceo_handoffs')}; "
+                          f"inbox {[l for l in inbox.splitlines() if t in l]}", file=sys.stderr)
+                    print((self.tdir / f"{t}.md").read_text(encoding="utf-8")[-1800:], file=sys.stderr)
+            dl = self.disp / "endurance-dispatch.log"
+            if dl.exists():
+                tail = dl.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+                print("[endurance] хвост лога диспетчера:\n" + "\n".join(tail), file=sys.stderr)
         blocked = [t for t, s in st.items() if s == "blocked"]
         res = {"round": n, "mode": mode, "done": done, "blocked": blocked, "lost_signals": lost, "faults": faults,
                "max_idle_s": round(max(self.idle_episodes, default=0.0), 1)}
