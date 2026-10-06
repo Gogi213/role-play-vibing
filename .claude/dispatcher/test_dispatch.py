@@ -1593,6 +1593,60 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(len(tkt.log), 1)
         self.assertEqual(tkt.header.get("status"), "done")
 
+    def _slow_role_mirror(self, title):
+        self.set_fake_bin(FAKE_BIN_SLOW_OK)
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title=title)
+        D.tick()
+        run = D.RUNNING[path.stem]
+        run["out_fh"].close()
+        run["err_fh"].close()
+        D.RUNNING.clear()
+        return path, run, D.load_state()
+
+    def test_recover_adopts_role_under_foreign_image_name_by_pid_and_start(self):
+        """#16: роль под другим именем образа (npm-установка — node, не claude) после рестарта диспетчера жива: подхват по
+        pid + времени старта, повторного запуска и конца прогона нет."""
+        orig = D.PID_EXPECT_NAME
+        D.PID_EXPECT_NAME = "claude-image-that-this-process-does-not-have"
+        try:
+            path, run, state = self._slow_role_mirror("Чужое имя образа")
+            saved = state["active_runs"][path.stem]
+            self.assertTrue(saved.get("pstart"), "метка старта записана при запуске")
+            D.recover_active_runs(state, datetime.now().astimezone())
+            self.assertIn(path.stem, D.RUNNING, "живая роль не должна считаться мёртвой из-за имени образа")
+            D.save_state(state)
+            D.PID_EXPECT_NAME = python_image_name()
+            self.wait_running()
+            run["popen"].wait(timeout=5)
+            self.assertEqual(len(T.read_ticket(path).log), 1, "второго запуска поверх живой роли нет")
+        finally:
+            D.PID_EXPECT_NAME = orig
+
+    def test_recover_treats_pid_with_other_start_time_as_finished(self):
+        """#16: pid переиспользован другим процессом (метка старта другая) — роль мертва, как бы ни звался образ."""
+        path, run, state = self._slow_role_mirror("Pid занят чужим")
+        state["active_runs"][path.stem]["pstart"] = "1"
+        D.recover_active_runs(state, datetime.now().astimezone())
+        self.assertNotEqual(D.RUNNING.get(path.stem, {}).get("pid"), run["pid"], "старый pid не отслеживается как живой")
+        run["popen"].wait(timeout=10)
+        for info in D.RUNNING.values():
+            _kill = D._kill_proc
+            _kill(info)
+
+    def test_pid_alive_start_mark_overrides_image_name_and_old_mirror_falls_back_to_name(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            mark = D._proc_start(child.pid)
+            self.assertTrue(mark)
+            self.assertTrue(D._pid_alive(child.pid, "no-such-image", start=mark))
+            self.assertFalse(D._pid_alive(child.pid, "no-such-image", start=mark + "0"))
+            self.assertFalse(D._pid_alive(child.pid, "no-such-image"), "зеркало без метки — прежняя проверка по имени")
+            self.assertTrue(D._pid_alive(child.pid, python_image_name()))
+        finally:
+            child.kill()
+            child.wait(timeout=10)
+        self.assertFalse(D._pid_alive(child.pid, "", start=mark))
+
     def test_ceo_mention_in_text_is_plain_text_status_signals_still_work(self):
         """v2: @ceo в записи — обычный текст, строки CEO нет и роль не стартует; сигнал даёт статус needs_owner."""
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Для CEO",

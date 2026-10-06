@@ -1039,7 +1039,53 @@ def resolve_run_cost(state: dict, result: dict):
     return cost, usage_diff, note
 
 
-def _pid_alive(pid, expect_name: str = None) -> bool:
+def _proc_start(pid):
+    """Метка времени старта процесса (строка) — вместе с pid однозначно называет процесс, переиспользованный pid даёт
+    другую метку. Windows — GetProcessTimes (ctypes), Linux — поле 22 `/proc/<pid>/stat`, иначе `ps -o lstart=`.
+    None — процесса нет или метку узнать нельзя."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return None
+            try:
+                c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+                if not k32.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e), ctypes.byref(k), ctypes.byref(u)):
+                    return None
+                return str((c.dwHighDateTime << 32) | c.dwLowDateTime)
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            return None
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            return "t" + fh.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        pass
+    got = _ps_field(pid, "lstart")
+    return "s" + " ".join(got.split()) if got else None
+
+
+def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
+    """Жив ли pid. `start` — метка старта, записанная при запуске (`_proc_start`): сверка pid + старт вместо имени
+    образа (роль под npm-установкой — `node`, не `claude`); не совпала — pid занят другим процессом, мёртв; метку узнать
+    нельзя — прежняя проверка по имени. Дальше — прежнее: """
+    if start:
+        now_start = _proc_start(pid)
+        if now_start is not None:
+            return now_start == start and _pid_alive(pid, "")
+    return _pid_alive_name(pid, expect_name)
+
+
+def _pid_alive_name(pid, expect_name: str = None) -> bool:
     """Жив ли pid — и похож ли на наш `claude` (судья 27.09, «можно потом»): подстрочный поиск pid в
     `tasklist` ловил чужие совпадения (123 ⊂ 1234), а pid мог переиспользоваться ОС после перезагрузки
     — точное сравнение PID-колонки через `/FO CSV` + проверка имени образа снижают оба риска (не
@@ -1176,7 +1222,7 @@ def release_instance_lock(pid_file) -> None:
 def _proc_alive(info: dict) -> bool:
     if info.get("popen") is not None:
         return info["popen"].poll() is None
-    return _pid_alive(info.get("pid"))
+    return _pid_alive(info.get("pid"), start=info.get("pstart"))
 
 
 def _kill_proc(info: dict) -> None:
@@ -1338,8 +1384,9 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
                    start_new_session=True)
     _drop_ceo_handoff(state, tid)  # любой запуск позже передачи CEO — ход состоялся, метка отработала
+    pstart = _proc_start(popen.pid)
     RUNNING[tid] = {
-        "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
+        "role": role, "popen": popen, "pid": popen.pid, "pstart": pstart, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
         "status_at_launch": status_at_launch, "executor": executor,
         "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
@@ -1351,7 +1398,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     _record_launch(state, tid, now)
     # зеркало в state.json (pid, задача, роль, старт) — переживает перезапуск диспетчера (recover_active_runs)
     state.setdefault("active_runs", {})[tid] = {
-        "role": role, "pid": popen.pid, "started": T.now_iso(now), "attempt": attempt,
+        "role": role, "pid": popen.pid, "pstart": pstart, "started": T.now_iso(now), "attempt": attempt,
         "run_file": str(run_file), "err_file": str(err_file), "reason": reason,
         "status_at_launch": status_at_launch, "executor": executor,
         "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
@@ -1725,7 +1772,7 @@ def recover_active_runs(state: dict, now) -> None:
         if tid in RUNNING:
             continue  # уже отслеживаем в этом процессе (это не перезапуск)
         info = {
-            "role": saved.get("role"), "popen": None, "pid": saved.get("pid"),
+            "role": saved.get("role"), "popen": None, "pid": saved.get("pid"), "pstart": saved.get("pstart"),
             "started": T.parse_dt(saved["started"]), "attempt": saved.get("attempt", 0),
             "run_file": Path(saved["run_file"]), "err_file": Path(saved.get("err_file") or ""),
             "out_fh": None, "err_fh": None, "reason": saved.get("reason", "recovered"),
@@ -1733,9 +1780,13 @@ def recover_active_runs(state: dict, now) -> None:
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }
-        alive = _pid_alive(saved.get("pid"))
-        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')} "
-              f"{'жив — слежу' if alive else 'не найден или чужое имя образа — разбираю как завершённый'}", file=sys.stderr, flush=True)
+        want, got = saved.get("pstart"), _proc_start(saved.get("pid"))
+        alive = _pid_alive(saved.get("pid"), start=want)
+        how = (f"старт записан {want}, сейчас {got}" if want
+               else "старт не записан (запуск прежней версии) — по имени образа")
+        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')}, {how}: "
+              f"{'жив — слежу' if alive else 'не найден или занят другим процессом — разбираю как завершённый'}",
+              file=sys.stderr, flush=True)
         if alive:
             RUNNING[tid] = info
         else:
