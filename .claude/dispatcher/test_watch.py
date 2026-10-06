@@ -733,6 +733,29 @@ class TriageWaitsTests(WatchSandbox):
             W.triage_waits(ws, self.now, probe=lambda *a: "unknown")
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
+    def test_ssh_silent_n_checks_wakes_owner_not_ceo(self):
+        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        ws = {}
+        for _ in range(W.SSH_FAIL_STRIKES - 1):
+            alive = W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+            self.assertEqual(len(alive), 1)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertEqual(t.log[-1].author, "watch")
+        self.assertIn("ssh", t.log[-1].text)
+
+    def test_ssh_answer_resets_the_count(self):
+        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        ws = {}
+        for _ in range(W.SSH_FAIL_STRIKES - 1):
+            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+        W.triage_waits(ws, self.now, probe=lambda *a: "producer")
+        for _ in range(W.SSH_FAIL_STRIKES - 1):
+            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
     def test_unknown_probe_is_not_orphan(self):
         self._waiting("host:calc:unit:rpv-job")
         alive = W.triage_waits({}, self.now, probe=lambda *a: "unknown")
