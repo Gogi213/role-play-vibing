@@ -989,6 +989,19 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(tkt.status, "waiting")
         self.assertFalse(any("без wait_for" in e.text for e in tkt.log))
 
+    def test_next_ceo_mark_reaches_disk_before_next_is_cleared(self):
+        """TK-076: диспетчер убит между очисткой `next` и сохранением state — метка передачи не теряется (bus-раунд macOS)."""
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Падение посреди передачи", now=t0)
+        T.append_log(path, "engineer", "нужно решение", now=t0 + timedelta(seconds=5))
+        T.write_header_updates(path, {"next": "ceo"}, now=t0 + timedelta(seconds=5))
+        state = D.load_state()
+        with mock.patch.object(T, "write_header_updates", side_effect=RuntimeError("kill")):
+            with self.assertRaises(RuntimeError):
+                D.handle_next_ceo(path, T.read_ticket(path), state, t0 + timedelta(seconds=6))
+        self.assertIn(path.stem, D.load_state().get("ceo_handoffs", {}))
+        self.assertEqual(T.read_ticket(path).next_role, "ceo")
+
     def test_waiting_with_condition_untouched(self):
         now = dt("2026-10-06T12:00:00+04:00")
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Ожидание", now=now)

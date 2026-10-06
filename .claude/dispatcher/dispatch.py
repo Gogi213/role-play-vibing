@@ -576,9 +576,12 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
         return
     last = tkt.log[-1] if tkt.log else None
     who = f"{last.author}: " if last else ""
+    # метка — на диск раньше, чем уйдёт `next`: убит диспетчер между ними — метка есть, `next` остался и доставится
+    # повторно (строка CEO может задвоиться, но передача не теряется и ожидание роли не станет «без условия»)
+    state.setdefault("ceo_handoffs", {})[tkt.id] = T.now_iso(now)  # next съеден тиком при живой роли — её waiting не «без условия»
+    save_state(state)
     append_ceo_inbox(tkt.id, "next-ceo", f"{who}{_first_line(last.text if last else '')}", now)
     T.write_header_updates(path, {"next": ""}, now=now, stamp_updated=False)
-    state.setdefault("ceo_handoffs", {})[tkt.id] = T.now_iso(now)  # next съеден тиком при живой роли — её waiting не «без условия»
 
 
 def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
