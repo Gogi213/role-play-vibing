@@ -140,7 +140,8 @@ class Bus:
     def _old_pending(self):
         return [r for r in self.db.execute(
             "SELECT d.seq,d.recipient,e.addr,d.created,d.stale FROM deliveries d JOIN events e ON e.seq=d.seq "
-            "WHERE d.state='pending' ORDER BY d.seq").fetchall()
+            "WHERE d.state='pending' AND d.created<? ORDER BY d.seq",
+            (self.clock() - min([self.stale_after, *self.stale_after_by.values()]),)).fetchall()
             if not r[2].startswith(SERVICE_PREFIX)
             and r[3] < self.clock() - self.stale_after_by.get(r[1], self.stale_after)]
 

@@ -525,13 +525,14 @@ def signal_prio(kind: str) -> str:
     return "normal" if kind in NORMAL_KINDS else "urgent"
 
 
-def _ceo_file_write(tid: str, kind: str, note: str, now=None, fallback: bool = False) -> None:
+def _ceo_file_write(tid: str, kind: str, note: str, now=None, fallback: bool = False, wake_only: bool = False) -> None:
     CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-    with open(CEO_INBOX, "a", encoding="utf-8") as fh:
-        fh.write(f"- {T.now_iso(now)} {tid} [{kind}]{' [запасной путь]' if fallback else ''} {note}\n")
-    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; ceo-inbox.md остаётся источником деталей
+    if not wake_only:
+        with open(CEO_INBOX, "a", encoding="utf-8") as fh:
+            fh.write(f"- {T.now_iso(now)} {tid} [{kind}]{' [запасной путь]' if fallback else ''} {note}\n")
+    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; детали — в ceo-inbox.md или в очереди шины
     with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
+        fh.write(f"{T.now_iso(now)} {tid} {kind}{' (очередь шины: tickets.py inbox)' if wake_only else ''}\n")
 
 
 def _bus_configured() -> bool:
@@ -552,6 +553,8 @@ def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
     payload = {"kind": kind, "note": note, "prio": signal_prio(kind), "ts": T.now_iso(now)}
     if busclient.post(addr, payload, timeout=3, spool=False) is None:
         _ceo_file_write(tid, kind, note, now, fallback=True)
+        return
+    _ceo_file_write(tid, kind, note, now, wake_only=True)  # будильник Monitor CEO; детали — в очереди (`tickets.py inbox`)
 
 
 # --- таблица правил «вид сигнала → будить / сводка» (судья TK-002 п.3, взамен привратника TypeSafe) --

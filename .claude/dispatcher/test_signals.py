@@ -57,7 +57,10 @@ class SignalsTest(unittest.TestCase):
                  "bus-down", "done", "next-ceo", "wait-for", "model", "watch-summary", "bus-up"]
         for k in kinds:
             D.append_ceo_inbox("TK-1", k, f"текст {k}")
-        self.assertFalse(D.CEO_INBOX.exists(), "шина жива — файл не пишется")
+        self.assertFalse(D.CEO_INBOX.exists(), "шина жива — ceo-inbox не пишется")
+        wake = D.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(wake), len(kinds), "каждый сигнал будит Monitor коротким повтором в ceo-wake.log")
+        self.assertTrue(all("текст" not in ln for ln in wake), "деталей в будильнике нет — они в очереди")
         rc, text = self.inbox()
         self.assertEqual(rc, 0)
         lines = text.splitlines()
@@ -69,6 +72,11 @@ class SignalsTest(unittest.TestCase):
         self.assertTrue(all(ln.startswith("[обычное]") for ln in lines[first_normal:]))
         self.assertEqual(self.b.fetch("ceo", 0), [], "ack пачкой")
         self.assertIn("пуста", self.inbox()[1])
+
+    def test_next_ceo_with_live_bus_still_wakes_monitor(self):
+        D.append_ceo_inbox("TK-9", "next-ceo", "передача")
+        self.assertIn("TK-9 next-ceo", D.CEO_WAKE_LOG.read_text(encoding="utf-8"))
+        self.assertIn("передача", self.inbox()[1])
 
     def test_peek_does_not_ack(self):
         D.append_ceo_inbox("*", "watch-deck", "тревога")
