@@ -783,6 +783,22 @@ class DispatchRunTests(unittest.TestCase):
         self.assertTrue(rec["alerted"])
         self.assertEqual(self.dispatcher_dir.joinpath("ceo-inbox.md").read_text(encoding="utf-8").count("[idle-slo]"), 1)
 
+    def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        T.create_ticket(self.tickets_dir, owner="engineer", title="Тормоз", now=t0 - timedelta(hours=1))
+        with mock.patch.dict(os.environ, {"RPV_BUS_DISABLE": "1"}), mock.patch.object(D, "_rate_limited", lambda *a: True):
+            D.tick(t0)
+            D.tick(t0 + timedelta(seconds=300))
+            rec = D.load_state()["downtime"]["2026-10-06"]
+            self.assertEqual((rec["throttle_s"], rec["idle_s"]), (300, 0))
+            st = D.load_state()
+            st["limit_pause_until"] = (t0 + timedelta(hours=2)).isoformat()
+            D.save_state(st)
+            D.tick(t0 + timedelta(seconds=600))
+            D.tick(t0 + timedelta(seconds=1800))
+        rec = D.load_state()["downtime"]["2026-10-06"]
+        self.assertEqual((rec["throttle_s"], rec["limit_s"]), (300 + 300, 1200))
+
     def test_todo_ticket_runs_logs_and_saves_session(self):
         self.set_fake_bin(FAKE_BIN_OK)
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Тест",

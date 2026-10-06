@@ -11,7 +11,7 @@ KW = dict(poll_s=15, slo_min=10)
 
 
 def step(st, t, **flags):
-    base = dict(ready_unserved=False, work_present=False, waiting_nocond=False)
+    base = dict(ready_unserved=False, work_present=False, waiting_nocond=False, throttled=False, limit_paused=False)
     return D.account(st, T0 + timedelta(seconds=t), **{**base, **flags}, **KW)
 
 
@@ -64,6 +64,21 @@ class DowntimeTests(unittest.TestCase):
                            for d in range(1, 29)}}
         step(st, 0)
         self.assertEqual(len(st["downtime"]), D.KEEP_DAYS)
+
+    def test_throttle_counts_in_slo_limit_pause_does_not(self):
+        st = {}
+        step(st, 0, throttled=True, work_present=True)
+        _, rec, _ = step(st, 300, limit_paused=True, work_present=True)
+        self.assertEqual(rec["throttle_s"], 300)
+        _, rec, b = step(st, 1500, limit_paused=True, work_present=True)
+        self.assertEqual(rec["limit_s"], 1200)
+        self.assertEqual(D.total_min(rec), 5.0)  # 20 мин паузы лимита в SLO не входят
+        self.assertFalse(b)
+        _, rec, b = step(st, 1500 + 400, work_present=True)
+        self.assertFalse(b)
+        step(st, 2000, throttled=True)
+        _, rec, b = step(st, 2400)
+        self.assertTrue(b)  # тормоз: 300 + 400 с > 10 мин
 
 
 if __name__ == "__main__":
