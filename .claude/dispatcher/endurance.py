@@ -26,14 +26,21 @@ sys.path.insert(0, str(HERE))
 import ticket as T  # noqa: E402
 
 FAKE_ROLE = r'''
-import json, os, re, sys, time
+import json, os, re, subprocess, sys, time
+from datetime import datetime, timedelta
 from pathlib import Path
 base = Path(os.environ["EN_BASE"]); tid = os.environ["RPV_TICKET"]; role = os.environ["RPV_ROLE"]
 alive = base / "alive" / f"{os.getpid()}"; alive.parent.mkdir(exist_ok=True); alive.write_text(tid)
+(base / "roles").mkdir(exist_ok=True)
 plan_f = base / "plan" / f"{tid}.json"
 plan = json.loads(plan_f.read_text()) if plan_f.exists() else ["ok"]
 act = plan.pop(0) if plan else "ok"
 plan_f.write_text(json.dumps(plan))
+with open(base / "roles" / f"{tid}.txt", "a", encoding="utf-8") as fh:
+    fh.write(f"{role} {act}" + chr(10))
+tk = os.environ["EN_TK"]
+def cli(*a):
+    subprocess.run([sys.executable, str(tk), "--project", os.environ["RPV_PROJECT"], *a], check=True, capture_output=True)
 path = Path(os.environ["RPV_PROJECT"]) / ".claude" / "tickets" / f"{tid}.md"
 def entry(status):
     text = path.read_text(encoding="utf-8")
@@ -46,11 +53,27 @@ def entry(status):
 try:
     if act.startswith("slow"):
         time.sleep(float(act.split(":")[1])); act = "ok"
-    if act == "ok":
+    if act == "ok" or act.startswith("after-"):
         entry("done")
     elif act == "429":
-        print(json.dumps({"is_error": True, "api_error_status": 429, "result": "You've hit your session limit"}))
+        at = datetime.now().astimezone() + timedelta(seconds=60)  # «resets H:MMam»: следующая минута, диспетчер добавит ещё минуту
+        label = at.strftime("%I:%M%p").lstrip("0").lower()
+        print(json.dumps({"is_error": True, "api_error_status": 429,
+                          "result": f"You've hit your session limit · resets {label}"}))
         sys.exit(0)
+    elif act.startswith("handoff:"):  # comment --next <роль>, потом правка шапки — как живой случай 16:04
+        target = act.split(":")[1]
+        cli("comment", tid, "--author", role, "--text", f"передаю {target}", "--next", target)
+        time.sleep(2.5)  # диспетчер за это время делает тики при живой роли
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"(?m)^status:.*$", "status: waiting", text, count=1)
+        text = re.sub(r"(?m)^wait_for:.*$", "wait_for:", text, count=1)
+        path.write_text(text, encoding="utf-8")
+    elif act.startswith("waitfile:"):  # настоящее ожидание: файл появится позже (создаёт «мир» прогона)
+        flag = base / "flags" / tid
+        flag.parent.mkdir(exist_ok=True)
+        flag.write_text(act.split(":")[1])
+        cli("wait", tid, f"file:{base / 'ready' / tid}")
     elif act == "silent":
         pass
     elif act == "nostatus":
@@ -79,6 +102,9 @@ PLANS = [  # (владелец, план ролей на запуски подр
     ("engineer", ["waitnocond", "ok"]),
     ("researcher", ["slow:5", "ok"]),
     ("engineer", ["slow:5", "ok"]),
+    ("engineer", ["handoff:judge", "after-handoff", "ok"]),
+    ("researcher", ["handoff:ceo", "after-ceo"]),
+    ("engineer", ["waitfile:6", "after-wait"]),
 ]
 
 
@@ -90,6 +116,8 @@ class Harness:
         self.tdir = self.proj / ".claude" / "tickets"
         self.proc = None
         self.idle_episodes: list[float] = []
+        self.ceo_seen: set = set()
+        self.ceo_at: dict = {}
         self.stop = threading.Event()
         (base / "plan").mkdir(parents=True, exist_ok=True)
         (base / "alive").mkdir(exist_ok=True)
@@ -99,7 +127,7 @@ class Harness:
         self.runner.write_text(RUNNER, encoding="utf-8")
         self.disp.mkdir(parents=True, exist_ok=True)
         self.tdir.mkdir(parents=True, exist_ok=True)
-        self.env = dict(os.environ, EN_BASE=str(base), PYTHONIOENCODING="utf-8", RPV_BUS_DISABLE="1",
+        self.env = dict(os.environ, EN_BASE=str(base), EN_TK=str(HERE / "tickets.py"), PYTHONIOENCODING="utf-8", RPV_BUS_DISABLE="1",
                         RPV_DISPATCH_INTERVAL="1", RPV_DISPATCH_MIN_GAP_S="1", RPV_DISPATCH_MAX_PARALLEL="4",
                         RPV_DISPATCH_ROLE_PARALLEL="engineer:3,researcher:3", RPV_DISPATCH_TIMEOUT="60",
                         RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR="1000", RPV_DISPATCH_MAX_SAME_STATUS_RUNS="1000")
@@ -190,7 +218,8 @@ class Harness:
         idle_since = None
         while not self.stop.is_set():
             try:
-                runnable = any(T.read_ticket(p).status in ("todo", "in_progress") for p in T.list_tickets(self.tdir))
+                self.world()
+                runnable = any(self.is_ready(T.read_ticket(p)) for p in T.list_tickets(self.tdir))
                 busy = any((self.base / "alive").iterdir())
                 st = json.loads((self.disp / "state.json").read_text(encoding="utf-8")) if (self.disp / "state.json").exists() else {}
                 until = st.get("limit_pause_until")
@@ -206,6 +235,30 @@ class Harness:
             time.sleep(0.25)
         if idle_since:
             self.idle_episodes.append(time.time() - idle_since)
+
+    def is_ready(self, t) -> bool:
+        """Есть готовая работа: todo/in_progress либо waiting с уже выполненным file:-условием."""
+        if t.status in ("todo", "in_progress"):
+            return True
+        wf = str(t.header.get("wait_for") or "").strip()
+        return t.status == "waiting" and wf.startswith("file:") and Path(wf[5:]).exists()
+
+    def world(self):
+        """Внешний мир: файл ожидания появляется через N с после просьбы роли; CEO возвращает тикет, переданный ему."""
+        for flag in (self.base / "flags").glob("*"):
+            ready = self.base / "ready" / flag.name
+            if not ready.exists() and time.time() - flag.stat().st_mtime >= float(flag.read_text() or 5):
+                ready.parent.mkdir(exist_ok=True)
+                ready.write_text("go")
+        inbox = (self.disp / "ceo-inbox.md").read_text(encoding="utf-8") if (self.disp / "ceo-inbox.md").exists() else ""
+        for p in T.list_tickets(self.tdir):
+            if f"{p.stem} [next-ceo]" in inbox and p.stem not in self.ceo_seen:
+                self.ceo_seen.add(p.stem)
+                self.ceo_at[p.stem] = time.time()
+        for tid, at in list(self.ceo_at.items()):  # CEO читает не мгновенно: 2 с, потом возвращает тикет в работу
+            if time.time() - at >= 2 and T.read_ticket(self.tdir / f"{tid}.md").status == "waiting":
+                T.write_header_updates(self.tdir / f"{tid}.md", {"status": "todo"})
+                del self.ceo_at[tid]
 
     def state(self) -> dict:
         try:
@@ -265,7 +318,7 @@ class Harness:
         self.start_dispatcher()
 
     # --- раунд ---
-    def round(self, n: int, timeout: float = 120.0, mode: str = "base") -> dict:
+    def round(self, n: int, timeout: float = 300.0, mode: str = "base") -> dict:
         ids = []
         for owner, plan in PLANS:
             p = T.create_ticket(self.tdir, owner=owner, title=f"раунд {n}", prefix="TK-")
@@ -283,17 +336,15 @@ class Harness:
         faults = []
         bus_ev = []
         watch_bad = False
-        # 1) пауза лимита (429): убить диспетчер, «время прошло» — снять паузу в state.json, поднять
+        # 1) пауза лимита (429): диспетчер убит и поднят посреди паузы; state не правим — после resetsAt он обязан
+        # сам вернуться к работе (простой после resetsAt считает наблюдатель)
         if self.wait(lambda: bool(self.state().get("limit_pause_until")), 40, "пауза 429"):
             self.kill_dispatcher()
-            st = self.state()
-            st.pop("limit_pause_until", None)
-            (self.disp / "state.json").write_text(json.dumps(st), encoding="utf-8")
             time.sleep(1)
             self.start_dispatcher()
-            faults.append("429 + рестарт после сброса лимита")
+            faults.append("429: рестарт диспетчера посреди паузы, возобновление по resetsAt")
         # 2) жёсткое убийство диспетчера, пока идёт долгая роль (она — сирота, диспетчер подхватывает по state.json)
-        if self.wait(lambda: any((self.base / "alive").iterdir()), 30, "роль запущена"):
+        if self.wait(lambda: any((self.base / "alive").iterdir()), 150, "роль запущена"):
             time.sleep(self.rng.uniform(0.5, 2.0))
             self.kill_dispatcher()
             time.sleep(2)  # «присмотр» поднимает не мгновенно
@@ -325,6 +376,20 @@ class Harness:
         inbox = self.inbox()
         lost = [t for t in ids if f"{t} [done]" not in inbox]
         lost += [e for e in bus_ev if f"[{e}]" not in inbox]
+        roles = {t: (self.base / "roles" / f"{t}.txt").read_text(encoding="utf-8").splitlines()
+                 if (self.base / "roles" / f"{t}.txt").exists() else [] for t in ids}
+        ho_judge, ho_ceo, wf = ids[7], ids[8], ids[9]
+        if "judge after-handoff" not in roles[ho_judge]:
+            lost.append(f"{ho_judge}: --next judge не запустил judge")
+        if f"{ho_ceo} [next-ceo]" not in inbox:
+            lost.append(f"{ho_ceo}: --next ceo не дошёл до ceo-inbox")
+        if any(r.endswith("handoff:ceo") for r in roles[ho_ceo][1:]) or len(roles[ho_ceo]) < 2:
+            lost.append(f"{ho_ceo}: после передачи CEO нет ровно одного возобновления ({roles[ho_ceo]})")
+        if not any(r.endswith("after-wait") for r in roles[wf]):
+            lost.append(f"{wf}: владелец не разбужен по wait_for file")
+        refused = [t for t in ids if "waiting без wait_for и без next" in (self.tdir / f"{t}.md").read_text(encoding="utf-8")
+                   and t in (ho_judge, ho_ceo)]
+        lost += [f"{t}: после --next диспетчер отказал «waiting без условия»" for t in refused]
         blocked = [t for t, s in st.items() if s == "blocked"]
         res = {"round": n, "mode": mode, "done": done, "blocked": blocked, "lost_signals": lost, "faults": faults,
                "max_idle_s": round(max(self.idle_episodes, default=0.0), 1)}
