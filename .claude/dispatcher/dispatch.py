@@ -1370,9 +1370,25 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
+    # зеркало в state.json — ДО Popen (pid пока неизвестен): диспетчер убит между запуском роли и записью зеркала —
+    # после рестарта роль не сирота, её находят по session_id (recover_active_runs)
+    mirror = {
+        "role": role, "pid": None, "started": T.now_iso(now), "attempt": attempt,
+        "run_file": str(run_file), "err_file": str(err_file), "reason": reason,
+        "status_at_launch": status_at_launch, "executor": executor,
+        "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
+    }
+    state.setdefault("active_runs", {})[tid] = mirror
+    save_state(state)
     # своя группа процессов (на Windows параметр без действия): остановка CEO снимает роль вместе с потомками
-    popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
-                   start_new_session=True)
+    try:
+        popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
+                       start_new_session=True)
+    except BaseException:
+        state.get("active_runs", {}).pop(tid, None)
+        save_state(state)
+        raise
+    mirror["pid"] = popen.pid
     _drop_ceo_handoff(state, tid)  # любой запуск позже передачи CEO — ход состоялся, метка отработала
     RUNNING[tid] = {
         "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
@@ -1386,12 +1402,6 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     sess_entry["last_woken"] = T.now_iso(now)
     _record_launch(state, tid, now)
     # зеркало в state.json (pid, задача, роль, старт) — переживает перезапуск диспетчера (recover_active_runs)
-    state.setdefault("active_runs", {})[tid] = {
-        "role": role, "pid": popen.pid, "started": T.now_iso(now), "attempt": attempt,
-        "run_file": str(run_file), "err_file": str(err_file), "reason": reason,
-        "status_at_launch": status_at_launch, "executor": executor,
-        "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
-    }
     save_state(state)
 
 
@@ -1751,6 +1761,31 @@ def _poll_running(state: dict, now) -> None:
         _finish_run(tid, info, state, now, timed_out=False)
 
 
+def _find_pid_by_session(session_id) -> "int | None":
+    """Роль, запущенная перед убийством диспетчера, но не успевшая попасть в зеркало с pid: ищем процесс по
+    `--session-id`/`--resume <id>` в командной строке (id известен до запуска)."""
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
+        return None
+    try:
+        if os.name == "nt":
+            ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
+                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | ForEach-Object {{ $_.ProcessId }}")
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                                 timeout=30).stdout
+            pids = [int(x) for x in out.split()]
+        else:
+            out = subprocess.run(["ps", "-ww", "-eo", "pid=,args="], capture_output=True, text=True, timeout=10).stdout
+            pids = []
+            for ln in out.splitlines():
+                pid_s, _, args = ln.strip().partition(" ")
+                if pid_s.isdigit() and str(session_id) in args:
+                    pids.append(int(pid_s))
+        pids = [p for p in pids if p != os.getpid()]
+        return min(pids) if pids else None
+    except Exception:
+        return None
+
+
 def recover_active_runs(state: dict, now) -> None:
     """После перезапуска диспетчера — подхватить зеркало state.json["active_runs"]: живой pid не
     запускаем повторно (просто продолжаем отслеживать по pid), уже закончившийся — обрабатываем как
@@ -1769,6 +1804,16 @@ def recover_active_runs(state: dict, now) -> None:
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }
+        if not saved.get("pid"):  # зеркало-намерение: диспетчер убит до записи pid
+            found = _find_pid_by_session(saved.get("session_id"))
+            if not found:
+                print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет) — "
+                      "зеркало снято", file=sys.stderr, flush=True)
+                state.get("active_runs", {}).pop(tid, None)
+                continue
+            saved["pid"] = info["pid"] = found
+            print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {found} найден по session_id (зеркало было без pid)",
+                  file=sys.stderr, flush=True)
         alive = _pid_alive(saved.get("pid"))
         print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')} "
               f"{'жив — слежу' if alive else 'не найден или чужое имя образа — разбираю как завершённый'}", file=sys.stderr, flush=True)
@@ -2035,8 +2080,17 @@ def _drop_ceo_handoff(state: dict, tid: str) -> None:
 def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
     """Метка передачи CEO кончается на тике, как только тикет вышел из ожидания (waiting/in_review): CEO вернул его
     шапкой, done/stopped/blocked. Запуск любой роли и запись CEO снимают её в launch_run / _ceo_handoff_pending."""
-    if tkt.id in (state.get("ceo_handoffs") or {}) and tkt.id not in RUNNING and tkt.status not in ("waiting", "in_review"):
-        _drop_ceo_handoff(state, tkt.id)
+    at = (state.get("ceo_handoffs") or {}).get(tkt.id)
+    if not at or tkt.id in RUNNING or tkt.status in ("waiting", "in_review"):
+        return
+    # `--next ceo` и смена статуса роли — две команды: тик между ними видит старый статус при свежей метке. Статус
+    # сменили после метки (updated новее) — это ход CEO/роли; иначе метку не трогаем, роль ещё допишет `waiting`.
+    try:
+        if tkt.status in ("todo", "in_progress") and T.parse_dt(tkt.header.get("updated", "")) <= T.parse_dt(at):
+            return
+    except (ValueError, TypeError):
+        pass
+    _drop_ceo_handoff(state, tkt.id)
 
 
 def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
