@@ -361,12 +361,23 @@ def _event_met(alias: str, what: str, arg: str) -> bool:
         return key in _EVENT_MET
 
 
+def _event_ts(alias: str, what: str, arg: str):
+    key = (alias, what, _unit_base(arg) if what == "unit" else arg)
+    with _EVENT_LOCK:
+        return _EVENT_MET.get(key)
+
+
+def _drop_event(alias: str, what: str, arg: str) -> None:
+    with _EVENT_LOCK:
+        _EVENT_MET.pop((alias, what, _unit_base(arg) if what == "unit" else arg), None)
+
+
 def _wait_poller() -> None:
     """Подстраховка: ssh-опрос ключей из _WAIT_WATCH с шагом WAIT_POLL_S в своём потоке, результат — в _WAIT_CACHE."""
     while True:
         for ckey in list(_WAIT_WATCH):
-            if _event_met(*ckey):
-                continue
+            if _event_met(*ckey) and ckey[1] != "unit":
+                continue  # юнит проверяем и при событии: новый запуск с тем же именем сбрасывает прежнее событие
             try:
                 _host_probe(*ckey)
             except Exception as e:
@@ -416,8 +427,21 @@ def _host_wait_met(alias: str, what: str, arg: str) -> bool:
     Судья 27.09 («можно потом»): без кэша ssh дёргается на каждый ждущий тикет каждые 15 с — результат на
     WAIT_CHECK_CACHE_S; ошибка ssh (код 255, таймаут) = «не выполнено» + строка в dispatch.err.log раз в 10 мин."""
     ckey = (alias, what, arg)
-    if _event_met(alias, what, arg):
-        return True
+    ev_ts = _event_ts(alias, what, arg)
+    if ev_ts is not None:
+        if what != "unit":
+            return True
+        # событие юнита может быть от прежнего экземпляра с тем же именем: засчитываем, только если проверка
+        # ПОСЛЕ прихода события видела юнит не работающим (работает — _host_probe сбросит событие)
+        cached = _WAIT_CACHE.get(ckey)
+        if not (cached and cached[0] >= ev_ts):
+            if WAIT_ASYNC:
+                _WAIT_WATCH.add(ckey)
+                _WAIT_NEW.set()
+                return False
+            _host_probe(alias, what, arg)
+            cached = _WAIT_CACHE.get(ckey)
+        return bool(cached and cached[1] and _event_met(alias, what, arg))
     if WAIT_ASYNC:  # основной поток ssh не трогает: проверку делает _wait_poller редким шагом (TK-055)
         if ckey not in _WAIT_WATCH:
             _WAIT_WATCH.add(ckey)
@@ -454,6 +478,8 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
                 _wait_err(label, f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
             else:
                 result = state not in _UNIT_RUNNING
+                if not result:  # юнит работает — «остановлен» от прежнего экземпляра с этим именем недействительно
+                    _drop_event(alias, what, arg)
         elif r.returncode == 0:
             progress = _progress_done(out) if arg.endswith(".json") else None
             result = True if progress is None else progress
@@ -1239,6 +1265,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     try:
         launch_tkt = T.read_ticket(ticket_path)
         status_at_launch = launch_tkt.status
+        if role == launch_tkt.owner and status_at_launch == "todo":
+            # TK-070 п.6: «в работе» ставит диспетчер при старте владельца — роль не обязана менять todo (раньше: повтор → blocked)
+            T.write_header_updates(ticket_path, {"status": "in_progress"}, now=now)
+            status_at_launch = "in_progress"  # старт ≠ смена статуса ролью: холостой ход считается как раньше
         executor = launch_tkt.executor
         effort = effort_for(role, launch_tkt)
         # v2: «роль оставила запись» — новый заголовок записи ЭТОЙ роли (ключи на старте), а не рост лога
@@ -1435,6 +1465,14 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
         save_state(state)
         return
     tkt = T.read_ticket(path)
+    if (role == tkt.owner and tkt.status == "waiting" and not (tkt.header.get("wait_for") or "").strip()
+            and not tkt.next_role):
+        # TK-070 п.3: ожидание без условия пробуждения — отказ (иначе тикет молчит до эскалации); вернуть в работу
+        T.write_header_updates(path, {"status": "in_progress"}, now=now)
+        T.append_log(path, "dispatcher", "status: waiting без wait_for и без next — отказ: ожидание без условия "
+                     "пробуждения не принимается; тикет возвращён в in_progress. Задай условие "
+                     "`tickets.py wait <ID> <форма>` (формы — README диспетчера) или передай `--next <роль>`.", now=now)
+        tkt = T.read_ticket(path)
 
     # аудит 03.10: запуск ЛЮБОЙ роли (владелец, ревьюер, адресат `--next`) без новой записи — провал: один повтор,
     # затем blocked (раньше чужой холостой запуск молчал, и тикет `in_review` висел вечно).
@@ -1513,6 +1551,66 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     save_state(state)
 
 
+# --- лимит сессии (TK-070 п.2): ответ 429 «You've hit your session limit · resets 5am (Asia/Tbilisi)» — не холостой ход ---
+
+def _limit_hit(result: dict) -> bool:
+    text = str((result or {}).get("result") or "")
+    return (result or {}).get("api_error_status") == 429 or "hit your session limit" in text
+
+
+def _limit_reset_at(result: dict, now) -> datetime:
+    """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится)."""
+    m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)(?:\s*\(([^)]+)\))?", str((result or {}).get("result") or ""), re.I)
+    if not m:
+        return now + timedelta(hours=1)
+    hour, minute = int(m.group(1)) % 12, int(m.group(2) or 0)
+    if m.group(3).lower() == "pm":
+        hour += 12
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(m.group(4)) if m.group(4) else now.tzinfo
+    except Exception:
+        tz = now.tzinfo
+    local = now.astimezone(tz)
+    at = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if at <= local:
+        at += timedelta(days=1)
+    return at + timedelta(minutes=1)
+
+
+def _limit_paused(state: dict, now) -> bool:
+    until = state.get("limit_pause_until")
+    if not until:
+        return False
+    try:
+        return now < T.parse_dt(until)
+    except ValueError:
+        return False
+
+
+def _last_run_was_limit(tid: str) -> bool:
+    runs = sorted(RUNS_DIR.glob(f"*-{tid}-*.json")) if RUNS_DIR.exists() else []
+    return bool(runs) and _limit_hit(_read_run_result(runs[-1]))
+
+
+def unblock_limit_victims(now) -> None:
+    """blocked из-за холостых запусков, чей последний запуск — 429 лимита сессии: вернуть в in_progress (тикет не виноват)."""
+    for path in T.list_tickets(TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+            if tkt.status != "blocked" or tkt.id in RUNNING or not _last_run_was_limit(tkt.id):
+                continue
+            tail = (tkt.log_raw or "")[-1500:]
+            if "холост" not in tail and "не оставил запись" not in tail:
+                continue
+            T.write_header_updates(path, {"status": "in_progress"}, now=now)
+            T.append_log(path, "dispatcher", "блок снят автоматически: последний запуск оборвал лимит сессии (429), "
+                         "тикет не виноват — роль запустится после сброса лимита.", now=now)
+        except Exception:
+            continue
+
+
+
 def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped: bool = False) -> None:
     for fh in (info.get("out_fh"), info.get("err_fh")):
         try:
@@ -1544,6 +1642,17 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
     if model_warn:
         route_ceo_signal(tid, "model", model_warn, state, now)
 
+    if _limit_hit(result) and not stopped:
+        until = _limit_reset_at(result, now)
+        state["limit_pause_until"] = T.now_iso(until)
+        key = f"{tid}::{info['role']}"
+        state.setdefault("idle_runs", {}).pop(key, None)
+        _reset_same_status(state, key)
+        state.setdefault("sessions", {}).setdefault(key, {})["retries"] = 0
+        print(f"[dispatch] {T.now_iso(now)} лимит сессии (429) на {tid}: запуски на паузе до {T.now_iso(until)}",
+              file=sys.stderr, flush=True)
+        save_state(state)
+        return  # лимит — не провал запуска: ни повтора, ни холостого хода, ни blocked
     if stopped:
         return  # остановка CEO — не провал: ни повтора, ни «не оставил запись» (след и счётчики — _apply_stop)
     _finish_role_part(tid, info, state, now, timed_out, result)
@@ -1814,6 +1923,8 @@ def tick(now=None) -> int:
     baseline_done_notified(state)  # v2: историю `done` CEO не пересказываем (один раз, ключ в state.json)
     save_state(state)
 
+    unblock_limit_victims(now)
+    paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
     for path in T.list_tickets(TICKETS_DIR):
         try:
@@ -1858,7 +1969,7 @@ def tick(now=None) -> int:
     launched = 0
     for path, tkt, decision in sorted(candidates, key=lambda c: _candidate_sort_key(state, c[1], c[2])):
         tid = tkt.id
-        if len(RUNNING) >= MAX_PARALLEL:
+        if paused or len(RUNNING) >= MAX_PARALLEL:
             break
         if tid in RUNNING or path.stem in RUNNING:
             continue  # на один тикет — один запуск роли (RUNNING по stem файла; tkt.id из шапки мог разойтись с ним)

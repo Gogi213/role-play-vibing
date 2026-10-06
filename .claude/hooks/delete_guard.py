@@ -291,7 +291,8 @@ def linked_worktree(p):
         if os.path.isfile(fp):
             return True
         if os.path.isdir(fp):
-            return False
+            # TK-070 п.5: отдельный клон (свой `.git`-каталог) внутри `.claude/worktrees/<имя>` — тоже рабочая копия вне основного дерева
+            return bool(re.search(r"/\.claude/worktrees/[^/]+$", cur))
         parent = posixpath.dirname(cur)
         if parent == cur:
             return False
