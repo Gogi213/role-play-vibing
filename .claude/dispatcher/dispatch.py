@@ -1334,6 +1334,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     # своя группа процессов (на Windows параметр без действия): остановка CEO снимает роль вместе с потомками
     popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
                    start_new_session=True)
+    _drop_ceo_handoff(state, tid)  # любой запуск позже передачи CEO — ход состоялся, метка отработала
     RUNNING[tid] = {
         "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
@@ -1984,6 +1985,18 @@ def _open_owner_question(tid: str) -> bool:
     return False
 
 
+def _drop_ceo_handoff(state: dict, tid: str) -> None:
+    (state.get("ceo_handoffs") or {}).pop(tid, None)
+    (state.get("ceo_handoff_reminded") or {}).pop(tid, None)
+
+
+def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
+    """Метка передачи CEO кончается на тике, как только тикет вышел из ожидания (waiting/in_review): CEO вернул его
+    шапкой, done/stopped/blocked. Запуск любой роли и запись CEO снимают её в launch_run / _ceo_handoff_pending."""
+    if tkt.id in (state.get("ceo_handoffs") or {}) and tkt.id not in RUNNING and tkt.status not in ("waiting", "in_review"):
+        _drop_ceo_handoff(state, tkt.id)
+
+
 def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
     """Передача CEO (`--next ceo`) — ход, пока CEO не ответил: метка живёт до первой записи CEO после неё (или смены
     статуса на не-ожидание). Без ответа дольше INVARIANT_GRACE_S — одна повторная строка CEO, владельца не будим."""
@@ -2132,6 +2145,7 @@ def tick(now=None) -> int:
             # аудит-3: пока владелец ещё работает, его промежуточная запись — не «сдал на ревью»; эскалация — после запуска
             tkt = escalate_review_limit(path, tkt, state, now)
         handle_next_ceo(path, tkt, state, now)
+        _expire_ceo_handoff(tkt, state)
         notify_status_for_ceo(tkt, state, now)
         notify_done(tkt, state, now)
         notify_wait_for_problem(tkt, state, now)

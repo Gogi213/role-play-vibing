@@ -846,6 +846,48 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(out.status, "in_progress")
         self.assertEqual(state["ceo_handoffs"], {})
 
+    def _handoff_state(self, p, t0):
+        return {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
+
+    def test_ceo_handoff_ends_when_ceo_returns_by_header_only(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = self._handoff_state(p, t0)
+        T.write_header_updates(p, {"status": "todo"}, now=t0 + timedelta(minutes=5))
+        D._expire_ceo_handoff(T.read_ticket(p), state)
+        self.assertEqual(state["ceo_handoffs"], {})
+        T.write_header_updates(p, {"status": "waiting"}, now=t0 + timedelta(minutes=20))
+        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=31))
+        self.assertEqual(out.status, "in_progress")
+
+    def test_ceo_handoff_ends_when_any_role_is_launched_later(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = self._handoff_state(p, t0)
+        state["ceo_handoff_reminded"] = {T.read_ticket(p).id: "x"}
+        fake = mock.MagicMock(pid=1)
+        with mock.patch.object(D, "_popen", return_value=fake), mock.patch.object(D, "RUNS_DIR", self.tickets_dir.parent / "runs"):
+            try:
+                D.launch_run(p, "judge", state, t0 + timedelta(minutes=2), reason="next")
+            finally:
+                for info in D.RUNNING.values():
+                    for fh in (info.get("out_fh"), info.get("err_fh")):
+                        if fh:
+                            fh.close()
+                D.RUNNING.clear()
+        self.assertEqual((state["ceo_handoffs"], state["ceo_handoff_reminded"]), ({}, {}))
+        T.write_header_updates(p, {"status": "waiting", "wait_for": ""}, now=t0 + timedelta(minutes=20))
+        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(hours=3))
+        self.assertEqual(out.status, "in_progress")
+
+    def test_ceo_handoff_dropped_on_done(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = self._handoff_state(p, t0)
+        T.write_header_updates(p, {"status": "done"}, now=t0 + timedelta(minutes=5))
+        D._expire_ceo_handoff(T.read_ticket(p), state)
+        self.assertEqual(state["ceo_handoffs"], {})
+
     def test_ceo_handoff_early_is_silent(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         p = self.mk("engineer", "waiting", now=t0)

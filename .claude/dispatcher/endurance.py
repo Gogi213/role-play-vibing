@@ -260,7 +260,13 @@ class Harness:
                 self.ceo_seen.add(p.stem)
                 self.ceo_at[p.stem] = time.time()
         for tid, at in list(self.ceo_at.items()):  # CEO отвечает позже грейса инварианта (8 с): 12 с, запись + возврат в работу
-            if time.time() - at >= CEO_REPLY_S and T.read_ticket(self.tdir / f"{tid}.md").status == "waiting":
+            if time.time() - at < CEO_REPLY_S:
+                continue
+            try:
+                waiting = T.read_ticket(self.tdir / f"{tid}.md").status == "waiting"
+            except ValueError:  # диспетчер пишет тикет в этот момент — на следующем обходе
+                continue
+            if waiting:
                 T.append_log(self.tdir / f"{tid}.md", "ceo", "принято, продолжай")
                 T.write_header_updates(self.tdir / f"{tid}.md", {"status": "todo"})
                 del self.ceo_at[tid]
