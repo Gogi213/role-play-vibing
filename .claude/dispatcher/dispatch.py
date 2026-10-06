@@ -1866,9 +1866,18 @@ def recover_active_runs(state: dict, now) -> None:
             by_session = True
             found = _find_pid_by_session(saved.get("session_id"))
             if not found:
-                print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет) — "
-                      "зеркало снято", file=sys.stderr, flush=True)
                 state.get("active_runs", {}).pop(tid, None)
+                try:
+                    has_output = info["run_file"].stat().st_size > 0
+                except OSError:
+                    has_output = False
+                if has_output:  # роль отработала, пока диспетчер лежал: итог прогона не терять
+                    print(f"[dispatch] {T.now_iso(now)} подхват {tid}: процесса нет, вывод есть — разбираю как завершённый",
+                          file=sys.stderr, flush=True)
+                    _finish_run(tid, info, state, now, timed_out=False)
+                else:
+                    print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет, "
+                          "вывода нет) — зеркало снято", file=sys.stderr, flush=True)
                 continue
             saved["pid"] = info["pid"] = found
             saved["pstart"] = info["pstart"] = _proc_start(found)  # метки старта не было — берём текущую: «процесс есть»
