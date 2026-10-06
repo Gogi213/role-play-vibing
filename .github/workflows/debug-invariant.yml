@@ -41,4 +41,5 @@ jobs:
         with:
           name: dbg-${{ strategy.job-index }}-${{ matrix.mode }}-py${{ matrix.python }}-${{ github.sha }}
           path: out
+          include-hidden-files: true
           retention-days: 7
