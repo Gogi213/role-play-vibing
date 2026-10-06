@@ -20,6 +20,14 @@ def plans_dir(root: Path | None = None) -> Path:
     return (root or _project.resolve_project([])) / ".claude" / "pulse" / "plans"
 
 
+def questions_dir(root: Path | None = None) -> Path:
+    return (root or _project.resolve_project([])) / ".claude" / "pulse" / "questions"
+
+
+def is_ticket(pid: str) -> bool:
+    return bool(re.fullmatch(r"TK-\d+", pid or ""))
+
+
 VALID_ON = ("pc", "vps", "calc", "col", "you")  # метки машин + «вы»
 STEP_STATES = ("todo", "run", "review", "repair", "wait", "bad", "done")  # run делается · review проверяется · repair чинится
 

@@ -212,6 +212,12 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Что нового в 1.6.0
+
+- **Табло с мака наполняется как у alpha:** `board_push.py` строит полный view2 — прогресс с оценкой срока, ленту событий, вопросы владельцу
+  (`ask.py`, `<проект>/.claude/pulse/questions/`), машины и шаги ролей; сборка — `view2.py`. Короткие строки Haiku (plainify) не переносились:
+  сводка процесса — по фактам плана («сделано: … N из M»).
+
 ## Что нового в 1.5.0
 
 - **Табло наполняется шагами:** роли пишут план командой `plan.py set/step` (правило в промпте диспетчера), `board_push.py`
