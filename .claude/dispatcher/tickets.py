@@ -207,7 +207,8 @@ def cmd_result(args) -> int:
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
     if args.result == "accept" and (args.pr or args.sha):
-        return cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why})())
+        return cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
+                                         "repo": getattr(args, "repo", None)})())
     if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
         rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
         if rc == 0:
@@ -219,7 +220,8 @@ def cmd_result(args) -> int:
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
-    upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""))
+    upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
+                       owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "")
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
     print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
@@ -246,9 +248,13 @@ def cmd_accept(args) -> int:
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
         return 1
     import merge_rule
-    slug = merge_rule.repo_slug()
+    slug = (getattr(args, "repo", None) or D.P.env("CI_REPO", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
-        print("accept: репозиторий не определён — задай RPV_CI_REPO=<владелец/репо> (или войди в gh)", file=sys.stderr)
+        print("accept: репозиторий не задан — --repo <владелец/репо> или RPV_CI_REPO", file=sys.stderr)
+        return 1
+    err = merge_rule.check_pr(slug, int(args.pr), args.sha)
+    if err:
+        print(f"accept: {err}", file=sys.stderr)
         return 1
     with T.ticket_lock(path):
         T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}. "
@@ -401,6 +407,7 @@ def main(argv=None) -> int:
     p_accept.add_argument("--pr", type=int, required=True)
     p_accept.add_argument("--sha", required=True)
     p_accept.add_argument("--text", default="")
+    p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе RPV_CI_REPO)")
     p_accept.set_defaults(func=cmd_accept)
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
@@ -411,6 +418,7 @@ def main(argv=None) -> int:
     p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")
     p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
     p_result.add_argument("--form", default=None, help="wait: форма wait_for")
+    p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
     p_result.set_defaults(func=cmd_result)
 
     p_start = sub.add_parser("start")

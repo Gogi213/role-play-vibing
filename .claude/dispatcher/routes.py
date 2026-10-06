@@ -69,7 +69,21 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
     return ""
 
 
-def route(role: str, result: str, owner: str, reviewer: str = "") -> dict:
+def T_author_is(author: str, role: str) -> bool:
+    import ticket as T
+    return T.author_is(author, role)
+
+
+def last_owner_result(tkt) -> str:
+    """Последний итог владельца тикета из лога («[итог: X]…»); нет — пусто."""
+    for e in reversed(tkt.log):
+        m = re.match(r"\[итог: ([\w-]+)\]", e.text.strip())
+        if m and T_author_is(e.author, tkt.owner or ""):
+            return m.group(1)
+    return ""
+
+
+def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "") -> dict:
     """Правки шапки по итогу. accept и wait правит своя команда (accepted / wait_for), здесь — только ход."""
     rev = (reviewer or "").strip()
     if result == "done":
@@ -78,8 +92,10 @@ def route(role: str, result: str, owner: str, reviewer: str = "") -> dict:
         return {"status": "done", "next": ""}
     if result == "pr":
         return {"status": "in_review", "next": rev or "judge"}
-    if result == "accept":  # без PR (приём протокола/отчёта): влитого не ждём; с PR — cmd_accept
-        return {"status": "done", "next": ""}
+    if result == "accept":  # без PR; с PR — cmd_accept. Закрываем, только если владелец сдавал done; иначе проверка
+        if owner_last == "done":  # шага — владелец продолжает
+            return {"status": "done", "next": ""}
+        return {"status": "in_progress", "next": owner}
     if result == "return":
         return {"status": "in_progress", "next": owner}
     if result == "blocked":

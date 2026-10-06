@@ -38,8 +38,13 @@ class ResultTests(unittest.TestCase):
         T.write_header_updates(self.path, {"status": "in_progress", "reviewer": "judge"}, now=NOW)
         self.tid = self.path.stem
         self._role = os.environ.get("RPV_ROLE")
+        import merge_rule
+        self._chk = merge_rule.check_pr
+        merge_rule.check_pr = lambda repo, n, sha, gh=None: ""
 
     def tearDown(self):
+        import merge_rule
+        merge_rule.check_pr = self._chk
         D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT = self._orig
         if self._role is None:
             os.environ.pop("RPV_ROLE", None)
@@ -99,10 +104,25 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(self.res("judge", "return", path="review.md"), 0)
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("in_progress", "engineer"))
         T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
-        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)
+        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)  # владелец итога done не сдавал → не закрываем
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("in_progress", "engineer"))
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)  # последний итог владельца — done → закрыть
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("done", ""))
         self.refused("judge", "accept", path="нет-такого.md")
         self.refused("judge", "accept")
+
+    def test_accept_refuses_without_repo_or_unknown_pr(self):
+        import merge_rule
+        os.environ.pop("RPV_CI_REPO")
+        try:
+            self.refused("judge", "accept", pr=7, sha=SHA)  # репо не задан — без догадки по cwd
+            self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, repo="x/y"), 0)
+            merge_rule.check_pr = lambda repo, n, sha, gh=None: "PR не найден"
+            self.refused("judge", "accept", pr=7, sha=SHA, repo="x/y")  # PR нет в репо — ничего не пишем
+        finally:
+            os.environ["RPV_CI_REPO"] = "o/r"
 
     def test_wait_ticket_cycle_writes_nothing(self):
         other = T.create_ticket(D.TICKETS_DIR, owner="researcher", title="Д", status="todo", now=NOW)

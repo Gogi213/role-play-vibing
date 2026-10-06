@@ -69,25 +69,26 @@ def _note(tkt, text: str, wake_owner: bool = False, bus=None) -> None:
 
 
 def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
-    """wait_for `merged:<репо>#<PR>`: PR влит. Не удалось спросить у GitHub — не готово."""
+    """wait_for `merged:<репо>#<PR>`: PR влит. PR не найден (404) — ожидание вечным не делаем: «готово», владелец
+    просыпается и видит ошибку в stderr/журнале диспетчера. Прочий сбой GitHub — не готово (повтор на след. тике)."""
     try:
         return bool(gh(f"repos/{repo}/pulls/{number}").get("merged"))
-    except Exception:
+    except Exception as e:
+        if "404" in str(e) or "Not Found" in str(e):
+            print(f"merged:{repo}#{number}: PR не найден — ожидание снято, проверь репозиторий", file=sys.stderr)
+            return True
         return False
 
 
-def repo_slug() -> str:
-    """<владелец/репо> для `merged:`: RPV_CI_REPO, иначе `gh repo view`; не определился — пусто."""
-    import subprocess
-    slug = (C.P.env("CI_REPO", "") or "").strip()
-    if slug:
-        return slug
+def check_pr(repo: str, number: int, sha: str, gh=C.gh_api) -> str:
+    """accept: PR есть в этом репозитории и его голова начинается с sha. Пустая строка — годно, иначе текст отказа."""
     try:
-        r = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                           capture_output=True, timeout=30)
-        return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else ""
-    except Exception:
-        return ""
+        head = gh(f"repos/{repo}/pulls/{number}")["head"]["sha"]
+    except Exception as e:
+        return f"PR #{number} не найден в {repo} ({e}) — проверь RPV_CI_REPO/--repo"
+    if not head.startswith(sha.lower()):
+        return f"голова PR #{number} в {repo} — {head[:7]}, а вердикт на {sha[:7]}: сверь --sha"
+    return ""
 
 
 def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:

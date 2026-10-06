@@ -42,8 +42,11 @@ class MergeRuleTests(unittest.TestCase):
         self.head, self.base, self.mergeable, self.merged = SHA, "main", True, True
         self.calls, self.others = [], []
         C.save_state({f"{REPO}#7": {"sha": SHA, "state": "success"}})
+        self._chk = M.check_pr
+        M.check_pr = lambda repo, n, sha, gh=None: ""
 
     def tearDown(self):
+        M.check_pr = self._chk
         D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR = self._orig
         self.tmp.cleanup()
 
@@ -122,6 +125,16 @@ class MergeRuleTests(unittest.TestCase):
         self.merged = False
         self.assertEqual(self.run_m(), [(7, "не подтверждено → владельцу")])
         self.assertEqual(self.tkt().header.get("next"), "engineer")
+
+    def test_check_pr_and_404(self):
+        M.check_pr = self._chk
+        ok = lambda p, **k: {"head": {"sha": SHA}}
+        self.assertEqual(M.check_pr(REPO, 7, SHA[:7], gh=ok), "")
+        self.assertIn("сверь --sha", M.check_pr(REPO, 7, "b" * 7, gh=ok))
+        def nf(p, **k):
+            raise RuntimeError("Not Found (HTTP 404)")
+        self.assertIn("не найден", M.check_pr(REPO, 7, SHA, gh=nf))
+        self.assertTrue(M.merged_done(REPO, 7, gh=nf))  # 404 — не вечное ожидание: владелец просыпается
 
     def test_accept_writes_verdict(self):
         T.write_header_updates(self.path, {"accepted": ""}, now=NOW)
