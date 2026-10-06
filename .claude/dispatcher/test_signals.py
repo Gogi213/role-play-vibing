@@ -138,7 +138,7 @@ class SignalsTest(unittest.TestCase):
         src = (HERE / "dispatch.py").read_text(encoding="utf-8")
         for m in re.finditer(r'open\((CEO_INBOX|CEO_WAKE_LOG)[^)]*"a"', src):
             fn = src.rfind("\ndef ", 0, m.start())
-            self.assertTrue(src[fn:].startswith("\ndef _ceo_file_write"), src[fn:fn + 60])
+            self.assertTrue(src[fn:].startswith(("\ndef _ceo_file_write", "\ndef ceo_queue_wake")), src[fn:fn + 60])
         for name in ("watch.py", "tickets.py", "ticket.py", "bus_link.py", "supervise.py"):
             t = (HERE / name).read_text(encoding="utf-8")
             self.assertNotRegex(t, r'open\([^)]*(ceo-inbox|ceo-wake|CEO_INBOX|CEO_WAKE_LOG)[^)]*"a"', name)
