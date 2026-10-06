@@ -141,8 +141,43 @@ class Harness:
 
     # --- диспетчер ---
     def start_dispatcher(self):
-        self.proc = subprocess.Popen([sys.executable, str(self.runner), str(HERE), str(self.fake), str(self.proj)],
+        self.proc = subprocess.Popen([sys.executable, str(self.runner), str(HERE), str(self.fake), str(self.proj),
+                                      "dispatch.py"],  # имя в командной строке — присмотр узнаёт «наш» процесс
                                      env=self.env, stdout=self.log_fh, stderr=subprocess.STDOUT)
+
+    def start_watcher(self):
+        self.watch = subprocess.Popen([sys.executable, "-u", str(HERE / "watch.py"), "--project", str(self.proj)],
+                                      env=self.env, stdout=self.log_fh, stderr=subprocess.STDOUT)
+
+    def kill_watcher(self):
+        if getattr(self, "watch", None) and self.watch.poll() is None:
+            self.watch.kill()
+            self.watch.wait(timeout=10)
+
+    def watcher_fresh(self, max_age: float = 15.0) -> bool:
+        try:
+            beat = json.loads((self.disp / "watch-heartbeat.json").read_text(encoding="utf-8"))["ts"]
+            return time.time() - datetime.fromisoformat(beat).timestamp() < max_age
+        except Exception:
+            return False
+
+    def supervise_pass(self) -> dict:
+        """Один проход настоящего supervise.run_once (его по таймеру ОС зовёт Планировщик/launchd/systemd);
+        запуск служб подменён: диспетчер — через обвязку прогона, сторож — настоящий watch.py."""
+        import supervise
+
+        class Started:
+            def __init__(self, pid):
+                self.pid, self.how = pid, "endurance"
+
+        def spawn(script, project, log, extra=()):
+            if script.name == "watch.py":
+                self.start_watcher()
+                return Started(self.watch.pid)
+            self.start_dispatcher()
+            return Started(self.proc.pid)
+
+        return supervise.run_once(self.proj, spawn=spawn, stop=supervise.S.stop_running)
 
     def kill_dispatcher(self):
         if self.proc and self.proc.poll() is None:
@@ -239,8 +274,11 @@ class Harness:
         if mode == "bus":
             self.start_bus()
         self.start_dispatcher()
+        if mode == "watch":
+            self.start_watcher()
         faults = []
         bus_ev = []
+        watch_bad = False
         # 1) пауза лимита (429): убить диспетчер, «время прошло» — снять паузу в state.json, поднять
         if self.wait(lambda: bool(self.state().get("limit_pause_until")), 40, "пауза 429"):
             self.kill_dispatcher()
@@ -260,6 +298,15 @@ class Harness:
         if mode == "bus":
             bus_ev = self.bus_faults(n)
             faults.append("шина: падение, spool, возврат, ложное событие юнита")
+        if mode == "watch" and self.wait(self.watcher_fresh, 20, "сторож жив"):
+            self.kill_watcher()
+            self.kill_dispatcher()
+            act = self.supervise_pass()
+            back = self.wait(lambda: self.watcher_fresh(8) and self.proc.poll() is None, 30, "присмотр поднял сторож")
+            faults.append(f"kill сторожа и диспетчера, присмотр: {act}")
+            if not back or act.get("watch") != "start" or act.get("dispatch") != "start":
+                faults.append("присмотр не поднял службы")
+                watch_bad = True
         if mode == "reboot" and self.wait(lambda: any((self.base / "alive").iterdir()), 30, "роль запущена"):
             self.reboot()
             faults.append("перезагрузка: убиты диспетчер и роли, чистый перезапуск")
@@ -268,6 +315,7 @@ class Harness:
         self.stop.set()
         obs.join(5)
         self.kill_dispatcher()
+        self.kill_watcher()
         self.kill_bus()
         st = self.statuses()
         inbox = self.inbox()
@@ -276,7 +324,7 @@ class Harness:
         blocked = [t for t, s in st.items() if s == "blocked"]
         res = {"round": n, "mode": mode, "done": done, "blocked": blocked, "lost_signals": lost, "faults": faults,
                "max_idle_s": round(max(self.idle_episodes, default=0.0), 1)}
-        res["ok"] = bool(done and not blocked and not lost and res["max_idle_s"] <= self.idle_max)
+        res["ok"] = bool(done and not blocked and not lost and not watch_bad and res["max_idle_s"] <= self.idle_max)
         return res
 
 
@@ -287,7 +335,7 @@ def main(argv=None) -> int:
     ap.add_argument("--idle-max", type=float, default=20.0)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--keep", action="store_true")
-    ap.add_argument("--modes", default="base,bus,reboot", help="сбои раундов по кругу: base | bus | reboot")
+    ap.add_argument("--modes", default="base,bus,reboot,watch", help="сбои раундов по кругу: base | bus | reboot | watch")
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")

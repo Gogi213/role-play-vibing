@@ -14,6 +14,9 @@ class EnduranceShort(unittest.TestCase):
     def test_reboot_round(self):
         self.assertEqual(endurance.main(["--modes", "reboot", "--idle-max", "30"]), 0)
 
+    def test_watch_round(self):
+        self.assertEqual(endurance.main(["--modes", "watch", "--idle-max", "30"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
