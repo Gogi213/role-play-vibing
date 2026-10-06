@@ -127,6 +127,17 @@ class StartTests(unittest.TestCase):
         self.assertTrue(wait_alive(stranger.pid), "чужой процесс убит")
         self.assertNotEqual(S.read_pid(state / "dispatch.pid"), stranger.pid)
 
+    def test_cmdline_of_live_process_is_known_on_every_os(self):
+        """Командную строку чужого процесса видно на каждой ОС (Linux — /proc, macOS — ps): иначе is_ours()
+        принимает любой живой pid за свой и останавливает его."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)  # rpv-cmdline-probe"])
+        self.pids.append(child.pid)
+        self.assertTrue(wait_alive(child.pid))
+        line = S._cmdline(child.pid)
+        self.assertIsNotNone(line, "командная строка не прочитана")
+        self.assertIn("rpv-cmdline-probe", line)
+        self.assertFalse(S.is_ours(child.pid, "dispatch.py"))
+
     def test_main_prints_pid_and_log_path(self):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):

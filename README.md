@@ -212,6 +212,12 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Что нового в 1.6.1
+
+- **macOS: проверка «наш ли живой процесс» по pid без `/proc` доведена.** В 1.5.0 `start.py` не читал командную строку без `/proc` и принимал
+  любой живой pid из устаревшего замка за свой — `/rpv-start` убивал чужой процесс; теперь она берётся из `ps`. Тесты диспетчера на macOS
+  ждали имя образа по `sys.executable`, а у framework-python оно «Python» — теперь имя спрашивается у ОС. Linux и Windows не менялись.
+
 ## Что нового в 1.6.0
 
 - **Табло с мака наполняется как у alpha:** `board_push.py` строит полный view2 — прогресс с оценкой срока, ленту событий, вопросы владельцу
