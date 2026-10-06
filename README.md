@@ -212,6 +212,10 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Что нового в 1.4.2
+
+- **Шина без `RPV_BUS_URL` выключается молча.** В `busclient.py` не была задана `DEFAULT_URL` (с 1.3.0), и диспетчер при каждом старте писал в лог `шина не запущена: NameError: name 'DEFAULT_URL' is not defined`. Теперь `DEFAULT_URL = ""`: без адреса шины `config()` отдаёт пустой адрес, диспетчер работает по таймеру без строки об ошибке, как и описано в «Шина событий».
+
 ## Что нового в 1.4.1
 
 - **README: «Установка по платформам»** — Windows, macOS, Linux: что нужно заранее, как поставить и запустить, как остановить, переживает ли закрытие Claude и перезагрузку; готовые примеры автозапуска — LaunchAgent (macOS), постоянный user-юнит systemd (Linux), установка сервера шины (Linux). Код не менялся.
