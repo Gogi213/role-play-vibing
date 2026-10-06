@@ -35,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
+import pulsedata as PD  # noqa: E402
 import ticket as T  # noqa: E402
 
 # Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
@@ -73,6 +74,9 @@ WATCH_DEDUP_REPEAT_HOURS = float(P.env("WATCH_REPEAT_HOURS", "2"))
 WATCH_LONG_REPEAT_HOURS = float(P.env("WATCH_LONG_REPEAT_HOURS", "24"))
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "deck-alert", "deck-idle-expected", "blocked", "needs_owner"}
 CLOSED_TICKET_STATUSES = ("done", "cancelled")
+# План шагов на табло: через сколько минут «в работе без плана» / «шаги не менялись» сторож напоминает роли
+NO_PLAN_MINUTES = float(P.env("WATCH_NO_PLAN_MIN", "30"))
+PLAN_LAG_MINUTES = float(P.env("WATCH_PLAN_LAG_MIN", "5"))  # роль обновляет шаги чуть раньше итогового comment — это не «застыл»
 DISPATCH_STALE_MINUTES = float(P.env("WATCH_DISPATCH_STALE_MIN", "5"))
 ORPHAN_TICKET_HOURS = float(P.env("WATCH_ORPHAN_HOURS", "2"))
 # через сколько минут без обновления STATUS непустая очередь на второй машине считается простоем
@@ -155,8 +159,57 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
     return out
 
 
+def check_no_progress_view(now) -> list:
+    """TK-060: тикет in_progress дольше NO_PLAN_MINUTES без плана шагов (plan.py set) — у табло нет честного процента.
+    Читает status.json сборщика (без LLM, без сети); исполнителя будит notify_findings."""
+    try:
+        view = json.loads((D.PROJECT_ROOT / ".claude" / "pulse" / "status.json").read_text(encoding="utf-8"))["view2"]
+        if now.timestamp() - float(view["built_ts"]) > 300:
+            return []  # сборщик стоит — это другая находка, не эта
+        procs = {p["id"]: p for p in view["processes"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    out = []
+    for path in T.list_tickets(D.TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        p = procs.get(tkt.id)
+        if tkt.status != "in_progress" or p is None or p.get("plan"):
+            continue
+        upd = T.parse_dt(tkt.header.get("updated")) if tkt.header.get("updated") else None
+        if upd is not None and (now - upd).total_seconds() / 60 > NO_PLAN_MINUTES:
+            out.append(Finding("no-plan", tkt.id, f"{tkt.id}: в работе > {NO_PLAN_MINUTES:.0f} мин без плана шагов на табло"))
+    return out
+
+
+def check_stale_plan(now) -> list:
+    """TK-061: у in_progress-тикета есть план, в логе запись роли новее плана, а шаги не менялись > NO_PLAN_MINUTES."""
+    out = []
+    for path in T.list_tickets(D.TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+            if tkt.status not in ("in_progress", "waiting") or tkt.owner not in ("researcher", "engineer", "judge"):
+                continue
+            plan = json.loads((PD.plans_dir(D.PROJECT_ROOT) / f"{tkt.id}.json").read_text(encoding="utf-8"))
+            if not plan.get("steps") or all(s.get("state") == "done" for s in plan["steps"]):
+                continue
+            upd = T.parse_dt(plan["updated"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        except Exception:
+            continue
+        role_logs = [e for e in tkt.log if not T.author_is(e.author, "ceo")]
+        if role_logs and role_logs[-1].ts - upd > timedelta(minutes=PLAN_LAG_MINUTES) and (now - upd).total_seconds() / 60 > NO_PLAN_MINUTES:
+            out.append(Finding("plan-stale" if tkt.status == "in_progress" else "plan-stale-waiting", tkt.id,
+                               f"{tkt.id}: запись роли в логе новее плана, шаги на табло не менялись > {NO_PLAN_MINUTES:.0f} мин"))
+    return out
+
+
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
+SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
 def _producer_pattern(path: str) -> str:
@@ -168,7 +221,8 @@ def _producer_pattern(path: str) -> str:
 
 def probe_wait_target(alias: str, what: str, arg: str) -> str:
     """`exists` — путь есть; `producer` — пути нет, но юнит/процесс с именем задания жив; `dead` — нет ни того, ни
-    другого; `unknown` — ssh не ответил (не считаем). Имя задания — basename пути без расширения."""
+    другого; `ssh-error` — ssh не ответил (считается подряд, SSH_FAIL_STRIKES → тревога владельцу); `unknown` — форма
+    не проверяется ssh (условие проверяет диспетчер). Имя задания — basename пути без расширения."""
     pat = _producer_pattern(arg)
     if what != "path" or not arg.startswith("/") or not pat:
         return "unknown"
@@ -179,15 +233,17 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     try:
         r = subprocess.run(D._ssh_cmd(alias, remote), capture_output=True, timeout=20)
     except Exception:
-        return "unknown"
+        return "ssh-error"
     out = (r.stdout or b"").decode("utf-8", "replace").strip().splitlines()
-    return out[0] if r.returncode == 0 and out and out[0] in ("exists", "producer", "dead") else "unknown"
+    return out[0] if r.returncode == 0 and out and out[0] in ("exists", "producer", "dead") else "ssh-error"
 
 
 def _wait_target_state(tkt, probe) -> str:
     parsed = T.parse_wait_for(tkt.header.get("wait_for") or "")
     if parsed is None:
-        return "unknown"
+        return "invalid"
+    if parsed[0] == "file":
+        return "exists"
     if parsed[0] == "ticket":
         return "exists" if (D.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
     if parsed[0] == "host":
@@ -200,6 +256,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
     записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
     dead = ws.setdefault("dead_wait", {})
+    ssh_fail = ws.setdefault("ssh_fail_wait", {})
     alive, seen = set(), set()
     for path in T.list_tickets(D.TICKETS_DIR):
         try:
@@ -210,7 +267,22 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
             continue
         spec = tkt.header["wait_for"].strip()
         st = _wait_target_state(tkt, probe)
-        if st in ("exists", "producer"):
+        if st == "ssh-error":  # ssh молчит: условие не проверить; N раз подряд — владельцу тикета, не CEO
+            ent = ssh_fail.get(tkt.id) or {}
+            n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+            ssh_fail[tkt.id] = {"spec": spec, "n": n}
+            dead.pop(tkt.id, None)
+            if n < SSH_FAIL_STRIKES:
+                alive.add(tkt.id)
+                continue
+            with T.ticket_lock(path):
+                T.append_log(path, "watch", f"сторож: ssh к машине из `{spec}` молчит {n} проверок подряд — условие "
+                             "не проверить; ожидание снято, владелец будится: проверь машину и задание, поставь wait_for заново", now)
+                T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
+            ssh_fail.pop(tkt.id, None)
+            continue
+        ssh_fail.pop(tkt.id, None)
+        if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
             alive.add(tkt.id)
             dead.pop(tkt.id, None)
             continue
@@ -235,6 +307,9 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
     for tid in list(dead):
         if tid not in seen and tid not in alive:
             dead.pop(tid, None)
+    for tid in list(ssh_fail):
+        if tid not in alive:
+            ssh_fail.pop(tid, None)
     return alive
 
 
@@ -523,6 +598,8 @@ def collect_findings(state: dict, now, ssh_run=_ssh_run, started_at=None, hold_h
     findings += check_dispatcher_alive(state, now, started_at)
     findings += check_blocked_and_needs_owner(now)
     findings += check_orphan_tickets(now, alive_waits)
+    findings += check_no_progress_view(now)
+    findings += check_stale_plan(now)
     findings += check_second_machine(ssh_run, hold_hint=hold_hint, observed=observed)
     return findings
 
@@ -626,6 +703,42 @@ def _flush_pending_summary(ws: dict, now) -> None:
     ws["last_summary_flush"] = T.now_iso(now)
 
 
+_PLAN_PY = str(Path(__file__).resolve().with_name("plan.py"))
+
+
+def _wake_for_plan(tid: str, now, stale: bool = False) -> None:
+    """no-plan: запись в лог тикета и `next: <владелец>` — исполнитель запишет план (plan.py set, 3–6 шагов)."""
+    path = D.TICKETS_DIR / f"{tid}.md"
+    try:
+        with T.ticket_lock(path):
+            tkt = T.read_ticket(path)
+            if tkt.owner not in ("researcher", "engineer", "judge"):
+                return
+            if stale:
+                T.append_log(path, "ceo", "Сторож (без LLM): в логе есть запись роли, а шаги на табло не менялись "
+                             f"> {NO_PLAN_MINUTES:.0f} мин. Обнови по факту: `python " + _PLAN_PY + " step " + tid +
+                             " <N> <run|done|todo>` (wait — только когда ждём владельца), затем продолжай работу.")
+            else:
+                T.append_log(path, "ceo", "Сторож (без LLM): задача в работе дольше "
+                             f"{NO_PLAN_MINUTES:.0f} мин, а плана шагов на табло нет — табло не может показать процент. "
+                             "Запиши план: `python " + _PLAN_PY + " set " + tid + " ...` (3–6 шагов по-людски, "
+                             "справка — `plan.py --help`), затем продолжай работу.")
+            T.write_header_updates(path, {"next": tkt.owner}, stamp_updated=False)
+    except Exception as e:
+        print(f"[watch] no-plan: не разбудил {tid}: {type(e).__name__}: {e}", file=sys.stderr)
+
+
+def _remind_plan_waiting(tid: str) -> None:
+    """waiting + застывший план: не будим (запуск впустую) — напоминание в лог, следующий запуск роли обновит шаги."""
+    path = D.TICKETS_DIR / f"{tid}.md"
+    try:
+        T.append_log(path, "ceo", "Сторож (без LLM): запись роли новее плана, а шаги на табло не менялись "
+                     f"> {NO_PLAN_MINUTES:.0f} мин. В следующем запуске обнови по факту: `python " + _PLAN_PY + " step "
+                     + tid + " <N> <run|done|todo>`.")
+    except Exception as e:
+        print(f"[watch] plan-stale-waiting: не записал {tid}: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 def notify_findings(findings: list, ws: dict, now) -> list:
     """Возвращает находки, по которым реально написали (для тестов). Дедуп — (kind, key) + для
     второй машины ещё и содержимое без времени (см. выше). Виды из WATCH_SUMMARY_KINDS не будят сразу —
@@ -654,6 +767,12 @@ def notify_findings(findings: list, ws: dict, now) -> list:
                 pending.append(f"{T.now_iso(now)} [{f.kind}] {f.message[:150]}")
             else:
                 D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
+                if f.kind == "no-plan":
+                    _wake_for_plan(f.key, now)
+                elif f.kind == "plan-stale":
+                    _wake_for_plan(f.key, now, stale=True)
+                elif f.kind == "plan-stale-waiting":
+                    _remind_plan_waiting(f.key)
             notified[marker] = {"sig": sig, "ts": T.now_iso(now)}
             posted.append(f)
         else:

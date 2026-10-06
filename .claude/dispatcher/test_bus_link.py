@@ -78,6 +78,31 @@ class CeoWakeTest(unittest.TestCase):
         self.assertEqual(len(self.wakes), want, self.wakes)
         self.assertEqual(len(self.b.fetch("ceo", 0)), len(ceo_rules), "ack только у inbox")
 
+    def test_backlog_at_start_is_folded_into_one_line_then_one_per_event(self):
+        """Накопленное до старта диспетчера — одна строка; события после первого ответа шины — по строке на каждое."""
+        self.link.disp.stop_flag.set()
+        self.link.ceo.stop_flag.set()
+        for i in range(3):
+            self.b.post(f"служба.простой.превышен", {"n": i}, f"bk{i}")
+        wakes = []
+        link = bus_link.Link(lambda k, n: None, ceo_wake=lambda addr, seq: wakes.append((addr, seq)))
+        link.start()
+        try:
+            end = time.time() + 10
+            while not wakes and time.time() < end:
+                time.sleep(0.05)
+            self.assertEqual(len(wakes), 1, wakes)
+            self.assertIn("3 событий", wakes[0][0])
+            self.b.post("служба.простой.превышен", {"n": 9}, "bk9")
+            end = time.time() + 10
+            while len(wakes) < 2 and time.time() < end:
+                time.sleep(0.05)
+            self.assertEqual(len(wakes), 2, wakes)
+            self.assertEqual(wakes[1][0], "служба.простой.превышен")
+        finally:
+            link.disp.stop_flag.set()
+            link.ceo.stop_flag.set()
+
     def test_service_events_wake_ceo(self):
         self.b.post("служба.простой.превышен", {}, "s1")
         self.wait_wakes(1)
