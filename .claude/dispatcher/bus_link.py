@@ -22,6 +22,7 @@ class Listener(threading.Thread):
         super().__init__(daemon=True, name=f"bus-{recipient}")
         self.recipient, self.on_events, self.on_state, self.tick = recipient, on_events, on_state, tick
         self.after, self.seen, self.up = 0, set(), None
+        self.polls = 0  # число успешных ответов шины; 0 — идущий ответ первый (накопленное до старта)
         self.stop_flag = threading.Event()
 
     def run(self):
@@ -37,6 +38,7 @@ class Listener(threading.Thread):
                     self.after = max(self.after, e["seq"])
                 if new:
                     self.on_events(new)
+                self.polls += 1
                 if self.tick:
                     self.tick()
             except Exception as e:
@@ -90,7 +92,6 @@ class Link:
         self.disp = Listener("dispatcher", self._on_disp, self._on_state)
         self.ceo_wake = ceo_wake  # callable(addr, seq) — строка будильника CEO; None — очередь ceo не слушаем
         self.ceo = Listener("ceo", self._on_ceo) if ceo_wake else None
-        self._ceo_first = True
 
     def start(self):
         self.disp.start()
@@ -112,8 +113,7 @@ class Link:
         """Будильник на любое событие очереди ceo, кроме `.к_ceo` (его будит append_ceo_inbox при отправке). Без ack.
         Первая пачка после старта диспетчера — одна строка о накопленном, а не по строке на событие."""
         try:
-            if self._ceo_first:
-                self._ceo_first = False
+            if self.ceo.polls == 0:  # первый ответ шины после старта — накопленное, одна строка; позже — по строке на событие
                 if len(events) > 1:
                     self.ceo_wake(f"в очереди ceo {len(events)} событий", events[-1]["seq"])
                     return

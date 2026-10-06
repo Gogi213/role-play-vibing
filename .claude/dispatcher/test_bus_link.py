@@ -45,6 +45,10 @@ class CeoWakeTest(unittest.TestCase):
         self.wakes = []
         self.link = bus_link.Link(lambda k, n: None, ceo_wake=lambda addr, seq: self.wakes.append((addr, seq)))
         self.link.start()
+        end = time.time() + 10
+        while self.link.ceo.polls < 1 and time.time() < end:  # первый ответ шины — «накопленное»; события теста идут после него
+            time.sleep(0.02)
+        self.assertGreaterEqual(self.link.ceo.polls, 1)
 
     def tearDown(self):
         self.link.disp.stop_flag.set()
