@@ -1610,6 +1610,40 @@ class DispatchRunTests(unittest.TestCase):
         D.recover_active_runs(state, datetime.now().astimezone())
         self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
 
+    def _find_by_session(self, os_name, stdout, sid="sid-tree-1"):
+        from unittest import mock
+        res = mock.Mock(stdout=stdout)
+        with mock.patch.object(D.os, "name", os_name), mock.patch.object(D.os, "getpid", return_value=1),                 mock.patch.object(D.subprocess, "run", return_value=res):
+            return D._find_pid_by_session(sid)
+
+    def test_find_pid_by_session_picks_tree_root_posix(self):
+        out = ("  100 1 supervisor\n"
+               "  200 999 sh -c claude --session-id sid-tree-1\n"
+               "  300 200 node claude --session-id sid-tree-1\n"
+               "  400 300 node worker --session-id sid-tree-1\n")
+        self.assertEqual(self._find_by_session("posix", out), 200)
+
+    def test_find_pid_by_session_picks_tree_root_windows(self):
+        self.assertEqual(self._find_by_session("nt", "5000 4000\n4000 1\n"), 4000)
+
+    def test_find_pid_by_session_two_independent_roots_takes_min(self):
+        out = "  700 1 claude --session-id sid-tree-1\n  300 1 claude --resume sid-tree-1\n"
+        self.assertEqual(self._find_by_session("posix", out), 300)
+
+    def test_recover_no_process_but_output_is_finished_as_completed(self):
+        from unittest import mock
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title="Отработала без диспетчера")
+        run_file = self.tickets_dir.parent / "r-done.json"
+        run_file.write_text('{"result": "ok"}', encoding="utf-8")
+        state = {"active_runs": {path.stem: {
+            "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
+            "run_file": str(run_file), "err_file": "", "reason": "todo",
+            "status_at_launch": "todo", "session_id": "finished-sid-1"}}}
+        with mock.patch.object(D, "_find_pid_by_session", return_value=None),                 mock.patch.object(D, "_finish_run") as fin:
+            D.recover_active_runs(state, datetime.now().astimezone())
+        self.assertEqual(fin.call_count, 1)
+        self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
+
     def test_launch_run_mirrors_intent_before_popen(self):
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Намерение")
         seen = {}
@@ -1646,6 +1680,95 @@ class DispatchRunTests(unittest.TestCase):
         tkt = T.read_ticket(path)
         self.assertEqual(len(tkt.log), 1)
         self.assertEqual(tkt.header.get("status"), "done")
+
+    def _slow_role_mirror(self, title):
+        self.set_fake_bin(FAKE_BIN_SLOW_OK)
+        path = T.create_ticket(self.tickets_dir, owner="researcher", title=title)
+        D.tick()
+        run = D.RUNNING[path.stem]
+        run["out_fh"].close()
+        run["err_fh"].close()
+        D.RUNNING.clear()
+        return path, run, D.load_state()
+
+    def test_recover_adopts_role_under_foreign_image_name_by_pid_and_start(self):
+        """#16: роль под другим именем образа (npm-установка — node, не claude) после рестарта диспетчера жива: подхват по
+        pid + времени старта, повторного запуска и конца прогона нет."""
+        orig = D.PID_EXPECT_NAME
+        D.PID_EXPECT_NAME = "claude-image-that-this-process-does-not-have"
+        try:
+            path, run, state = self._slow_role_mirror("Чужое имя образа")
+            saved = state["active_runs"][path.stem]
+            self.assertTrue(saved.get("pstart"), "метка старта записана при запуске")
+            D.recover_active_runs(state, datetime.now().astimezone())
+            self.assertIn(path.stem, D.RUNNING, "живая роль не должна считаться мёртвой из-за имени образа")
+            D.save_state(state)
+            D.PID_EXPECT_NAME = python_image_name()
+            self.wait_running()
+            run["popen"].wait(timeout=5)
+            self.assertEqual(len(T.read_ticket(path).log), 1, "второго запуска поверх живой роли нет")
+        finally:
+            D.PID_EXPECT_NAME = orig
+
+    def test_recover_treats_pid_with_other_start_time_as_finished(self):
+        """#16: pid переиспользован другим процессом (метка старта другая) — роль мертва, как бы ни звался образ."""
+        path, run, state = self._slow_role_mirror("Pid занят чужим")
+        state["active_runs"][path.stem]["pstart"] = "1"
+        D.recover_active_runs(state, datetime.now().astimezone())
+        self.assertNotEqual(D.RUNNING.get(path.stem, {}).get("pid"), run["pid"], "старый pid не отслеживается как живой")
+        run["popen"].wait(timeout=10)
+        for info in D.RUNNING.values():
+            _kill = D._kill_proc
+            _kill(info)
+
+    def test_pid_alive_start_mark_overrides_image_name_and_old_mirror_falls_back_to_name(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            mark = D._proc_start(child.pid)
+            self.assertTrue(mark)
+            self.assertTrue(D._pid_alive(child.pid, "no-such-image", start=mark))
+            self.assertFalse(D._pid_alive(child.pid, "no-such-image", start=mark + "0"))
+            self.assertFalse(D._pid_alive(child.pid, "no-such-image"), "зеркало без метки — прежняя проверка по имени")
+            self.assertTrue(D._pid_alive(child.pid, python_image_name()))
+        finally:
+            child.kill()
+            child.wait(timeout=10)
+        self.assertFalse(D._pid_alive(child.pid, "", start=mark))
+
+    @unittest.skipIf(os.name == "nt", "ps lstart — только Linux/macOS")
+    def test_ps_start_mark_does_not_depend_on_locale_or_timezone(self):
+        """#16: диспетчер под launchd (локаль C) и из терминала (ru_RU, свой пояс) получают одну метку старта."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        saved = {k: os.environ.get(k) for k in ("LANG", "LC_ALL", "LC_TIME", "TZ")}
+        try:
+            os.environ.update(LANG="ru_RU.UTF-8", LC_TIME="ru_RU.UTF-8", TZ="Asia/Dubai")
+            os.environ.pop("LC_ALL", None)
+            first = D._ps_field(child.pid, "lstart")
+            for k in saved:
+                os.environ.pop(k, None)
+            second = D._ps_field(child.pid, "lstart")
+            self.assertTrue(first)
+            self.assertEqual(first, second)
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
+            child.kill()
+            child.wait(timeout=10)
+
+    def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
+        """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        orig = D._proc_start
+        try:
+            D._proc_start = lambda pid: None
+            self.assertTrue(D._pid_alive(child.pid, "no-such-image", start="123"))
+        finally:
+            D._proc_start = orig
+            child.kill()
+            child.wait(timeout=10)
+        self.assertFalse(D._pid_alive(child.pid, "", start="123"))
 
     def test_ceo_mention_in_text_is_plain_text_status_signals_still_work(self):
         """v2: @ceo в записи — обычный текст, строки CEO нет и роль не стартует; сигнал даёт статус needs_owner."""

@@ -1227,7 +1227,54 @@ def resolve_run_cost(state: dict, result: dict):
     return cost, usage_diff, note
 
 
-def _pid_alive(pid, expect_name: str = None) -> bool:
+def _proc_start(pid):
+    """Метка времени старта процесса (строка) — вместе с pid однозначно называет процесс, переиспользованный pid даёт
+    другую метку. Windows — GetProcessTimes (ctypes), Linux — поле 22 `/proc/<pid>/stat`, иначе `ps -o lstart=`.
+    None — процесса нет или метку узнать нельзя."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return None
+            try:
+                c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+                if not k32.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e), ctypes.byref(k), ctypes.byref(u)):
+                    return None
+                return str((c.dwHighDateTime << 32) | c.dwLowDateTime)
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            return None
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            return "t" + fh.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        pass
+    got = _ps_field(pid, "lstart")
+    return "s" + " ".join(got.split()) if got else None
+
+
+def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
+    """Жив ли pid. `start` — метка старта, записанная при запуске (`_proc_start`): сверка pid + старт вместо имени
+    образа (роль под npm-установкой — `node`, не `claude`); не совпала — pid занят другим процессом, мёртв; метку узнать
+    нельзя — только «процесс есть». Дальше — прежнее: """
+    if start:
+        now_start = _proc_start(pid)
+        if now_start is not None:
+            return now_start == start and _pid_alive(pid, "")
+        return _pid_alive_name(pid, "")  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
+    return _pid_alive_name(pid, expect_name)
+
+
+def _pid_alive_name(pid, expect_name: str = None) -> bool:
     """Жив ли pid — и похож ли на наш `claude` (судья 27.09, «можно потом»): подстрочный поиск pid в
     `tasklist` ловил чужие совпадения (123 ⊂ 1234), а pid мог переиспользоваться ОС после перезагрузки
     — точное сравнение PID-колонки через `/FO CSV` + проверка имени образа снижают оба риска (не
@@ -1254,7 +1301,8 @@ def _ps_field(pid, field: str):
     None — ps нет или процесса нет."""
     try:
         out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(int(pid))], capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=5)
+                             encoding="utf-8", errors="replace", timeout=5,
+                             env=dict(os.environ, LC_ALL="C", TZ="UTC0"))  # lstart зависит от локали и пояса
     except Exception:
         return None
     return out.stdout.strip() if out.returncode == 0 else None
@@ -1364,7 +1412,7 @@ def release_instance_lock(pid_file) -> None:
 def _proc_alive(info: dict) -> bool:
     if info.get("popen") is not None:
         return info["popen"].poll() is None
-    return _pid_alive(info.get("pid"))
+    return _pid_alive(info.get("pid"), start=info.get("pstart"))
 
 
 def _kill_proc(info: dict) -> None:
@@ -1542,8 +1590,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         raise
     mirror["pid"] = popen.pid
     _drop_ceo_handoff(state, tid)  # любой запуск позже передачи CEO — ход состоялся, метка отработала
+    pstart = _proc_start(popen.pid)
+    mirror["pstart"] = pstart
     RUNNING[tid] = {
-        "role": role, "popen": popen, "pid": popen.pid, "started": now, "attempt": attempt,
+        "role": role, "popen": popen, "pid": popen.pid, "pstart": pstart, "started": now, "attempt": attempt,
         "run_file": run_file, "err_file": err_file, "out_fh": out_fh, "err_fh": err_fh, "reason": reason,
         "status_at_launch": status_at_launch, "executor": executor,
         "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
@@ -1919,21 +1969,28 @@ def _find_pid_by_session(session_id) -> "int | None":
     if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
         return None
     try:
+        pairs = []  # (pid, ppid) совпавших процессов
         if os.name == "nt":
             ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
-                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | ForEach-Object {{ $_.ProcessId }}")
+                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
+                  "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
             out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
                                  timeout=30).stdout
-            pids = [int(x) for x in out.split()]
-        else:
-            out = subprocess.run(["ps", "-ww", "-eo", "pid=,args="], capture_output=True, text=True, timeout=10).stdout
-            pids = []
             for ln in out.splitlines():
-                pid_s, _, args = ln.strip().partition(" ")
-                if pid_s.isdigit() and str(session_id) in args:
-                    pids.append(int(pid_s))
-        pids = [p for p in pids if p != os.getpid()]
-        return min(pids) if pids else None
+                f = ln.split()
+                if len(f) == 2 and all(x.isdigit() for x in f):
+                    pairs.append((int(f[0]), int(f[1])))
+        else:
+            out = subprocess.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
+                                 timeout=10).stdout
+            for ln in out.splitlines():
+                f = ln.split(None, 2)
+                if len(f) == 3 and f[0].isdigit() and f[1].isdigit() and str(session_id) in f[2]:
+                    pairs.append((int(f[0]), int(f[1])))
+        pairs = [(p, pp) for p, pp in pairs if p != os.getpid()]
+        found = {p for p, _ in pairs}
+        roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
+        return min(roots or found) if found else None
     except Exception:
         return None
 
@@ -1948,7 +2005,7 @@ def recover_active_runs(state: dict, now) -> None:
         if tid in RUNNING:
             continue  # уже отслеживаем в этом процессе (это не перезапуск)
         info = {
-            "role": saved.get("role"), "popen": None, "pid": saved.get("pid"),
+            "role": saved.get("role"), "popen": None, "pid": saved.get("pid"), "pstart": saved.get("pstart"),
             "started": T.parse_dt(saved["started"]), "attempt": saved.get("attempt", 0),
             "run_file": Path(saved["run_file"]), "err_file": Path(saved.get("err_file") or ""),
             "out_fh": None, "err_fh": None, "reason": saved.get("reason", "recovered"),
@@ -1956,19 +2013,35 @@ def recover_active_runs(state: dict, now) -> None:
             "executor": saved.get("executor", ""), "log_keys_at_launch": saved.get("log_keys_at_launch"),
             "effort": saved.get("effort", ""),
         }
+        by_session = False
         if not saved.get("pid"):  # зеркало-намерение: диспетчер убит до записи pid
+            by_session = True
             found = _find_pid_by_session(saved.get("session_id"))
             if not found:
-                print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет) — "
-                      "зеркало снято", file=sys.stderr, flush=True)
                 state.get("active_runs", {}).pop(tid, None)
+                try:
+                    has_output = info["run_file"].stat().st_size > 0
+                except OSError:
+                    has_output = False
+                if has_output:  # роль отработала, пока диспетчер лежал: итог прогона не терять
+                    print(f"[dispatch] {T.now_iso(now)} подхват {tid}: процесса нет, вывод есть — разбираю как завершённый",
+                          file=sys.stderr, flush=True)
+                    _finish_run(tid, info, state, now, timed_out=False)
+                else:
+                    print(f"[dispatch] {T.now_iso(now)} подхват {tid}: запуск не состоялся (процесса с session_id нет, "
+                          "вывода нет) — зеркало снято", file=sys.stderr, flush=True)
                 continue
             saved["pid"] = info["pid"] = found
+            saved["pstart"] = info["pstart"] = _proc_start(found)  # метки старта не было — берём текущую: «процесс есть»
             print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {found} найден по session_id (зеркало было без pid)",
                   file=sys.stderr, flush=True)
-        alive = _pid_alive(saved.get("pid"))
-        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')} "
-              f"{'жив — слежу' if alive else 'не найден или чужое имя образа — разбираю как завершённый'}", file=sys.stderr, flush=True)
+        want, got = saved.get("pstart"), _proc_start(saved.get("pid"))
+        alive = _pid_alive(saved.get("pid"), expect_name="" if by_session else None, start=want)
+        how = (f"старт записан {want}, сейчас {got}" if want
+               else "старт не записан (запуск прежней версии) — по имени образа")
+        print(f"[dispatch] {T.now_iso(now)} подхват {tid}: pid {saved.get('pid')}, {how}: "
+              f"{'жив — слежу' if alive else 'не найден или занят другим процессом — разбираю как завершённый'}",
+              file=sys.stderr, flush=True)
         if alive:
             RUNNING[tid] = info
         else:
