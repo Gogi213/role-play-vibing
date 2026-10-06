@@ -203,17 +203,22 @@ def cmd_result(args) -> int:
         return 1
     tkt = T.read_ticket(path)
     why = args.why.strip()
-    proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": "", "return": f" голова {(args.sha or '')[:7]}",
+    on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
+    proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
-    if args.result == "accept":
+    if args.result == "accept" and (args.pr or args.sha):
         return cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why})())
+    if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
+        rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
+        if rc == 0:
+            with T.ticket_lock(path):
+                T.append_log(path, role, f"[итог: wait]{proof} — {why}")
+        return rc
     with T.ticket_lock(path):
         T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
-    if args.result == "wait":
-        return cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
     upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""))
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
@@ -240,15 +245,21 @@ def cmd_accept(args) -> int:
     if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
         return 1
+    import merge_rule
+    slug = merge_rule.repo_slug()
+    if not slug:
+        print("accept: репозиторий не определён — задай RPV_CI_REPO=<владелец/репо> (или войди в gh)", file=sys.stderr)
+        return 1
     with T.ticket_lock(path):
         T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}. "
                      + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."))
-        import merge_rule
         acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
         acc[int(args.pr)] = args.sha  # вердикты по другим PR тикета не трогаем
-        T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc)}, stamp_updated=False)
+        # ждём влития: после merged диспетчер разбудит владельца (done или следующий шаг); Судью повторно не будим
+        T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "waiting",
+                                     "wait_for": f"merged:{slug}#{args.pr}", "on_met": "", "next": ""})
     bus_emit(args.id, "статус", {"accepted": f"{args.pr}@{args.sha}"})
-    print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]}")
+    print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} → status: waiting, wait_for: merged:{slug}#{args.pr}")
     return 0
 
 

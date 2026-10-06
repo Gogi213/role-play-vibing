@@ -14,6 +14,7 @@ _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 os.environ["RPV_BUS_DISABLE"] = "1"
+os.environ["RPV_CI_REPO"] = "o/r"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
@@ -76,6 +77,37 @@ class ResultTests(unittest.TestCase):
     def test_accept_writes_verdict_list(self):
         self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA), 0)
         self.assertEqual(self.tkt().header.get("accepted"), f"7@{SHA}")
+
+    def test_accept_pr_waits_for_merge_then_wakes_owner_not_judge(self):
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("wait_for"), t.header.get("next")), ("waiting", "merged:o/r#7", ""))
+        import merge_rule as M
+        orig = M.merged_done
+        try:
+            M.merged_done = lambda repo, n, gh=None: False
+            self.assertFalse(D.check_wait_for("merged:o/r#7"))
+            M.merged_done = lambda repo, n, gh=None: True
+            self.assertTrue(D.check_wait_for("merged:o/r#7"))
+        finally:
+            M.merged_done = orig
+
+    def test_judge_accept_and_return_without_pr_by_artifact(self):
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self.assertEqual(self.res("judge", "return", path="review.md"), 0)
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("in_progress", "engineer"))
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("done", ""))
+        self.refused("judge", "accept", path="нет-такого.md")
+        self.refused("judge", "accept")
+
+    def test_wait_ticket_cycle_writes_nothing(self):
+        other = T.create_ticket(D.TICKETS_DIR, owner="researcher", title="Д", status="todo", now=NOW)
+        T.write_header_updates(other, {"status": "waiting", "wait_for": f"ticket:{self.tid}"}, now=NOW)
+        self.refused("engineer", "wait", form=f"ticket:{other.stem}")
 
     def test_return_goes_to_owner_in_progress(self):
         T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)

@@ -13,8 +13,8 @@ _SHA = re.compile(r"[0-9a-f]{7,40}")
 RULES = {
     "done": ({"researcher", "engineer"}, "path"),
     "pr": ({"engineer", "researcher"}, "pr+sha"),
-    "accept": ({"judge"}, "pr+sha"),
-    "return": ({"judge"}, "sha"),
+    "accept": ({"judge"}, "pr+sha|path"),
+    "return": ({"judge"}, "sha|path"),
     "blocked": ({"researcher", "engineer", "judge"}, ""),
     "ask-owner": ({"researcher", "engineer", "judge"}, ""),
     "wait": ({"researcher", "engineer", "judge"}, "form"),
@@ -23,6 +23,8 @@ HINT = {
     "path": "--path <файл или каталог с результатом, существует на диске>",
     "pr+sha": "--pr <номер> --sha <голова PR, 7–40 hex>",
     "sha": "--sha <проверенная голова, 7–40 hex>",
+    "pr+sha|path": "--pr <номер> --sha <голова PR, 7–40 hex> (работа в PR) либо --path <артефакт проверки> (без PR)",
+    "sha|path": "--sha <проверенная голова, 7–40 hex> (работа в PR) либо --path <артефакт проверки> (без PR)",
     "form": "--form <форма wait_for>",
 }
 
@@ -40,13 +42,24 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
         return "нужен --why «зачем/почему» (≤ 200 знаков)"
     if len(why) > WHY_MAX:
         return f"--why длиннее {WHY_MAX} знаков ({len(why)}) — сократи"
+
+    def _exists(p: str) -> bool:
+        return bool(p) and (Path(p) if Path(p).is_absolute() else root / p).exists()
+
+    if "|" in need:  # Судья: работа в PR (голова) либо без PR (артефакт проверки)
+        pr_form = need.partition("|")[0]
+        if pr or sha:
+            need = pr_form
+        elif _exists(path):
+            return ""
+        else:
+            return f"итог {result} требует {HINT[need]}"
     if "pr" in need and not (isinstance(pr, int) and pr > 0):
         return f"итог {result} требует {HINT[need]}"
     if "sha" in need and not _SHA.fullmatch((sha or "").lower()):
         return f"итог {result} требует {HINT[need]}"
-    if need == "path":
-        if not path or not (Path(path) if Path(path).is_absolute() else root / path).exists():
-            return f"итог done требует {HINT['path']}"
+    if need == "path" and not _exists(path):
+        return f"итог done требует {HINT['path']}"
     if need == "form" and not (form or "").strip():
         return f"итог wait требует {HINT['form']}"
     if need == "form":
@@ -65,10 +78,12 @@ def route(role: str, result: str, owner: str, reviewer: str = "") -> dict:
         return {"status": "done", "next": ""}
     if result == "pr":
         return {"status": "in_review", "next": rev or "judge"}
+    if result == "accept":  # без PR (приём протокола/отчёта): влитого не ждём; с PR — cmd_accept
+        return {"status": "done", "next": ""}
     if result == "return":
         return {"status": "in_progress", "next": owner}
     if result == "blocked":
         return {"status": "blocked", "next": "ceo"}
     if result == "ask-owner":
         return {"status": "needs_owner", "next": "ceo"}
-    return {}  # accept: вливает merge_rule; wait: статус waiting + wait_for
+    return {}  # wait: статус waiting + wait_for ставит cmd_wait

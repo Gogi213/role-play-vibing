@@ -68,6 +68,28 @@ def _note(tkt, text: str, wake_owner: bool = False, bus=None) -> None:
         bus(tkt.id, "статус", {"merge": text[:120]})
 
 
+def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
+    """wait_for `merged:<репо>#<PR>`: PR влит. Не удалось спросить у GitHub — не готово."""
+    try:
+        return bool(gh(f"repos/{repo}/pulls/{number}").get("merged"))
+    except Exception:
+        return False
+
+
+def repo_slug() -> str:
+    """<владелец/репо> для `merged:`: RPV_CI_REPO, иначе `gh repo view`; не определился — пусто."""
+    import subprocess
+    slug = (C.P.env("CI_REPO", "") or "").strip()
+    if slug:
+        return slug
+    try:
+        r = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                           capture_output=True, timeout=30)
+        return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
 def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
     """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
     st, out = _load(), []

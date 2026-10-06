@@ -14,6 +14,7 @@ from pathlib import Path
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
+os.environ["RPV_CI_REPO"] = "o/r"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
@@ -133,6 +134,14 @@ class MergeRuleTests(unittest.TestCase):
         self.assertTrue(T.author_is(t.log[-1].author, "judge"))
         self.assertEqual(M.accepted_head(t, 7), SHA)
         self.assertIsNone(M.accepted_head(t, 8))
+        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "merged:o/r#7"))
+
+    def test_merged_done_asks_github(self):
+        self.assertTrue(M.merged_done(REPO, 7, gh=lambda p, **k: {"merged": True}))
+        self.assertFalse(M.merged_done(REPO, 7, gh=lambda p, **k: {"merged": False}))
+        def boom(p, **k):
+            raise RuntimeError("net")
+        self.assertFalse(M.merged_done(REPO, 7, gh=boom))
 
     def test_two_prs_one_ticket_keep_both_verdicts(self):
         os.environ.pop("RPV_ROLE", None)

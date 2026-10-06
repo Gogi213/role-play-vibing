@@ -288,6 +288,9 @@ def check_wait_for(spec: str) -> bool:
     if parsed[0] == "ci":
         import ci_watch
         return ci_watch.ci_done(parsed[1], parsed[2])
+    if parsed[0] == "merged":
+        import merge_rule
+        return merge_rule.merged_done(parsed[1], parsed[2])
     _, alias, what, arg = parsed
     return _host_wait_met(alias, what, arg)
 

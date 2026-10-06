@@ -52,8 +52,8 @@ python <плагин>/.claude/dispatcher/supervise.py --uninstall [--project <п
 |---|---|---|---|
 | `done` | исследователь, инженер | `--path` (существует на диске) | ревьюер (`in_review`), нет ревьюера — `done` |
 | `pr` | инженер, исследователь | `--pr N --sha H` | `in_review`, next — ревьюер (Судья); номер — в `pr:` шапки |
-| `accept` | Судья | `--pr N --sha H` | `accepted:` (список), вливает merge_rule по правилу |
-| `return` | Судья | `--sha H` | `in_progress`, next — владелец |
+| `accept` | Судья | `--pr N --sha H` (PR) либо `--path <артефакт проверки>` (без PR) | PR: `accepted:` (список), `waiting` + `wait_for: merged:<репо>#N`, вливает merge_rule, после влития владелец будится (done или следующий шаг), Судья — нет; без PR: `done` |
+| `return` | Судья | `--sha H` либо `--path <артефакт проверки>` | `in_progress`, next — владелец |
 | `blocked` | любая | — | `blocked`, next — CEO |
 | `ask-owner` | любая | — | `needs_owner`, next — CEO |
 | `wait` | любая | `--form` (годная форма wait_for) | `waiting` + `wait_for` |
