@@ -875,5 +875,125 @@ class ServerIdleTK070Tests(WatchSandbox):
         self.assertEqual([x.kind for x in f], ["server-idle"])
 
 
+class NoPlanWakeTests(WatchSandbox):
+    def test_no_plan_wakes_ticket_owner(self):
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Без плана", status="in_progress", now=self.now)
+        ws = {}
+        f = [W.Finding("no-plan", T.read_ticket(p).id, "x: в работе > 30 мин без плана шагов на табло")]
+        self.assertEqual(len(W.notify_findings(f, ws, self.now)), 1)
+        t = T.read_ticket(p)
+        self.assertEqual(t.next_role, "engineer")
+        self.assertIn("plan.py set", t.log[-1].text)
+        W.notify_findings(f, ws, self.now + timedelta(minutes=5))
+        self.assertEqual(len(T.read_ticket(p).log), 1)
+
+
+class StalePlanTests(WatchSandbox):
+    def test_stale_plan_wakes_owner_once(self):
+        import json
+        root = Path(self.tmp.name) / "root"
+        (root / ".claude" / "pulse" / "plans").mkdir(parents=True)
+        orig_root = D.PROJECT_ROOT
+        D.PROJECT_ROOT = root
+        try:
+            p = T.create_ticket(self.tickets_dir, owner="engineer", title="План", status="in_progress",
+                                now=self.now - timedelta(hours=3))
+            tid = T.read_ticket(p).id
+            plan = {"id": tid, "steps": [{"state": "run"}], "updated": T.now_iso(self.now - timedelta(hours=2))}
+            (root / ".claude" / "pulse" / "plans" / f"{tid}.json").write_text(json.dumps(plan), encoding="utf-8")
+            self.assertEqual(W.check_stale_plan(self.now), [])  # новой записи роли нет
+            T.append_log(p, "engineer", "сделал", now=self.now - timedelta(hours=1))
+            f = W.check_stale_plan(self.now)
+            self.assertEqual([x.kind for x in f], ["plan-stale"])
+            ws = {}
+            self.assertEqual(len(W.notify_findings(f, ws, self.now)), 1)
+            t = T.read_ticket(p)
+            self.assertEqual(t.next_role, "engineer")
+            self.assertIn("plan.py step", t.log[-1].text)
+            W.notify_findings(f, ws, self.now + timedelta(minutes=5))
+            self.assertEqual(len(T.read_ticket(p).log), 2)
+        finally:
+            D.PROJECT_ROOT = orig_root
+
+
+class StalePlanWaitingTests(WatchSandbox):
+    def test_waiting_gets_reminder_without_wake(self):
+        import json
+        root = Path(self.tmp.name) / "root"
+        (root / ".claude" / "pulse" / "plans").mkdir(parents=True)
+        orig_root = D.PROJECT_ROOT
+        D.PROJECT_ROOT = root
+        try:
+            p = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт", status="waiting",
+                                now=self.now - timedelta(hours=3))
+            tid = T.read_ticket(p).id
+            plan = {"id": tid, "steps": [{"state": "run"}], "updated": T.now_iso(self.now - timedelta(hours=2))}
+            (root / ".claude" / "pulse" / "plans" / f"{tid}.json").write_text(json.dumps(plan), encoding="utf-8")
+            T.append_log(p, "engineer", "ждём счёт", now=self.now - timedelta(hours=1))
+            f = W.check_stale_plan(self.now)
+            self.assertEqual([x.kind for x in f], ["plan-stale-waiting"])
+            ws = {}
+            self.assertEqual(len(W.notify_findings(f, ws, self.now)), 1)
+            t = T.read_ticket(p)
+            self.assertFalse(t.next_role)
+            self.assertIn("plan.py step", t.log[-1].text)
+            W.notify_findings(f, ws, self.now + timedelta(minutes=5))
+            self.assertEqual(len(T.read_ticket(p).log), 2)
+        finally:
+            D.PROJECT_ROOT = orig_root
+
+
+class StalePlanLagTests(WatchSandbox):
+    def test_log_right_after_plan_update_is_not_stale(self):
+        import json
+        root = Path(self.tmp.name) / "root"
+        (root / ".claude" / "pulse" / "plans").mkdir(parents=True)
+        orig_root = D.PROJECT_ROOT
+        D.PROJECT_ROOT = root
+        try:
+            p = T.create_ticket(self.tickets_dir, owner="engineer", title="Лаг", status="in_progress",
+                                now=self.now - timedelta(hours=3))
+            tid = T.read_ticket(p).id
+            upd = self.now - timedelta(hours=2)
+            plan = {"id": tid, "steps": [{"state": "run"}], "updated": T.now_iso(upd)}
+            (root / ".claude" / "pulse" / "plans" / f"{tid}.json").write_text(json.dumps(plan), encoding="utf-8")
+            T.append_log(p, "engineer", "итог", now=upd + timedelta(minutes=2))
+            self.assertEqual(W.check_stale_plan(self.now), [])
+        finally:
+            D.PROJECT_ROOT = orig_root
+
+
+class NoProgressViewTests(WatchSandbox):
+    def _status(self, root, procs, built_ts):
+        import json
+        d = root / ".claude" / "pulse"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "status.json").write_text(json.dumps({"view2": {"built_ts": built_ts, "processes": procs}}), encoding="utf-8")
+
+    def test_in_progress_without_plan_is_found_only_with_fresh_collector(self):
+        root = Path(self.tmp.name) / "root"
+        orig_root = D.PROJECT_ROOT
+        D.PROJECT_ROOT = root
+        try:
+            p = T.create_ticket(self.tickets_dir, owner="engineer", title="Без плана", status="in_progress",
+                                now=self.now - timedelta(hours=1))
+            tid = T.read_ticket(p).id
+            self.assertEqual(W.check_no_progress_view(self.now), [])  # status.json нет — молчим
+            self._status(root, [{"id": tid, "plan": None}], self.now.timestamp() - 600)
+            self.assertEqual(W.check_no_progress_view(self.now), [])  # сборщик стоит — другая находка
+            self._status(root, [{"id": tid, "plan": None}], self.now.timestamp() - 10)
+            self.assertEqual([f.kind for f in W.check_no_progress_view(self.now)], ["no-plan"])
+            self._status(root, [{"id": tid, "plan": {"steps": []}}], self.now.timestamp() - 10)
+            self.assertEqual(W.check_no_progress_view(self.now), [])
+        finally:
+            D.PROJECT_ROOT = orig_root
+
+    def test_wake_text_points_to_plugin_plan_script(self):
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Без плана", status="in_progress", now=self.now)
+        W.notify_findings([W.Finding("no-plan", T.read_ticket(p).id, "x")], {}, self.now)
+        self.assertIn(W._PLAN_PY, T.read_ticket(p).log[-1].text)
+        self.assertTrue(Path(W._PLAN_PY).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
