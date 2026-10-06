@@ -267,9 +267,7 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(STATE_FILE)
+    T.atomic_write_text(STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True))  # с повторами: на Windows читатель держит файл
 
 
 # --- wait_for ---------------------------------------------------------------------------------
