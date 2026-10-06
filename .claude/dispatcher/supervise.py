@@ -83,9 +83,9 @@ def task_name(project: Path) -> str:
 
 
 def _secret_name(k: str) -> bool:
-    """Секреты в файл не пишем; *_FILE (путь к файлу с секретом) — не секрет."""
+    """Секрет — по окончанию имени (…_TOKEN, …_API_KEY); пороги (…_TOKENS) и пути (…_DECK_KEY, …_FILE) — нет."""
     u = k.upper()
-    return not u.endswith("_FILE") and any(w in u for w in ("TOKEN", "KEY", "SECRET", "PASS"))
+    return u.endswith(("_TOKEN", "_SECRET", "_PASSWORD", "_PASS", "_API_KEY", "_ACCESS_KEY", "_SECRET_KEY", "_PRIVATE_KEY"))
 
 
 def snapshot_env(state_dir: Path) -> None:

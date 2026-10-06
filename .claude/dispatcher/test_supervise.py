@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -96,19 +97,18 @@ class InstallFilesTest(unittest.TestCase):
             sys.executable = real
 
     def test_env_snapshot_only_forwarded(self):
-        with tempfile.TemporaryDirectory() as d:
-            os.environ["RPV_TEST_X"], os.environ["ANTHROPIC_API_KEY_TK072"] = "1", "secret"
-            os.environ["RPV_BUS_TOKEN"], os.environ["RPV_BUS_TOKEN_FILE"] = "tok-SECRET", "/p/tok"
-            try:
-                V.snapshot_env(Path(d))
-                saved = json.loads((Path(d) / "supervise.env.json").read_text(encoding="utf-8"))
-            finally:
-                del os.environ["RPV_TEST_X"], os.environ["ANTHROPIC_API_KEY_TK072"]
-                del os.environ["RPV_BUS_TOKEN"], os.environ["RPV_BUS_TOKEN_FILE"]
-            self.assertEqual(saved.get("RPV_TEST_X"), "1")
-            self.assertNotIn("ANTHROPIC_API_KEY_TK072", saved)
-            self.assertNotIn("RPV_BUS_TOKEN", saved)
-            self.assertEqual(saved.get("RPV_BUS_TOKEN_FILE"), "/p/tok")
+        keep = {"RPV_TEST_X": "1", "RPV_DISPATCH_ROTATE_TOKENS": "150000", "ALPHA_DISPATCH_ROTATE_TOKENS": "1",
+                "RPV_CONTEXT_WARN_TOKENS": "2", "ALPHA_CONTEXT_WARN_TOKENS": "3", "RPV_DECK_KEY": "C:/k/id_rsa",
+                "ALPHA_DECK_KEY": "/k", "RPV_BUS_TOKEN_FILE": "/p/tok"}
+        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_BUS_TOKEN": "tok-SECRET", "ALPHA_BUS_TOKEN": "t2",
+                "RPV_X_API_KEY": "k", "ALPHA_DB_PASSWORD": "p"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**keep, **drop}):
+            V.snapshot_env(Path(d))
+            saved = json.loads((Path(d) / "supervise.env.json").read_text(encoding="utf-8"))
+        for k, v in keep.items():
+            self.assertEqual(saved.get(k), v, k)
+        for k in drop:
+            self.assertNotIn(k, saved)
 
 
 if __name__ == "__main__":
