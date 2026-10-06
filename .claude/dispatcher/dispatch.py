@@ -1682,7 +1682,7 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
             ref = datetime.fromtimestamp(Path(info["run_file"]).stat().st_mtime).astimezone()
         except OSError:
             ref = now
-        until = _limit_reset_at(result, now, ref)
+        until = min(_limit_reset_at(result, now, ref), now + LIMIT_PAUSE_MAX)
         if until > now:
             state["limit_pause_until"] = T.now_iso(until)
         key = f"{tid}::{info['role']}"
@@ -1956,6 +1956,8 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
 
 IDLE_SLO_MIN = float(P.env("IDLE_SLO_MIN", "10"))
 IDLE_GRACE_S = 600.0
+INVARIANT_GRACE_S = float(os.environ.get("RPV_DISPATCH_INVARIANT_GRACE_S") or 600.0)  # TK-076 п.6: открытый тикет без хода дольше этого — владельца будим сами
+LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее часа: дальше пробный запуск (429 бесплатен), новая метка — новая пауза
 
 
 def _waits_without_condition(tkt: T.Ticket, now) -> bool:
@@ -1967,6 +1969,70 @@ def _waits_without_condition(tkt: T.Ticket, now) -> bool:
         return (now - T.parse_dt(tkt.header.get("updated", ""))).total_seconds() > IDLE_GRACE_S
     except Exception:
         return False
+
+
+def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | None":
+    """TK-076 п.6: у открытого тикета есть ход — роль запущена / next / годный wait_for / вопрос владельцу. Здесь —
+    тикет, которого decide() не будит, а хода нет дольше INVARIANT_GRACE_S (от `updated`): причина или None."""
+    if tkt.next_role or tkt.status not in ("waiting", "in_review"):
+        return None
+    try:
+        if (now - T.parse_dt(tkt.header.get("updated", ""))).total_seconds() <= INVARIANT_GRACE_S:
+            return None
+    except Exception:
+        return None
+    if tkt.status == "waiting":
+        spec = (tkt.header.get("wait_for") or "").strip()
+        if not spec:
+            return "waiting без wait_for и без next"
+        if T.parse_wait_for(spec) is None:
+            return f"wait_for не понят ({spec[:80]})"
+        return None
+    if tkt.reviewer in ROLE_KEYS and _review_returns(state or {}, tkt.id) < MAX_REVIEW_RETURNS:  # предел — вопрос CEO
+        return "in_review: последняя запись — ревьюера, статус не сменён, next не задан"
+    return None
+
+
+def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ticket":
+    """Нарушение инварианта: будим владельца (status → in_progress, запись диспетчера) + строка CEO (раз на эпизод)."""
+    reason = _no_move_reason(tkt, now, state)
+    if not reason:
+        return tkt
+    key = f"{tkt.id}|{tkt.header.get('updated', '')}"
+    sig = state.setdefault("invariant_signaled", {})
+    if sig.get(tkt.id) != key:
+        sig[tkt.id] = key
+        append_ceo_inbox(tkt.id, "нет-хода", f"{reason} дольше {int(INVARIANT_GRACE_S // 60)} мин — "
+                         + (f"владелец {tkt.owner} разбужен" if tkt.owner in ROLE_KEYS else "владельца-роли нет, нужен CEO"), now)
+    if tkt.owner not in ROLE_KEYS:
+        return tkt
+    T.write_header_updates(path, {"status": "in_progress"}, now=now)
+    T.append_log(path, "dispatcher", f"инвариант «у открытого тикета есть ход»: {reason} — владелец разбужен "
+                 f"(status: in_progress). Следующий ход обязателен: работа / `--next <роль>` / "
+                 f"`tickets.py wait <ID> <форма>` / вопрос владельцу.", now=now)
+    return T.read_ticket(path)
+
+
+def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
+    """TK-076 п.7: уже существующий цикл ожиданий ticket:<ID> → строка CEO (раз в сутки, от тикета с наименьшим ID)."""
+    if tkt.status != "waiting":
+        return
+    parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
+    if not parsed or parsed[0] != "ticket":
+        return
+    cycle = T.wait_cycle(TICKETS_DIR, tkt.id, parsed[1])
+    if not cycle or tkt.id != min(cycle[:-1]):
+        return
+    notified = state.setdefault("ceo_wait_cycle_notified", {})
+    prev = notified.get(tkt.id)
+    if prev:
+        try:
+            if now - T.parse_dt(prev) < WAIT_NOTICE_EVERY:
+                return
+        except ValueError:
+            pass
+    append_ceo_inbox(tkt.id, "цикл-ожиданий", " -> ".join(cycle) + " — каждый ждёт следующего, никто не пойдёт; разорвать", now)
+    notified[tkt.id] = T.now_iso(now)
 
 
 def _alert_idle(day: str, rec: dict, now) -> None:
@@ -2040,11 +2106,15 @@ def tick(now=None) -> int:
             except Exception as e:  # on_met не должен ронять тик; on_met уже очищен — дальше обычный путь
                 print(f"[dispatch] on_met {tid}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             tkt = T.read_ticket(path)
+        notify_wait_cycle(tkt, state, now)
         decision = decide(tkt, state, now)
         if decision is None:
             if _waits_without_condition(tkt, now):
                 waiting_nocond = True
-            continue
+            tkt = enforce_move_invariant(path, tkt, state, now)
+            decision = decide(tkt, state, now)
+            if decision is None:
+                continue
         haiku_reason = haiku_refused_reason(tkt)
         if haiku_reason:
             T.write_header_updates(path, {"status": "blocked"}, now=now)

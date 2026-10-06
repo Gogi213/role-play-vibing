@@ -76,7 +76,7 @@ try:
         cli("wait", tid, f"file:{base / 'ready' / tid}")
     elif act == "silent":
         pass
-    elif act == "nostatus":
+    elif act in ("nostatus", "noverdict"):  # noverdict: ревьюер пишет запись, статус in_review не меняет, next не ставит
         entry(None)
     elif act == "waitnocond":
         entry("waiting")
@@ -106,6 +106,7 @@ PLANS = [  # (владелец, план ролей на запуски подр
     ("researcher", ["handoff:ceo", "after-ceo"]),
     ("engineer", ["waitfile:6", "after-wait"]),
     ("researcher", ["429now", "ok"]),
+    ("engineer", ["ok", "noverdict", "ok"], "judge"),  # п.6: ревьюер без вердикта и без next — владелец разбужен сам
 ]
 
 
@@ -131,7 +132,7 @@ class Harness:
         self.env = dict(os.environ, EN_BASE=str(base), EN_TK=str(HERE / "tickets.py"), PYTHONIOENCODING="utf-8", RPV_BUS_DISABLE="1",
                         RPV_DISPATCH_INTERVAL="1", RPV_DISPATCH_MIN_GAP_S="1", RPV_DISPATCH_MAX_PARALLEL="4",
                         RPV_DISPATCH_ROLE_PARALLEL="engineer:3,researcher:3", RPV_DISPATCH_TIMEOUT="60",
-                        RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR="1000", RPV_DISPATCH_MAX_SAME_STATUS_RUNS="1000")
+                        RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR="1000", RPV_DISPATCH_INVARIANT_GRACE_S="8", RPV_DISPATCH_MAX_SAME_STATUS_RUNS="1000")
         self.log_fh = open(self.disp / "endurance-dispatch.log", "a", encoding="utf-8")
 
     # --- шина (настоящий bus.py на свободном порту) ---
@@ -321,8 +322,8 @@ class Harness:
     # --- раунд ---
     def round(self, n: int, timeout: float = 300.0, mode: str = "base") -> dict:
         ids = []
-        for owner, plan in PLANS:
-            p = T.create_ticket(self.tdir, owner=owner, title=f"раунд {n}", prefix="TK-")
+        for owner, plan, *rev in PLANS:
+            p = T.create_ticket(self.tdir, owner=owner, title=f"раунд {n}", prefix="TK-", reviewer=rev[0] if rev else None)
             (self.base / "plan" / f"{p.stem}.json").write_text(json.dumps(plan))
             ids.append(p.stem)
         self.idle_episodes.clear()
@@ -391,6 +392,11 @@ class Harness:
         refused = [t for t in ids if "waiting без wait_for и без next" in (self.tdir / f"{t}.md").read_text(encoding="utf-8")
                    and t in (ho_judge, ho_ceo)]
         lost += [f"{t}: после --next диспетчер отказал «waiting без условия»" for t in refused]
+        nv = ids[11]
+        if roles[nv] != ["engineer ok", "judge noverdict", "engineer ok", "judge ok"]:
+            lost.append(f"{nv}: ревьюер без вердикта — владелец не разбужен инвариантом ({roles[nv]})")
+        if f"{nv} [нет-хода]" not in inbox:
+            lost.append(f"{nv}: нарушение инварианта не дошло до ceo-inbox")
         blocked = [t for t, s in st.items() if s == "blocked"]
         res = {"round": n, "mode": mode, "done": done, "blocked": blocked, "lost_signals": lost, "faults": faults,
                "max_idle_s": round(max(self.idle_episodes, default=0.0), 1)}

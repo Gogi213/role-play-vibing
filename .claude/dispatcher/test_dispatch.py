@@ -773,7 +773,7 @@ class DispatchRunTests(unittest.TestCase):
         t0 = dt("2026-10-06T12:00:00+04:00")
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт", now=t0 - timedelta(hours=1))
         T.write_header_updates(path, {"status": "waiting", "wait_for": ""}, now=t0 - timedelta(hours=1))
-        with mock.patch.dict(os.environ, {"RPV_BUS_DISABLE": "1"}):
+        with mock.patch.dict(os.environ, {"RPV_BUS_DISABLE": "1"}),                 mock.patch.object(D, "enforce_move_invariant", lambda p, t, s, n: t):  # учёт — отдельно от пробуждения п.6
             D.tick(t0)
             D.tick(t0 + timedelta(seconds=300))
             D.tick(t0 + timedelta(seconds=900))  # 15 мин > SLO 10
@@ -798,6 +798,73 @@ class DispatchRunTests(unittest.TestCase):
             D.tick(t0 + timedelta(seconds=1800))
         rec = D.load_state()["downtime"]["2026-10-06"]
         self.assertEqual((rec["throttle_s"], rec["limit_s"]), (300 + 300, 1200))
+
+    def mk(self, owner, status, wait_for="", now=None, reviewer=None):
+        now = now or dt("2026-10-06T12:00:00+04:00")
+        p = T.create_ticket(self.tickets_dir, owner=owner, title="t", reviewer=reviewer, now=now)
+        T.write_header_updates(p, {"status": status, "wait_for": wait_for}, now=now)
+        return p
+
+    def test_waiting_without_condition_woken_after_grace_and_signalled_once(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", now=t0)
+        state = {}
+        early = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=9))
+        self.assertEqual(early.status, "waiting")
+        late = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=11))
+        self.assertEqual(late.status, "in_progress")
+        self.assertEqual(D.decide(late, state, t0 + timedelta(minutes=11)).role, "engineer")
+        self.assertTrue(any(e.author == "dispatcher" and "инвариант" in e.text for e in late.log))
+        self.assertIn("нет-хода", D.CEO_INBOX.read_text(encoding="utf-8"))
+
+    def test_waiting_with_good_wait_for_is_a_move(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "waiting", "file:/tmp/x", now=t0)
+        self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), {}, t0 + timedelta(hours=5)).status, "waiting")
+
+    def test_in_review_after_reviewer_entry_without_status_is_woken(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "in_review", reviewer="judge", now=t0)
+        T.append_log(p, "judge", "Дальше: Инженер", now=t0 + timedelta(seconds=30))
+        self.assertIsNone(D.decide(T.read_ticket(p), {}, t0))
+        out = D.enforce_move_invariant(p, T.read_ticket(p), {}, t0 + timedelta(minutes=12))
+        self.assertEqual(out.status, "in_progress")
+
+    def test_done_and_blocked_are_not_violations(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        for st in ("done", "blocked", "needs_owner", "stopped"):
+            p = self.mk("engineer", st, now=t0)
+            self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(days=1)), st)
+
+    def test_wait_cycle_two_and_three_tickets_refused_by_cli(self):
+        a, b, c = (self.mk("engineer", "todo") for _ in range(3))
+        ia, ib, ic = a.stem, b.stem, c.stem
+        T.write_header_updates(a, {"status": "waiting", "wait_for": f"ticket:{ib}"})
+        self.assertEqual(T.wait_cycle(self.tickets_dir, ib, ia), [ib, ia, ib])  # 2 тикета
+        T.write_header_updates(b, {"status": "waiting", "wait_for": f"ticket:{ic}"})
+        self.assertEqual(T.wait_cycle(self.tickets_dir, ic, ia), [ic, ia, ib, ic])  # 3 тикета
+        self.assertIsNone(T.wait_cycle(self.tickets_dir, ic, "TK-9999"))
+        self.assertEqual(T.wait_cycle(self.tickets_dir, ic, ic), [ic, ic])  # сам на себя
+        orig = TK.TICKETS_DIR
+        TK.TICKETS_DIR = self.tickets_dir
+        try:
+            self.assertEqual(TK.main(["wait", ic, f"ticket:{ia}"]), 1)
+            self.assertEqual(T.read_ticket(c).status, "todo")  # отказ — шапка не тронута
+            self.assertEqual(TK.main(["wait", ic, "file:/tmp/ok"]), 0)
+        finally:
+            TK.TICKETS_DIR = orig
+
+    def test_existing_cycle_signals_ceo_once_from_min_id(self):
+        a, b = (self.mk("engineer", "todo") for _ in range(2))
+        T.write_header_updates(a, {"status": "waiting", "wait_for": f"ticket:{b.stem}"})
+        T.write_header_updates(b, {"status": "waiting", "wait_for": f"ticket:{a.stem}"})
+        state, now = {}, dt("2026-10-06T12:30:00+04:00")
+        for p in (b, a, a):
+            D.notify_wait_cycle(T.read_ticket(p), state, now)
+        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
+
+    def test_limit_pause_capped_to_one_hour(self):
+        self.assertEqual(D.LIMIT_PAUSE_MAX, timedelta(hours=1))
 
     def test_todo_ticket_runs_logs_and_saves_session(self):
         self.set_fake_bin(FAKE_BIN_OK)
@@ -4196,5 +4263,6 @@ class LimitAndWaitingTK070Test(unittest.TestCase):
         self.assertTrue(D._limit_paused(st, now))
         self.assertFalse(D._limit_paused(st, now + timedelta(minutes=11)))
         self.assertFalse(D._limit_paused({}, now))
+
 
 
