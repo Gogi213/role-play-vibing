@@ -2035,8 +2035,17 @@ def _drop_ceo_handoff(state: dict, tid: str) -> None:
 def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
     """Метка передачи CEO кончается на тике, как только тикет вышел из ожидания (waiting/in_review): CEO вернул его
     шапкой, done/stopped/blocked. Запуск любой роли и запись CEO снимают её в launch_run / _ceo_handoff_pending."""
-    if tkt.id in (state.get("ceo_handoffs") or {}) and tkt.id not in RUNNING and tkt.status not in ("waiting", "in_review"):
-        _drop_ceo_handoff(state, tkt.id)
+    at = (state.get("ceo_handoffs") or {}).get(tkt.id)
+    if not at or tkt.id in RUNNING or tkt.status in ("waiting", "in_review"):
+        return
+    # `--next ceo` и смена статуса роли — две команды: тик между ними видит старый статус при свежей метке. Статус
+    # сменили после метки (updated новее) — это ход CEO/роли; иначе метку не трогаем, роль ещё допишет `waiting`.
+    try:
+        if T.parse_dt(tkt.header.get("updated", "")) <= T.parse_dt(at):
+            return
+    except (ValueError, TypeError):
+        pass
+    _drop_ceo_handoff(state, tkt.id)
 
 
 def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:

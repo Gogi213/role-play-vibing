@@ -890,6 +890,16 @@ class DispatchRunTests(unittest.TestCase):
         out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(hours=3))
         self.assertEqual(out.status, "in_progress")
 
+    def test_ceo_handoff_survives_tick_between_next_ceo_and_waiting(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        p = self.mk("engineer", "in_progress", now=t0)
+        state = self._handoff_state(p, t0 + timedelta(seconds=2))  # метка поставлена тиком после `comment --next ceo`
+        D._expire_ceo_handoff(T.read_ticket(p), state)
+        self.assertIn(T.read_ticket(p).id, state["ceo_handoffs"])
+        T.write_header_updates(p, {"status": "waiting"}, now=t0 + timedelta(seconds=9))
+        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=12))
+        self.assertEqual(out.status, "waiting")
+
     def test_ceo_handoff_dropped_on_done(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         p = self.mk("engineer", "waiting", now=t0)
