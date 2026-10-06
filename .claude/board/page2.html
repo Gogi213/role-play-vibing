@@ -1,0 +1,403 @@
+<title>Табло RPV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+/* Табло v2 по концепту владельца: обзор (машины, процессы цепочкой шагов, ваш ход, лента) + раскрытие процесса по клику.
+   Тёмная тема — основная (bare :root); светлая — приглушённая версия токенов. Данные — view2 (.claude/board/VIEW2.md). */
+:root {
+  --bg: #0E1014; --head: #1A1F29; --ink: #C9CED6; --dim: #7C8494; --strong: #F4F5F7;
+  --green: #5FD38D; --blue: #6AA9FF; --amber: #F2B84B; --red: #F27C6D;
+  --line: #2A3140; --sep: #1C212B; --arrow: #4A5262; --keybg: #262C38;
+  --run-bg: #121B2A; --wait-bg: #1A160C; --bad-bg: #1E1212; --done-line: #2B5A40; --sel: #121722;
+  --ask-bg: #16140E; --wait-row: #2A2416; --on-amber: #1A1405; --brand-bg: #E6E8EC; --brand-ink: #0E1014;
+  --purple-bg: #3A2F5C; --purple-fg: #D9CCFF; --purple-line: #4A3F73;
+  --teal-bg: #0F4A50; --teal-fg: #9BEAF0; --teal-line: #1B5E64;
+  --blue-bg: #1B3355; --blue-fg: #A9CBFF; --blue-line: #2D4A73;
+  --gray-bg: #1E2430; --gray-fg: #7C8494; --gray-line: #2A3140;
+  --amber-bg: #F2B84B; --amber-fg: #1A1405; --amber-line: #F2B84B;
+  --f: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #F4F5F7; --head: #E4E7EC; --ink: #2A3140; --dim: #6B7384; --strong: #0E1014;
+    --green: #1F8A52; --blue: #2B6FD1; --amber: #A8680A; --red: #C0392B;
+    --line: #D0D5DD; --sep: #E1E4EA; --arrow: #9AA2B1; --keybg: #DDE1E8;
+    --run-bg: #E6EFFC; --wait-bg: #FBF1DC; --bad-bg: #FBE7E4; --done-line: #9FD3B5; --sel: #EBEEF4;
+    --ask-bg: #FBF4E4; --wait-row: #F6E7C4; --on-amber: #1A1405; --brand-bg: #0E1014; --brand-ink: #F4F5F7;
+    --purple-bg: #E3DBF7; --purple-fg: #3A2F5C; --purple-line: #B9A9E6;
+    --teal-bg: #CDEFF2; --teal-fg: #0F4A50; --teal-line: #7CC9CF;
+    --blue-bg: #D6E4FA; --blue-fg: #1B3355; --blue-line: #93B4E6;
+    --gray-bg: #E4E7EC; --gray-fg: #5B6270; --gray-line: #CBD0D8;
+    --amber-line: #D79B2B; color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #F4F5F7; --head: #E4E7EC; --ink: #2A3140; --dim: #6B7384; --strong: #0E1014;
+  --green: #1F8A52; --blue: #2B6FD1; --amber: #A8680A; --red: #C0392B;
+  --line: #D0D5DD; --sep: #E1E4EA; --arrow: #9AA2B1; --keybg: #DDE1E8;
+  --run-bg: #E6EFFC; --wait-bg: #FBF1DC; --bad-bg: #FBE7E4; --done-line: #9FD3B5; --sel: #EBEEF4;
+  --ask-bg: #FBF4E4; --wait-row: #F6E7C4; --on-amber: #1A1405; --brand-bg: #0E1014; --brand-ink: #F4F5F7;
+  --purple-bg: #E3DBF7; --purple-fg: #3A2F5C; --purple-line: #B9A9E6;
+  --teal-bg: #CDEFF2; --teal-fg: #0F4A50; --teal-line: #7CC9CF;
+  --blue-bg: #D6E4FA; --blue-fg: #1B3355; --blue-line: #93B4E6;
+  --gray-bg: #E4E7EC; --gray-fg: #5B6270; --gray-line: #CBD0D8;
+  --amber-line: #D79B2B; color-scheme: light;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.5 var(--f); font-variant-ligatures: none; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px 24px; display: grid; gap: 14px; }
+.d { color: var(--dim); } .g { color: var(--green); } .b { color: var(--blue); } .a { color: var(--amber); } .r { color: var(--red); }
+.w { color: var(--strong); } .k { font-weight: 700; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 18px; margin: 0 -16px; padding: 8px 16px; background: var(--head); }
+.brand { font-weight: 700; background: var(--brand-bg); color: var(--brand-ink); padding: 0 .8ch; border-radius: 3px; }
+.hl { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+.sec { color: var(--dim); font-weight: 700; letter-spacing: .15ch; text-transform: uppercase; margin: 6px 0 -4px; }
+.sec span { font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+.tg { display: inline-block; padding: 0 .6ch; border-radius: 3px; font-weight: 700; white-space: nowrap; }
+.tg-purple { background: var(--purple-bg); color: var(--purple-fg); } .tg-teal { background: var(--teal-bg); color: var(--teal-fg); }
+.tg-blue { background: var(--blue-bg); color: var(--blue-fg); } .tg-gray { background: var(--gray-bg); color: var(--gray-fg); }
+.tg-amber { background: var(--amber-bg); color: var(--amber-fg); }
+.key { display: inline-block; background: var(--keybg); color: var(--strong); padding: 0 .7ch; border-radius: 3px; font-weight: 700; }
+
+.notice { padding: 8px 12px; border: 1px solid var(--amber); border-radius: 6px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.notice.bad { border-color: var(--red); }
+.notice button { border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+.card.off { border-style: dashed; } .card.down { border-color: var(--red); }
+.card .top { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.card .load { margin-top: 4px; overflow-wrap: anywhere; }
+
+.proc { border-bottom: 1px solid var(--sep); }
+.proc > button { display: block; width: 100%; text-align: left; padding: 10px 6px 8px; border-left: 3px solid transparent; border-radius: 2px; }
+.proc.open > button, .proc > button:hover { background: var(--sel); }
+.proc.open > button { border-left-color: var(--blue); }
+.phead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-bottom: 8px; }
+.phead .l { min-width: 0; overflow-wrap: anywhere; }
+.pipe { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px 0; }
+.chip { border: 1px solid var(--line); border-radius: 6px; padding: 4px 1ch; width: 23ch; min-width: 0; overflow-wrap: anywhere; }
+.chip.done { border-color: var(--done-line); } .chip.run { border-color: var(--blue); background: var(--run-bg); }
+.chip.wait { border-color: var(--amber-line); background: var(--wait-bg); } .chip.todo { border-style: dashed; }
+.chip.bad { border-color: var(--red); background: var(--bad-bg); }
+.arr { width: 4ch; text-align: center; align-self: center; color: var(--arrow); white-space: pre; }
+
+.detail { padding: 6px 6px 14px 16px; display: grid; gap: 12px; }
+.flow { overflow-wrap: anywhere; }
+.srow { display: grid; grid-template-columns: 3ch minmax(0, 1.3fr) minmax(0, 2fr) minmax(0, 1.4fr) 9ch; gap: 2px 12px; padding: 2px 6px; }
+.srow.head { background: var(--green); color: #0B0D10; font-weight: 700; }
+.srow.wait { background: var(--wait-row); }
+.srow .meta { display: flex; flex-wrap: wrap; gap: 0 10px; min-width: 0; }
+.sdet { padding: 0 6px 2px calc(3ch + 18px); color: var(--dim); overflow-wrap: anywhere; }
+.q { border: 1px solid var(--amber-line); background: var(--ask-bg); border-radius: 6px; padding: 10px 14px; display: grid; gap: 6px; min-width: 0; }
+.q .qt { overflow-wrap: anywhere; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+.opt { text-align: left; padding: 2px 4px; border-radius: 4px; }
+.opt:hover { background: var(--keybg); }
+.opt .eff { display: block; color: var(--dim); font-size: 12px; margin-left: 2.4ch; }
+.confirm { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--amber); color: var(--on-amber); padding: 6px 10px; border-radius: 4px; font-weight: 700; }
+.confirm button { background: var(--on-amber); color: var(--amber); padding: 2px 12px; border-radius: 3px; }
+.confirm button.no { background: transparent; color: var(--on-amber); border: 1px solid var(--on-amber); }
+
+.bottom { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
+.box { border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; min-width: 0; display: grid; gap: 8px; align-content: start; }
+.box.ask { border-color: var(--amber-line); background: var(--ask-bg); }
+.feedrow { overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: var(--head); color: var(--strong); border: 1px solid var(--line); padding: 8px 14px; border-radius: 6px; max-width: calc(100vw - 32px); z-index: 5; }
+.toast.err { border-color: var(--red); }
+.legend { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+
+@media (max-width: 720px) {
+  .bottom { grid-template-columns: minmax(0, 1fr); }
+  .chip { width: calc(50% - 2ch); min-width: 16ch; }
+  .arr { width: 3ch; }
+  .srow { grid-template-columns: 3ch minmax(0, 1fr); }
+  .srow > :nth-child(n+3) { grid-column: 2; }
+  .srow.head { display: none; }
+  .sdet { padding-left: calc(3ch + 12px); }
+  .detail { padding-left: 4px; padding-right: 0; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div><span class="brand">RPV</span> &nbsp;<span class="w" id="time">--:--</span></div>
+    <div class="hl" id="hl"></div>
+  </header>
+  <div class="notice" id="notice" hidden><span id="notice-text"></span><button id="notice-btn" type="button" hidden></button></div>
+
+  <div class="sec">Машины</div>
+  <div class="cards" id="cards"></div>
+
+  <div class="sec">Процессы <span>· шаги слева направо · под шагом — где он делается · нажмите на процесс — подробно</span></div>
+  <div id="procs"></div>
+
+  <div class="bottom">
+    <div class="box ask" id="ask"></div>
+    <div class="box" id="feed"></div>
+  </div>
+  <div class="legend"><span class="g">✓</span> готово · <span class="b">▸</span> идёт · <span class="a">⏸</span> ждёт вас · ○ впереди · <span class="r">✗</span> проблема · ═▶ переход на другую машину · ─▶ на той же · ┄▶ впереди</div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+  const SAMPLE = {"view2":{"time":"02:30","headline":{"state":"wait","text":"ждёт вас: 2"},"counters":{"done":5,"run":1,"wait":2,"todo":4,"bad":2},"tags":{"pc":{"tag":"ПК","name":"этот ПК","color":"purple"},"vps":{"tag":"VPS","name":"сервер","color":"teal"},"calc":{"tag":"СЧЁТ","name":"сервер счёта","color":"blue"},"col":{"tag":"КОЛ","name":"сборщик","color":"gray"},"you":{"tag":"ВЫ","name":"вы","color":"amber"}},"machines":[{"id":"pc","state":"ok","load":"инженер · Умная проверка","now":{"state":"wait","text":"ждёт вас"},"orphans":0,"cpu":10,"mem":76,"disk_mb_s":null},{"id":"vps","state":"ok","load":"Умная проверка · без хозяина","now":{"state":"idle","text":"простаивает"},"orphans":2,"cpu":3,"mem":22,"disk_mb_s":0},{"id":"calc","state":"ok","load":"автомат · Добор данных","now":{"state":"run","text":"сверка ~5 мин"},"orphans":0,"cpu":18,"mem":2,"disk_mb_s":77},{"id":"col","state":"off","load":"выключен вами","now":{"state":"off","text":"задач нет"},"orphans":0,"cpu":1,"mem":14,"disk_mb_s":0}],"processes":[{"id":"TK-042","n":1,"title":"Добор и проверка данных","flow":[{"text":"делается на","on":"calc"}],"for":{"text":"база дней","on":"calc"},"state":"run","step_now":3,"steps_total":4,"eta_min":5,"wait_min":null,"steps":[{"n":1,"title":"найти пропуски","who":"автомат","on":"calc","for":"список","state":"done","pct":null,"detail":null,"eta_min":null,"started":"00:45","finished":"00:48","question":null},{"n":2,"title":"добор","who":"автомат","on":"calc","for":"база дней","state":"done","pct":100,"detail":"93 из 93 суток","eta_min":null,"started":"00:48","finished":"00:51","question":null},{"n":3,"title":"сверка","who":"автомат","on":"calc","for":"база дней","state":"run","pct":47,"detail":"231 из 492 монето-месяцев","eta_min":5,"started":"00:59","finished":null,"question":null},{"n":4,"title":"запись в базу","who":"автомат","on":"calc","for":"база дней","state":"todo","pct":null,"detail":null,"eta_min":null,"started":null,"finished":null,"question":null}]},{"id":"TK-044","n":2,"title":"Умная проверка данных","flow":[{"text":"код пишет","on":"pc"},{"text":"запускает и проверяет","on":"vps"}],"for":{"text":"данные дней","on":"vps"},"state":"wait","step_now":3,"steps_total":5,"eta_min":null,"wait_min":6,"steps":[{"n":1,"title":"правила проверки","who":"инженер","on":"pc","for":"код для VPS","state":"done","pct":null,"detail":null,"eta_min":null,"started":"01:16","finished":"02:16","question":null},{"n":2,"title":"сборка кода","who":"автомат","on":"vps","for":"запуск на VPS","state":"done","pct":null,"detail":null,"eta_min":null,"started":"02:17","finished":"02:22","question":null},{"n":3,"title":"вопрос владельцу","who":"вы","on":"you","for":"правило для шага 4","state":"wait","pct":null,"detail":null,"eta_min":null,"started":"02:24","finished":null,"question":"q-TK-044-1"},{"n":4,"title":"прогон проверки","who":"автомат","on":"vps","for":"данные на VPS","state":"todo","pct":null,"detail":null,"eta_min":null,"started":null,"finished":null,"question":null},{"n":5,"title":"отчёт","who":"инженер","on":"pc","for":"для вас","state":"todo","pct":null,"detail":null,"eta_min":null,"started":null,"finished":null,"question":null}]},{"id":"orphans-vps","n":3,"title":"Старые задачи без хозяина ×2","flow":[{"text":"висят на","on":"vps"}],"for":{"text":"кто запустил — неизвестно","on":null},"state":"bad","step_now":2,"steps_total":3,"eta_min":null,"wait_min":30,"steps":[{"n":1,"title":"без хозяина","who":"автомат","on":"vps","for":"2 шт.","state":"bad","pct":null,"detail":"заливка в хранилище с 02.10; пересылка с 28.09","eta_min":null,"started":null,"finished":null,"question":null},{"n":2,"title":"вопрос владельцу","who":"вы","on":"you","for":"остановить?","state":"wait","pct":null,"detail":null,"eta_min":null,"started":"02:00","finished":null,"question":"q-vps-orphans"},{"n":3,"title":"остановить","who":"автомат","on":"vps","for":"VPS","state":"todo","pct":null,"detail":null,"eta_min":null,"started":null,"finished":null,"question":null}]}],"questions":[{"id":"q-TK-044-1","n":1,"process":"TK-044","from":"инженер","on":"pc","text":"Признак «цены не было»: только число или браковать сутки?","options":[{"key":"a","label":"только число","effect":"запустит «прогон» на VPS"},{"key":"b","label":"браковать сутки","effect":"запустит «прогон» на VPS, ~20 % суток малоликвидных — в брак"}],"since":"02:24","wait_min":6},{"id":"q-vps-orphans","n":2,"process":"orphans-vps","from":"CEO","on":"vps","text":"Остановить 2 старые задачи на VPS?","options":[{"key":"y","label":"да","effect":"остановит их на VPS"},{"key":"n","label":"нет","effect":"оставит как есть"}],"since":"02:00","wait_min":30}],"feed":[{"time":"02:16","state":"done","on":["pc"],"to":null,"text":"правила проверки"},{"time":"02:21","state":"done","on":["calc"],"to":null,"text":"добор 100 %"},{"time":"02:24","state":"wait","on":["pc"],"to":"you","text":"вопрос 1"},{"time":"02:27","state":"bad","on":["vps"],"to":null,"text":"найдены 2 задачи без хозяина"}]}};
+  const SERVER = "host:rpv-pulse";
+  const PERIOD = 10000;
+  const $ = (id) => document.getElementById(id);
+  const ICON = { done: ["✓", "g"], run: ["▸", "b"], wait: ["⏸", "a"], todo: ["○", "d"], bad: ["✗", "r"] };
+  let mcp = null, timer = null, stopped = false, data = SAMPLE.view2, isSample = true, sampleWhy = "", open = new Set(), pending = null, answered = {};
+
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const add = (p, ...kids) => { for (const k of kids) if (k != null) p.append(k.nodeType ? k : document.createTextNode(k)); return p; };
+  const mins = (m) => { m = Math.round(m); return m < 1 ? "<1 мин" : m < 60 ? m + " мин" : Math.floor(m / 60) + " ч " + String(m % 60).padStart(2, "0") + " мин"; };
+  const tags = () => Object.assign({}, SAMPLE.view2.tags, data.tags || {});
+  const tag = (id) => { const t = tags()[id]; return el("span", "tg tg-" + (t ? t.color : "gray"), t ? t.tag : (id || "?")); };
+  const sp = (cls, text) => el("span", cls, text);
+
+  // слова-названия машин в тексте — метками
+  function linkify(text, cls) {
+    const names = {}; for (const [k, t] of Object.entries(tags())) names[t.tag] = k;
+    const box = sp(cls || "d");
+    for (const part of String(text || "").split(/(\s+)/)) {
+      const core = part.replace(/[.,;:)»]+$/, "");
+      if (names[core]) box.append(tag(names[core]), part.slice(core.length));
+      else box.append(part);
+    }
+    return box;
+  }
+  function toast(text, err) {
+    const t = $("toast"); t.textContent = text; t.className = "toast" + (err ? " err" : ""); t.hidden = false;
+    clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 4500);
+  }
+  function notice(text, o = {}) {
+    const box = $("notice");
+    if (!text) { box.hidden = true; return; }
+    box.hidden = false; box.classList.toggle("bad", !!o.bad); $("notice-text").textContent = text;
+    const b = $("notice-btn"); b.hidden = !o.button;
+    if (o.button) { b.textContent = o.button; b.onclick = o.onClick; }
+  }
+
+  const curStep = (p) => (p.steps || []).find((s) => s.n === p.step_now) || (p.steps || []).find((s) => s.state !== "done") || (p.steps || []).slice(-1)[0];
+  function dispState(p) { if (p.state === "done" || p.state === "todo") return p.state; const c = curStep(p); return c ? c.state : p.state; }
+  const qmap = () => Object.fromEntries((data.questions || []).map((q) => [q.id, q]));
+  const stepLabel = (s) => { const q = qmap()[s.question || ""]; return q ? "вопрос " + q.n : s.title; };
+
+  function statusEl(p) {
+    const st = dispState(p), [ic, c] = ICON[st] || ICON.todo, n = el("span");
+    if (st === "done") return sp("g", "✓ готово");
+    if (st === "todo") return sp("d", "○ впереди");
+    const base = `${ic} шаг ${p.step_now} из ${p.steps_total}`;
+    if (st === "run") { add(n, sp("b", base)); if (p.eta_min != null) add(n, sp("d", " · ~" + mins(p.eta_min))); return n; }
+    return add(n, sp(c, base + (st === "wait" ? " · ждёт вас" : " · проблема")));
+  }
+  function flowEl(p) {
+    const n = sp("d");
+    (p.flow || []).forEach((f, i) => { if (i) n.append(" → "); n.append(f.text + " ", tag(f.on)); });
+    if (p.for) { if (p.for.on) n.append(" → для ", tag(p.for.on), " " + p.for.text); else n.append(" · " + p.for.text); }
+    return n;
+  }
+  function arrowFor(prev, nxt) {
+    const a = el("div", "arr");
+    if (nxt.state === "todo") { a.textContent = "┄▶"; return a; }
+    const pm = prev.on, nm = nxt.on;
+    if (pm !== nm && pm && nm && pm !== "you" && nm !== "you") { a.textContent = "═▶"; a.className += " tg-" + (tags()[nm] ? tags()[nm].color : "gray"); a.style.background = "none"; a.style.color = "var(--" + (tags()[nm] ? tags()[nm].color : "gray") + "-fg)"; if (tags()[nm] && tags()[nm].color === "amber") a.style.color = "var(--amber)"; return a; }
+    a.textContent = "─▶"; a.style.color = { run: "var(--blue)", wait: "var(--amber)", bad: "var(--red)" }[nxt.state] || "var(--arrow)";
+    return a;
+  }
+  function chipEl(s) {
+    const st = s.state || "todo", [ic, c] = ICON[st] || ICON.todo, ch = el("div", "chip " + st);
+    const l1 = el("div"); add(l1, sp(c, ic + " "));
+    const tt = sp(st === "run" ? "w k" : st === "wait" ? "a k" : st === "todo" ? "d" : "", stepLabel(s));
+    l1.append(tt);
+    if (st === "done" && s.pct != null) l1.append(" ", sp("g", s.pct + " %"));
+    if (st === "run") l1.append(" ", sp("b", s.eta_min != null ? "~" + mins(s.eta_min) : s.pct != null ? s.pct + " %" : ""));
+    const l2 = el("div"); l2.append(tag(s.on));
+    const who = st === "bad" ? s.for : s.who !== "вы" ? s.who : "";
+    if (who) l2.append(" ", sp("d", who));
+    ch.append(l1, l2);
+    return ch;
+  }
+
+  // ---- ответ -------------------------------------------------------------------------------------------------------
+  function pickAnswer(q, o) { pending = { q, o }; render(); }
+  async function sendAnswer(q, o) {
+    pending = null;
+    if (!mcp || isSample) { toast("Пример: ответ не отправлен — живые данные в приложении Claude на компьютере с проектом."); render(); return; }
+    try {
+      await mcp.callTool(SERVER, "pulse_answer", { id: q.id, key: o.key }, { cache: false, signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
+      answered[q.id] = o.label; toast("Ответ записан");
+      render(); poll();
+    } catch (e) {
+      toast("Ответ не записан: " + ((e && e.message) || "ошибка") + (e && e.code === "tool_error" ? "" : ""), true); render();
+    }
+  }
+  function questionBlock(q, withTitle) {
+    const box = el("div", "q");
+    const head = el("div", "qt"); add(head, sp("tg tg-amber", "ВОПРОС " + q.n), "  ", sp("w k", q.text), "  ", sp("d", "спросил " + (q.from || "") + " с "), tag(q.on));
+    box.append(head);
+    if (answered[q.id]) { box.append(add(el("div"), sp("g", "✓ ответ записан: "), sp("d", answered[q.id]))); return box; }
+    const opts = el("div", "opts");
+    for (const o of q.options || []) {
+      const b = el("button", "opt"); b.type = "button";
+      add(b, sp("key", o.key), " ", o.label);
+      if (o.effect) { const e = el("span", "eff"); e.append("→ ", linkify(o.effect)); b.append(e); }
+      b.onclick = () => pickAnswer(q, o);
+      opts.append(b);
+    }
+    box.append(opts);
+    if (pending && pending.q.id === q.id) {
+      const c = el("div", "confirm"); c.setAttribute("role", "alert");
+      const yes = el("button", "", "Да"), no = el("button", "no", "Нет"); yes.type = no.type = "button";
+      yes.onclick = () => sendAnswer(pending.q, pending.o); no.onclick = () => { pending = null; render(); };
+      add(c, `Ответить «${pending.o.label}» на вопрос ${q.n}?`, yes, no); box.append(c);
+    }
+    return box;
+  }
+
+  // ---- разделы -----------------------------------------------------------------------------------------------------
+  function renderHead() {
+    $("time").textContent = data.time || "--:--";
+    const hl = $("hl"); hl.replaceChildren();
+    const h = data.headline || {}, c = data.counters || {};
+    const [ic, col] = { wait: ["⏸", "a"], bad: ["✗", "r"] }[h.state] || ["●", "g"];
+    hl.append(sp(col + " k", ic + " " + (h.text || "")));
+    add(hl, add(sp(), sp("d", "шаги "), sp("g", "✓" + (c.done || 0)), " ", sp("b", "▸" + (c.run || 0)), " ", sp("a", "⏸" + (c.wait || 0)), " ", sp("d", "○" + (c.todo || 0))));
+    if (c.bad) hl.append(sp("r", `✗ ${c.bad} ${(data.machines || []).some((m) => m.orphans) ? "без хозяина" : "проблем"}`));
+  }
+  function renderCards() {
+    const box = $("cards"); box.replaceChildren();
+    for (const m of data.machines || []) {
+      const t = tags()[m.id] || { name: m.id, color: "gray" };
+      const card = el("div", "card " + (m.state === "off" ? "off" : m.state === "down" ? "down" : ""));
+      card.style.borderColor = m.state === "down" ? "var(--red)" : m.state === "off" ? "var(--gray-line)" : "var(--" + t.color + "-line)";
+      const top = el("div", "top");
+      add(top, add(sp(), tag(m.id), " ", sp(m.state === "off" ? "d k" : "w k", t.name)), m.state === "down" ? sp("r", "✗ нет связи") : m.state === "off" ? sp("d", "○ выключен") : sp("g", "● в сети"));
+      card.append(top, el("div", "load d", m.load || ""));
+      const now = m.now || {}, nw = el("div");
+      if (now.state === "off") nw.append(sp("d", now.text || ""));
+      else { nw.append("сейчас ", sp({ run: "b", wait: "a", bad: "r" }[now.state] || "d", ({ run: "▸ ", wait: "⏸ ", bad: "✗ " }[now.state] || "") + (now.text || ""))); if (m.orphans) nw.append(sp("d", " · "), sp("r", "✗ " + m.orphans)); }
+      card.append(nw); box.append(card);
+    }
+  }
+  function stepsTable(p) {
+    const wrap = el("div"), qm = qmap();
+    const head = el("div", "srow head"); for (const h of ["#", "ШАГ", "КТО · ДЕЛАЕТСЯ НА · ДЛЯ", "СТАТУС", "ВРЕМЯ"]) head.append(el("span", "", h));
+    wrap.append(head);
+    (p.steps || []).forEach((s, k) => {
+      const st = s.state || "todo", dim = st === "todo", q = qm[s.question || ""];
+      const row = el("div", "srow " + st);
+      row.append(sp(st === "wait" ? "a k" : st === "run" ? "b k" : "d", String(s.n)), sp(dim ? "d" : st === "wait" || st === "run" ? "w k" : "w", s.title));
+      const meta = el("span", "meta" + (dim ? " d" : "")); add(meta, sp("", s.who || ""), tag(s.on), linkify(s.for || "", dim ? "d" : ""));
+      row.append(meta);
+      const prev = k ? p.steps[k - 1].state : "";
+      const stx = st === "done" ? sp("g", "✓ готово") : st === "run" ? sp("b", "▸ идёт" + (s.pct != null ? " " + s.pct + " %" : "") + (s.eta_min != null ? " · ~" + mins(s.eta_min) : "")) :
+        st === "wait" ? sp("a k", "⏸ ждёт вас" + (s.started ? " с " + s.started : "")) : st === "bad" ? sp("r", "✗ проблема") : sp("d", prev === "wait" ? "○ после ответа" : "○ впереди");
+      const tm = st === "done" ? (s.finished || "—") : st === "run" ? (s.started ? "с " + s.started : "—") : st === "wait" ? ((q && q.wait_min != null) ? mins(q.wait_min) : p.wait_min != null ? mins(p.wait_min) : "—") : "—";
+      row.append(stx, sp(st === "wait" ? "a" : "d", tm));
+      wrap.append(row);
+      if (s.detail) wrap.append(el("div", "sdet", s.detail));
+    });
+    return wrap;
+  }
+  function detailEl(p) {
+    const d = el("div", "detail");
+    const fl = el("div", "flow d"), steps = p.steps || [];
+    (p.flow || []).forEach((f, i) => {
+      const actor = (steps.find((s) => s.on === f.on && s.who !== "автомат" && s.who !== "вы") || {}).who;
+      if (i) fl.append(" ", (p.flow[i - 1].on !== f.on ? "═▶" : "─▶"), " ");
+      fl.append(f.text + " ", tag(f.on), " " + ((tags()[f.on] || {}).name || "") + (actor ? ", " + actor : ""));
+    });
+    if (p.for) { fl.append(" ", "═▶", " результат для "); if (p.for.on) fl.append(tag(p.for.on), " "); fl.append(p.for.text); }
+    d.append(fl, stepsTable(p));
+    for (const q of data.questions || []) if (q.process === p.id) d.append(questionBlock(q));
+    return d;
+  }
+  function renderProcs() {
+    const box = $("procs"); box.replaceChildren();
+    const list = (data.processes || []).slice().sort((a, b) => (a.state === "done") - (b.state === "done"));
+    for (const p of list) {
+      const wrap = el("div", "proc" + (open.has(p.id) ? " open" : ""));
+      const btn = el("button"); btn.type = "button"; btn.setAttribute("aria-expanded", open.has(p.id));
+      const ph = el("div", "phead");
+      const l = el("div", "l"); add(l, sp("d", p.n + "  "), sp("w k", p.title), "   ", flowEl(p));
+      ph.append(l, statusEl(p));
+      btn.append(ph);
+      const pipe = el("div", "pipe");
+      (p.steps || []).forEach((s, i) => { if (i) pipe.append(arrowFor(p.steps[i - 1], s)); pipe.append(chipEl(s)); });
+      btn.append(pipe);
+      btn.onclick = () => { open.has(p.id) ? open.delete(p.id) : open.add(p.id); renderProcs(); };
+      wrap.append(btn);
+      if (open.has(p.id)) wrap.append(detailEl(p));
+      box.append(wrap);
+    }
+    if (!list.length) box.append(el("div", "d", "Процессов пока нет."));
+  }
+  function renderAsk() {
+    const box = $("ask"); box.replaceChildren(sp("a k", "ВАШ ХОД"));
+    const qs = data.questions || [];
+    if (!qs.length) { box.append(sp("d", "вопросов к вам нет")); return; }
+    for (const q of qs) box.append(questionBlock(q));
+  }
+  function renderFeed() {
+    const box = $("feed"); box.replaceChildren(sp("d k", "ЛЕНТА"));
+    for (const f of (data.feed || []).slice(-6)) {
+      const [ic, c] = ICON[f.state] || ICON.todo, r = el("div", "feedrow");
+      add(r, sp("d", f.time || ""), " ", sp(c, ic), " ");
+      for (const m of f.on || []) r.append(tag(m));
+      if (f.to) r.append(sp("d", "→"), tag(f.to));
+      r.append(" " + (f.text || "")); box.append(r);
+    }
+  }
+  function render() {
+    renderHead(); renderCards(); renderProcs(); renderAsk(); renderFeed();
+    if (isSample) notice("Пример — " + (sampleWhy || "живые данные в приложении Claude на компьютере с проектом."));
+  }
+
+  // ---- опрос сборщика (обработка ошибок — как в page.html) ----------------------------------------------------------
+  const schedule = (ms) => { clearTimeout(timer); if (!stopped && !document.hidden) timer = setTimeout(poll, ms); };
+  const retry = (text) => notice(text, { button: "Проверить снова", onClick: () => { stopped = false; notice(null); poll(); } });
+  async function poll() {
+    if (!mcp) return;
+    clearTimeout(timer);
+    const signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined;
+    try {
+      const res = await mcp.callTool(SERVER, "pulse_status", {}, { cache: false, signal });
+      const d = res && res.payload;
+      if (d && d.view2) { data = d.view2; isSample = false; sampleWhy = ""; notice(d.error ? "Сборщик сообщил об ошибке: " + d.error : null, { bad: !!d.error }); render(); }
+      else { sampleWhy = "сборщик ещё не отдаёт view2 (старая версия: создайте файл .claude/pulse/stop, экран поднимет новый)."; if (isSample) render(); else notice("Сборщик ответил без view2. Повторю через 10 секунд."); }
+      schedule(PERIOD);
+    } catch (e) {
+      const code = (e && e.code) || "upstream_error";
+      if (code === "server_not_connected") { stopped = true; retry("Сборщик rpv-pulse не подключён к приложению Claude. Он уже прописан в настройках: перезапустите приложение Claude на компьютере с проектом и нажмите «Проверить снова»."); }
+      else if (["not_in_manifest", "not_granted", "blocked_by_policy", "approval_required"].includes(code)) {
+        stopped = true;
+        notice("Доступ к сборщику для этой страницы выключен. Включите его в разрешениях страницы.", { button: "Открыть разрешения", onClick: async () => { try { const p = await claude.use("permissions"); if (p) await p.manage(); } catch (_) {} stopped = false; poll(); } });
+      }
+      else if (code === "cancelled" && signal && signal.aborted) { notice("Сборщик не ответил за 15 секунд. Обычно это значит, что приложение Claude ещё не подключило сборщик rpv-pulse: перезапустите приложение Claude. Пробую снова каждые 30 секунд.", { button: "Проверить сейчас", onClick: () => { stopped = false; poll(); } }); schedule(30000); }
+      else if (code === "cancelled") { stopped = true; retry("Запрос к сборщику отклонён в приложении."); }
+      else if (code === "capability_disabled" || code === "capability_removed") { stopped = true; notice("Живые данные здесь недоступны. Откройте страницу в приложении Claude на компьютере с проектом."); }
+      else if (code === "tool_error") { notice("Сборщик ответил ошибкой: " + (e.message || "без текста") + ". Повторю через 30 секунд.", { bad: true }); schedule(30000); }
+      else { notice("Сборщик сейчас не отвечает. Показываю последнюю сводку, повторю через 30 секунд."); schedule(e && e.retryAfterMs ? Math.max(e.retryAfterMs, 10000) : 30000); }
+    }
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !stopped && mcp) poll(); else clearTimeout(timer); });
+
+  (async () => {
+    open.add(SAMPLE.view2.processes[1] && SAMPLE.view2.processes[1].id);
+    render();
+    try { mcp = await window.claude?.use?.("mcp"); } catch (_) { mcp = null; }
+    if (!mcp) { sampleWhy = "живые данные в приложении Claude на компьютере с проектом."; render(); return; }
+    sampleWhy = "подключаюсь к сборщику…"; render();
+    poll();
+  })();
+})();
+</script>

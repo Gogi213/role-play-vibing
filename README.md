@@ -212,6 +212,16 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - **Настройка:** `RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 - Тесты: `python -m unittest discover -s .claude/bus` и `-s .claude/dispatcher`.
 
+## Что нового в 1.7.0
+
+- **По умолчанию включены** строки Haiku (`RPV_PLAIN=0` — выключить; без `claude` — строка по фактам плана) и загрузка «этого ПК» (`RPV_PC=0` — без неё), в том числе на macOS/Windows без `/proc`.
+- **Своя «Диспетчерская»:** в плагин перенесён сервер веб-табло (`.claude/board/`: `server.py`, страница `dispetcher.html` на `phosphor.css` / `phosphor.js`,
+  юнит `rpv-board.service`) — его можно поднять у себя (раздел «Диспетчерская» ниже), а не только слать на чужой.
+- **Машины:** `RPV_MACHINES` — загрузка ЦП, памяти и диска машин по ssh и ход их заданий (`machines.py`); недоступная машина — «нет связи».
+- **Строки процессов:** короткие человеческие строки от Haiku (`plainify.py`) — по умолчанию (`RPV_PLAIN=0` — выкл.), в том числе для задач без плана (шаги по логу тикета); без `claude` или при ошибке остаётся строка по фактам.
+- **Кадр на диск:** `board_push.py` пишет `<проект>/.claude/pulse/status.json`, даже если `RPV_BOARD` не задан; его читают TUI `board.py` и MCP `mcp_server.py`.
+- Тесты: `python -m unittest discover -s .claude/board`.
+- Не перенесено: старый TUI v1 (`pulse.py`) — он целиком завязан на сборщик проекта-источника.
 ## Что нового в 1.6.2
 
 - **Судью не снимает CEO.** В шаблонах ролей (`templates/roles/ceo.md`, README «Судья и договор») записано правило
@@ -269,10 +279,50 @@ sudo cp "$PLUGIN"/.claude/bus/rpv-bus.service "$PLUGIN"/.claude/bus/rpv-bus-watc
 - Модели ролей — `RPV_DISPATCH_MODEL`, `RPV_DISPATCH_ROLE_MODEL`, `RPV_DISPATCH_EFFORT` (умолчания — в `dispatch.py`: `CLAUDE_MODEL`, `ROLE_MODEL`).
 - Защита удаления — хук `PreToolUse` (страж ловит Bash, PowerShell, Write, Edit, MultiEdit, NotebookEdit) в `hooks/hooks.json`; корень проекта — `CLAUDE_PROJECT_DIR`; удалённые каталоги, стадия и закрытые хосты — `RPV_GUARD_REMOTE_ROOTS`, `RPV_GUARD_HOST_ROOTS` (`хост=корень,корень;хост2=…` — только при ssh на этот хост), `RPV_GUARD_STAGE`, `RPV_GUARD_FORBIDDEN_HOSTS` (без переменных — на удалённых машинах удалять нельзя нигде; прежние `ALPHA_GUARD_*` — запасные).
 - Хуки запускает `hooks/run-hook.sh`: `python3`, иначе `python`, иначе `py -3`; в проекте без `.claude/roles` хуки молчат.
-- Тесты: `python -m unittest discover -s .claude/dispatcher` и `-s .claude/hooks`.
+- Тесты: `python -m unittest discover -s .claude/dispatcher`, `-s .claude/hooks` и `-s .claude/board`.
 - Нужно: Python 3.11, `claude` в `PATH`, git (по ОС — «Установка по платформам»).
 
 ## Веб-табло (необязательно)
 
 `python .claude/dispatcher/board_push.py [--loop 5] [--dry]` — сводка тикетов на табло по `RPV_BOARD` — одной строке подключения
 из окна «+» (`https://host/<токен>/#<ключ>`); без ssh, ключ уходит только в заголовке и в вывод не попадает.
+
+## Диспетчерская: поднять свою / подключиться к чужой
+
+Диспетчерская — веб-страница «Диспетчерская»: ход всех подключённых команд (процессы и шаги, вопросы владельцу, машины, лента) на компьютере и с телефона.
+Сервер ничего не исполняет и ничего не знает о проектах: он принимает сводки и отдаёт страницу. Адрес защищён секретным префиксом `/<токен>/`.
+
+**Подключиться к чужой (или к своей уже поднятой).** На странице нажмите «+», введите имя команды — окно выдаст строку подключения
+`https://<хост>/<токен>/#<ключ>` (ключ виден один раз). Положите её в окружение проекта: `export RPV_BOARD='https://…/#…'`
+(Windows: `setx RPV_BOARD "…"`) и выполните `/rpv-start` — он запустит `python .claude/dispatcher/board_push.py --loop 5`; вручную то же самое
+(`--dry` — только показать сводку). Необязательное:
+
+- `RPV_MACHINES=pc2=user@host,srv=алиас` — машины (ssh в режиме BatchMode, ключ входа должен быть без пароля; `id=!host` — машина выключена вами и не опрашивается).
+  Нужны `ssh` на этом компьютере и Linux на машине (`/proc`). Ключ — `RPV_DECK_KEY`, файл known_hosts — `RPV_DECK_KNOWN_HOSTS` (те же, что у проверки второй машины).
+  Ход заданий — `*.json` свежее 30 минут в каталоге `RPV_PROGRESS_DIR` на машине: `{"done": 231, "total": 492, "step": "сверка", "unit": "ед."}`.
+  Метки `ПК/VPS/СЧЁТ/КОЛ` — у машин с id `pc/vps/calc/col` (только они принимаются как «где» шага плана `plan.py`); остальные видны в списке машин.
+- `RPV_PLAIN` (по умолчанию включено; `0` — выкл.) — человеческие строки процессов: `claude -p` (Haiku) из временного каталога вне проекта, кэш `<проект>/.claude/pulse/plain-auto.json`;
+  без `claude` в `PATH` (или `CLAUDE_BIN`) — строка по фактам плана. Модель: `RPV_PLAIN_MODEL`.
+- Рядом с проектом: кадр лежит в `<проект>/.claude/pulse/status.json` — `python .claude/board/board.py [--project <путь>]` рисует его в терминале
+  (нужен `pip install textual`; `--sample` — пример), `.claude/board/mcp_server.py` — MCP-сервер «rpv-pulse»: `claude mcp add rpv-pulse -- python "<проект>/.claude/board/mcp_server.py" --project "<проект>"`
+  (инструменты `pulse_status` и `pulse_answer`).
+
+**Поднять свою.** Нужен Python 3.11+ без пакетов, открытый порт (по умолчанию 8787; для интернета поставьте перед сервером HTTPS-прокси — токен в адресе не должен ходить открытым текстом).
+
+```sh
+PLUGIN=/path/to/role-play-vibing          # каталог плагина
+sudo useradd -r -s /usr/sbin/nologin rpv-board
+sudo mkdir -p /opt/rpv-board /etc/rpv-board
+sudo cp "$PLUGIN"/.claude/board/{server.py,dispetcher.html,phosphor.css,phosphor.js} /opt/rpv-board/
+sudo sh -c 'umask 077; python3 -c "import secrets; print(secrets.token_urlsafe(32))" > /etc/rpv-board/token'
+sudo chown rpv-board /etc/rpv-board/token
+sudo cp "$PLUGIN"/.claude/board/rpv-board.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now rpv-board
+cat /etc/rpv-board/token                  # адрес страницы: http://<хост>:8787/<токен>/
+```
+
+Данные (команды, сводки) — `RPV_BOARD_DATA` (в юните `/var/lib/rpv-board`, без юнита `~/rpv-board`); порт — `RPV_BOARD_PORT`, адрес — `RPV_BOARD_HOST`,
+файл токена — `RPV_BOARD_TOKEN_FILE`. Команд — до 20; ключ команды хранится только хэшем, удалить команду можно на странице.
+Без systemd: macOS — LaunchAgent с `python3 /путь/server.py` (по образцу автозапуска выше) и теми же переменными в `EnvironmentVariables`;
+Windows — служба или задача планировщика, запускающая `python server.py` с этими переменными (токен — файл `RPV_BOARD_TOKEN_FILE`).
+Контракт данных — `.claude/board/VIEW2.md`.

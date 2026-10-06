@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Диспетчерская</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anonymous+Pro:wght@400;700&display=swap">
+<link rel="stylesheet" href="phosphor.css">
+<style>
+/* Направление 3 «Диспетчерская»: таблица «машина × задача» — в клетке видно, что именно эта машина делает для этой задачи.
+   Строка «вы» показывает, где ждут вас. Шапка колонки выбирает задачу, подробности (шаги по времени) — под таблицей.
+   Раскладка на всю ширину окна: таблица слева, вопросы и лента справа (от 1100 px две колонки, от 1700 px три);
+   на телефоне одна колонка: итог, вопросы, таблица списком «машина → задачи», лента. Люминофор по умолчанию — ледяной.
+   Размеры пересчитаны под комфортный просмотр владельца (прежние ×0,75): кегль, отступы, рамка монитора, свечение, планка.
+   Мелкий текст не меньше 11 px (--fs-s). Масштаба в корне нет: всё считается от --fs в em/ch или задано в px заново. */
+.d3{
+  --mono:"Anonymous Pro","SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --fs:clamp(12px,.5vw + 5.5px,13px);          /* было clamp(14px, .46rem + .5vw, 17.5px) */
+  --fs-s:max(11px,calc(var(--fs)*.9));         /* мелкий текст: подписи, шкалы, заголовки блоков */
+  --lh:1.4; --maxw:none;                       /* ограничения ширины нет */
+  --bezel:clamp(4px,.8vw,14px);                /* было clamp(6px, 1.4vw, 22px) */
+  --pad-x:clamp(10px,1.3vw,26px);              /* было clamp(12px, 2.6vw, 44px) */
+  --shadow:0 0 1px rgba(var(--fg-rgb),.9),0 0 5px rgba(var(--fg-rgb),.5),0 0 13px rgba(var(--fg-rgb),.22);
+}
+/* корпус и стекло: рамка, радиус, свечение, отступы экрана */
+.d3 .screen{border-radius:22px/20px;box-shadow:0 0 0 1px #000,0 0 0 4px #161814,0 0 0 5px #262822,0 0 52px 4px rgba(var(--fg-rgb),.09),0 10px 30px rgba(0,0,0,.6)}
+.d3 .term{padding:clamp(10px,1.6vw,26px) var(--pad-x) clamp(12px,1.6vw,22px)}
+.d3 .banner{font-size:var(--fs)}
+.d3 .status{font-size:var(--fs-s)}
+.d3 ~ .toast{font-size:12px}
+.d3 .hot{text-shadow:0 0 1.5px var(--fg),0 0 7px rgba(var(--fg-rgb),.75),0 0 20px rgba(var(--fg-rgb),.4)}
+.d3 .dim{text-shadow:0 0 4px rgba(var(--fg-rgb),.25)}
+.d3 .small{font-size:var(--fs-s)}
+.d3 .strip{gap:6px clamp(8px,1.2vw,16px);padding:calc(var(--bezel)*.6 + 3px) var(--bezel) calc(var(--bezel)*.7 + 4px + env(safe-area-inset-bottom,0px))}
+.d3 .led{width:7px;height:7px}
+.d3 .brand-name{font-size:11px;letter-spacing:.3em}
+.d3 .brand-model,.d3 .dial-label{font-size:11px;letter-spacing:.16em}
+.d3 .key{font-size:11px;gap:6px;padding:7px 10px 6px;border-radius:4px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),inset 0 -2px 0 rgba(0,0,0,.25),0 1px 0 #050604,0 3px 6px rgba(0,0,0,.45)}
+.d3 .lamp-k{width:6px;height:6px}
+/* светодиоды машин и значки в таблице горят ровно, без анимации */
+.d3 .lamp,.d3 .mx .pip{animation:none!important}
+.d3 .pip{width:1.05em;height:1.05em;margin-right:.6ch}
+.d3 .pip::after{font-size:11px}
+
+/* раскладка на всю ширину */
+.d3 .lay{display:grid;grid-template-columns:minmax(0,1fr);gap:1.1em 2.4ch;align-items:start;grid-template-areas:"main" "rest"}
+.d3 .main{grid-area:main;min-width:0}.d3 .rest{grid-area:rest;min-width:0}
+@media (min-width:1100px){
+  .d3 .lay{grid-template-columns:minmax(0,1fr) minmax(23em,28em);grid-template-areas:"main rest"}
+}
+@media (min-width:1700px){
+  .d3 .lay{grid-template-columns:minmax(0,1fr) minmax(22em,26em);grid-template-areas:"main rest"}
+}
+.d3 .ttl{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.4em 3ch}
+.d3 .ttl h1{margin:0;font-size:calc(var(--fs)*1.5);letter-spacing:.24em;text-transform:uppercase;color:var(--hot);text-shadow:0 0 1.5px var(--fg),0 0 9px rgba(var(--fg-rgb),.7)}
+.d3 .big{padding:.1em 1ch;font-weight:700;letter-spacing:.06em}
+.d3 .big.plain{padding:.1em 0}
+.d3 .pr{display:grid;grid-template-columns:auto minmax(8ch,1fr) auto;gap:.3em 2ch;align-items:center;margin-top:.7em}
+.d3 .h4{margin:1.4em 0 .5em;font-size:var(--fs-s);letter-spacing:.2em;text-transform:uppercase;display:flex;gap:1.4ch;align-items:center}
+.d3 .h4:first-child{margin-top:0}
+.d3 .h4::after{content:"";flex:1;height:1px;background:rgba(var(--fg-rgb),.35)}
+
+/* вопросы */
+.d3 .asks{display:grid;gap:1em}
+.d3 .ask{border:1px solid var(--fg);padding:0 1.4ch .9em;box-shadow:0 0 14px rgba(var(--fg-rgb),.2),inset 0 0 16px rgba(var(--fg-rgb),.06);min-width:0}
+.d3 .ask .qh{margin:0 -1.4ch .6em;padding:.2em 1.4ch;background:var(--fg);color:var(--bg);text-shadow:none}
+.d3 .ask .qh .dim,.d3 .ask .qh .mt{color:var(--bg);text-shadow:none}
+.d3 .ask .qh .qn{padding:0;background:transparent;box-shadow:none}
+.d3 .opts{grid-template-columns:minmax(0,1fr)}
+.d3 .opt .df{font-size:var(--fs-s)}
+.d3 .opt{cursor:default}
+.d3 .opt:hover{border-color:rgba(var(--fg-rgb),.5);box-shadow:none}
+.d3 .asknote{margin-top:.6em}
+
+/* что стало возможно */
+.d3 .sums{display:grid;gap:.6em;margin:0;padding:0;list-style:none}
+.d3 .sums li{display:grid;gap:.1em}
+.d3 .sums b{color:var(--hot)}
+
+/* таблица «машина × задача» */
+.d3 .mxw{overflow-x:auto;border:1px solid rgba(var(--fg-rgb),.55)}
+.d3 .mx{display:grid;grid-template-columns:minmax(12em,15em) repeat(var(--np),minmax(10em,1fr))}
+.d3 .mx>*{min-width:0;padding:.65em 1.2ch;border-right:1px solid rgba(var(--fg-rgb),.24);border-bottom:1px solid rgba(var(--fg-rgb),.24)}
+.d3 .mx>.lc{border-right:0}.d3 .mx>.lr{border-bottom:0}
+.d3 .mx .corner{color:rgba(var(--fg-rgb),.62);font-size:var(--fs-s);letter-spacing:.14em;text-transform:uppercase;display:flex;align-items:flex-end}
+.d3 .ch{font:inherit;color:inherit;text-shadow:inherit;text-align:left;background:transparent;cursor:pointer;display:grid;gap:.25em;align-content:start;border-top:0;border-left:0}
+.d3 .ch:hover{background:rgba(var(--fg-rgb),.07)}
+.d3 .ch[aria-pressed="true"]{background:rgba(var(--fg-rgb),.12);box-shadow:inset 0 -2px 0 var(--fg),0 0 14px rgba(var(--fg-rgb),.15)}
+.d3 .ch b{color:var(--hot);text-shadow:0 0 1.5px var(--fg),0 0 7px rgba(var(--fg-rgb),.55);line-height:1.2;overflow-wrap:anywhere}
+.d3 .mc{display:grid;gap:.18em;align-content:start}
+.d3 .mc .mh{display:flex;align-items:baseline;flex-wrap:wrap}
+.d3 .mc .mh b{color:var(--hot)}
+.d3 .mt-row{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"l v" "b b";gap:.1em 1.2ch;align-items:baseline;font-size:var(--fs-s)}
+.d3 .mt-row>.dim{grid-area:l}.d3 .mt-row>.bar{grid-area:b;display:flex;gap:1px}.d3 .mt-row>span:last-child{grid-area:v;white-space:nowrap}
+.d3 .mt-row .bar b{flex:1;width:auto;height:.45em}
+.d3 .yr{background:rgba(var(--fg-rgb),.1)}
+.d3 .cl{display:grid;gap:.45em;align-content:start}
+.d3 .cs{line-height:1.25}
+.d3 .cs .d{margin:.1em 0 0 calc(1.05em + .6ch + 1ch)}
+.d3 .cs .n{color:rgba(var(--fg-rgb),.62);margin-right:.8ch}
+.d3 .cs.s-todo b{font-weight:400;color:rgba(var(--fg-rgb),.55)}
+.d3 .cs.s-done b{font-weight:400}
+.d3 .mxh{margin-top:.4em}
+
+/* выбор задачи для подробностей */
+.d3 .pick{margin-top:.8em;display:flex;flex-wrap:wrap;gap:.4em 1.2ch;align-items:baseline}
+.d3 .pick button{font:inherit;color:inherit;text-shadow:inherit;background:transparent;border:1px solid rgba(var(--fg-rgb),.4);padding:.15em 1ch;cursor:pointer;text-align:left}
+.d3 .pick button:hover{border-color:var(--fg)}
+.d3 .pick button[aria-pressed="true"]{background:var(--fg);color:var(--bg);text-shadow:none}
+.d3 .pick{display:none}
+.d3 .pick.hd{display:flex}
+.d3 .pick .pa{display:none}
+
+/* подробности выбранной задачи */
+.d3 .dr{border:1px solid rgba(var(--fg-rgb),.5);padding:.9em 1.6ch 1em}
+.d3 .drh{display:grid;gap:.3em;margin-bottom:.9em}
+.d3 .tl{margin:0;padding:0;list-style:none}
+.d3 .tl li{position:relative;display:grid;grid-template-columns:12ch 1.05em minmax(0,1fr);gap:0 1.4ch;padding-bottom:.8em}
+.d3 .tl li::after{content:"";position:absolute;left:calc(12ch + 1.4ch + .52em);top:1.4em;bottom:-.05em;width:1px;background:rgba(var(--fg-rgb),.35)}
+.d3 .tl li:last-child{padding-bottom:0}.d3 .tl li:last-child::after{display:none}
+.d3 .tl .pip{margin:.1em 0 0}
+.d3 .tl .tm{color:rgba(var(--fg-rgb),.62);font-size:var(--fs-s);padding-top:.1em}
+.d3 .tl .tb b{color:var(--hot)}
+.d3 .tl .s-todo .tb b{color:rgba(var(--fg-rgb),.6);font-weight:400}
+
+/* лента */
+.d3 .fl{display:grid;grid-template-columns:5ch 2.4ch minmax(0,1fr);gap:0 1.2ch;align-items:baseline;padding:.1em 0}
+
+@media (max-width:860px){
+  .d3 .pick{display:flex}
+  .d3 .pick .pa{display:inline-block}
+  .d3 .mxw{border:0;overflow:visible}
+  .d3 .mx{display:block}
+  .d3 .mx>*{border:0;border-bottom:1px solid rgba(var(--fg-rgb),.2)}
+  .d3 .mx .corner,.d3 .mx .ch.hd{display:none}
+  .d3 .mx .mc{border-top:1px solid rgba(var(--fg-rgb),.55);background:rgba(var(--fg-rgb),.08)}
+  .d3 .mx .cl.empty{display:none}
+  .d3 .mx .cl::before{content:attr(data-t);font-size:var(--fs-s);letter-spacing:.12em;text-transform:uppercase;color:rgba(var(--fg-rgb),.62)}
+  .d3 .mx .cl{padding-left:calc(1.2ch + 1ch)}
+}
+@media (max-width:720px){
+  .d3 .pr{grid-template-columns:minmax(0,1fr)}
+  .d3 .tl li{grid-template-columns:1.05em minmax(0,1fr)}
+  .d3 .tl li .tm{grid-column:2;grid-row:2}.d3 .tl li .pip{grid-column:1;grid-row:1}.d3 .tl li .tb{grid-column:2;grid-row:1}
+  .d3 .tl li::after{left:.52em}
+  .d3 .dr{padding:.8em 1.4ch}
+  /* кнопки на телефоне остаются нажимаемыми (вопросы только для чтения) */
+  .d3 .pick button{min-height:34px}
+  .d3 .key{min-height:36px;padding:0 12px}
+}
+
+/* ====================== Макет «несколько команд», вариант 2 (компактно): только новое и уплотнение ====================== */
+.d3 .cbtn{font-size:var(--fs)}
+.d3 .lamp.l-warn{background:#ffb000;box-shadow:0 0 6px #ffb000,0 0 14px rgba(255,176,0,.55)}
+.d3 .warn{color:#ffb000;text-shadow:0 0 5px rgba(255,176,0,.5)}
+.d3 .st.s-live{color:var(--hot)}
+
+/* уплотнение всей страницы */
+.d3 .term{padding:clamp(6px,.9vw,12px) var(--pad-x) clamp(8px,1vw,14px)}
+.d3 .lay{gap:.4em 2ch}
+.d3 .h4{margin:.8em 0 .35em}
+.d3 .h4:first-child{margin-top:0}
+@media (min-width:1100px){.d3 .lay{grid-template-columns:minmax(0,1fr) minmax(18em,22em)}}
+@media (min-width:1700px){.d3 .lay{grid-template-columns:minmax(0,1fr) minmax(18em,22em)}}
+.d3 .sums{gap:.35em}
+.d3 .sums li{gap:0}
+.d3 .fl{padding:0}
+.d3 .pr{margin-top:0;gap:.2em 1.6ch}
+
+/* шапка: заголовок, чипы команд, «+» — одна строка */
+.d3 .hbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35em 2.2ch;margin-bottom:.55em}
+.d3 .hbar h1{margin:0;font-size:calc(var(--fs)*1.25);letter-spacing:.24em;text-transform:uppercase;color:var(--hot);text-shadow:0 0 1.5px var(--fg),0 0 9px rgba(var(--fg-rgb),.7)}
+.d3 .chips{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1ch}
+.d3 .chip{font:inherit;color:inherit;text-shadow:inherit;background:transparent;border:1px solid rgba(var(--fg-rgb),.4);padding:.1em 1.1ch;cursor:pointer;display:inline-flex;align-items:center;white-space:nowrap}
+.d3 .tc{display:inline-flex}
+.d3 .chipx{border-left:0;padding:.1em .9ch}
+.d3 .chip:hover{border-color:var(--fg)}
+.d3 .chip[aria-pressed="true"]{border-color:var(--fg);background:rgba(var(--fg-rgb),.14);box-shadow:0 0 12px rgba(var(--fg-rgb),.35),inset 0 -2px 0 var(--fg)}
+.d3 .chip b{color:var(--hot)}
+.d3 .chip .cn{margin-left:1.2ch}
+.d3 .chip .cq{margin-left:1ch;padding:0 .6ch;background:var(--fg);color:var(--bg);text-shadow:none;font-weight:700;box-shadow:0 0 10px rgba(var(--fg-rgb),.55)}
+.d3 .cbtn.add{padding:.1em 1.4ch;line-height:1.3}
+
+/* матрица плотнее */
+.d3 .mx{grid-template-columns:minmax(9.5em,12em) repeat(var(--np),minmax(9em,1fr))}
+.d3 .mx>*{padding:.4em 1ch}
+.d3 .mx .corner{padding:0}
+.d3 .ch{gap:.1em}
+.d3 .mc{gap:.12em}
+.d3 .mc .mh{align-items:center}
+.d3 .mc .mh .qt-w{flex-basis:100%;margin-left:calc(.72em + .9ch)}
+.d3 .cl{gap:.3em}
+.d3 .cs .d{display:inline;margin:0 0 0 .9ch}
+/* счётчик машины одной строкой: метка, полоска, число */
+.d3 .mt-row{grid-template-columns:4.2ch minmax(0,1fr) 8ch;grid-template-areas:none;gap:0 .8ch;align-items:center;line-height:1.2}
+.d3 .mt-row>.dim,.d3 .mt-row>.bar{grid-area:auto}
+.d3 .mt-row>span:last-child{grid-area:auto;text-align:right}
+
+/* окно «Подключить команду» */
+.d3 .md{position:fixed;inset:0;z-index:3;display:grid;place-items:center;padding:16px;background:rgba(0,0,0,.74);background:color-mix(in srgb,var(--bg-lo) 82%,transparent)}
+.d3 .md-box{width:min(34em,100%);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto;border:1px solid var(--fg);background:var(--bg);padding:0 2ch 1em;box-shadow:0 0 28px rgba(var(--fg-rgb),.3),inset 0 0 18px rgba(var(--fg-rgb),.07)}
+.d3 .md-h{display:flex;align-items:center;justify-content:space-between;gap:2ch;margin:0 -2ch .7em;padding:.25em 2ch;background:var(--fg);color:var(--bg);text-shadow:none;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+.d3 .md-x{font:inherit;font-weight:700;color:var(--bg);background:transparent;border:0;cursor:pointer;padding:0 .5ch;text-shadow:none}
+.d3 .md-l{display:block;margin:.7em 0 .3em;font-size:var(--fs-s);letter-spacing:.14em;text-transform:uppercase;color:rgba(var(--fg-rgb),.7)}
+.d3 .md-in{font:inherit;width:100%;color:var(--hot);background:transparent;border:1px solid rgba(var(--fg-rgb),.55);padding:.4em 1.2ch;text-shadow:inherit;caret-color:var(--hot);border-radius:0}
+.d3 .md-in::placeholder{color:rgba(var(--fg-rgb),.4)}
+.d3 .md-in:focus{outline:none;border-color:var(--fg);box-shadow:0 0 12px rgba(var(--fg-rgb),.3)}
+.d3 .md-key{display:flex;flex-wrap:wrap;gap:.5em 1.6ch;align-items:center;border:1px dashed var(--fg);padding:.45em 1.4ch}
+.d3 .md-code{flex:1 1 14em;min-width:0;font:inherit;color:var(--hot);overflow-wrap:anywhere;text-shadow:0 0 2px var(--fg),0 0 8px rgba(var(--fg-rgb),.55)}
+.d3 .md-how{margin:.8em 0 0;line-height:1.4}
+.d3 .md-ok{display:flex;justify-content:flex-end;margin-top:.9em}
+/* шкала задачи (слово владельца 06.10, вариант В макета statusbar-mockup.html): N шагов = N равных сегментов одной высоты, справа «2/6».
+   сделано — спокойная заливка · делается — яркий с пульсом · ждёт вас — штрих · впереди — тонкий контур; тот же язык у значков */
+.d3 i.u{display:block;flex:1 1 0px;min-width:2px;height:100%}
+.d3 i.u.d{background:rgba(var(--fg-rgb),.55)}
+.d3 i.u.r{background:var(--fg);animation:glow 2.6s ease-in-out infinite}
+.d3 i.u.w{background:repeating-linear-gradient(135deg,var(--fg) 0 2px,transparent 2px 5px);box-shadow:inset 0 0 0 1px var(--fg)}
+.d3 i.u.t{box-shadow:inset 0 0 0 1px rgba(var(--fg-rgb),.45)}
+.d3 i.u.b{box-shadow:inset 0 0 0 1px var(--hot),0 0 6px rgba(var(--fg-rgb),.6)}
+@keyframes glow{0%,100%{background-color:var(--fg);box-shadow:0 0 0 rgba(var(--fg-rgb),0)}50%{background-color:var(--hot);box-shadow:0 0 9px rgba(var(--fg-rgb),.7)}}
+.d3 .sg{display:flex;width:100%;min-width:0}
+.d3 .sg .g{flex:1 1 0px;min-width:0;display:grid}
+.d3 .sg .s{display:flex;gap:2px;height:6px}
+.d3 .ch.hd{display:flex;flex-direction:column;gap:.1em}
+.d3 .ch .bw{margin-top:auto;padding-top:.45em;display:grid;gap:.3em;min-width:0}
+.d3 .ch .cr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 1ch;align-items:center}
+.d3 .ch .cnt{font-size:var(--fs-s);white-space:nowrap;line-height:1}
+.d3 .pip.s-done{background:rgba(var(--fg-rgb),.55);border-color:rgba(var(--fg-rgb),.55)}
+.d3 .pip.s-run,.d3 .pip.s-review,.d3 .pip.s-repair{background:var(--hot);border-color:var(--hot);box-shadow:0 0 6px rgba(var(--fg-rgb),.7)}
+.d3 .pip.s-review::after{content:none}
+.d3 .pip.s-todo{border-style:solid;border-color:rgba(var(--fg-rgb),.45);background:transparent}
+.d3 .pip.s-wait{background:repeating-linear-gradient(135deg,var(--fg) 0 2px,transparent 2px 4px);border-color:var(--fg);box-shadow:none}
+.d3 .pip.s-wait::after{content:none}
+.d3 .cs{display:flex;align-items:baseline;min-width:0;line-height:1.25}
+.d3 .cs .pip{flex:none;align-self:center}
+.d3 .cs .n{flex:none}
+.d3 .cs b{flex:0 1 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.d3 .cs .d{flex:1 1 0px;min-width:0;display:block;margin:0 0 0 .9ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-s)}
+.d3 .cs.s-wait b{color:var(--hot)}
+@media (max-width:860px){
+  .d3 .mx .mc{padding:.4em 1ch}
+  .d3 .mx .cl{padding-left:calc(1ch + 1ch)}
+  .d3 .mt-row{max-width:20em}
+  .d3 .mx .ch.hd{display:flex;padding:.5em 1ch}
+  .d3 .mx .ch .sg{max-width:30em}
+}
+@media (prefers-reduced-motion:reduce){
+  .d3 i.u.r{animation:none!important}
+}
+@media (max-width:720px){
+  .d3 .md{padding:8px}
+  .d3 .md-box{padding:0 1.4ch .9em}
+  .d3 .md-h{margin:0 -1.4ch .7em;padding:.25em 1.4ch}
+}
+
+</style>
+</head>
+<body>
+<noscript>Нужен JavaScript.</noscript>
+<script src="phosphor.js"></script>
+<script>
+(() => {
+  const { E, arr, bar, lamp, sdet, fmtMin, qOf, feedWho, ui, tagOf, tok, whoOn, tm, waitTxt, pinfo, forTxt, flow } = Board;
+  const STALE = (v, age) => age == null || age > 2 * (Number(v && v.tick_s) || 5) + 5;
+  const ROLE = { engineer: "Инженер", researcher: "Исследователь", judge: "Судья", ceo: "CEO" };
+  const n = (c, k) => Number((c || {})[k]) || 0;
+
+  const meter = (l, pct, txt) => `<div class="mt-row"><span class="dim">${l}</span>${pct != null ? bar(pct, 10) : "<span></span>"}<span>${txt}</span></div>`;
+
+  const SU = { done: "d", run: "r", review: "r", repair: "r", wait: "w", todo: "t", bad: "b" };
+  const scale = (p) => {
+    const ss = arr(p.steps), dn = ss.filter((s) => s.state === "done").length;
+    return `<span class="bw"><span class="cr"><span class="sg"><span class="g"><span class="s" role="img" aria-label="готово ${dn} из ${ss.length} шагов">${ss.map((s) => `<i class="u ${SU[Board.sk(s.state)]}"></i>`).join("")}</span></span></span><span class="cnt"><b class="hot">${dn}</b><span class="dim">/${ss.length}</span></span></span></span>`;
+  };
+
+  const cell = (mid, p) => {
+    const ss = arr(p.steps).filter((s) => s.on === mid);
+    if (!ss.length) return `<div class="cl empty" data-t="${E(p.title)}"><span class="faint">—</span></div>`;
+    return `<div class="cl" data-t="${E(p.title)}">${ss.map((s) => {
+      const q = s.state === "wait" && s.question ? qOf(s.question) : null;
+      const d = q ? `ждёт вас ${fmtMin(q.wait_min || 0)}` : sdet(s);
+      return `<div class="cs s-${Board.sk(s.state)}"><i class="pip s-${Board.sk(s.state)}"></i><span class="n">${E(s.n)}</span><b>${E(s.title)}</b>${d ? `<span class="dim d">${d}</span>` : ""}</div>`;
+    }).join("")}</div>`;
+  };
+
+  const drawer = (p) => {
+    const steps = arr(p.steps);
+    return `<div class="dr"><div class="drh"><b class="hot">${E(p.title)}</b><span class="dim">${[flow(p), forTxt(p), pinfo(p)].filter(Boolean).join(" · ")}</span></div>
+    <ol class="tl">${steps.map((s) => `<li class="s-${Board.sk(s.state)}"><span class="tm">${E(tm(s)) || "—"}</span><i class="pip s-${Board.sk(s.state)}"></i><div class="tb"><span class="n">шаг ${E(s.n)}</span> <b>${E(s.title)}</b> ${tok(s.state)}${s.wave != null && steps.length > 1 ? ` <span class="dim small">волна ${E(s.wave)}</span>` : ""}<div class="dim">${[whoOn(s), s.for ? "для: " + E(s.for) : "", sdet(s), s.state === "wait" ? waitTxt(s) : ""].filter(Boolean).join(" · ")}</div></div></li>`).join("") || '<li class="none">шагов в плане нет</li>'}</ol></div>`;
+  };
+
+  const chip = (t) => {
+    const v = t.view2, c = (v && v.counters) || {}, nq = arr(v && v.questions).length, age = t.age_s;
+    const run = n(c, "run") + n(c, "review") + n(c, "repair"), todo = n(c, "todo") + n(c, "wait");
+    const stale = !v || STALE(v, age);
+    const lp = stale ? "warn" : nq ? "wait" : run ? "run" : "idle";
+    const when = age == null ? "сводки ещё нет" : stale ? `молчит ${fmtMin(age / 60)}` : "на связи";
+    const mach = arr(v && v.machines).map((m) => tagOf(m.id).name).join(", ");
+    const tip = [`${t.name} — ${when}`, mach, v ? `в работе ${run}, ждут ${todo}` : "", v ? (nq ? `вопросов к вам: ${nq}` : "вопросов к вам нет") : ""].filter(Boolean).join("\n");
+    const x = t.id !== "home" && t.id === ui.team ? `<button type="button" class="chip chipx" data-del="${E(t.id)}" data-name="${E(t.name)}" title="Удалить команду" aria-label="Удалить команду ${E(t.name)}">×</button>` : "";
+    return `${x ? '<span class="tc">' : ""}<button type="button" class="chip" data-act="team" data-id="${E(t.id)}" aria-pressed="${t.id === ui.team}" title="${E(tip)}">${lamp(lp)}<b>${E(t.name)}</b>${v ? `<span class="cn">${run}·${todo}</span>` : ""}${nq ? `<span class="cq">?${nq}</span>` : ""}</button>${x ? x + "</span>" : ""}`;
+  };
+
+  const pane = (v) => {
+    const all = Board.procs(), act = all.filter((p) => p.state !== "done");
+    if (!all.length) return `<div class="main"><div class="none">ждём первую сводку этой команды</div></div>`;
+    const machines = arr(v.machines).map((m) => ({ id: m.id, state: (m.now || {}).state, m }));
+    act.forEach((p) => arr(p.steps).forEach((s) => { if (s.on && s.on !== "you" && !machines.some((r) => r.id === s.on)) machines.push({ id: s.on, state: "idle", m: null }); }));
+    if (arr(v.questions).length || act.some((p) => arr(p.steps).some((s) => s.on === "you"))) machines.push({ id: "you", state: arr(v.questions).length ? "wait" : "idle", m: null });
+    const np = act.length, done = all.filter((p) => p.state === "done");
+    const sel = ui.sel && all.some((p) => p.id === ui.sel) ? ui.sel : (act[0] || all[0] || {}).id, selP = all.find((p) => p.id === sel);
+    let mx = "";
+    if (np) {
+      mx = `<div class="corner"></div>` + act.map((p, i) => {
+        const q = p.state === "todo" ? "в очереди" : p.state === "wait" ? "ждёт вас" : p.state === "bad" ? "проблема" : "";
+        return `<button type="button" class="ch hd${i === np - 1 ? " lc" : ""}" data-act="select" data-id="${E(p.id)}" aria-pressed="${p.id === sel}"><b>${E(p.title)}</b><span class="dim small">${E([ROLE[p.role] || "", p.for && p.for.text ? p.for.text : ""].filter(Boolean).join(" · "))}</span>${p.plan && arr(p.steps).length ? scale(p) : `<span class="small"><span class="dim">${E(p.state === "run" || p.state === "review" || p.state === "repair" ? "делается" : p.state === "bad" ? "проблема" : p.state === "wait" ? "ждёт" : "в очереди")}</span></span>${q ? `<span class="small"><span class="dim">${q}</span></span>` : ""}`}</button>`;
+      }).join("");
+      machines.forEach((r, ri) => {
+        const you = r.id === "you", last = ri === machines.length - 1, m = r.m, down = m && m.state === "down";
+        const meters = m && m.state === "ok" ? meter("CPU", m.cpu != null ? m.cpu : 0, `${m.cpu != null ? m.cpu : 0}%`) + meter("RAM", m.mem != null ? m.mem : 0, `${m.mem != null ? m.mem : 0}%`) + (m.disk_mb_s ? meter("Диск", null, `${m.disk_mb_s} МБ/с`) : "") : "";
+        mx += `<div class="mc${you ? " yr" : ""}${last ? " lr" : ""}"><div class="mh">${lamp(down ? "warn" : r.state)}<b>${you ? "вы" : E(tagOf(r.id).name)}</b>${down ? '<span class="warn small qt-w">не отвечает</span>' : ""}</div>${meters}</div>`;
+        act.forEach((p, i) => { mx += cell(r.id, p).replace('class="cl', 'class="cl' + (you ? " yr" : "") + (i === np - 1 ? " lc" : "") + (last ? " lr" : "")); });
+      });
+    }
+    const feed = arr(v.feed).slice().reverse().map((f) => `<div class="fl"><span class="dim">${E(f.time)}</span><i class="pip s-${Board.sk(f.state)}"></i><span>${feedWho(f)} ${E(f.text)}</span></div>`).join("") || `<div class="none">пока тихо</div>`;
+    const pick = all.length > 1 ? `<div class="pick${done.length ? " hd" : ""}"><span class="dim">подробно о задаче:</span>${all.map((p) => `<button type="button"${p.state === "done" ? "" : ' class="pa"'} data-act="select" data-id="${E(p.id)}" aria-pressed="${p.id === sel}">${E(p.title)}</button>`).join("")}</div>` : "";
+    const sums = all.filter((p) => p.summary).map((p) => `<li><b>${E(p.title)}</b><span>${E(p.summary)}</span></li>`).join("");
+    return `<div class="main"><div class="h4 hot">Кто что делает и для чего</div>${np ? `<div class="mxw"><div class="mx" style="--np:${np}">${mx}</div></div><div class="mxh dim small" hidden>таблица шире окна: листайте её вправо</div>` : '<div class="none">все задачи готовы</div>'}${pick}${selP ? `<div class="h4 hot">Подробно · выберите задачу в шапке таблицы</div>${drawer(selP)}` : ""}</div>
+   <div class="rest"><div class="h4 hot">Что стало возможно</div>${sums ? `<ul class="sums">${sums}</ul>` : '<div class="none">пока ничего не закрыто</div>'}<div class="h4 hot">Недавно</div>${feed}</div>`;
+  };
+
+  const modal = `<div class="md" id="md" role="dialog" aria-modal="true" aria-labelledby="md-t" hidden><div class="md-box">
+    <div class="md-h"><span id="md-t">Подключить команду</span><button type="button" class="md-x" id="md-x" aria-label="Закрыть">×</button></div>
+    <div id="md-s1"><label class="md-l" for="md-name">Имя команды</label><input class="md-in" id="md-name" type="text" maxlength="40" placeholder="например: Инвойс" autocomplete="off">
+      <p class="md-how dim" id="md-err" hidden></p><div class="md-ok"><button type="button" class="cbtn" id="md-make">Выдать ключ</button></div></div>
+    <div id="md-s3" hidden><p class="md-how" id="md-del-q"></p><p class="md-how dim">Ключ команды отзовётся, её сводки больше не принимаются.</p>
+      <div class="md-ok"><button type="button" class="cbtn no" id="md-del-no">Отмена</button> <button type="button" class="cbtn" id="md-del-yes">Удалить</button></div></div>
+    <div id="md-s2" hidden><span class="md-l">Строка подключения (ключ виден один раз)</span><div class="md-key"><code class="md-code" id="md-code"></code><button type="button" class="cbtn no" data-copy="md-code">Копировать</button></div>
+      <p class="md-how dim">на том компьютере положите её в настройку плагина RPV_BOARD — сборщик сам начнёт присылать сводку</p>
+      <div class="md-ok"><button type="button" class="cbtn" id="md-done">Готово</button></div></div></div></div>`;
+
+  Board.start({
+    after() { const w = document.querySelector('.d3 .mxw'), h = document.querySelector('.d3 .mxh'); if (w && h) h.hidden = w.scrollWidth <= w.clientWidth + 1; },
+    id: "dispetcher", cls: "d3", ph: "ice", title: "Диспетчерская", path: "", model: "Диспетчерская", extra: modal,
+    render(v) {
+      return `<div class="hbar"><h1>Диспетчерская</h1><div class="chips" role="group" aria-label="Команды">${Board.teams().map(chip).join("")}<button type="button" class="cbtn add" id="md-open" title="Подключить команду" aria-label="Подключить команду">+</button></div></div><section class="lay">${pane(v)}</section>`;
+    },
+  });
+
+  const $ = (id) => document.getElementById(id), md = $("md");
+  const closeM = () => { md.hidden = true; const o = $("md-open"); if (o) o.focus(); };
+  let delId = null;
+  const show = (k) => { ["md-s1", "md-s2", "md-s3"].forEach((i) => { $(i).hidden = i !== k; }); md.hidden = false; };
+  async function del() {
+    try {
+      const r = await fetch("teams/" + delId + "/delete", { method: "POST" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      closeM(); Board.poll();
+    } catch (x) { $("md-del-q").textContent = "не получилось: " + x.message; }
+  }
+  async function make() {
+    const err = $("md-err"); err.hidden = true;
+    try {
+      const r = await fetch("teams", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("md-name").value }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
+      $("md-code").textContent = location.origin + location.pathname.replace(/[^/]*$/, "") + "#" + d.key; $("md-s1").hidden = true; $("md-s2").hidden = false;
+    } catch (x) { err.textContent = "не получилось: " + x.message; err.hidden = false; }
+  }
+  document.addEventListener("click", (e) => {
+    const dx = e.target.closest("[data-del]");
+    if (dx) { delId = dx.dataset.del; $("md-del-q").textContent = "Удалить команду «" + dx.dataset.name + "»?"; $("md-t").textContent = "Удалить команду"; show("md-s3"); $("md-del-no").focus(); }
+    else if (e.target.closest("#md-del-no")) closeM();
+    else if (e.target.closest("#md-del-yes")) del();
+    else if (e.target.closest("#md-open")) { $("md-t").textContent = "Подключить команду"; $("md-name").value = ""; $("md-err").hidden = true; show("md-s1"); $("md-name").focus(); }
+    else if (e.target.closest("#md-x,#md-done") || e.target === md) { closeM(); Board.poll(); }
+    else if (e.target.closest("#md-make")) make();
+    else { const c = e.target.closest("[data-copy]"); if (c) { const t = $(c.dataset.copy).textContent; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { c.textContent = "Скопировано"; }, () => { const r = document.createRange(); r.selectNodeContents($(c.dataset.copy)); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }); } }
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !md.hidden) closeM(); else if (e.key === "Enter" && e.target.id === "md-name") make(); });
+})();
+</script>
+</body>
+</html>
