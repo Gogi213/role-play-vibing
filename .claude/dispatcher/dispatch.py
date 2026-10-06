@@ -514,13 +514,54 @@ def _ssh_stderr(r) -> str:
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
 
-def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
+# Стандарт сигналов (В-192): при настроенной шине единственный путь сигнала к CEO — событие `задача.<ID|общее>.к_ceo`
+# в очередь `ceo` с приоритетом (urgent — читать первым); CEO читает её `tickets.py inbox`. Файлы ceo-inbox.md и
+# ceo-wake.log при шине — ТОЛЬКО запасной путь, когда шина не приняла событие (строка помечена «[запасной путь]»);
+# без шины (RPV_BUS_URL не задан) файлы — основной путь, как раньше. Неизвестный вид — urgent (безопасная сторона).
+NORMAL_KINDS = {"done", "next-ceo", "wait-for", "model", "watch-summary", "summary", "bus-up"}
+
+
+def signal_prio(kind: str) -> str:
+    return "normal" if kind in NORMAL_KINDS else "urgent"
+
+
+def _ceo_file_write(tid: str, kind: str, note: str, now=None, fallback: bool = False, wake_only: bool = False) -> None:
     CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-    with open(CEO_INBOX, "a", encoding="utf-8") as fh:
-        fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
-    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; ceo-inbox.md остаётся источником деталей
+    if not wake_only:
+        with open(CEO_INBOX, "a", encoding="utf-8") as fh:
+            fh.write(f"- {T.now_iso(now)} {tid} [{kind}]{' [запасной путь]' if fallback else ''} {note}\n")
+    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; детали — в ceo-inbox.md или в очереди шины
     with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
+        fh.write(f"{T.now_iso(now)} {tid} {kind}{' (очередь шины: tickets.py inbox)' if wake_only else ''}\n")
+
+
+def ceo_queue_wake(addr: str, seq: int) -> None:
+    """Будильник на событие очереди ceo, пришедшее мимо append_ceo_inbox (вопрос владельцу, падение юнита, тревога простоя)."""
+    CEO_WAKE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
+        fh.write(f"{T.now_iso()} {addr} #{seq} (очередь шины: tickets.py inbox){chr(10)}")
+
+
+def _bus_configured() -> bool:
+    try:
+        import busclient
+        return not os.environ.get("RPV_BUS_DISABLE") and bool(busclient.config()[0])
+    except Exception:
+        return False
+
+
+def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
+    """Сигнал CEO: шина (очередь `ceo`, ack на стороне CEO); шина не настроена — файл; не приняла — запасной файл."""
+    if not _bus_configured():
+        _ceo_file_write(tid, kind, note, now)
+        return
+    import busclient
+    addr = f"задача.{'общее' if tid == '*' else tid}.к_ceo"
+    payload = {"kind": kind, "note": note, "prio": signal_prio(kind), "ts": T.now_iso(now)}
+    if busclient.post(addr, payload, timeout=3, spool=False) is None:
+        _ceo_file_write(tid, kind, note, now, fallback=True)
+        return
+    _ceo_file_write(tid, kind, note, now, wake_only=True)  # будильник Monitor CEO; детали — в очереди (`tickets.py inbox`)
 
 
 # --- таблица правил «вид сигнала → будить / сводка» (судья TK-002 п.3, взамен привратника TypeSafe) --
@@ -542,12 +583,7 @@ def classify_signal(kind: str) -> str:
 def flush_pending_summary(state: dict, now) -> None:
     pending = state.get("pending_summary") or []
     if pending:
-        line = f"- {T.now_iso(now)} * [summary] {len(pending)} сигнал(ов): " + " | ".join(pending)
-        CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-        with open(CEO_INBOX, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-        with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-            fh.write(f"{T.now_iso(now)} * summary({len(pending)})\n")
+        append_ceo_inbox("*", "summary", f"{len(pending)} сигнал(ов): " + " | ".join(pending), now)
     state["pending_summary"] = []
     state["last_summary_flush"] = T.now_iso(now)
 
@@ -2222,7 +2258,8 @@ def _start_bus_link():
         if os.environ.get("RPV_BUS_DISABLE") or not busclient.config()[0]:
             return None
         link = bus_link.Link(lambda kind, note: append_ceo_inbox(
-            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event)
+            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event,
+            ceo_wake=ceo_queue_wake)
         link.start()
         return link
     except Exception as e:
