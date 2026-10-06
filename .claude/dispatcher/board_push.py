@@ -99,8 +99,12 @@ def build_view2(tickets_dir, now: float | None = None, plans_dir=None) -> dict:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "board"))
         import machines as M
         ms, tags = M.collect()
-        if not v.get("machines"):
-            v["machines"] = ms
+        have = {m["id"]: m for m in v.get("machines") or []}
+        for m in ms:  # загрузка из machines.py поверх строк view2 (там cpu/mem пустые)
+            if m["id"] in have:
+                have[m["id"]].update({k: m[k] for k in ("cpu", "mem", "disk_mb_s") if m.get(k) is not None})
+            else:
+                v.setdefault("machines", []).append(m)
         v["tags"] = {**tags, **(v.get("tags") or {})}
     except Exception as e:  # ssh/платформа не должны ронять сводку
         print("машины: " + type(e).__name__, file=sys.stderr)

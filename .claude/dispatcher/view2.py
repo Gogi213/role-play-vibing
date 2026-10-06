@@ -291,8 +291,29 @@ def make(tickets: dict, plans: dict, allq: list, now: float) -> dict:
                                after=af if isinstance(af, list) else None))
         return steps
 
+    def log_steps(t) -> list:
+        """План не написан — прошлые шаги берём из лога тикета (по записи на шаг, последние 3)."""
+        out = []
+        for e in (t.log or [])[-3:]:
+            who = (e.author or "").lower()
+            txt = _clip(re.split(r"(?<=[.!?])\s", " ".join((e.text or "").split()), 1)[0], 60)
+            if not txt or who not in ROLE_LC:
+                continue
+            out.append(_step(0, txt, ROLE_LC[who], "pc", "", "done", finished=e.ts.astimezone(P.TZ).strftime("%H:%M") if e.ts else None))
+        return out
+
     def synth_steps(t) -> tuple:
         wt, wmid = _wait_human(t)
+        prev = log_steps(t)
+        if prev:
+            cur, mids = synth_steps_now(t, wt, wmid)
+            steps = prev + cur
+            for i, s in enumerate(steps, 1):
+                s["n"] = i
+            return steps, mids
+        return synth_steps_now(t, wt, wmid)
+
+    def synth_steps_now(t, wt, wmid) -> tuple:
         if t.status == "in_review":
             return [_step(1, "проверка", "судья", "pc", "", "run")], ["pc"]
         if t.status == "in_progress":
@@ -425,6 +446,20 @@ def make(tickets: dict, plans: dict, allq: list, now: float) -> dict:
         if b and now - b.timestamp() <= FEED_AGE_S:
             feed.append((b.timestamp(), {"time": news_time(b), "state": "done", "on": [q.get("on", "pc")], "to": None,
                                          "text": f"ответ владельца: {q.get('answer_label')}"}))
+    for tid, t in tickets.items():
+        if BOARD_TITLE_RE.search(ptitle(tid)):
+            continue
+        for e in (t.log or [])[-4:]:
+            who = (e.author or "").lower()
+            if not e.ts or who not in ROLE_LC or now - e.ts.timestamp() > FEED_AGE_S:
+                continue
+            txt = _clip(re.split(r"(?<=[.!?])\s", " ".join((e.text or "").split()), 1)[0], 70)
+            feed.append((e.ts.timestamp(), {"time": news_time(e.ts), "state": "done", "on": ["pc"], "to": None,
+                                            "text": f"{ROLE_LC[who]}: {txt}", "_tid": tid, "_title": ptitle(tid)}))
+        if t.status == "done" and _t_updated(t, 0) and now - _t_updated(t, 0) <= FEED_AGE_S:
+            ts = _t_updated(t, 0)
+            feed.append((ts, {"time": news_time(P.datetime.fromtimestamp(ts, P.TZ)), "state": "done",
+                              "on": ["pc"], "to": None, "text": "задача закрыта", "_tid": tid, "_title": ptitle(tid)}))
     feed.sort(key=lambda x: x[0])
     per, picked = {}, []
     for _, f in reversed(feed):
