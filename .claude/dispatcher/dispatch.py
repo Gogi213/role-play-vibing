@@ -535,6 +535,13 @@ def _ceo_file_write(tid: str, kind: str, note: str, now=None, fallback: bool = F
         fh.write(f"{T.now_iso(now)} {tid} {kind}{' (очередь шины: tickets.py inbox)' if wake_only else ''}\n")
 
 
+def ceo_queue_wake(addr: str, seq: int) -> None:
+    """Будильник на событие очереди ceo, пришедшее мимо append_ceo_inbox (вопрос владельцу, падение юнита, тревога простоя)."""
+    CEO_WAKE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
+        fh.write(f"{T.now_iso()} {addr} #{seq} (очередь шины: tickets.py inbox){chr(10)}")
+
+
 def _bus_configured() -> bool:
     try:
         import busclient
@@ -2251,7 +2258,8 @@ def _start_bus_link():
         if os.environ.get("RPV_BUS_DISABLE") or not busclient.config()[0]:
             return None
         link = bus_link.Link(lambda kind, note: append_ceo_inbox(
-            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event)
+            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event,
+            ceo_wake=ceo_queue_wake)
         link.start()
         return link
     except Exception as e:

@@ -78,6 +78,12 @@ class SignalsTest(unittest.TestCase):
         self.assertIn("TK-9 next-ceo", D.CEO_WAKE_LOG.read_text(encoding="utf-8"))
         self.assertIn("передача", self.inbox()[1])
 
+    def test_ceo_queue_wake_line_has_no_details(self):
+        D.ceo_queue_wake("задача.TK-5.вопрос_владельцу", 7)
+        line = D.CEO_WAKE_LOG.read_text(encoding="utf-8")
+        self.assertIn("вопрос_владельцу #7", line)
+        self.assertFalse(D.CEO_INBOX.exists())
+
     def test_peek_does_not_ack(self):
         D.append_ceo_inbox("*", "watch-deck", "тревога")
         self.assertIn("СРОЧНО", self.inbox("--peek")[1])

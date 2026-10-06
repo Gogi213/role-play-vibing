@@ -1,5 +1,5 @@
 """Клиент шины для диспетчера (TK-045): long-poll очереди dispatcher, сигнал «проснуться сейчас», ack после тика.
-Очередь `ceo` диспетчер НЕ читает (В-192): её читает и подтверждает CEO командой `tickets.py inbox`.
+Очередь `ceo` диспетчер только слушает ради будильника (строка в ceo-wake.log, без ack): подтверждает её CEO командой `tickets.py inbox` (В-192).
 Шина лежит — диспетчер работает по таймеру как раньше (обёртка не бросает), CEO получает одну строку за период."""
 import os
 import sys
@@ -79,7 +79,7 @@ def blockers_snapshot(tickets) -> dict:
 class Link:
     """Состояние связи для цикла диспетчера: wake.wait(...) вместо sleep; ack — после законченного тика."""
 
-    def __init__(self, ceo_line, on_event=None):
+    def __init__(self, ceo_line, on_event=None, ceo_wake=None):
         self.on_event = on_event  # callable(event) — wait_for по событию (TK-055), вызывается из потока слушателя
         self.wake = threading.Event()
         self.lock = threading.Lock()
@@ -88,9 +88,14 @@ class Link:
         self.down_since = None
         self.last_snapshot = 0.0
         self.disp = Listener("dispatcher", self._on_disp, self._on_state)
+        self.ceo_wake = ceo_wake  # callable(addr, seq) — строка будильника CEO; None — очередь ceo не слушаем
+        self.ceo = Listener("ceo", self._on_ceo) if ceo_wake else None
+        self._ceo_first = True
 
     def start(self):
         self.disp.start()
+        if self.ceo:
+            self.ceo.start()
 
     def _on_disp(self, events):
         if self.on_event:
@@ -102,6 +107,21 @@ class Link:
         with self.lock:
             self.to_ack.update(e["seq"] for e in events)
         self.wake.set()
+
+    def _on_ceo(self, events):
+        """Будильник на любое событие очереди ceo, кроме `.к_ceo` (его будит append_ceo_inbox при отправке). Без ack.
+        Первая пачка после старта диспетчера — одна строка о накопленном, а не по строке на событие."""
+        try:
+            if self._ceo_first:
+                self._ceo_first = False
+                if len(events) > 1:
+                    self.ceo_wake(f"в очереди ceo {len(events)} событий", events[-1]["seq"])
+                    return
+            for e in events:
+                if not e["addr"].endswith(".к_ceo"):
+                    self.ceo_wake(e["addr"], e["seq"])
+        except Exception:
+            pass
 
     def _on_state(self, up, why):
         if not up and self.down_since is None:
