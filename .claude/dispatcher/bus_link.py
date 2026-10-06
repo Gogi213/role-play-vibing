@@ -120,8 +120,8 @@ class Link:
             for e in events:
                 if not e["addr"].endswith(".к_ceo"):
                     self.ceo_wake(e["addr"], e["seq"])
-        except Exception:
-            pass
+        except Exception as ex:
+            print(f"[bus] будильник очереди ceo не записан: {type(ex).__name__}: {ex}", file=sys.stderr)
 
     def _on_state(self, up, why):
         if not up and self.down_since is None:
