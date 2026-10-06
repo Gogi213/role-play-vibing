@@ -377,7 +377,7 @@ class Harness:
             self.reboot()
             faults.append("перезагрузка: убиты диспетчер и роли, чистый перезапуск")
         done = self.wait(lambda: all(s == "done" for s in self.statuses().values()), timeout, "все тикеты done")
-        time.sleep(2)  # дать диспетчеру дописать сигналы done
+        self.wait(lambda: all(f"{t} [done]" in self.inbox() for t in ids), 30, "сигналы done в ceo-inbox")  # диспетчер дописывает на следующем тике
         self.stop.set()
         obs.join(5)
         self.kill_dispatcher()
