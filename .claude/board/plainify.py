@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-MODEL = os.environ.get("RPV_PLAIN_MODEL") or "claude-haiku-4-5-20251001"
+MODEL = os.environ.get("RPV_PLAIN_MODEL") or "claude-haiku-5-5"
 CALL_TIMEOUT_S = 60
 MAX_PER_HOUR = 60
 RETRY_S = (60, 300, 1800)  # пауза после 1-го, 2-го, 3-го сбоя; после третьего вход не повторяется
