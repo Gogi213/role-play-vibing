@@ -77,6 +77,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/stop_result.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

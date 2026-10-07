@@ -68,14 +68,32 @@ def _note(tkt, text: str, wake_owner: bool = False, bus=None) -> None:
         bus(tkt.id, "статус", {"merge": text[:120]})
 
 
+def _note_not_found(repo: str, number: int) -> None:
+    """404 в `merged:`: запись в лог тикета, который ждёт этот PR, — проснувшийся владелец видит причину в тикете, а не
+    только в журнале диспетчера. Повторный опрос того же ожидания вторую запись не пишет."""
+    text = f"PR #{number} не найден в {repo} — ожидание merged: снято; проверь номер PR и репозиторий (RPV_CI_REPO)."
+    want = f"merged:{repo}#{number}"
+    for p in T.list_tickets(D.TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(p)
+        except Exception:
+            continue
+        if (tkt.header.get("wait_for") or "").strip() != want:
+            continue
+        if any(e.author == "merge" and e.text.strip() == text for e in tkt.log):
+            continue
+        _note(tkt, text)
+
+
 def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
-    """wait_for `merged:<репо>#<PR>`: PR влит. PR не найден (404) — ожидание вечным не делаем: «готово», владелец
-    просыпается и видит ошибку в stderr/журнале диспетчера. Прочий сбой GitHub — не готово (повтор на след. тике)."""
+    """wait_for `merged:<репо>#<PR>`: PR влит. PR не найден (404) — ожидание вечным не делаем: «готово», в тикет пишется
+    причина, владелец просыпается. Прочий сбой GitHub — не готово (повтор на след. тике)."""
     try:
         return bool(gh(f"repos/{repo}/pulls/{number}").get("merged"))
     except Exception as e:
         if "404" in str(e) or "Not Found" in str(e):
             print(f"merged:{repo}#{number}: PR не найден — ожидание снято, проверь репозиторий", file=sys.stderr)
+            _note_not_found(repo, number)
             return True
         return False
 

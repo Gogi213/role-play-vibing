@@ -398,6 +398,60 @@ class TicketScopedDigests(unittest.TestCase):
         self.assertTrue(last.endswith("-dddddddd.md"))
 
 
+class StopResultTest(unittest.TestCase):
+    TID = "TK-901"
+    OLD = "### 2026-10-07T01:00:00+04:00 engineer\nстарая запись\n\n"
+    NEW = "### 2026-10-07T02:00:00+04:00 engineer\nитог запуска\n\n"
+    RES = "### 2026-10-07T02:00:00+04:00 engineer\n[итог: pr] — готово\n\n"
+    HEAD = "---\nid: TK-901\ntitle: t\nowner: engineer\nstatus: in_progress\nreviewer: judge\n---\n\nописание\n\n## Лог\n\n"
+
+    def _setup(self, launch_keys, log_lines):
+        disp = os.environ["RPV_DISPATCHER_DIR"]
+        with open(os.path.join(disp, "state.json"), "w", encoding="utf-8") as f:
+            json.dump({"active_runs": {self.TID: {"log_keys_at_launch": launch_keys}}}, f)
+        tdir = os.path.join(PROJECT, ".claude", "tickets")
+        with open(os.path.join(tdir, self.TID + ".md"), "w", encoding="utf-8") as f:
+            f.write(self.HEAD + "".join(log_lines))
+
+    def _stop(self, extra=None, stdin=None):
+        env = {"RPV_ROLE": "engineer", "RPV_TICKET": self.TID}
+        env.update(extra or {})
+        r = run_hook("stop_result.py", stdin or {"hook_event_name": "Stop"}, env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.decode("utf-8")) if r.stdout.strip() else None
+
+    def test_no_new_entry_blocks(self):
+        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD])
+        out = self._stop()
+        self.assertEqual(out["decision"], "block")
+        self.assertIn(self.TID, out["reason"])
+
+    def test_new_entry_allows(self):
+        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.NEW])
+        self.assertIsNone(self._stop())
+
+    def test_other_role_entry_does_not_count(self):
+        self._setup([], ["### 2026-10-07T02:00:00+04:00 judge\nчужая\n\n".replace("\n", chr(92) + "n")])
+        self.assertEqual(self._stop()["decision"], "block")
+
+    def test_strict_needs_result_entry(self):
+        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.NEW])
+        self.assertEqual(self._stop({"RPV_STOP_STRICT": "1"})["decision"], "block")
+        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.RES])
+        self.assertIsNone(self._stop({"RPV_STOP_STRICT": "1"}))
+
+    def test_second_stop_is_not_blocked(self):
+        self._setup([], [])
+        self.assertIsNone(self._stop(stdin={"stop_hook_active": True}))
+
+    def test_not_a_dispatcher_run_is_silent(self):
+        self._setup([], [])
+        r = run_hook("stop_result.py", {}, {"RPV_ROLE": "", "RPV_TICKET": ""})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, b""))
+        os.remove(os.path.join(os.environ["RPV_DISPATCHER_DIR"], "state.json"))
+        self.assertIsNone(self._stop())
+
+
 class CeoSignalGuardTest(unittest.TestCase):
     def test_denied(self):
         import ceo_signal_guard as g
