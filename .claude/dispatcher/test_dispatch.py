@@ -1153,6 +1153,7 @@ class DispatchRunTests(unittest.TestCase):
         finally:
             D._popen = orig_popen
         self.assertEqual(captured_cmd[captured_cmd.index("--model") + 1], D.CLAUDE_HAIKU_MODEL)
+        self.assertEqual(captured_cmd[captured_cmd.index("--effort") + 1], "xhigh")
         for info in list(D.RUNNING.values()):
             info["popen"].wait(timeout=10)
             for fh in (info.get("out_fh"), info.get("err_fh")):

@@ -38,7 +38,7 @@
 | `RPV_DISPATCH_MODEL` | `claude-sonnet-5-5` | модель ролей |
 | `RPV_DISPATCH_ROLE_MODEL` | Судья — `claude-opus-5-5`, остальные — `RPV_DISPATCH_MODEL` | модель по ролям, `judge:…,engineer:…` или одно значение на все роли |
 | `RPV_DISPATCH_EFFORT` | Судья `xhigh`, Инженер и Исследователь `high` | усилие по ролям, `judge:xhigh,engineer:high` или одно значение на все; поле `effort` тикета перекрывает |
-| `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-5-5` | модель для механических задач (`executor: haiku`) |
+| `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-5-5` | модель для механических задач (`executor: haiku`); усилие у них всегда `xhigh` |
 | `RPV_DISPATCH_SESSION_SCOPE` | `judge:ticket,researcher:ticket,engineer:ticket` | область сессии роли: `ticket` — своя сессия на тикет, `role` — одна долгая сессия на все тикеты |
 | `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст прошлого запуска, после которого роль начинает новую сессию |
 | `RPV_DISPATCH_WAIT_POLL_S` | `300` | период запасного ssh-опроса `wait_for host:…`, с |

@@ -124,7 +124,6 @@ class Plain:
         cmd = [self.claude, "-p", "--model", MODEL, "--effort", "xhigh", "--output-format", "json", "--tools", "", "--system-prompt", SYSTEM,
                "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
         env = {k: v for k, v in os.environ.items() if "HOST_SESSION" not in k.upper()}
-        env["MAX_THINKING_TOKENS"] = "0"
         cwd = Path(tempfile.gettempdir()) / "rpv-plainify"  # вне проекта: его CLAUDE.md не подтягивается
         try:
             cwd.mkdir(parents=True, exist_ok=True)

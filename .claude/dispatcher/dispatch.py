@@ -1553,6 +1553,8 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     # executor: haiku (судья TK-002 п.5) — заведомо проверенный на whitelist/обход тикетом (tickets.py
     # new и haiku_refused_reason() в tick()); здесь только сама подмена модели.
     model = CLAUDE_HAIKU_MODEL if executor == "haiku" else ROLE_MODEL.get(role, CLAUDE_MODEL)
+    if executor == "haiku":
+        effort = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
            "--model", model, "--effort", effort]
     if sid:
