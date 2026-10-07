@@ -4,6 +4,11 @@
 
 ## Не выпущено
 
+### Добавлено
+
+- Сортировщик сигналов CEO `ceo_triage.py` (TK-086): правила без ИИ (дубль, закрытый тикет, план-сигналы, orphan при годном wait_for) + Haiku 5.5 `--effort xhigh` на остаток; шум — ack, сведения — `ceo-digest.md` (показывает хук на сообщении владельца), действия — один запуск CEO как роли; журнал `triage.jsonl` с токенами. Запуск вручную/присмотром (`ceo_triage.py --project …`), по умолчанию ничего не меняется; тесты `test_ceo_triage.py`.
+- Присмотр поднимает сортировщик при `RPV_CEO_TRIAGE=1` (сердцебиение `triage-heartbeat.json`, замок `ceo_triage.pid`); `ceo_triage.py --report` — замер TK-086 (классы событий, токены Haiku и запусков CEO).
+
 ### Изменено
 
 - Haiku 4.5 → Haiku 5.5 (`claude-haiku-5-5`): `plainify.py` (+ `--effort xhigh` по решению владельца 08.10), `RPV_DISPATCH_HAIKU_MODEL`, `agents/reader.md`, доки, тесты. TK-085.
