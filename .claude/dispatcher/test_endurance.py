@@ -1,5 +1,6 @@
 """Короткий прогон на выносливость (TK-076 п.2): по раунду на сбой — 0 потерь, 0 blocked, простой в пределах."""
 import sys
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,9 +28,13 @@ class EnduranceShort(unittest.TestCase):
             try:
                 sys.path.insert(0, str(endurance.HERE.parent / "bus"))
                 import busclient
-                for i in range(130):
-                    busclient.post(f"задача.TK-{i}.к_ceo", {"kind": "done"}, f"pg-{i}")
-                self.assertIn("TK-129 [done]", h.inbox())
+                end = time.time() + 60  # на медленном раннере (macOS) шина слушает порт позже 15 с ожидания start_bus
+                while busclient.post("задача.TK-0.к_ceo", {"kind": "done"}, "pg-0", timeout=5, spool=False) is None:
+                    self.assertLess(time.time(), end, "шина не ответила за 60 с")
+                    time.sleep(1)
+                for i in range(1, 130):
+                    self.assertIsNotNone(busclient.post(f"задача.TK-{i}.к_ceo", {"kind": "done"}, f"pg-{i}", timeout=15, spool=False))
+                self.assertIn("TK-129 [done]", h.inbox(timeout=15))
             finally:
                 h.kill_bus()
                 h.log_fh.close()
