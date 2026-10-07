@@ -38,7 +38,7 @@
 | `RPV_DISPATCH_MODEL` | `claude-sonnet-5-5` | модель ролей |
 | `RPV_DISPATCH_ROLE_MODEL` | Судья — `claude-opus-5-5`, остальные — `RPV_DISPATCH_MODEL` | модель по ролям, `judge:…,engineer:…` или одно значение на все роли |
 | `RPV_DISPATCH_EFFORT` | Судья `xhigh`, Инженер и Исследователь `high` | усилие по ролям, `judge:xhigh,engineer:high` или одно значение на все; поле `effort` тикета перекрывает |
-| `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-4-5-20251001` | модель для механических задач (`executor: haiku`) |
+| `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-5-5` | модель для механических задач (`executor: haiku`) |
 | `RPV_DISPATCH_SESSION_SCOPE` | `judge:ticket,researcher:ticket,engineer:ticket` | область сессии роли: `ticket` — своя сессия на тикет, `role` — одна долгая сессия на все тикеты |
 | `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст прошлого запуска, после которого роль начинает новую сессию |
 | `RPV_DISPATCH_WAIT_POLL_S` | `300` | период запасного ssh-опроса `wait_for host:…`, с |
@@ -125,7 +125,7 @@
 | `RPV_MACHINES` | не задан | машины: `pc2=user@host,srv=алиас`; `id=!host` — выключена вами |
 | `RPV_PC` | `1` | `0` — без загрузки «этого ПК» |
 | `RPV_PLAIN` | `1` | `0` — без человеческих строк процессов (Haiku) |
-| `RPV_PLAIN_MODEL` | `claude-haiku-4-5-20251001` | модель для таких строк |
+| `RPV_PLAIN_MODEL` | `claude-haiku-5-5` | модель для таких строк |
 | `RPV_BOARD_DATA` | `~/rpv-board` (в юните `/var/lib/rpv-board`) | данные сервера: команды, сводки |
 | `RPV_BOARD_TOKEN_FILE` | `/etc/rpv-board/token`, иначе `<данные>/token` | файл токена сервера |
 | `RPV_BOARD_PORT` | `8787` | порт сервера |
