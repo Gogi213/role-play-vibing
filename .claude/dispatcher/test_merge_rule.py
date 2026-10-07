@@ -136,6 +136,19 @@ class MergeRuleTests(unittest.TestCase):
         self.assertIn("не найден", M.check_pr(REPO, 7, SHA, gh=nf))
         self.assertTrue(M.merged_done(REPO, 7, gh=nf))  # 404 — не вечное ожидание: владелец просыпается
 
+    def test_404_on_merged_wait_writes_note_once(self):
+        T.write_header_updates(self.path, {"status": "waiting", "wait_for": "merged:o/r#9"}, now=NOW)
+        def nf(p, **k):
+            raise RuntimeError("Not Found (HTTP 404)")
+        n0 = len(self.tkt().log)
+        self.assertTrue(M.merged_done(REPO, 9, gh=nf))
+        self.assertTrue(M.merged_done(REPO, 9, gh=nf))
+        log = self.tkt().log
+        self.assertEqual(len(log), n0 + 1)
+        self.assertIn("PR #9 не найден", log[-1].text)
+        self.assertTrue(M.merged_done(REPO, 10, gh=nf))  # чужой PR: записей нет
+        self.assertEqual(len(self.tkt().log), n0 + 1)
+
     def test_accept_writes_verdict(self):
         T.write_header_updates(self.path, {"accepted": ""}, now=NOW)
         os.environ.pop("RPV_ROLE", None)
