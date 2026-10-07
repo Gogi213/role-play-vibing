@@ -11,7 +11,8 @@
     tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
-    tickets.py comment TK-001 --author researcher --text "..." [--next judge]
+    tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait; следующую роль ставит маршрут
+    tickets.py comment TK-001 --author researcher --text "..."  # промежуточная заметка без смены хода
     tickets.py accept TK-001 --pr 7 --sha <голова>              # только Судья: принято на этой голове → вливает merge_rule
     tickets.py start TK-001                                     # backlog|stopped → todo
     tickets.py wait TK-001 host:calc:<путь>/<job>.json [--on-met "python tools/x.py арг"]  # status: waiting + wait_for
