@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-MODEL = os.environ.get("RPV_PLAIN_MODEL") or "claude-haiku-4-5-20251001"
+MODEL = os.environ.get("RPV_PLAIN_MODEL") or "claude-haiku-5-5"
 CALL_TIMEOUT_S = 60
 MAX_PER_HOUR = 60
 RETRY_S = (60, 300, 1800)  # пауза после 1-го, 2-го, 3-го сбоя; после третьего вход не повторяется
@@ -121,7 +121,7 @@ class Plain:
         if len(self.calls) >= MAX_PER_HOUR:
             return None
         self.calls.append(now)
-        cmd = [self.claude, "-p", "--model", MODEL, "--output-format", "json", "--tools", "", "--system-prompt", SYSTEM,
+        cmd = [self.claude, "-p", "--model", MODEL, "--effort", "low", "--output-format", "json", "--tools", "", "--system-prompt", SYSTEM,
                "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
         env = {k: v for k, v in os.environ.items() if "HOST_SESSION" not in k.upper()}
         env["MAX_THINKING_TOKENS"] = "0"
