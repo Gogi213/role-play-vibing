@@ -14,6 +14,11 @@
 
 - Haiku 4.5 → Haiku 5.5 (`claude-haiku-5-5`): `plainify.py` (+ `--effort xhigh` по решению владельца 08.10), `RPV_DISPATCH_HAIKU_MODEL`, `agents/reader.md`, доки, тесты. TK-085.
 
+### Исправлено
+
+- Тесты: `.claude/conftest.py` убирает `RPV_*`/`ALPHA_*` из окружения до сбора — pytest на машине с живой установкой больше не пишет фикстуры в живую шину и очередь CEO (TK-077); тест `test_env_isolation`.
+- Тесты: conftest направляет spool шины во временный файл сессии (без URL post иначе пишет в общий `%TEMP%/rpv-bus-spool.jsonl` живой установки); страж проверяет и это.
+
 ## 1.8.2 — 2026-10-07
 
 ### Добавлено
