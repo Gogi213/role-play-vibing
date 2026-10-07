@@ -59,7 +59,7 @@ class ModelTest(unittest.TestCase):
             self.assertEqual(v["processes"][0]["summary"], "Код готов, идёт счёт — 1 из 2 готово")
             self.assertEqual(len(calls), 1)
             cmd, kw = calls[0]
-            self.assertEqual(cmd[:4], ["claude", "-p", "--model", "claude-haiku-4-5-20251001"])
+            self.assertEqual(cmd[:4], ["claude", "-p", "--model", "claude-haiku-5-5"])
             self.assertIn("--no-session-persistence", cmd)
             self.assertNotIn(d, kw["cwd"])  # временный каталог вне проекта
             self.assertEqual(json.loads(kw["input"])["title"], "Счёт")

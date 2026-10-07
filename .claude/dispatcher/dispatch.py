@@ -193,7 +193,7 @@ def _expected_model_family(info: dict) -> str:
 # tickets.py new), приёмка результата — кодом (в конкретных скриптах-проверках по виду, не здесь).
 # Обход Судьи запрещён (условие г): reviewer: judge или owner: researcher — не Haiku, tickets.py new
 # отказывает раньше, чем тикет вообще появится; здесь — вторая защита на случай ручной правки шапки.
-CLAUDE_HAIKU_MODEL = P.env("DISPATCH_HAIKU_MODEL", "claude-haiku-4-5-20251001")
+CLAUDE_HAIKU_MODEL = P.env("DISPATCH_HAIKU_MODEL", "claude-haiku-5-5")
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
