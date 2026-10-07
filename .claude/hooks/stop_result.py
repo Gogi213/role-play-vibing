@@ -44,8 +44,7 @@ def main():
         return
     how = f"tickets.py result {tid} <итог> --why \"…\"" if strict else f"tickets.py comment {tid} --author {role} --text \"…\""
     print(json.dumps({"decision": "block",
-                      "reason": f"За этот запуск нет записи в логе {tid}. Сообщи итог: {how} — что сделал, что дальше."},
-                     ensure_ascii=False))
+                      "reason": f"За этот запуск нет записи в логе {tid}. Сообщи итог: {how} — что сделал, что дальше."}))
 
 
 if __name__ == "__main__":
