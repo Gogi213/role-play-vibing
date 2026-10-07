@@ -174,14 +174,21 @@ class Harness:
         f = self.disp / "ceo-inbox.md"
         text = f.read_text(encoding="utf-8") if f.exists() else ""
         if "RPV_BUS_URL" in self.env and "RPV_BUS_DISABLE" not in self.env:
+            after = 0
             try:
-                req = urllib.request.Request(self.env["RPV_BUS_URL"] + "/q/ceo?after=0&wait=0",
-                                             headers={"Authorization": "Bearer " + self.env["RPV_BUS_TOKEN"]})
-                with urllib.request.urlopen(req, timeout=3) as r:
-                    for e in json.loads(r.read())["events"]:
+                while True:  # шина отдаёт не больше 100 событий за запрос: без ack очередь растёт по раундам — листаем по seq
+                    req = urllib.request.Request(self.env["RPV_BUS_URL"] + f"/q/ceo?after={after}&wait=0",
+                                                 headers={"Authorization": "Bearer " + self.env["RPV_BUS_TOKEN"]})
+                    with urllib.request.urlopen(req, timeout=3) as r:
+                        events = json.loads(r.read())["events"]
+                    fresh = [e for e in events if e["seq"] > after]
+                    for e in fresh:
                         pl = e.get("payload") or {}
                         tid = e["addr"].split(".")[1] if e["addr"].startswith("задача.") else e["addr"]
                         text += f"- {tid} [{pl.get('kind', '')}] [{e['addr']}] {pl.get('note', '')}\n"
+                    if not fresh:
+                        break
+                    after = max(e["seq"] for e in fresh)
             except Exception:
                 pass
         return text
