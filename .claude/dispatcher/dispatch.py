@@ -1823,7 +1823,7 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     if info.get("attempt", 0) < 1:
         if not logged:
             note = ("Предыдущий запуск не оставил новую запись в «## Лог» — обязательно допиши итог "
-                    "командой tickets.py comment и обнови status." if not timed_out else
+                    "командой tickets.py result (done|pr|accept|return|blocked|ask-owner|wait, --why) и обнови status." if not timed_out else
                     "Предыдущий запуск не уложился в таймаут — сократи шаг и обязательно запиши итог.")
         else:
             note = ("Запись в «## Лог» есть, но status остался todo — обязательно смени статус (например "

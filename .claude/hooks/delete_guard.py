@@ -116,8 +116,8 @@ REASON_OVERWRITE = ("Перезапись/усечение файла (`> фай
                     "только каталоги из RPV_GUARD_REMOTE_ROOTS и RPV_GUARD_HOST_ROOTS; автопамять проекта "
                     "(~/.claude/projects/<проект>/memory/) — можно. Новый локальный файл вне папки можно создать (его ещё "
                     "нет). Закрытые узлы, записи root/ и deep/ — никогда. Цель: {t}")
-REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO записью "
-                       "тикета (`tickets.py comment <ID> --author <роль> --text \"...\" --next ceo`). `git reset --hard`, "
+REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO итогом "
+                       "шага (`tickets.py result <ID> blocked --why \"...\"`). `git reset --hard`, "
                        "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
                        "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
                        "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из RPV_GUARD_REMOTE_ROOTS, "

@@ -9,7 +9,7 @@ WRITE_BASH = re.compile(r"(>|\btee\b|\bsed\b[^|;&]*\s-i|\bmv\b|\bcp\b|\brm\b|\bt
                         r"Set-Content|Add-Content|Out-File|Clear-Content|Remove-Item|Move-Item|Copy-Item|\.write|open\()", re.I)
 TEXT_ARG = re.compile(r"""--text(?:=|\s+)("(?:[^"\\]|\\.)*"|'[^']*')""", re.S)
 MSG = ("Сигналы команды идут только через шину: ceo-inbox.md/ceo-wake.log пишет лишь dispatch.append_ceo_inbox "
-       "(запасной путь). Нужно CEO — `tickets.py comment <ID> --next ceo`; очередь читает `tickets.py inbox` (README «Стандарт сигналов»).")
+       "(запасной путь). Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; очередь читает `tickets.py inbox` (README «Стандарт сигналов»).")
 
 
 def denied(tool, inp):
