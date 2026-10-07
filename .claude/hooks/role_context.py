@@ -225,9 +225,10 @@ def full_context(role, title, source, hook_in):
     else:
         head.append("Работа — тикет `.claude/tickets/<ID>.md`, который назвал владелец или CEO.")
     tcmd = tickets_command()
-    head.append(f"Связь с командой — только лог тикета (готовая команда, путь абсолютный): `{tcmd} comment <ID> "
-                f"--author {role} --text \"...\" [--next <роль>]` (`--next` — кого разбудить следующим; "
-                "@упоминания никого не будят)."
+    head.append(f"Связь с командой — только лог тикета (готовая команда, путь абсолютный): итог шага — `{tcmd} "
+                "result <ID> <done|pr|accept|return|blocked|ask-owner|wait> --why \"...\"` (кого будить дальше "
+                f"решает таблица маршрутов); промежуточная заметка — `{tcmd} comment <ID> --author {role} --text "
+                "\"...\"` (@упоминания никого не будят)."
                 + (" Остальные подкоманды (`new`, `start`, `stop`, `status`) — после `--project \"...\"` той же командой."
                    if role == "ceo" else ""))
     if role != "ceo":

@@ -267,7 +267,8 @@ class Prompts(unittest.TestCase):
     def test_role_prompt_is_silence_line_about_ticket_log(self):
         os.environ["RPV_ROLE"] = "engineer"
         text = rm.on_prompt_all({"session_id": "s1"}, "engineer")
-        self.assertIn("tickets.py comment", text)
+        self.assertIn("tickets.py result", text)
+        self.assertNotIn("tickets.py comment", text)
         for bad in ("SendMessage", "clear_session", "блокнот"):
             self.assertNotIn(bad, text)
 
@@ -396,6 +397,25 @@ class TicketScopedDigests(unittest.TestCase):
         self.assertIsNotNone(last)
         self.assertEqual(os.path.basename(os.path.dirname(last)), "TK-040")
         self.assertTrue(last.endswith("-dddddddd.md"))
+
+
+class RoleInstructionsUseResult(unittest.TestCase):
+    """Под RPV_STOP_STRICT=1 итог шага — только `tickets.py result`: ни одна инструкция роли не велит `comment` для итога."""
+
+    def test_no_instruction_sends_role_to_comment_for_result(self):
+        import delete_guard as dg
+        import ceo_signal_guard as sg
+        for text in (rm.SILENT_TEXT, dg.REASON_IRREVERSIBLE, sg.MSG):
+            self.assertNotIn("tickets.py comment", text)
+            self.assertIn("tickets.py result", text)
+
+    def test_prompt_and_retry_note_use_result(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "dispatcher"))
+        import dispatch as D
+        self.assertIn(" result TK-1 <", D.build_prompt("engineer", "TK-1"))
+        src = open(D.__file__, encoding="utf-8").read()
+        self.assertIn("командой tickets.py result", src)
+        self.assertNotIn("командой tickets.py comment и обнови", src)
 
 
 class StopResultTest(unittest.TestCase):
