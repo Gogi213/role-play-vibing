@@ -18,6 +18,12 @@ class _Started:
 
 
 class SuperviseTest(unittest.TestCase):
+    def setUp(self):  # другие тесты набора ставят RPV_CI_REPO на уровне модуля — здесь ci_watch по умолчанию не нужен
+        p = mock.patch.dict(os.environ)
+        p.start()
+        self.addCleanup(p.stop)
+        os.environ.pop("RPV_CI_REPO", None)
+
     def test_decide(self):
         self.assertEqual(V.decide(5, True), "ok")
         self.assertEqual(V.decide(700, True), "restart")
