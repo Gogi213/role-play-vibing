@@ -389,7 +389,7 @@ def main(argv=None) -> int:
     p_new.add_argument("--backlog", action="store_true",
                         help="создать сразу в backlog (перенос из TASKS.md) — диспетчер её не трогает до `start`")
     p_new.add_argument("--executor", choices=["haiku"], default=None,
-                        help="claude-haiku-4-5 для чисто механических задач — требует --kind")
+                        help="claude-haiku-5-5 для чисто механических задач — требует --kind")
     p_new.add_argument("--kind", choices=sorted(D.HAIKU_ALLOWED_KINDS), default=None,
                         help="вид задачи для --executor haiku")
     p_new.set_defaults(func=cmd_new)

@@ -3451,7 +3451,7 @@ class MoneyControlsTests(unittest.TestCase):
     def test_model_family_from_id(self):
         self.assertEqual(D.model_family("claude-sonnet-5-5"), "sonnet")
         self.assertEqual(D.model_family("claude-opus-5-5"), "opus")
-        self.assertEqual(D.model_family("claude-haiku-4-5-20251001"), "haiku")
+        self.assertEqual(D.model_family("claude-haiku-5-5"), "haiku")
         self.assertEqual(D.model_family("Fable-5-1"), "fable-5-1")
         # ожидаемое по умолчанию — семейство CLAUDE_MODEL, а не жёстко «opus»
         fam = D.model_family(D.CLAUDE_MODEL)
