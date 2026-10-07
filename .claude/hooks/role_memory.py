@@ -252,6 +252,37 @@ def ceo_inbox_alert():
     return f"[диспетчер] {len(new)} новых в .claude/dispatcher/ceo-inbox.md"
 
 
+# Сводка сортировщика (ceo_triage.py, TK-086): «сведения» копятся в ceo-digest.md и показываются CEO на сообщении
+# владельца один раз — будильник (Monitor) не нужен. Отметка прочитанного — число показанных строк.
+DISPATCHER_CEO_DIGEST = os.path.join(DISPATCHER_DIR, "ceo-digest.md")
+DISPATCHER_CEO_DIGEST_SEEN = os.path.join(DISPATCHER_DIR, ".ceo-digest-seen")
+DIGEST_SHOW_MAX = 15
+
+
+def ceo_digest_alert():
+    try:
+        with open(DISPATCHER_CEO_DIGEST, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return None
+    try:
+        with open(DISPATCHER_CEO_DIGEST_SEEN, encoding="utf-8") as f:
+            seen = int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        seen = 0
+    new = [ln.rstrip() for ln in lines[seen:] if ln.strip()]
+    if len(lines) != seen:
+        try:
+            with open(DISPATCHER_CEO_DIGEST_SEEN, "w", encoding="utf-8") as f:
+                f.write(str(len(lines)))
+        except OSError:
+            pass
+    if not new:
+        return None
+    more = f" (и ещё {len(new) - DIGEST_SHOW_MAX} в ceo-digest.md)" if len(new) > DIGEST_SHOW_MAX else ""
+    return "\n".join(["[сводка сортировщика] сведения без действий CEO:"] + new[-DIGEST_SHOW_MAX:]) + more
+
+
 # вызов роли может часами ждать подтверждения в её сессии, куда никто не смотрит. Уведомление роли «нужно
 # разрешение» пишется меткой; CEO видит её на своём сообщении.
 PENDING = os.path.join(STATE_DIR, "pending-permission.json")
@@ -355,6 +386,10 @@ def on_prompt_all(hook_in, role):
                 parts.append(throttled(state, getter.__name__, got[0], got[1]))
         try:
             parts.append(ceo_inbox_alert())
+        except Exception:
+            pass
+        try:
+            parts.append(ceo_digest_alert())
         except Exception:
             pass
     if env_role() is None:
