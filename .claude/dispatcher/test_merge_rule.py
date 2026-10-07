@@ -14,6 +14,7 @@ from pathlib import Path
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
+os.environ["RPV_CI_REPO"] = "o/r"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
@@ -41,8 +42,11 @@ class MergeRuleTests(unittest.TestCase):
         self.head, self.base, self.mergeable, self.merged = SHA, "main", True, True
         self.calls, self.others = [], []
         C.save_state({f"{REPO}#7": {"sha": SHA, "state": "success"}})
+        self._chk = M.check_pr
+        M.check_pr = lambda repo, n, sha, gh=None: ""
 
     def tearDown(self):
+        M.check_pr = self._chk
         D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR = self._orig
         self.tmp.cleanup()
 
@@ -122,6 +126,16 @@ class MergeRuleTests(unittest.TestCase):
         self.assertEqual(self.run_m(), [(7, "не подтверждено → владельцу")])
         self.assertEqual(self.tkt().header.get("next"), "engineer")
 
+    def test_check_pr_and_404(self):
+        M.check_pr = self._chk
+        ok = lambda p, **k: {"head": {"sha": SHA}}
+        self.assertEqual(M.check_pr(REPO, 7, SHA[:7], gh=ok), "")
+        self.assertIn("сверь --sha", M.check_pr(REPO, 7, "b" * 7, gh=ok))
+        def nf(p, **k):
+            raise RuntimeError("Not Found (HTTP 404)")
+        self.assertIn("не найден", M.check_pr(REPO, 7, SHA, gh=nf))
+        self.assertTrue(M.merged_done(REPO, 7, gh=nf))  # 404 — не вечное ожидание: владелец просыпается
+
     def test_accept_writes_verdict(self):
         T.write_header_updates(self.path, {"accepted": ""}, now=NOW)
         os.environ.pop("RPV_ROLE", None)
@@ -133,6 +147,14 @@ class MergeRuleTests(unittest.TestCase):
         self.assertTrue(T.author_is(t.log[-1].author, "judge"))
         self.assertEqual(M.accepted_head(t, 7), SHA)
         self.assertIsNone(M.accepted_head(t, 8))
+        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "merged:o/r#7"))
+
+    def test_merged_done_asks_github(self):
+        self.assertTrue(M.merged_done(REPO, 7, gh=lambda p, **k: {"merged": True}))
+        self.assertFalse(M.merged_done(REPO, 7, gh=lambda p, **k: {"merged": False}))
+        def boom(p, **k):
+            raise RuntimeError("net")
+        self.assertFalse(M.merged_done(REPO, 7, gh=boom))
 
     def test_two_prs_one_ticket_keep_both_verdicts(self):
         os.environ.pop("RPV_ROLE", None)
