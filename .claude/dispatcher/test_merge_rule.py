@@ -106,6 +106,59 @@ class MergeRuleTests(unittest.TestCase):
         self.assertEqual(self.run_m(), [])
         self.assertEqual(self.put(), [])
 
+    def test_conflict_reported_even_if_ci_not_green(self):
+        self.mergeable = False
+        C.save_state({f"{REPO}#7": {"sha": SHA, "state": "pending"}})
+        self.assertEqual(self.run_m(), [(7, "конфликт → владельцу")])
+        self.assertEqual(self.tkt().header.get("next"), "engineer")
+
+    def test_transient_5xx_retries_then_wakes_owner(self):
+        base_gh = self.gh
+
+        def boom(path, method="GET", **f):
+            if path == f"repos/{REPO}/pulls/7":
+                raise RuntimeError("gh: HTTP 500")
+            return base_gh(path, method, **f)
+        for _ in range(M.ERR_LIMIT - 1):
+            self.assertEqual(M.merge_once(REPO, gh=boom), [])
+            self.assertNotEqual(self.tkt().header.get("next"), "engineer")
+        out = M.merge_once(REPO, gh=boom)
+        self.assertEqual([n for n, _ in out], [7])
+        t = self.tkt()
+        self.assertEqual(t.header.get("next"), "engineer")
+        self.assertIn("HTTP 500", t.log[-1].text)
+        self.assertEqual(M.merge_once(REPO, gh=boom), [])            # одна запись на голову
+        self.assertEqual(self.put(), [])
+
+    def test_transient_error_counter_resets_on_success(self):
+        base_gh = self.gh
+        fail = [True]
+
+        def flaky(path, method="GET", **f):
+            if fail[0] and path == f"repos/{REPO}/pulls/7":
+                raise RuntimeError("gh: HTTP 502")
+            return base_gh(path, method, **f)
+        for _ in range(M.ERR_LIMIT - 1):
+            M.merge_once(REPO, gh=flaky)
+        fail[0] = False
+        self.mergeable = None
+        M.merge_once(REPO, gh=flaky)
+        fail[0] = True
+        for _ in range(M.ERR_LIMIT - 1):
+            self.assertEqual(M.merge_once(REPO, gh=flaky), [])
+        self.assertNotEqual(self.tkt().header.get("next"), "engineer")
+
+    def test_merge_put_4xx_wakes_owner_at_once(self):
+        base_gh = self.gh
+
+        def refuse(path, method="GET", **f):
+            if method == "PUT":
+                raise RuntimeError("gh: HTTP 405 Method Not Allowed")
+            return base_gh(path, method, **f)
+        out = M.merge_once(REPO, gh=refuse)
+        self.assertEqual([n for n, _ in out], [7])
+        self.assertEqual(self.tkt().header.get("next"), "engineer")
+
     def test_mergeable_unknown_waits(self):
         self.mergeable = None
         self.assertEqual(self.run_m(), [])
