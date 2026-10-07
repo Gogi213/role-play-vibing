@@ -1607,7 +1607,10 @@ class DispatchRunTests(unittest.TestCase):
             "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
             "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": "", "reason": "todo",
             "status_at_launch": "todo", "session_id": "never-started-sid-1"}}}
-        D.recover_active_runs(state, datetime.now().astimezone())
+        from unittest import mock
+        with mock.patch.object(D, "_find_pid_by_session", return_value=None), mock.patch.object(D, "_finish_run") as fin:
+            D.recover_active_runs(state, datetime.now().astimezone())
+        fin.assert_not_called()
         self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
 
     def _find_by_session(self, os_name, stdout, sid="sid-tree-1"):
