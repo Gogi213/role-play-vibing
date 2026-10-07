@@ -6,7 +6,7 @@
 
 ### Изменено
 
-- Haiku 4.5 → Haiku 5.5 (`claude-haiku-5-5`): `plainify.py` (+ `--effort low`: без него модель думает и отвечает 400–1000 токенов вместо ~25), `RPV_DISPATCH_HAIKU_MODEL`, `agents/reader.md`, доки, тесты. TK-085.
+- Haiku 4.5 → Haiku 5.5 (`claude-haiku-5-5`): `plainify.py` (+ `--effort xhigh` по решению владельца 08.10), `RPV_DISPATCH_HAIKU_MODEL`, `agents/reader.md`, доки, тесты. TK-085.
 
 ## 1.8.2 — 2026-10-07
 
