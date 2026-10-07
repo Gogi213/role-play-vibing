@@ -207,8 +207,12 @@ def cmd_result(args) -> int:
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
     if args.result == "accept" and (args.pr or args.sha):
-        return cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
-                                         "repo": getattr(args, "repo", None)})())
+        rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
+                                      "repo": getattr(args, "repo", None)})())
+        if rc == 0:  # запись итога — иначе строгий Stop (RPV_STOP_STRICT) не видит сдачи шага и блокирует Судью
+            with T.ticket_lock(path):
+                T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]} — {why}")
+        return rc
     if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
         rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
         if rc == 0:
