@@ -53,6 +53,35 @@ class CiWatchTests(unittest.TestCase):
     def tkt(self):
         return T.read_ticket(self.path)
 
+    def test_poll_errors_wake_owner_after_limit_once(self):
+        def boom(path):
+            if "check-runs" in path:
+                raise RuntimeError("gh: HTTP 500")
+            return self.gh(path)
+        for _ in range(C.ERR_LIMIT - 1):
+            C.run_once(REPO, gh=boom)
+            self.assertNotEqual(self.tkt().header.get("next"), "engineer")
+        C.run_once(REPO, gh=boom)
+        t = self.tkt()
+        self.assertEqual(t.header.get("next"), "engineer")
+        self.assertIn("HTTP 500", t.log[-1].text)
+        n = len(t.log)
+        C.run_once(REPO, gh=boom)
+        self.assertEqual(len(self.tkt().log), n)
+
+    def test_poll_error_counter_resets_after_success(self):
+        def boom(path):
+            if "check-runs" in path:
+                raise RuntimeError("gh: HTTP 500")
+            return self.gh(path)
+        for _ in range(C.ERR_LIMIT - 1):
+            C.run_once(REPO, gh=boom)
+        self.runs = []
+        C.run_once(REPO, gh=self.gh)
+        for _ in range(C.ERR_LIMIT - 1):
+            C.run_once(REPO, gh=boom)
+        self.assertNotEqual(self.tkt().header.get("next"), "engineer")
+
     def test_red_wakes_owner_with_names(self):
         self.runs = [{"name": "test (win)", "status": "completed", "conclusion": "failure"},
                      {"name": "lint", "status": "completed", "conclusion": "success"}]

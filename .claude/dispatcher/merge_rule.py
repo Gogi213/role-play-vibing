@@ -5,6 +5,7 @@
 в тикет и событие в шину. Защиту main не ставим (В-193): `sha` в запросе слияния защищает от гонки со сменой головы."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -12,6 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
 import ticket as T  # noqa: E402
+
+
+ERR_LIMIT = 3          # подряд сбоев GitHub (5xx, сеть) на одном PR, после которых о нём узнаёт владелец
+_TRANSIENT = re.compile(r"HTTP 5\d\d|timed out|timeout|connection", re.I)
 
 
 def merge_state_path() -> Path:
@@ -109,6 +114,23 @@ def check_pr(repo: str, number: int, sha: str, gh=C.gh_api) -> str:
     return ""
 
 
+def _gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception, bus) -> str:
+    """Сбой GitHub на принятом PR. Временный (5xx, сеть) — повтор на след. тике, владельцу — после ERR_LIMIT подряд;
+    прочий (отказ слияния, 4xx) — владельцу сразу. Одна запись на голову. Возвращает пометку для отчёта или ''."""
+    ent = st.get(key) or {}
+    if ent.get("failed") == sha:
+        return ""
+    errs = ent.get("errs", 0) + 1 if ent.get("errs_sha") == sha else 1
+    if _TRANSIENT.search(str(e)) and errs < ERR_LIMIT:
+        st[key] = {"errs": errs, "errs_sha": sha}
+        return ""
+    n = key.rsplit("#", 1)[1]
+    note = f"PR #{n}: {what} не удалось на {sha[:7]}: {e}" + (f" ({errs} раз подряд)" if errs > 1 else "")
+    _note(tkt, note, wake_owner=True, bus=bus)
+    st[key] = {"failed": sha}
+    return f"{what}: сбой → владельцу"
+
+
 def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
     """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
     st, out = _load(), []
@@ -130,35 +152,41 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
         acc = accepted_head(tkt, n)
         if not acc or not sha.startswith(acc):
             continue
-        cur = ci.get(f"{repo}#{n}") or {}
-        if cur.get("sha") != sha or cur.get("state") != "success":
-            continue
+        key = f"{repo}#{n}"
+        ci_ok = (ci.get(key) or {}).get("sha") == sha and (ci.get(key) or {}).get("state") == "success"
         base = pr["base"]["ref"]
         if base != default:
-            if base in open_heads:
+            if not ci_ok or base in open_heads:
                 continue
             gh(f"repos/{repo}/pulls/{n}", method="PATCH", base=default)
             out.append((n, f"база {base} → {default}"))
             continue
-        key = f"{repo}#{n}"
-        detail = gh(f"repos/{repo}/pulls/{n}")
-        if detail.get("mergeable") is None:
+        try:
+            detail = gh(f"repos/{repo}/pulls/{n}")
+        except Exception as e:
+            r = _gh_error(st, key, sha, tkt, "запрос состояния PR", e, bus)
+            if r:
+                out.append((n, r))
             continue
-        if detail.get("mergeable") is False:
+        if "errs" in (st.get(key) or {}):
+            st.pop(key)
+        if detail.get("mergeable") is False:                  # конфликт сообщаем сразу: CI на конфликтной голове не нужен
             if (st.get(key) or {}).get("conflict") != sha:
                 _note(tkt, f"PR #{n} принят на {sha[:7]}, но конфликтует с {default}: слей {default} в ветку и запушь "
                            f"(CI и вердикт на новой голове — заново).", wake_owner=True, bus=bus)
                 st[key] = {"conflict": sha}
                 out.append((n, "конфликт → владельцу"))
             continue
+        if not ci_ok or detail.get("mergeable") is None:
+            continue
         try:
             gh(f"repos/{repo}/pulls/{n}/merge", method="PUT", merge_method="merge", sha=sha)
         except Exception as e:
-            if (st.get(key) or {}).get("failed") != sha:
-                _note(tkt, f"PR #{n}: слияние не удалось на {sha[:7]}: {e}", wake_owner=True, bus=bus)
-                st[key] = {"failed": sha}
-                out.append((n, "слияние не удалось → владельцу"))
+            r = _gh_error(st, key, sha, tkt, "слияние", e, bus)
+            if r:
+                out.append((n, r))
             continue
+        st.pop(key, None)
         if gh(f"repos/{repo}/pulls/{n}").get("merged"):
             _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).", bus=bus)
             _drop_accepted(tkt, n)

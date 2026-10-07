@@ -108,6 +108,19 @@ def bus_emit(pr_number: int, sha: str, state: str, red: list, who: str, tid: str
         pass
 
 
+ERR_LIMIT = 3          # подряд сбоев опроса CI одного PR, после которых о нём узнаёт владелец тикета
+
+
+def _count_error(st: dict, key: str, sha: str, tkt, pr_number: int, e: Exception) -> None:
+    """Сбой опроса GitHub не молчит в stderr вечно: на ERR_LIMIT-м подряд — запись и `next` владельцу тикета (один раз на голову)."""
+    ent = st.setdefault(key, {})
+    ent["errs"] = ent.get("errs", 0) + 1
+    if ent["errs"] != ERR_LIMIT or tkt is None or tkt.status not in ACTIVE:
+        return
+    wake(tkt.path, tkt, tkt.owner, f"CI PR #{pr_number} ({sha[:7]}): GitHub отвечает ошибкой {ERR_LIMIT} раза подряд: {e}. "
+                                   "Проверь PR и права gh вручную; ci_watch продолжает опрос.")
+
+
 def run_once(repo: str, gh=gh_api) -> list:
     """Один проход. Возвращает список (PR, sha7, state, кого разбудили)."""
     st, out = load_state(), []
@@ -123,10 +136,12 @@ def run_once(repo: str, gh=gh_api) -> list:
             runs = gh(f"repos/{repo}/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
         except Exception as e:
             print(f"[ci_watch] PR #{pr['number']}: {e}", file=sys.stderr)
+            _count_error(st, f"{repo}#{pr['number']}", sha, ticket_for_pr(pr, tickets), pr["number"], e)
             continue
         state, red = ci_result(runs)
         key = f"{repo}#{pr['number']}"
         prev = st.get(key) or {}
+        prev.pop("errs", None)
         if prev.get("sha") == sha and prev.get("state") == state:
             continue
         woke = ""
