@@ -83,6 +83,12 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA), 0)
         self.assertEqual(self.tkt().header.get("accepted"), f"7@{SHA}")
 
+    def test_accept_pr_writes_result_entry_for_strict_stop(self):
+        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA), 0)
+        last = self.tkt().log[-1]
+        self.assertEqual(last.author, "judge")
+        self.assertTrue(last.text.lstrip().startswith("[итог: accept]"), last.text)
+
     def test_accept_pr_waits_for_merge_then_wakes_owner_not_judge(self):
         T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
         self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA), 0)
