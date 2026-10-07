@@ -487,5 +487,27 @@ class CeoSignalGuardTest(unittest.TestCase):
         self.assertTrue(d("Bash", {"command": 'python tickets.py comment TK-1 --text "x" >> ceo-inbox.md'}))
 
 
+class HaikuAbstractTest(unittest.TestCase):
+    def test_abstract_on_off_and_failure(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+        import haiku_aux
+        orig, old = haiku_aux.compact, os.environ.get("RPV_HAIKU_COMPACT")
+        try:
+            haiku_aux.compact = lambda t: "KONSPEKT"
+            os.environ["RPV_HAIKU_COMPACT"] = "1"
+            self.assertIn("KONSPEKT", rm.haiku_abstract(["a"]))
+            os.environ["RPV_HAIKU_COMPACT"] = "0"
+            self.assertEqual(rm.haiku_abstract(["a"]), "")
+            os.environ["RPV_HAIKU_COMPACT"] = "1"
+            haiku_aux.compact = lambda t: None
+            self.assertEqual(rm.haiku_abstract(["a"]), "")
+        finally:
+            haiku_aux.compact = orig
+            if old is None:
+                os.environ.pop("RPV_HAIKU_COMPACT", None)
+            else:
+                os.environ["RPV_HAIKU_COMPACT"] = old
+
+
 if __name__ == "__main__":
     unittest.main()
