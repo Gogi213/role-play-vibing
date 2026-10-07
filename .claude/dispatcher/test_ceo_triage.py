@@ -89,6 +89,18 @@ class RunOnce(Sandbox):
         self.inbox("* [weird] что-то")
         C.run_once(NOW, classify=lambda ev: ([(C.ACTION, "н")] * len(ev), {}), launch=lambda ev, now: False)
         self.assertEqual(len(C.read_events()), 1)  # CEO-роль занята — действие не потеряно
+        launched = []  # следующий проход (CEO свободен): то же событие — не «дубль», а запуск
+        r = C.run_once(NOW + timedelta(seconds=30), classify=lambda ev: ([(C.ACTION, "н")] * len(ev), {}),
+                       launch=lambda ev, now: launched.extend(ev) or True)
+        self.assertEqual((r["noise"], r["action"], r["launched"]), (0, 1, True))
+        self.assertEqual(C.read_events(), [])
+
+    def test_busy_blocked_survives_second_pass(self):
+        self.ticket("TK-004", "blocked")
+        self.inbox("TK-004 [blocked] встал")
+        C.run_once(NOW, launch=lambda ev, now: False)
+        r = C.run_once(NOW + timedelta(seconds=30), launch=lambda ev, now: True)
+        self.assertEqual((r["noise"], r["action"], r["launched"]), (0, 1, True))
 
     def test_haiku_failure_is_action(self):
         res, _ = C.haiku_classify([{"tid": "*", "kind": "k", "note": "n"}], claude_bin="definitely-not-a-binary")

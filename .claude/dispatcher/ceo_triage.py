@@ -3,7 +3,7 @@
 Событие очереди `ceo` (или строка ceo-inbox.md без шины) разбирается так:
   1. правила без ИИ — дубль за час, тикет уже закрыт, план-сигналы (дело владельца тикета), orphan при годном
      wait_for, bus-up → шум; blocked/needs-owner/ask-owner → действие (безопасная сторона, без модели);
-  2. остальное — один вызов Haiku 5.5 на пачку (`--effort low`): действие CEO / сведения / шум + причина;
+  2. остальное — один вызов Haiku 5.5 на пачку (`--effort xhigh`, приказ владельца 08.10): действие CEO / сведения / шум + причина;
      модель не ответила или ответ не разобран → действие (пропуск сигнала дороже лишнего запуска);
   3. шум — ack и запись в triage.jsonl; сведения — строка в ceo-digest.md (её показывает хук UserPromptSubmit
      на сообщении владельца); действие — один запуск CEO как роли (claude -p со свежим малым контекстом,
@@ -112,7 +112,7 @@ def haiku_classify(events: list, claude_bin: str = None) -> tuple:
         # cwd — пустой временный каталог: сортировщику не нужен проект, и он не подтягивает CLAUDE.md проекта
         with tempfile.TemporaryDirectory() as cwd:
             p = subprocess.run([claude_bin or D.CLAUDE_BIN, "-p", PROMPT + lines, "--model", HAIKU_MODEL,
-                                "--effort", "low", "--output-format", "json"], capture_output=True, text=True,
+                                "--effort", "xhigh", "--output-format", "json"], capture_output=True, text=True,
                                encoding="utf-8", timeout=120, env=env, cwd=cwd)
         out = json.loads(p.stdout)
         text = out.get("result") or ""
@@ -233,14 +233,11 @@ def run_once(now: datetime = None, classify=haiku_classify, launch=launch_ceo) -
             e["cls"], e["why"], e["by"] = r[0], r[1], "rule"
         else:
             undecided.append(e)
-        if e.get("cls") != NOISE:
-            recent[f"{e['tid']}|{e['kind']}|{_norm(e['note'])}"] = T.now_iso(now)
     usage = {}
     if undecided:
         res, usage = classify(undecided)
         for e, (c, why) in zip(undecided, res):
             e["cls"], e["why"], e["by"] = c, why, "haiku"
-            recent[f"{e['tid']}|{e['kind']}|{_norm(e['note'])}"] = T.now_iso(now)
     actions = [e for e in events if e["cls"] == ACTION]
     for e in events:
         result[e["cls"]].append(e)
@@ -254,6 +251,10 @@ def run_once(now: datetime = None, classify=haiku_classify, launch=launch_ceo) -
         launched = launch(actions, now)
     if actions and not launched:
         events = [e for e in events if e["cls"] != ACTION]  # CEO-роль занята: действия остаются в очереди до её конца
+    # подпись для дубля — только у разобранного: не запущенное действие (CEO занят) не должно стать «дублем» на следующем проходе
+    for e in events:
+        if e["cls"] != NOISE:
+            recent[f"{e['tid']}|{e['kind']}|{_norm(e['note'])}"] = T.now_iso(now)
     ack(events)
     for e in events:
         _log({"ts": T.now_iso(now), "seq": e["seq"], "tid": e["tid"], "kind": e["kind"], "cls": e["cls"],
