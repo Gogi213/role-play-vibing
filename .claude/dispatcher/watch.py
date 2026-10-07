@@ -148,7 +148,8 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
             continue
         if tkt.id in skip_ids:  # цель wait_for жива (TK-056 п.4): долгое ожидание — не сирота
             continue
-        last_ts = tkt.log[-1].ts if tkt.log else T.parse_dt(tkt.header.get("updated")) if tkt.header.get(
+        entries = [e for e in tkt.log if not T.author_is(e.author, "watch")]  # записи сторожа не сбрасывают таймер
+        last_ts = entries[-1].ts if entries else T.parse_dt(tkt.header.get("updated")) if tkt.header.get(
             "updated") else None
         if last_ts is None:
             continue
@@ -200,7 +201,7 @@ def check_stale_plan(now) -> list:
             continue
         except Exception:
             continue
-        role_logs = [e for e in tkt.log if not T.author_is(e.author, "ceo")]
+        role_logs = [e for e in tkt.log if not (T.author_is(e.author, "ceo") or T.author_is(e.author, "watch"))]
         if role_logs and role_logs[-1].ts - upd > timedelta(minutes=PLAN_LAG_MINUTES) and (now - upd).total_seconds() / 60 > NO_PLAN_MINUTES:
             out.append(Finding("plan-stale" if tkt.status == "in_progress" else "plan-stale-waiting", tkt.id,
                                f"{tkt.id}: запись роли в логе новее плана, шаги на табло не менялись > {NO_PLAN_MINUTES:.0f} мин"))
@@ -209,6 +210,7 @@ def check_stale_plan(now) -> list:
 
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
+OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # находки адресуются владельцу тикета, не CEO
 SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
@@ -715,11 +717,11 @@ def _wake_for_plan(tid: str, now, stale: bool = False) -> None:
             if tkt.owner not in ("researcher", "engineer", "judge"):
                 return
             if stale:
-                T.append_log(path, "ceo", "Сторож (без LLM): в логе есть запись роли, а шаги на табло не менялись "
+                T.append_log(path, "watch", "Сторож (без LLM): в логе есть запись роли, а шаги на табло не менялись "
                              f"> {NO_PLAN_MINUTES:.0f} мин. Обнови по факту: `python " + _PLAN_PY + " step " + tid +
                              " <N> <run|done|todo>` (wait — только когда ждём владельца), затем продолжай работу.")
             else:
-                T.append_log(path, "ceo", "Сторож (без LLM): задача в работе дольше "
+                T.append_log(path, "watch", "Сторож (без LLM): задача в работе дольше "
                              f"{NO_PLAN_MINUTES:.0f} мин, а плана шагов на табло нет — табло не может показать процент. "
                              "Запиши план: `python " + _PLAN_PY + " set " + tid + " ...` (3–6 шагов по-людски, "
                              "справка — `plan.py --help`), затем продолжай работу.")
@@ -732,7 +734,7 @@ def _remind_plan_waiting(tid: str) -> None:
     """waiting + застывший план: не будим (запуск впустую) — напоминание в лог, следующий запуск роли обновит шаги."""
     path = D.TICKETS_DIR / f"{tid}.md"
     try:
-        T.append_log(path, "ceo", "Сторож (без LLM): запись роли новее плана, а шаги на табло не менялись "
+        T.append_log(path, "watch", "Сторож (без LLM): запись роли новее плана, а шаги на табло не менялись "
                      f"> {NO_PLAN_MINUTES:.0f} мин. В следующем запуске обнови по факту: `python " + _PLAN_PY + " step "
                      + tid + " <N> <run|done|todo>`.")
     except Exception as e:
@@ -766,7 +768,8 @@ def notify_findings(findings: list, ws: dict, now) -> list:
                 pending = ws.setdefault("pending_summary", [])
                 pending.append(f"{T.now_iso(now)} [{f.kind}] {f.message[:150]}")
             else:
-                D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
+                if f.kind not in OWNER_ONLY_KINDS:  # план шагов — дело владельца тикета, действия CEO тут нет (TK-079 п.3)
+                    D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
                 if f.kind == "no-plan":
                     _wake_for_plan(f.key, now)
                 elif f.kind == "plan-stale":
