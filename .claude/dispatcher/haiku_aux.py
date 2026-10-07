@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 MODEL = os.environ.get("RPV_HAIKU_MODEL") or "claude-haiku-5-5"
-EFFORT = os.environ.get("RPV_HAIKU_EFFORT") or "low"
+EFFORT = os.environ.get("RPV_HAIKU_EFFORT") or "xhigh"
 TIMEOUT_S = 90
 MAX_IN = 12000  # знаков входа: хвост, не начало
 
