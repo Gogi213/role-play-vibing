@@ -191,6 +191,8 @@ python -m pytest .claude -q
 
 Или без pytest — `python -m unittest discover -s .claude/dispatcher`, затем то же для `-s .claude/hooks`, `-s .claude/board` и `-s .claude/bus`.
 
+**На машине с живой установкой** настройка `RPV_*`/`ALPHA_*` (шина, машины, ключи) лежит в окружении пользователя, и тесты не должны её видеть — иначе фикстуры уходят в живую шину и очередь CEO. Под pytest это делает `.claude/conftest.py`; под `unittest` очисти окружение сам (PowerShell: `Get-ChildItem Env: | ? Name -match '^(RPV|ALPHA)_' | % { Remove-Item "Env:$($_.Name)" }`). Страж — `test_env_isolation.py` падает, если настройка просочилась.
+
 - **CI** — workflow [`ci`](.github/workflows/ci.yml): тесты на Windows, macOS и Linux × Python 3.11–3.13 на каждый PR и каждый push в `main`; итоговая проверка `ci-ok`.
 - **Выносливость** — workflow [`endurance`](.github/workflows/endurance.yml) каждую ночь и вручную: настоящий диспетчер, фейковые роли и сбои (падение шины, убитый диспетчер, лимит 429); критерий — 0 потерянных сигналов, 0 `blocked`, простой не больше порога. Локально: `python .claude/dispatcher/endurance.py --rounds N` (или `--hours H`; ещё `--idle-max S`, `--seed K`, `--keep`, `--modes`) — [docs/reliability.md](docs/reliability.md#прогон-на-выносливость).
 - **Версии** — `python .claude/dispatcher/release.py check` проверяет, что версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают.
