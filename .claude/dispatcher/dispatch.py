@@ -1510,8 +1510,6 @@ def effort_for(role: str, tkt=None) -> str:
     high, Судья xhigh; env RPV_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
     if tkt is not None and getattr(tkt, "effort", ""):
         return tkt.effort
-    if tkt is not None and getattr(tkt, "executor", "") == "haiku":
-        return "xhigh"  # приказ владельца 08.10: Haiku везде на xhigh
     return ROLE_EFFORT.get(role, "high")
 
 
