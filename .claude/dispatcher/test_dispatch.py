@@ -1760,6 +1760,23 @@ class DispatchRunTests(unittest.TestCase):
             child.kill()
             child.wait(timeout=10)
 
+    def test_pid_alive_name_windows_tasklist_oem_bytes_do_not_break_decode(self):
+        """Windows: tasklist печатает в OEM-кодировке (cp866), а под PYTHONUTF8=1 text=True читал её как utf-8 — поток
+        чтения падал, stdout пустой, живой pid считался мёртвым (doctor: ложный FAIL диспетчера, подхват «как завершённый»)."""
+        raw = b'"python.exe","4444","Console","1","35\xa0176 \x8a"\r\n'
+        real_run = subprocess.run
+
+        def fake_run(cmd, **kw):
+            if cmd and cmd[0] == "tasklist":
+                if kw.get("text") and not kw.get("errors"):
+                    raw.decode(kw.get("encoding") or "utf-8")  # как _readerthread: строгая декодировка
+                return subprocess.CompletedProcess(cmd, 0, stdout=raw.decode(kw.get("encoding") or "utf-8", kw.get("errors") or "strict"))
+            return real_run(cmd, **kw)
+
+        with mock.patch.object(D.os, "name", "nt"), mock.patch.object(D.subprocess, "run", fake_run):
+            self.assertTrue(D._pid_alive_name(4444, "python"))
+            self.assertFalse(D._pid_alive_name(4445, "python"))
+
     def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
         """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])

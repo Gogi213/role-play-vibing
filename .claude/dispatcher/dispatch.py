@@ -1291,7 +1291,7 @@ def _pid_alive_name(pid, expect_name: str = None) -> bool:
     if os.name == "nt":
         try:
             out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                                  capture_output=True, text=True, timeout=5)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
             for line in (out.stdout or "").splitlines():
                 fields = [f.strip().strip('"') for f in line.split(",")]
                 if len(fields) >= 2 and fields[1] == str(pid):
@@ -1981,14 +1981,14 @@ def _find_pid_by_session(session_id) -> "int | None":
                   f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
                   "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
             out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
-                                 timeout=30).stdout
+                                 encoding="utf-8", errors="replace", timeout=30).stdout
             for ln in out.splitlines():
                 f = ln.split()
                 if len(f) == 2 and all(x.isdigit() for x in f):
                     pairs.append((int(f[0]), int(f[1])))
         else:
             out = subprocess.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
-                                 timeout=10).stdout
+                                 encoding="utf-8", errors="replace", timeout=10).stdout
             for ln in out.splitlines():
                 f = ln.split(None, 2)
                 if len(f) == 3 and f[0].isdigit() and f[1].isdigit() and str(session_id) in f[2]:
