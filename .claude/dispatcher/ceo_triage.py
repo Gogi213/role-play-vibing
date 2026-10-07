@@ -267,15 +267,60 @@ def run_once(now: datetime = None, classify=haiku_classify, launch=launch_ceo) -
     return {"noise": len(result[NOISE]), "info": len(result[INFO]), "action": len(actions), "launched": launched}
 
 
+def report() -> dict:
+    """Замер TK-086 (4): разбор сигналов и токены — Haiku (triage.jsonl) и запусков CEO-роли (runs/*-ceo-triage.json)."""
+    cls, by, haiku, ceo_runs, ceo = {}, {}, {}, 0, {}
+    try:
+        for ln in _paths()["log"].read_text(encoding="utf-8").splitlines():
+            r = json.loads(ln)
+            if "haiku_usage" in r:
+                for k, v in r["haiku_usage"].items():
+                    if isinstance(v, (int, float)):
+                        haiku[k] = haiku.get(k, 0) + v
+            else:
+                cls[r["cls"]] = cls.get(r["cls"], 0) + 1
+                by[r["by"]] = by.get(r["by"], 0) + 1
+    except OSError:
+        pass
+    for f in D.RUNS_DIR.glob("*-ceo-triage.json"):
+        ceo_runs += 1
+        try:
+            for k, v in (json.loads(f.read_text(encoding="utf-8")).get("usage") or {}).items():
+                if isinstance(v, (int, float)):
+                    ceo[k] = ceo.get(k, 0) + v
+        except (OSError, ValueError):
+            pass
+    return {"events_by_class": cls, "events_by": by, "haiku_tokens": haiku, "ceo_runs": ceo_runs, "ceo_tokens": ceo}
+
+
+def write_heartbeat(now: datetime) -> None:
+    f = _paths()["pid"].with_name("triage-heartbeat.json")
+    tmp = f.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"ts": T.now_iso(now)}), encoding="utf-8")
+    tmp.replace(f)
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--project" in argv:
         i = argv.index("--project")
         D.configure_project(argv[i + 1])
+    if "--report" in argv:
+        print(json.dumps(report(), ensure_ascii=False, indent=1))
+        return 0
     once = "--once" in argv
+    if not once:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра
+        lock = D.DISPATCHER_DIR / "ceo_triage.pid"
+        ok, why = D.acquire_instance_lock(lock)
+        if not ok:
+            print(f"[triage] {why}", file=sys.stderr)
+            return 1
+        import atexit
+        atexit.register(D.release_instance_lock, lock)
     while True:
         try:
             r = run_once()
+            write_heartbeat(datetime.now().astimezone())
             if r["noise"] or r["info"] or r["action"]:
                 print(f"[triage] {r}", flush=True)
         except Exception as e:

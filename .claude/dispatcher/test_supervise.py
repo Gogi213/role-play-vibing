@@ -67,6 +67,22 @@ class SuperviseTest(unittest.TestCase):
             self.assertEqual(spawned, ["dispatch.py", "watch.py"])
 
 
+    def test_ceo_triage_supervised_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            (project / ".claude" / "dispatcher").mkdir(parents=True)
+            spawned = []
+            kw = dict(stop=lambda p, s, unit=None: 0,
+                      spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+            os.environ["RPV_CEO_TRIAGE"] = "1"
+            try:
+                out = V.run_once(project, **kw)
+            finally:
+                del os.environ["RPV_CEO_TRIAGE"]
+            self.assertEqual(out, {"dispatch": "start", "watch": "start", "ceo_triage": "start"})
+            self.assertEqual(spawned, ["dispatch.py", "watch.py", "ceo_triage.py"])
+
+
 class InstallFilesTest(unittest.TestCase):
     P = Path("/p/proj")
 

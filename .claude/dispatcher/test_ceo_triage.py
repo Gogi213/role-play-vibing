@@ -107,5 +107,16 @@ class RunOnce(Sandbox):
         self.assertEqual(res[0][0], C.ACTION)
 
 
+    def test_report_counts_classes_and_tokens(self):
+        self.inbox("* [bus-up] ok", "* [weird] что-то")
+        C.run_once(NOW, classify=lambda ev: ([(C.ACTION, "н")] * len(ev), {"input_tokens": 7, "output_tokens": 3}),
+                   launch=lambda ev, now: True)
+        D.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        (D.RUNS_DIR / "x-ceo-triage.json").write_text(json.dumps({"usage": {"input_tokens": 100}}), encoding="utf-8")
+        r = C.report()
+        self.assertEqual(r["events_by_class"], {"noise": 1, "action": 1})
+        self.assertEqual((r["haiku_tokens"]["input_tokens"], r["ceo_runs"], r["ceo_tokens"]["input_tokens"]), (7, 1, 100))
+
+
 if __name__ == "__main__":
     unittest.main()
