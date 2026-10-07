@@ -13,7 +13,8 @@ systemd-run; скрипт-обёртка замера (`/data/benchrun.sh stand 
 `tar` кроме распаковки со stdin (`tar xzf - -C …` — выкладка файлов с этой машины, ограничена каналом); md5sum/sha*sum/b3sum/
 cksum/cmp/`diff -r` — если аргумент каталог, маска, неизвестная переменная, список из xargs, `-c`, либо файл `*.binlog|*.abin`;
 `cat`/`cp` файлов `*.binlog|*.abin` и масок под /data/alpha/; `python3 <файл>`, `python3 -m <не py_compile>`,
-`python3 -c`/stdin длиннее 200 символов. Всё прочее (cat/tail/head/ls/grep по файлам, systemctl, uptime, sha256sum отдельных
+`python3 -c`/stdin длиннее 200 символов. Исключения — `RPV_GUARD_HEAVY_ALLOW` (регэксп по простой команде `имя арг…`, напр. `^python3 /data/sched/alsched[.]py (submit|status)( |$)`).
+Всё прочее (cat/tail/head/ls/grep по файлам, systemctl, uptime, sha256sum отдельных
 файлов, `cat > файл && mv`, `python3 -m py_compile`, `python3 -c '<короткое>'`) — свободно.
 """
 import os
@@ -21,6 +22,17 @@ import re
 
 # Хост замка — только из окружения (`user@` не нужен, как у RPV_GUARD_HOST_ROOTS); пусто — замок выключен.
 HEAVY_HOST = (os.environ.get("RPV_GUARD_HEAVY_HOST") or os.environ.get("ALPHA_GUARD_HEAVY_HOST") or "").strip().lower()
+
+
+def _compile_allow(raw):
+    """`RPV_GUARD_HEAVY_ALLOW` — регэксп по разобранной простой команде `имя арг…`; пусто или негодный регэксп — исключений нет."""
+    try:
+        return re.compile(raw) if raw else None
+    except re.error:
+        return None
+
+
+HEAVY_ALLOW = _compile_allow((os.environ.get("RPV_GUARD_HEAVY_ALLOW") or "").strip())
 PY_NAMES = re.compile(r"^(?:python|pythonw|py)[0-9.]*$")
 PY_ONELINER_MAX = 200
 ALWAYS = {"du", "find", "rsync", "vmtouch", "tree", "ncdu", "locate", "plocate", "mlocate", "updatedb", "fd", "fdfind"}
@@ -131,6 +143,8 @@ def heavy_label(name, args, stdin=(), xargs=False):
     """Тяжёлая ли команда `name args…` на сервере счёта вне замка: метка или None. `name` — имя команды строчными без пути;
     `args` — слова после неё (переменные, известные в той же команде, уже подставлены); `stdin` — тексты, которые команда
     читает со stdin (heredoc, here-string, строка конвейера); `xargs` — цели приходят из stdin xargs."""
+    if HEAVY_ALLOW and HEAVY_ALLOW.search(" ".join([name, *args])):
+        return None
     if name in ALWAYS:
         return name
     short, long_, pos = opts(args)

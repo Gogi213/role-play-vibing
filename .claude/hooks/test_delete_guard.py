@@ -1595,6 +1595,27 @@ class BenchLock(unittest.TestCase):
         self.assertIsNotNone(dg.check(self.remote("systemd-run -G rm -rf /data/alpha/x"), CWD))
         self.assertIsNone(dg.check(self.remote("systemd-run -G --unit tk046-x rm -rf /data/tk046/old"), CWD))
 
+    def test_heavy_allow(self):
+        import re
+        import heavy_guard as bg
+        cmd = "python3 /data/sched/alsched.py submit --cls prod --name n -- /x/y.py"
+        self.assertIsNotNone(self.deny_heavy(cmd))
+        old = bg.HEAVY_ALLOW
+        try:
+            bg.HEAVY_ALLOW = bg._compile_allow(r"^python3 /data/sched/alsched\.py (submit|status)( |$)")
+            self.assertIsNone(self.deny_heavy(cmd))
+            self.assertIsNone(bg.heavy_label("python3", ["/data/sched/alsched.py", "status"]))
+            self.assertIsNotNone(bg.heavy_label("python3", ["/data/sched/alsched.py", "evil"]))
+            self.assertIsNotNone(bg.heavy_label("python3", ["/tmp/x.py", "/data/sched/alsched.py", "submit"]))
+            self.assertIsNotNone(self.deny_heavy("python3 /data/sched/alsched.py submit x; python3 /tmp/y.py"))
+        finally:
+            bg.HEAVY_ALLOW = old
+        self.assertIsNone(bg._compile_allow(""))
+        self.assertIsNone(bg._compile_allow("(["))
+
+    def deny_heavy(self, text):
+        return dg.check(self.remote(text), CWD)
+
     def test_heavy_label_unit(self):
         import heavy_guard as bg
         self.assertEqual(bg.heavy_label("du", ["-sh", "/x"]), "du")
