@@ -170,7 +170,7 @@ class Harness:
             self.bus.kill()
             self.bus.wait(timeout=10)
 
-    def inbox(self) -> str:
+    def inbox(self, timeout: float = 3) -> str:
         """Сигналы CEO: файл (запасной путь / без шины) + очередь `ceo` шины, прочитанная без ack."""
         f = self.disp / "ceo-inbox.md"
         text = f.read_text(encoding="utf-8") if f.exists() else ""
@@ -180,7 +180,7 @@ class Harness:
                 while True:  # шина отдаёт не больше 100 событий за запрос: без ack очередь растёт по раундам — листаем по seq
                     req = urllib.request.Request(self.env["RPV_BUS_URL"] + f"/q/ceo?after={after}&wait=0",
                                                  headers={"Authorization": "Bearer " + self.env["RPV_BUS_TOKEN"]})
-                    with urllib.request.urlopen(req, timeout=15) as r:
+                    with urllib.request.urlopen(req, timeout=timeout) as r:
                         events = json.loads(r.read())["events"]
                     fresh = [e for e in events if e["seq"] > after]
                     for e in fresh:
