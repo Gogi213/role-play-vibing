@@ -11,7 +11,8 @@
     tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
-    tickets.py comment TK-001 --author researcher --text "..." [--next judge]
+    tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait; следующую роль ставит маршрут
+    tickets.py comment TK-001 --author researcher --text "..."  # промежуточная заметка без смены хода
     tickets.py accept TK-001 --pr 7 --sha <голова>              # только Судья: принято на этой голове → вливает merge_rule
     tickets.py start TK-001                                     # backlog|stopped → todo
     tickets.py wait TK-001 host:calc:<путь>/<job>.json [--on-met "python tools/x.py арг"]  # status: waiting + wait_for
@@ -207,8 +208,12 @@ def cmd_result(args) -> int:
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
     if args.result == "accept" and (args.pr or args.sha):
-        return cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
-                                         "repo": getattr(args, "repo", None)})())
+        rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
+                                      "repo": getattr(args, "repo", None)})())
+        if rc == 0:  # запись итога — иначе строгий Stop (RPV_STOP_STRICT) не видит сдачи шага и блокирует Судью
+            with T.ticket_lock(path):
+                T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]} — {why}")
+        return rc
     if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
         rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
         if rc == 0:
