@@ -29,7 +29,11 @@ def pytest_sessionstart(session):
 
 
 @pytest.fixture(autouse=True)
-def _own_spool():
-    # тест шины мог снять RPV_BUS_SPOOL (endurance) — к следующему тесту вернуть спул сессии
+def _isolated_environ():
+    # снимок окружения до теста и полный возврат после: тест шины, оставивший RPV_BUS_URL/TOKEN, не течёт в следующие
+    # (и страж test_env_isolation не зависит от порядка файлов); спул сессии снова на месте, если тест его снял
+    saved = dict(os.environ)
     os.environ.setdefault("RPV_BUS_SPOOL", _SPOOL)
     yield
+    os.environ.clear()
+    os.environ.update(saved)
