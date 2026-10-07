@@ -14,11 +14,13 @@
 ### Изменено
 
 - Haiku 4.5 → Haiku 5.5 (`claude-haiku-5-5`): `plainify.py` (+ `--effort xhigh` по решению владельца 08.10), `RPV_DISPATCH_HAIKU_MODEL`, `agents/reader.md`, доки, тесты. TK-085.
+- Записка повтора запуска и usage `tickets.py` выровнены под `result`: повтор не велит ставить status руками (его ставит маршрут), `comment --next` не показан как основной путь итога. Только текст, поведение не меняется. TK-079, #40.
 
 ### Исправлено
 
 - Тесты: `.claude/conftest.py` убирает `RPV_*`/`ALPHA_*` из окружения до сбора — pytest на машине с живой установкой больше не пишет фикстуры в живую шину и очередь CEO (TK-077); тест `test_env_isolation`.
 - Тесты: conftest направляет spool шины во временный файл сессии (без URL post иначе пишет в общий `%TEMP%/rpv-bus-spool.jsonl` живой установки); страж проверяет и это.
+- `tickets.py result <ID> accept --pr N --sha S` после принятия пишет «[итог: accept] PR #N@sha — why»: при `RPV_STOP_STRICT=1` хук `stop_result` больше не блокирует Stop Судьи после каждого принятия (раньше метки не было). TK-079, #43.
 
 ## 1.8.2 — 2026-10-07
 
