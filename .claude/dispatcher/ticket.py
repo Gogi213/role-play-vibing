@@ -420,8 +420,8 @@ def _compact_log_locked(path, keep, limit_bytes) -> int:
 
 
 def _haiku_digest(old_part: str):
-    """TK-087 п.2: RPV_HAIKU_COMPACT=1 → конспект переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
-    if os.environ.get("RPV_HAIKU_COMPACT") != "1":
+    """TK-087 п.2: конспект (RPV_HAIKU_COMPACT=0 — выкл) переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
+    if os.environ.get("RPV_HAIKU_COMPACT") == "0":
         return None
     try:
         import haiku_aux
