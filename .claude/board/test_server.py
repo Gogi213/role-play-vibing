@@ -115,6 +115,8 @@ class HttpTest(unittest.TestCase):
                 code, body = call(f"/{tok}/")
                 self.assertEqual(code, 200)
                 self.assertIn("Диспетчерская".encode(), body)
+                for gone in ("Что стало возможно", "Недавно", 'class="rest"'):  # TK-091: правой колонки нет
+                    self.assertNotIn(gone.encode(), body)
                 self.assertEqual(call(f"/{tok}/status.json")[0], 503)
                 code, body = call(f"/{tok}/teams", json.dumps({"name": "Студия"}, ensure_ascii=False).encode("utf-8"))
                 team = json.loads(body)
