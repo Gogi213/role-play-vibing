@@ -156,13 +156,14 @@ class Harness:
             [sys.executable, str(HERE.parent / "bus" / "bus.py"), "--db", str(self.base / "bus.db"),
              "--routes", str(HERE.parent / "bus" / "routes.json"), "--token-file", str(self.base / "bus-token"),
              "--host", "127.0.0.1", "--port", str(self.bus_port)], stdout=self.log_fh, stderr=subprocess.STDOUT)
-        end = time.time() + 15
+        end = time.time() + 60
         while time.time() < end:
             try:
                 with socket.create_connection(("127.0.0.1", self.bus_port), timeout=1):
                     return
             except OSError:
                 time.sleep(0.2)
+        raise RuntimeError("шина не поднялась за 60 с")
 
     def kill_bus(self):
         if getattr(self, "bus", None) and self.bus.poll() is None:
@@ -179,7 +180,7 @@ class Harness:
                 while True:  # шина отдаёт не больше 100 событий за запрос: без ack очередь растёт по раундам — листаем по seq
                     req = urllib.request.Request(self.env["RPV_BUS_URL"] + f"/q/ceo?after={after}&wait=0",
                                                  headers={"Authorization": "Bearer " + self.env["RPV_BUS_TOKEN"]})
-                    with urllib.request.urlopen(req, timeout=3) as r:
+                    with urllib.request.urlopen(req, timeout=15) as r:
                         events = json.loads(r.read())["events"]
                     fresh = [e for e in events if e["seq"] > after]
                     for e in fresh:
@@ -189,8 +190,8 @@ class Harness:
                     if not fresh:
                         break
                     after = max(e["seq"] for e in fresh)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[endurance] inbox: шина не ответила ({type(e).__name__}: {e})", file=sys.stderr)
         return text
 
     # --- диспетчер ---

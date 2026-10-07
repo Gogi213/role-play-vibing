@@ -28,7 +28,7 @@ class EnduranceShort(unittest.TestCase):
                 sys.path.insert(0, str(endurance.HERE.parent / "bus"))
                 import busclient
                 for i in range(130):
-                    busclient.post(f"задача.TK-{i}.к_ceo", {"kind": "done"}, f"pg-{i}")
+                    self.assertIsNotNone(busclient.post(f"задача.TK-{i}.к_ceo", {"kind": "done"}, f"pg-{i}", timeout=15, spool=False))
                 self.assertIn("TK-129 [done]", h.inbox())
             finally:
                 h.kill_bus()
