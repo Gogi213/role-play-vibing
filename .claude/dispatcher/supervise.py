@@ -64,7 +64,10 @@ def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> 
     load_env(state_dir)
     use_systemd = real and S._launcher() == "systemd"
     out = {}
-    for name, (beat, field) in BEATS.items():
+    beats = dict(BEATS)
+    if os.environ.get("RPV_CEO_TRIAGE") == "1":  # TK-086: сортировщик сигналов CEO — по включению, умолчание прежнее
+        beats["ceo_triage"] = ("triage-heartbeat.json", "ts")
+    for name, (beat, field) in beats.items():
         age = heartbeat_age(state_dir / beat, field, now)
         alive = S.is_ours(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")
         act = out[name] = decide(age, alive)
