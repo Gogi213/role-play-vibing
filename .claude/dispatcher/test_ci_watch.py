@@ -175,6 +175,13 @@ class CiWatchTests(unittest.TestCase):
         self.assertEqual(T.parse_wait_for("ci:o/r#7"), ("ci", "o/r", 7))
         self.assertIsNone(T.parse_wait_for("ci:o/r"))
 
+    def test_heartbeat_written(self):  # TK-090 Д-1: сердцебиение для supervise
+        C.write_heartbeat()
+        beat = D.STATE_FILE.parent / "ci-heartbeat.json"
+        self.assertTrue(beat.exists())
+        import json
+        self.assertIn("ts", json.loads(beat.read_text(encoding="utf-8")))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,35 @@ class SuperviseTest(unittest.TestCase):
             self.assertEqual(out, {"dispatch": "start", "watch": "start", "ceo_triage": "start"})
             self.assertEqual(spawned, ["dispatch.py", "watch.py", "ceo_triage.py"])
 
+    def test_ci_watch_supervised_only_with_repo(self):  # TK-090 Д-1
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            (project / ".claude" / "dispatcher").mkdir(parents=True)
+            spawned = []
+            kw = dict(stop=lambda p, s, unit=None: 0,
+                      spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+            with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
+                out = V.run_once(project, **kw)
+            self.assertEqual(out, {"dispatch": "start", "watch": "start", "ci_watch": "start"})
+            self.assertEqual(spawned, ["dispatch.py", "watch.py", "ci_watch.py"])
+
+    def test_load_env_rereads_project_settings(self):  # TK-090 Д-5: settings.json свежее снимка, секреты не берём
+        with tempfile.TemporaryDirectory() as d:
+            sd = Path(d) / ".claude" / "dispatcher"
+            sd.mkdir(parents=True)
+            (sd / "supervise.env.json").write_text(json.dumps({"RPV_X_OLD": "1", "RPV_Y": "old"}), encoding="utf-8")
+            (sd.parent / "settings.json").write_text(json.dumps(
+                {"env": {"RPV_Y": "new", "RPV_CI_REPO": "o/r", "RPV_BUS_TOKEN": "s", "PATH": "x"}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO", "RPV_BUS_TOKEN"):
+                    os.environ.pop(k, None)
+                V.load_env(sd)
+                self.assertEqual((os.environ["RPV_X_OLD"], os.environ["RPV_Y"], os.environ["RPV_CI_REPO"]),
+                                 ("1", "new", "o/r"))
+                self.assertNotIn("RPV_BUS_TOKEN", os.environ)
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO"):
+                    os.environ.pop(k, None)
+
 
 class InstallFilesTest(unittest.TestCase):
     P = Path("/p/proj")
