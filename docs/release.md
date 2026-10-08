@@ -3,7 +3,7 @@
 Все четыре действия — один скрипт `release.py` из папки плагина:
 
 ```
-python .claude/dispatcher/release.py bump X.Y.Z [--push]
+python tools/release_bump.py X.Y.Z [--push]
 python .claude/dispatcher/release.py update
 python .claude/dispatcher/release.py rollback [X.Y.Z]
 python .claude/dispatcher/release.py check
@@ -11,7 +11,7 @@ python .claude/dispatcher/release.py check
 
 | команда | что делает |
 |---|---|
-| `bump X.Y.Z [--push]` | версия в `plugin.json` и `marketplace.json`; раздел в `CHANGELOG.md` обязателен; коммит и тег `vX.Y.Z` (`--push` — и отправить) |
+| `tools/release_bump.py X.Y.Z [--push]` | версия в `plugin.json` и `marketplace.json`; раздел в `CHANGELOG.md` обязателен; коммит и тег `vX.Y.Z` (`--push` — и отправить) |
 | `update` | обновить установленный плагин до последнего выпуска (печатает версию до и после; прежняя запоминается) |
 | `rollback [X.Y.Z]` | вернуть прошлую версию одной командой: маркетплейс с тегом `vX.Y.Z`; без аргумента — версия, записанная перед последним `update` |
 | `check` | версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают (то же проверяет тест в CI) |
@@ -25,6 +25,6 @@ python .claude/dispatcher/release.py check
 ## Как выпустить версию
 
 1. Допишите раздел в [`CHANGELOG.md`](../CHANGELOG.md) — самым верхним, формат Keep a Changelog: заголовок `## X.Y.Z — ГГГГ-ММ-ДД` (`release.py` ищет версию в начале заголовка) и подразделы `### Добавлено` / `### Изменено` / `### Исправлено`.
-2. `python .claude/dispatcher/release.py bump X.Y.Z --push`.
+2. `python tools/release_bump.py X.Y.Z --push`.
 
-`bump` сам проверяет согласованность версий после правки файлов; отдельно `check` удобен перед слиянием (его же проверяет тест в [CI](../README.md#разработка-и-тесты)).
+`release_bump.py` сам проверяет согласованность версий после правки файлов; отдельно `check` удобен перед слиянием (его же проверяет тест в [CI](../README.md#разработка-и-тесты)).

@@ -41,18 +41,6 @@ class ReleaseTests(unittest.TestCase):
     def test_repo_versions_consistent(self):
         self.assertIsNone(release.check())
 
-    def test_bump_requires_changelog_and_updates_both_files(self):
-        with tempfile.TemporaryDirectory() as t:
-            root = Path(t)
-            make_root(root)
-            with self.assertRaises(SystemExit):
-                release.bump("1.1.0", root)
-            (root / "CHANGELOG.md").write_text("# C\n\n## 1.1.0\n- x\n\n## 1.0.0\n", encoding="utf-8")
-            release.bump("1.1.0", root)
-            self.assertEqual(release.read_versions(root), {"plugin": "1.1.0", "marketplace": "1.1.0", "changelog": "1.1.0"})
-            with self.assertRaises(SystemExit):
-                release.bump("v1.2", root)
-
     def test_update_records_previous_version(self):
         with tempfile.TemporaryDirectory() as t:
             st = Path(t) / "s.json"

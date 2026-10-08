@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.13 — 2026-10-08
+
+### Изменено (TK-100, срез №25)
+
+- Команда `release.py bump` перенесена в `tools/release_bump.py` (инструмент хозяина репо, не поставка): `bump` и его ветка в `main` ушли из `release.py` (−29 строк в поставке). `check` и `read_versions` остались в `release.py` (тест согласованности версий идёт в CI как раньше). Тест `bump` переехал в `tools/test_release_bump.py`, CI гонит `pytest .claude tools`. Команды `update`, `rollback`, `auto`, `check` без изменений.
+
 ## 1.8.12 — 2026-10-08
 
 ### Удалено (TK-100, срезы №2 и №3 сводного списка)

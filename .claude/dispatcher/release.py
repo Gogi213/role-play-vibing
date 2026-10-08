@@ -1,7 +1,5 @@
-"""Выпуск плагина (TK-076 п.5): версия, CHANGELOG, обновление установленного плагина, откат одной командой.
+"""Выпуск плагина (TK-076 п.5): проверка версий, обновление установленного плагина, откат одной командой.
 
-    python release.py bump X.Y.Z [--push]   версия в plugin.json и marketplace.json, проверка записи в CHANGELOG.md,
-                                            коммит и тег vX.Y.Z (--push: и отправить)
     python release.py update                обновить установленный плагин до последнего выпуска (версия до/после)
     python release.py rollback [X.Y.Z]      вернуть прошлую версию (по умолчанию — записанная перед последним update)
     python release.py auto --project P      автовыпуск после влития PR (TK-094): update, службы проекта заново из чистого
@@ -43,22 +41,6 @@ def read_versions(root: Path = ROOT) -> dict:
 def check(root: Path = ROOT) -> str | None:
     v = read_versions(root)
     return None if len(set(v.values())) == 1 else f"версии расходятся: {v}"
-
-
-def bump(version: str, root: Path = ROOT) -> None:
-    if not SEMVER.fullmatch(version):
-        raise SystemExit(f"версия должна быть X.Y.Z, получено {version!r}")
-    if not re.search(rf"(?m)^## {re.escape(version)}\b", (root / "CHANGELOG.md").read_text(encoding="utf-8")):
-        raise SystemExit(f"в CHANGELOG.md нет раздела «## {version}» — сначала запись об изменениях")
-    for rel, edit in ((".claude-plugin/plugin.json", lambda d: d.update(version=version)),
-                      (".claude-plugin/marketplace.json", lambda d: d["plugins"][0].update(version=version))):
-        p = root / rel
-        data = json.loads(p.read_text(encoding="utf-8"))
-        edit(data)
-        p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    problem = check(root)
-    if problem:
-        raise SystemExit(problem)
 
 
 GIT_TIMEOUT_S = 120.0     # git без предела держал клон и блокировал установку (Б3 КТ-3)
@@ -391,17 +373,6 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     cmd = argv[0] if argv else ""
-    if cmd == "bump" and len(argv) >= 2:
-        bump(argv[1])
-        git = ["git", "-C", str(ROOT)]
-        for c in (git + ["add", ".claude-plugin", "CHANGELOG.md"], git + ["commit", "-m", f"Выпуск {argv[1]}"],
-                  git + ["tag", f"v{argv[1]}"]) + ((git + ["push", "origin", "HEAD", f"v{argv[1]}"],) if "--push" in argv else ()):
-            r = _run(c)
-            if r.returncode:
-                print(f"[release] {' '.join(c)}: {(r.stderr or r.stdout).strip()}", file=sys.stderr)
-                return 1
-        print(f"[release] выпуск {argv[1]}: тег v{argv[1]} поставлен" + ("" if "--push" in argv else "; отправить: git push origin HEAD v" + argv[1]))
-        return 0
     if cmd == "update":
         return update()
     if cmd == "auto":
