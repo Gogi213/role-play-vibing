@@ -99,6 +99,25 @@ def new_question(process: str, frm: str, on: str, text: str, opts: list[str], st
     return qid, warns
 
 
+def new_notice(root: Path, source: str, text: str) -> str | None:
+    """TK-094: машинный сигнал «ждёт вас» без тикета (выпуск плагина, сортировщик) — строка на Диспетчерской: вопрос с
+    одним вариантом «принято» (`notice`), без записей в лог и ceo-inbox. Тот же текст ещё не принят — не дублируется."""
+    qdir = Path(root) / ".claude" / "pulse" / "questions"
+    text = text.strip()
+    best = 0
+    for p in qdir.glob(f"q-{source}-*.json"):
+        m = re.fullmatch(rf"q-{re.escape(source)}-(\d+)\.json", p.name)
+        best = max(best, int(m.group(1))) if m else best
+        q = P.read_json(p)
+        if isinstance(q, dict) and not q.get("answered_at") and q.get("text") == text:
+            return None
+    qid = f"q-{source}-{best + 1}"
+    P.write_json(qdir / f"{qid}.json", {"id": qid, "process": source, "from": source, "from_role": None, "on": "pc",
+                 "text": text, "options": [{"key": "a", "label": "принято", "effect": ""}], "default": None, "step": None,
+                 "since": P.iso(), "answered_at": None, "answer": None, "notice": True})
+    return qid
+
+
 def answer_question(qid: str, key: str) -> tuple[bool, str, list[str]]:
     """→ (ответ принят, сообщение, предупреждения). Принят — файл вопроса записан; сбои побочных записей — в предупреждениях."""
     q = P.read_json(qpath(qid))
@@ -113,6 +132,8 @@ def answer_question(qid: str, key: str) -> tuple[bool, str, list[str]]:
     q.update(answered_at=P.iso(now), answer=opt["key"], answer_label=opt["label"])
     P.write_json(qpath(qid), q)
     msgs: list[str] = []
+    if q.get("notice"):  # сигнал машины: принято — и всё, CEO не будим
+        return True, f"{qid}: принято", msgs
     pid, hh = q["process"], now.strftime("%H:%M")
     if q.get("step"):  # шаг «вы» → готово
         try:

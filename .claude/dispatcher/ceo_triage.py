@@ -7,7 +7,7 @@
      модель не ответила или ответ не разобран → действие (пропуск сигнала дороже лишнего запуска);
   3. шум — ack и запись в triage.jsonl; сведения — строка в ceo-digest.md (её показывает хук UserPromptSubmit
      на сообщении владельца); действие — по маршрутам, без CEO (TK-094): по тикету — `next: judge`
-     и запись dispatcher (needs_owner — только строка «ждёт вас»), без тикета — строка «ждёт вас» в сводку.
+     и запись dispatcher (needs_owner — только строка «ждёт вас»), без тикета — строка «ждёт вас» на Диспетчерской (ask.new_notice).
 Каждая запись triage.jsonl хранит класс, причину и токены Haiku — по ним считается «до/после» и число ложных побудок.
 
     python <плагин>/.claude/dispatcher/ceo_triage.py --project <проект> --once   # один проход
@@ -187,8 +187,10 @@ def route_actions(events: list, now: datetime) -> bool:
                          "либо вернуть владельцу тикета; вопрос о содержании исследования — владельцу (ask-owner).", now=now)
             T.write_header_updates(path, {"next": "judge"}, now=now, stamp_updated=False)
             continue
-        with open(_paths()["digest"], "a", encoding="utf-8") as fh:
-            fh.write(f"- {T.now_iso(now)} {e['tid']} [{e['kind']}] ждёт вас: {e['note'][:300]}\n")
+        if tkt is not None and tkt.status == "needs_owner":  # уже строка «ждёт вас» тикета на Диспетчерской
+            continue
+        import ask
+        ask.new_notice(D.PROJECT_ROOT, "triage", f"{e['tid']} [{e['kind']}] {e['note'][:300]}")
     return True
 
 

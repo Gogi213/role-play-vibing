@@ -232,10 +232,9 @@ def _journal(project: Path, rec: dict) -> None:
     rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"), **rec}
     with open(d / "release-journal.jsonl", "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    if rec["result"] != "ok":  # строка «ждёт вас» в сводку Диспетчерской, CEO не будится
-        with open(d / "ceo-digest.md", "a", encoding="utf-8") as fh:
-            fh.write(f"- {rec['ts']} * [release] ждёт вас: выпуск {rec.get('after')} — {rec['result']}"
-                     f" ({rec.get('detail', '')})\n")
+    if rec["result"] != "ok":  # «ждёт вас» на Диспетчерскую (вопрос-сигнал), CEO не будится
+        import ask
+        ask.new_notice(project, "release", f"Выпуск плагина {rec.get('after')}: {rec['result']} ({rec.get('detail', '')})")
 
 
 def autorelease(project: Path, run=subprocess.run, state: Path = STATE, registry: Path = INSTALLED,

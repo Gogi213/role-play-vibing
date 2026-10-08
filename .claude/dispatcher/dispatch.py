@@ -827,7 +827,7 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     if not T.author_is(last_author, tkt.owner):
         return tkt
     T.append_log(path, "dispatcher",
-                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд — на новый круг не будим. Решение за владельцем: "
+                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (спор ревью, не вопрос об исследовании) — на новый круг не будим. Решение за владельцем: "
                  f"ещё один круг (`tickets.py comment {tkt.id} --author ceo --text \"...\" --next {tkt.reviewer}`) "
                  "либо принять/закрыть самому.", now=now)
     T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)

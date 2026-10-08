@@ -112,9 +112,10 @@ class RunOnce(Sandbox):
         self.assertEqual(t5.next_role, "judge")
         self.assertEqual(t5.log[-1].author, "dispatcher")
         self.assertEqual(C.T.read_ticket(D.TICKETS_DIR / "TK-006.md").next_role, "")  # владельцу, не Судье
-        digest = D.DISPATCHER_DIR.joinpath("ceo-digest.md").read_text(encoding="utf-8")
-        self.assertIn("ждёт вас", digest)
-        self.assertIn("[weird]", digest)
+        qdir = D.PROJECT_ROOT / ".claude" / "pulse" / "questions"
+        qs = [json.loads(p.read_text(encoding="utf-8")) for p in qdir.glob("q-triage-*.json")]
+        self.assertEqual(len(qs), 1)  # needs_owner — уже строка тикета; машинный сигнал без тикета — на Диспетчерскую
+        self.assertIn("[weird]", qs[0]["text"])
 
     def test_blocked_with_assignee_is_not_owner_noise(self):  # blocked с next: judge — уже у адресата, в «ждёт вас» не идёт
         self.ticket("TK-007", "blocked")
