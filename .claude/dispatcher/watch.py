@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lifewatch as LW  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
 import pulsedata as PD  # noqa: E402
@@ -253,13 +254,69 @@ def _wait_target_state(tkt, probe) -> str:
     return "unknown"
 
 
-def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
+def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now) -> None:
+    """Задание из `job:` упало/исчезло: владелец тикета будится записью (хвост лога + причина), CEO — только при
+    повторе после пробуждения (тикет blocked)."""
+    acted = ws.setdefault("job_wakes", {})
+    repeat = tkt.id in acted
+    with T.ticket_lock(path):
+        if repeat:
+            T.append_log(path, "watch", why + " — второй раз после пробуждения, тикет blocked (решение за CEO)", now)
+            T.write_header_updates(path, {"status": "blocked", "wait_for": "", "on_met": ""}, now)
+        else:
+            T.append_log(path, "watch", why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
+            T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
+    acted[tkt.id] = spec
+
+
+def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict) -> bool:
+    """Одна проверка `job:`; True — тикет «жив» (ждёт, не сирота). failed — действие сразу (падение однозначно);
+    missing — после DEAD_WAIT_STRIKES подряд (задание могло ещё не записаться); ssh-error — как у прочих форм."""
+    _, alias, jid = parsed
+    spec = tkt.header["wait_for"].strip()
+    st, tail = job_probe(alias, jid)
+    dead = ws.setdefault("dead_wait", {})
+    if st in ("running", "queued", "done"):
+        states[f"{alias}:{jid}"] = st
+        if st == "done":
+            ws.setdefault("job_wakes", {}).pop(tkt.id, None)  # довели до конца — следующее падение снова только владельцу
+        dead.pop(tkt.id, None)
+        ws.setdefault("ssh_fail_wait", {}).pop(tkt.id, None)
+        return True
+    if st == "ssh-error":
+        ssh_fail = ws.setdefault("ssh_fail_wait", {})
+        ent = ssh_fail.get(tkt.id) or {}
+        n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+        ssh_fail[tkt.id] = {"spec": spec, "n": n}
+        if n < SSH_FAIL_STRIKES:
+            return True
+        ssh_fail.pop(tkt.id, None)
+        _wake_owner_job(path, tkt, ws, spec, f"сторож: состояние задания `{spec}` не проверить {n} проверок подряд (ssh/адаптер)", now)
+        return False
+    if st == "failed":
+        why = f"сторож: задание `{spec}` упало"
+        why += f"\nХвост лога:\n{tail}" if tail else ""
+        r = LW.reason(tail)
+        _wake_owner_job(path, tkt, ws, spec, why + (f"\nПричина (Haiku): {r}" if r else ""), now)
+        return False
+    ent = dead.get(tkt.id) or {}  # missing: задание не найдено
+    n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+    dead[tkt.id] = {"spec": spec, "n": n}
+    if n < DEAD_WAIT_STRIKES:
+        return True
+    dead.pop(tkt.id, None)
+    _wake_owner_job(path, tkt, ws, spec, f"сторож: задание `{spec}` не найдено на машине и никто его не производит ({n} проверки подряд)", now)
+    return False
+
+
+def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
     записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
     dead = ws.setdefault("dead_wait", {})
     ssh_fail = ws.setdefault("ssh_fail_wait", {})
-    alive, seen = set(), set()
+    alive, seen, states = set(), set(), {}
+    job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, D._ssh_cmd))
     for path in T.list_tickets(D.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
@@ -268,6 +325,11 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
         if tkt.status != "waiting" or not (tkt.header.get("wait_for") or "").strip():
             continue
         spec = tkt.header["wait_for"].strip()
+        parsed = T.parse_wait_for(spec)
+        if parsed and parsed[0] == "job":
+            if _triage_job(path, tkt, parsed, ws, now, job_probe, states):
+                alive.add(tkt.id)
+            continue
         st = _wait_target_state(tkt, probe)
         if st == "ssh-error":  # ssh молчит: условие не проверить; N раз подряд — владельцу тикета, не CEO
             ent = ssh_fail.get(tkt.id) or {}
@@ -306,6 +368,12 @@ def triage_waits(ws: dict, now, probe=probe_wait_target) -> set:
                 T.append_log(path, "watch", why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
                 T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
         dead[tkt.id] = {"spec": spec, "n": 0, "acted": ent.get("acted", []) + [spec]}
+    if states or ws.get("job_states_written"):  # состояние для диспетчера (check_wait_for); пустое тоже пишем один раз
+        try:
+            LW.save_states(D.DISPATCHER_DIR, states)
+        except OSError:
+            pass
+        ws["job_states_written"] = bool(states)
     for tid in list(dead):
         if tid not in seen and tid not in alive:
             dead.pop(tid, None)

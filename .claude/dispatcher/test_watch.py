@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -771,6 +772,68 @@ class TriageWaitsTests(WatchSandbox):
         ws = {}
         W.triage_waits(ws, self.now)
         W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+    # --- сторож жизни (TK-092): форма job:<алиас>:<id> через адаптер проекта ---
+    SPEC = "job:calc:0108041500123"
+
+    def _job(self, state, tail=""):
+        return lambda alias, jid: (state, tail)
+
+    def test_job_form_parses(self):
+        self.assertEqual(T.parse_wait_for(self.SPEC), ("job", "calc", "0108041500123"))
+        self.assertIsNone(T.parse_wait_for("job:nohost:1"))
+        self.assertIsNone(T.parse_wait_for("job:calc:"))
+
+    def test_job_failed_wakes_owner_at_once_with_tail_and_reason(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        tail = "Traceback\nOSError: нет места"
+        with mock.patch.object(W.LW, "reason", return_value="кончилось место"):
+            alive = W.triage_waits(ws, self.now, job_probe=self._job("failed", tail))
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertEqual(alive, set())
+        self.assertEqual(t.log[-1].author, "watch")
+        for part in ("упало", "OSError: нет места", "кончилось место"):
+            self.assertIn(part, t.log[-1].text)
+
+    def test_job_failed_again_after_wake_blocks_for_ceo(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        with mock.patch.object(W.LW, "reason", return_value=""):
+            W.triage_waits(ws, self.now, job_probe=self._job("failed"))
+            T.write_header_updates(p, {"status": "waiting", "wait_for": "job:calc:other2"})
+            W.triage_waits(ws, self.now, job_probe=self._job("failed"))
+        self.assertEqual(T.read_ticket(p).status, "blocked")
+
+    def test_job_vanished_wakes_owner_after_strikes(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        for _ in range(W.DEAD_WAIT_STRIKES - 1):
+            self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("missing"))), 1)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now, job_probe=self._job("missing"))
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("не найдено", t.log[-1].text)
+
+    def test_job_running_waits_and_done_is_published_for_dispatcher(self):
+        import lifewatch
+        p = self._waiting(self.SPEC)
+        ws = {}
+        self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("running"))), 1)
+        self.assertFalse(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
+        W.triage_waits(ws, self.now, job_probe=self._job("done"))
+        self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
+        self.assertTrue(D.check_wait_for(self.SPEC))
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_job_adapter_silent_wakes_owner_after_ssh_strikes(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        for _ in range(W.SSH_FAIL_STRIKES):
+            W.triage_waits(ws, self.now, job_probe=self._job("ssh-error"))
         self.assertEqual(T.read_ticket(p).status, "in_progress")
 
 

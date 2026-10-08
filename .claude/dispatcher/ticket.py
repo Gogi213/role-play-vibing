@@ -71,11 +71,12 @@ WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<пу�
                     "merged:<владелец/репо>#<PR> (готово, когда PR влит)")
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 _TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _CI_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
 
 
 def parse_wait_for(spec: str):
-    """Разбор `wait_for`. Возвращает ("file", путь) | ("ticket", ID) | ("host", алиас, "path"|"unit", арг) либо None
+    """Разбор `wait_for`. Возвращает ("file", путь) | ("ticket", ID) | ("job", алиас, id) | ("host", алиас, "path"|"unit", арг) либо None
     (форма не понята). Пустая строка — None: «ничего не ждём» проверяется отдельно."""
     spec = (spec or "").strip()
     if spec.startswith("file:"):
@@ -90,6 +91,10 @@ def parse_wait_for(spec: str):
     if spec.startswith("merged:"):
         m = _CI_RE.match(spec[len("merged:"):].strip())
         return ("merged", m.group(1), int(m.group(2))) if m else None
+    if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, RPV_JOB_STATE_CMD)
+        alias, sep, jid = spec[len("job:"):].partition(":")
+        jid = jid.strip()
+        return ("job", alias, jid) if alias in WAIT_FOR_HOSTS and sep and _JOB_ID_RE.match(jid) else None
     if spec.startswith("deck:"):
         arg = spec[len("deck:"):].strip()
         return ("host", "deck", "path", arg) if arg else None

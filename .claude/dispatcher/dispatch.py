@@ -292,6 +292,9 @@ def check_wait_for(spec: str) -> bool:
     if parsed[0] == "merged":
         import merge_rule
         return merge_rule.merged_done(parsed[1], parsed[2])
+    if parsed[0] == "job":  # состояние пишет сторож жизни (watch.py → lifewatch.py), своего ssh нет
+        import lifewatch
+        return lifewatch.job_done(DISPATCHER_DIR, parsed[1], parsed[2])
     _, alias, what, arg = parsed
     return _host_wait_met(alias, what, arg)
 
