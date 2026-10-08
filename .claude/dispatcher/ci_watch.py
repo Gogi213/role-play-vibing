@@ -95,6 +95,9 @@ def wake(path, tkt, who: str, text: str, repo: str = "", pr_number: int = 0) -> 
     upd = {"next": who}
     if repo and (tkt.header.get("wait_for") or "").strip() == f"ci:{repo}#{pr_number}":
         upd.update({"wait_for": "", "on_met": ""})
+    elif repo and who != "judge" and (tkt.header.get("wait_for") or "").strip() == f"merged:{repo}#{pr_number}":
+        # красный CI на принятом PR: ждать влития нечего (PR не влить) — владелец будится, ожидание снято (TK-092, CEO 05:25)
+        upd.update({"wait_for": "", "on_met": "", "status": "in_progress"})
     with T.ticket_lock(path):
         T.append_log(path, "ci", text)
         T.write_header_updates(path, upd, stamp_updated=False)
