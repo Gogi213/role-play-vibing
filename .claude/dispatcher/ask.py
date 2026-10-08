@@ -45,7 +45,10 @@ def ticket_comment(tk: str, author: str, text: str, nxt: str | None = None) -> s
     if nxt:
         cmd += ["--next", nxt]
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    r = hide.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=str(P.questions_dir().parents[2]))
+    try:
+        r = hide.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=str(P.questions_dir().parents[2]))
+    except Exception as e:  # TK-109 п.16: таймаут/сбой запуска — не исключение наружу, а текст ошибки (ответ повторится)
+        return f"tickets.py comment {tk}: {type(e).__name__}: {str(e)[:150]}"
     return None if r.returncode == 0 else f"tickets.py comment {tk}: код {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}"
 
 
@@ -119,11 +122,46 @@ def new_notice(root: Path, source: str, text: str) -> str | None:
     return qid
 
 
+def _retry_log(qid: str, q: dict) -> tuple[bool, str, list[str]]:
+    """Повтор недошедшей записи ответа в тикет. Таймаут мог случиться ПОСЛЕ записи — сначала ищем текст в тикете."""
+    pid, text, role = q["process"], q["log_pending"], q.get("from_role")
+    done = False
+    try:
+        import ticket as T
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import dispatch as D
+        done = any(text in e.text for e in T.read_ticket(D.TICKETS_DIR / f"{pid}.md").log)
+    except Exception:  # noqa: BLE001
+        pass
+    err = None if done else ticket_comment(pid, "ceo", text, role if role in ("engineer", "researcher", "judge") else None)
+    if err:
+        return True, f"{qid}: ответ записан, запись в тикет снова не дошла", [err]
+    q.pop("log_pending", None)
+    P.write_json(qpath(qid), q)
+    return True, f"{qid}: запись ответа в тикет доставлена", []
+
+
+def flush_pending() -> int:
+    """TK-109 п.16: тик диспетчера досылает недошедшие записи ответов (log_pending); → сколько доставлено."""
+    n = 0
+    for p in sorted(P.questions_dir().glob("q-*.json")):
+        q = P.read_json(p)
+        if isinstance(q, dict) and q.get("answered_at") and q.get("log_pending") and P.is_ticket(q.get("process", "")):
+            try:
+                _retry_log(q["id"], q)
+                n += not P.read_json(p).get("log_pending")
+            except Exception as e:  # noqa: BLE001
+                print(f"[ask] досылка {p.name}: {type(e).__name__}: {e}", file=sys.stderr)
+    return n
+
+
 def answer_question(qid: str, key: str) -> tuple[bool, str, list[str]]:
     """→ (ответ принят, сообщение, предупреждения). Принят — файл вопроса записан; сбои побочных записей — в предупреждениях."""
     q = P.read_json(qpath(qid))
     if not isinstance(q, dict):
         return False, f"нет вопроса {qid}", []
+    if q.get("answered_at") and q.get("log_pending") and P.is_ticket(q.get("process", "")):
+        return _retry_log(qid, q)  # TK-109 п.16: ответ записан, а запись в тикет не дошла — повтор без нового ответа
     if q.get("answered_at"):
         return False, f"вопрос {qid} уже отвечен: «{q.get('answer_label') or q.get('answer')}»", []
     opt = next((o for o in q["options"] if o["key"] == str(key).strip().lower()), None)
@@ -151,6 +189,8 @@ def answer_question(qid: str, key: str) -> tuple[bool, str, list[str]]:
         err = ticket_comment(pid, "ceo", text, role if role in ("engineer", "researcher", "judge") else None)
         if err:
             msgs.append(err)
+            q["log_pending"] = text
+            P.write_json(qpath(qid), q)
     try:  # CEO записывает решение; прямой дописью (диспетчер может стоять), kind не «summary» → будит
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import dispatch as D
