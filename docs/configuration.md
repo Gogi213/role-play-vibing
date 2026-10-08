@@ -80,7 +80,7 @@
 
 | переменная | по умолчанию | смысл |
 |---|---|---|
-| `RPV_CALC_HOST`, `RPV_VPS_HOST`, `RPV_DECK_HOST` | не заданы | хосты для `wait_for: host:<calc\|vps\|deck>:…` (`user@host` или алиас из `~/.ssh/config`); `RPV_DECK_HOST` — ещё и вторая машина сторожа |
+| `RPV_CALC_HOST`, `RPV_VPS_HOST`, `RPV_DECK_HOST` | не заданы | хосты для `wait_for: host:<calc\|vps\|deck>:…` (`user@host` или алиас из `~/.ssh/config`) |
 | `RPV_DECK_KEY` | — | ключ ssh (`-i`) |
 | `RPV_DECK_KNOWN_HOSTS` | — | файл known_hosts (`-o UserKnownHostsFile=`) |
 | `RPV_DECK_ROOT` | `~/rpv` | корень очереди заданий на второй машине |

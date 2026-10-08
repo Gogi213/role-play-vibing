@@ -19,7 +19,6 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -29,48 +28,6 @@ import ticket  # noqa: E402
 import view2 as V2  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "board"))  # machines.py, plainify.py — по желанию
-
-STATE = {"in_progress": "run", "in_review": "review", "waiting": "wait", "blocked": "bad", "needs_owner": "wait",
-         "stopped": "bad", "done": "done", "todo": "todo", "backlog": "todo"}
-TZ = timezone(timedelta(hours=4))
-
-
-TAGS = {"pc": {"tag": "ПК", "name": "этот ПК", "color": "purple"}, "vps": {"tag": "VPS", "name": "сервер", "color": "teal"},
-        "calc": {"tag": "СЧЁТ", "name": "сервер счёта", "color": "blue"},
-        "col": {"tag": "КОЛ", "name": "сборщик", "color": "gray"}, "you": {"tag": "ВЫ", "name": "вы", "color": "amber"}}
-MORDER = ("pc", "vps", "calc", "col")
-ACTIVE = ("run", "review", "repair")
-
-
-def _plan_steps(plan, st: str, who: str, title: str) -> list:
-    """Шаги тикета: из плана (`plan.py`, пишут роли), плана нет — один шаг из состояния тикета. `after`/`wave` — как у alpha:
-    после предыдущего шага по умолчанию, волна = 1 + максимум волн `after`."""
-    raw = plan.get("steps") if isinstance(plan, dict) else None
-    if not raw:
-        return [_step(1, title, who, "pc", "", st)]
-    steps = []
-    for i, x in enumerate(raw, 1):
-        if not isinstance(x, dict):
-            continue
-        sst = x.get("state") if x.get("state") in PD.STEP_STATES else "todo"
-        steps.append(_step(len(steps) + 1, x.get("title") or "шаг", x.get("who") or who, x.get("on") if x.get("on") in PD.VALID_ON else "pc",
-                           x.get("for") or "", sst, detail=x.get("detail"), started=PD.hhmm(x.get("started_at")),
-                           finished=PD.hhmm(x.get("finished_at")), after=x.get("after")))
-    for i, s in enumerate(steps, 1):
-        a = s["after"]
-        if a is None:
-            a = [i - 1] if i > 1 else []
-        a = sorted({v for v in a if isinstance(v, int) and not isinstance(v, bool) and 1 <= v < i})
-        s["after"] = a
-        s["wave"] = 1 + max((steps[v - 1]["wave"] for v in a), default=0)
-    return steps
-
-
-def _step(n, title, who, on, forr, state, **kw) -> dict:
-    d = {"n": n, "title": title, "who": who, "on": on, "for": forr, "state": state, "after": [], "wave": 1, "pct": None,
-         "detail": None, "eta_min": None, "started": None, "finished": None, "question": None}
-    d.update(kw)
-    return d
 
 
 def _pstate(steps: list, st: str) -> str:
