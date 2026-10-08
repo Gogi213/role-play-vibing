@@ -1420,35 +1420,51 @@ def _pid_kill(pid) -> None:
 
 
 def acquire_instance_lock(pid_file, expect_name: str = "py"):
-    """Замок единственного экземпляра: pid-файл создаётся атомарно (O_EXCL). Файл есть и в нём живой чужой процесс —
-    (False, сообщение); процесса нет (упал, зомби) или файл битый — замок забирается; свой pid (его записал запускатель) —
-    ок. Второй диспетчер/сторож иначе запускал бы роли повторно (двойные запуски и расход)."""
+    """Замок единственного экземпляра. Проверка-и-запись идут под короткой мьютекс-файлом (`<pid_file>.mx`, O_EXCL):
+    без него второй претендент видел файл замка уже созданным, но ещё пустым (pid не записан), считал его битым,
+    удалял и брал себе — оба диспетчера «владели» замком (TK-093, гонка в test_watch_round). Файл есть и в нём живой
+    чужой процесс — (False, сообщение); процесса нет (упал, зомби) или файл битый — замок забирается; свой pid
+    (его записал запускатель) — ок. Pid пишется целиком через временный файл и `os.replace`."""
     pid_file = Path(pid_file)
     me = os.getpid()
     pid_file.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(5):
+    mx = pid_file.with_name(pid_file.name + ".mx")
+    deadline = time.time() + 40
+    while True:
         try:
-            fd = os.open(str(pid_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(os.open(str(mx), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
         except FileExistsError:
             try:
-                other = int(pid_file.read_text(encoding="utf-8").strip() or 0)
-            except (OSError, ValueError):
-                other = 0
-            if other == me:
-                return True, ""
-            if other and _pid_alive(other, expect_name):
-                return False, f"уже запущен (pid {other}, файл {pid_file.name}) — второй экземпляр не нужен, выхожу"
-            try:
-                pid_file.unlink()       # процесса нет — замок осиротел, забираем
-            except FileNotFoundError:
-                pass
-            except OSError as e:
-                return False, f"не удалось забрать осиротевший замок {pid_file}: {e}"
-            continue
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(str(me))
+                if time.time() - mx.stat().st_mtime > 30:   # мьютекс держит умерший процесс (секция — миллисекунды)
+                    mx.unlink()
+                    continue
+            except OSError:
+                continue
+            if time.time() > deadline:
+                return False, f"не удалось взять замок {pid_file}: занят мьютекс {mx.name}"
+            time.sleep(0.01)
+    try:
+        try:
+            other = int(pid_file.read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            other = 0
+        if other == me:
+            return True, ""
+        if other and _pid_alive(other, expect_name):
+            return False, f"уже запущен (pid {other}, файл {pid_file.name}) — второй экземпляр не нужен, выхожу"
+        tmp = pid_file.with_name(f"{pid_file.name}.{me}.tmp")
+        try:
+            tmp.write_text(str(me), encoding="utf-8")
+            os.replace(tmp, pid_file)   # осиротевший/битый замок забираем, свой пишем целиком
+        except OSError as e:
+            return False, f"не удалось взять замок {pid_file}: {e}"
         return True, ""
-    return False, f"не удалось взять замок {pid_file}"
+    finally:
+        try:
+            mx.unlink()
+        except OSError:
+            pass
 
 
 def release_instance_lock(pid_file) -> None:
