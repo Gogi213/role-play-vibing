@@ -123,6 +123,24 @@ def _fetchable(ref: str | None, run) -> bool:
         return r.returncode == 0
 
 
+def _scope_args(registry: Path | None = None) -> list:
+    """`--scope project`, если плагин стоит на уровне проекта (иначе install ставит на user и ломает привязку проекта)."""
+    try:
+        entries = json.loads((registry or INSTALLED).read_text(encoding="utf-8"))["plugins"].get(f"{NAME}@{NAME}") or []
+    except (OSError, ValueError, KeyError):
+        return []
+    return ["--scope", "project"] if any(e.get("scope") == "project" for e in entries) else []
+
+
+def _restore(old_pin: str | None, run) -> int:
+    """После сбоя смены маркетплейса вернуть прежний (до 3 попыток): машину без плагина не оставляем."""
+    for _ in range(3):
+        if not _reinstall(f"{REPO}#{old_pin}" if old_pin else REPO, run):
+            return 0
+        time.sleep(0 if run is not subprocess.run else 5)
+    return 1
+
+
 def _reinstall(source: str, run) -> int:
     """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него. Сначала цель добывается
     (_fetchable); не добыта — ничего не трогаем, код 1."""
@@ -131,7 +149,7 @@ def _reinstall(source: str, run) -> int:
         return 1
     for cmd in (["claude", "plugin", "marketplace", "remove", NAME],
                 ["claude", "plugin", "marketplace", "add", source],
-                ["claude", "plugin", "install", f"{NAME}@{NAME}"]):
+                ["claude", "plugin", "install", f"{NAME}@{NAME}", *_scope_args()]):
         r = _run(cmd, run)
         if r.returncode:
             return _fail(cmd, r)
@@ -143,6 +161,7 @@ def update(run=subprocess.run, state: Path = STATE) -> int:
     pin = pinned_ref(run)
     if pin:  # после отката маркетплейс прибит к тегу — вернуть на main
         if _reinstall(REPO, run):
+            _restore(pin, run)  # сбой add после remove не оставляет машину без плагина (замечание Судьи к PR #59)
             return 1
     for cmd in (["claude", "plugin", "marketplace", "update", NAME],
                 ["claude", "plugin", "update", f"{NAME}@{NAME}"]):
@@ -173,10 +192,7 @@ def rollback(version: str | None = None, run=subprocess.run, state: Path = STATE
     old_pin = pinned_ref(run)
     if _reinstall(f"{REPO}#v{version}", run):
         print(f"[release] откат не удался — возвращаю прежний маркетплейс ({old_pin or 'main'})", file=sys.stderr)
-        for _ in range(3):   # без плагина машину не оставляем: возврат прежнего — с повтором
-            if not _reinstall(f"{REPO}#{old_pin}" if old_pin else REPO, run):
-                break
-            time.sleep(0 if run is not subprocess.run else 5)
+        _restore(old_pin, run)
         return 1
     _save_prev(before, state)
     print(f"[release] {before} -> {installed_version(run)} (откат на v{version}; перезапустить Claude Code)")
