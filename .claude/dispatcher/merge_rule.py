@@ -166,7 +166,13 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
         if base != default:
             if not ci_ok or base in open_heads:
                 continue
-            gh(f"repos/{repo}/pulls/{n}", method="PATCH", base=default)
+            try:
+                gh(f"repos/{repo}/pulls/{n}", method="PATCH", base=default)
+            except Exception as e:                            # TK-109 п.2: сбой одного PR не обрывает проход
+                r = _gh_error(st, key, sha, tkt, "смена базы", e, bus)
+                if r:
+                    out.append((n, r))
+                continue
             out.append((n, f"база {base} → {default}"))
             continue
         try:
@@ -209,7 +215,11 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
                 out.append((n, r))
             continue
         st.pop(key, None)
-        if gh(f"repos/{repo}/pulls/{n}").get("merged"):
+        try:
+            confirmed = bool(gh(f"repos/{repo}/pulls/{n}").get("merged"))
+        except Exception:                                     # TK-109 п.1/14: PUT прошёл, а проверка упала (сбой, таймаут gh)
+            confirmed = bool((merged_resp or {}).get("merged"))  # — слияние не теряем, верим ответу PUT
+        if confirmed:
             _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).", bus=bus)
             _drop_accepted(tkt, n)
             st[key] = {"merged": sha}

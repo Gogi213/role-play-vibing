@@ -48,7 +48,14 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
         return f"--why длиннее {WHY_MAX} знаков ({len(why)}) — сократи"
 
     def _exists(p: str) -> bool:
-        return bool(p) and (Path(p) if Path(p).is_absolute() else root / p).exists()
+        if not (p or "").strip():
+            return False
+        try:  # TK-109 п.3: не '.', '/', каталог проекта и не путь вне проекта
+            base = root.resolve()
+            f = (Path(p) if Path(p).is_absolute() else root / p).resolve()
+            return f != base and f.exists() and f.is_relative_to(base)
+        except (OSError, ValueError):
+            return False
 
     if "|" in need:  # Судья: работа в PR (голова) либо без PR (артефакт проверки)
         pr_form = need.partition("|")[0]

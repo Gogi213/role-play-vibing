@@ -2557,45 +2557,49 @@ def tick(now=None) -> int:
             notify_parse_error(path.stem, f"{type(e).__name__}: {e}", state, now)
             continue
 
-        # CEO получает строку только по: `next: ceo`, blocked/needs_owner, done.
-        # @ceo (и любые @упоминания) в тексте записей — просто текст.
-        if tkt.id not in RUNNING and path.stem not in RUNNING:
-            # аудит-3: пока владелец ещё работает, его промежуточная запись — не «сдал на ревью»; эскалация — после запуска
-            tkt = escalate_review_limit(path, tkt, state, now)
-        handle_next_ceo(path, tkt, state, now)
-        _expire_ceo_handoff(tkt, state)
-        notify_status_for_ceo(tkt, state, now)
-        notify_done(tkt, state, now)
-        notify_wait_for_problem(tkt, state, now)
+        try:  # TK-109 п.15: сбой на одном тикете не останавливает обработку остальных
+            # CEO получает строку только по: `next: ceo`, blocked/needs_owner, done.
+            # @ceo (и любые @упоминания) в тексте записей — просто текст.
+            if tkt.id not in RUNNING and path.stem not in RUNNING:
+                # аудит-3: пока владелец ещё работает, его промежуточная запись — не «сдал на ревью»; эскалация — после запуска
+                tkt = escalate_review_limit(path, tkt, state, now)
+            handle_next_ceo(path, tkt, state, now)
+            _expire_ceo_handoff(tkt, state)
+            notify_status_for_ceo(tkt, state, now)
+            notify_done(tkt, state, now)
+            notify_wait_for_problem(tkt, state, now)
 
-        tid = tkt.id
-        if tid in RUNNING:
-            continue
-        if (tkt.status == "waiting" and not tkt.next_role and (tkt.header.get("on_met") or "").strip()
-                and check_wait_for(tkt.header.get("wait_for", ""))):
-            try:
-                if run_on_met(path, tkt, state, now):
-                    save_state(state)
-                    continue
-            except Exception as e:  # on_met не должен ронять тик; on_met уже очищен — дальше обычный путь
-                print(f"[dispatch] on_met {tid}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-            tkt = T.read_ticket(path)
-        notify_wait_cycle(tkt, state, now)
-        decision = decide(tkt, state, now)
-        if decision is None:
-            if _waits_without_condition(tkt, now):
-                waiting_nocond = True
-            tkt = enforce_move_invariant(path, tkt, state, now)
+            tid = tkt.id
+            if tid in RUNNING:
+                continue
+            if (tkt.status == "waiting" and not tkt.next_role and (tkt.header.get("on_met") or "").strip()
+                    and check_wait_for(tkt.header.get("wait_for", ""))):
+                try:
+                    if run_on_met(path, tkt, state, now):
+                        save_state(state)
+                        continue
+                except Exception as e:  # on_met не должен ронять тик; on_met уже очищен — дальше обычный путь
+                    print(f"[dispatch] on_met {tid}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                tkt = T.read_ticket(path)
+            notify_wait_cycle(tkt, state, now)
             decision = decide(tkt, state, now)
             if decision is None:
+                if _waits_without_condition(tkt, now):
+                    waiting_nocond = True
+                tkt = enforce_move_invariant(path, tkt, state, now)
+                decision = decide(tkt, state, now)
+                if decision is None:
+                    continue
+            haiku_reason = haiku_refused_reason(tkt)
+            if haiku_reason:
+                T.write_header_updates(path, {"status": "blocked"}, now=now)
+                T.append_log(path, "dispatcher", f"{haiku_reason} — задача заблокирована, нужен CEO.", now=now)
+                route_ceo_signal(tid, "blocked", haiku_reason, state, now)
                 continue
-        haiku_reason = haiku_refused_reason(tkt)
-        if haiku_reason:
-            T.write_header_updates(path, {"status": "blocked"}, now=now)
-            T.append_log(path, "dispatcher", f"{haiku_reason} — задача заблокирована, нужен CEO.", now=now)
-            route_ceo_signal(tid, "blocked", haiku_reason, state, now)
-            continue
-        candidates.append((path, tkt, decision))
+            candidates.append((path, tkt, decision))
+        except Exception as e:
+            print(f"[dispatch] тикет {path.stem}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            notify_parse_error(path.stem, f"сбой тика: {type(e).__name__}: {e}", state, now)
 
     launched = 0
     throttled = 0
