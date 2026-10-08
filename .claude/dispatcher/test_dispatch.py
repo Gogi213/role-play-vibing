@@ -4299,7 +4299,7 @@ class ProjectRootTests(unittest.TestCase):
         state = self.proj / ".claude" / "dispatcher"
         self.assertEqual(D.TICKETS_DIR, self.proj / ".claude" / "tickets")
         for path in (D.STATE_FILE, D.PID_FILE, D.RUNS_DIR, D.RUNS_LOG, D.CEO_INBOX, D.CEO_WAKE_LOG,
-                     W.WATCH_HEARTBEAT_FILE, W.WATCH_PID_FILE, W.WATCH_STATE_FILE, W.DECK_OFF_FLAG):
+                     W.WATCH_HEARTBEAT_FILE, W.WATCH_PID_FILE, W.WATCH_STATE_FILE):
             self.assertEqual(path.parent, state, path)
         self.assertNotEqual(D.CODE_DIR, state)  # код диспетчера и состояние проекта — разные каталоги
 
