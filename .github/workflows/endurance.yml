@@ -17,4 +17,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Прогон на выносливость
-        run: python .claude/dispatcher/endurance.py --hours "${{ github.event.inputs.hours || '2' }}" --idle-max 30 --keep
+        run: python tests/endurance.py --hours "${{ github.event.inputs.hours || '2' }}" --idle-max 30 --keep

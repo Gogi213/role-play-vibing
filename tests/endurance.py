@@ -22,7 +22,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent / ".claude" / "dispatcher"  # каталог диспетчера; сам стенд лежит в tests/ (не поставляется)
 sys.path.insert(0, str(HERE))
 import ticket as T  # noqa: E402
 

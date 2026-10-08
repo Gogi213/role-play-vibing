@@ -79,7 +79,7 @@ python <плагин>/.claude/dispatcher/supervise.py --uninstall [--project <п
 ## Прогон на выносливость
 
 ```
-python <плагин>/.claude/dispatcher/endurance.py [--rounds N | --hours H] [--idle-max S] [--seed K] [--keep] [--modes base,bus,reboot,watch]
+python <репо плагина>/tests/endurance.py [--rounds N | --hours H] [--idle-max S] [--seed K] [--keep] [--modes base,bus,reboot,watch]
 ```
 
 Настоящий диспетчер в подпроцессе, фейковые роли и сбои. Раунд — 7 тикетов, роли ведут себя по плану (успех, 429, молчит, без статуса, `waiting` без условия, долгая работа); посреди раунда диспетчер жёстко убивается — во время долгой роли и в паузе лимита — и поднимается заново. Режимы сбоев идут по кругу: `base`; `bus` — падение шины, spool, ложное событие юнита; `reboot` — перезагрузка; `watch` — kill сторожа и диспетчера, и настоящий `supervise` поднимает обоих.
