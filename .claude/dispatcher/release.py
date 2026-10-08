@@ -27,7 +27,9 @@ REPO = "Gogi213/role-play-vibing"
 STATE = Path.home() / ".claude" / "rpv-release.json"
 SEMVER = re.compile(r"\d+\.\d+\.\d+")
 INSTALLED = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
-CLEAN_DROP = ("RPV_", "ALPHA_", "CLAUDE", "HOST_SESSION", "ANTHROPIC_")  # окружение сессии роли службам не передаём
+SESSION_DROP = ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "HOST_SESSION")  # как supervise.SESSION_ENV + хост
+SESSION_DROP_PREFIX = ("CLAUDECODE", "CLAUDE_CODE_")  # метки сессии Claude; *_DISPATCH_*, ключи и прочие настройки служб остаются
+LOCK_STALE_S = 1800
 
 
 def read_versions(root: Path = ROOT) -> dict:
@@ -159,8 +161,10 @@ def installed_dir(project: Path, registry: Path = INSTALLED) -> Path | None:
 
 
 def clean_env(env: dict | None = None) -> dict:
-    """Окружение для перезапуска служб: без RPV_ROLE/сессии Claude — иначе supervise --install откажет (дыра (г) TK-090)."""
-    return {k: v for k, v in (os.environ if env is None else env).items() if not k.upper().startswith(CLEAN_DROP)}
+    """Окружение для перезапуска служб: без роли/тикета/сессии Claude — иначе supervise --install откажет (дыра (г) TK-090).
+    Настройки диспетчера (RPV_/ALPHA_ *_DISPATCH_*, лимиты) остаются: start._forward_env пробрасывает их службам."""
+    return {k: v for k, v in (os.environ if env is None else env).items()
+            if k.upper() not in SESSION_DROP and not k.upper().startswith(SESSION_DROP_PREFIX)}
 
 
 def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -> bool:
@@ -213,8 +217,10 @@ def autorelease(project: Path, run=subprocess.run, state: Path = STATE, registry
         _journal(project, {"result": "update-failed", "before": before, "after": before, "detail": "claude plugin update"})
         return 1
     after = installed_version(run)
-    if before == after:
-        print(f"[release] auto: версия {after} уже стоит — нечего выпускать")
+    if before == after:  # влит PR без смены версии — не молча: выпуск ждёт bump (`release.py bump`)
+        _journal(project, {"result": "no-bump", "before": before, "after": after,
+                           "detail": "влит PR плагина без смены версии — нужен release.py bump"})
+        print(f"[release] auto: версия {after} уже стоит — нечего выпускать (PR влит без bump)")
         return 0
     code_dir = installed_dir(project, registry)
     if restart(project, code_dir, run) and verify(project, code_dir, run):
@@ -232,8 +238,49 @@ def autorelease(project: Path, run=subprocess.run, state: Path = STATE, registry
     return 1 if alive else 2
 
 
+def _auto_paths(project: Path) -> tuple:
+    d = project / ".claude" / "dispatcher"
+    return d / "release-auto.lock", d / "release-auto.pending"
+
+
+def _lock_acquire(lock: Path, now=time.time) -> bool:
+    """Замок автовыпуска: один update/start за раз. Занят живым (моложе LOCK_STALE_S) — False."""
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            try:
+                if now() - lock.stat().st_mtime < LOCK_STALE_S:
+                    return False
+                lock.unlink()
+            except OSError:
+                pass
+    return False
+
+
+def run_auto_locked(project: Path, run_one=autorelease) -> int:
+    """Тело процесса `auto`: замок; занят — пометка «ещё один выпуск» (доделает держатель после текущего)."""
+    lock, pending = _auto_paths(project)
+    if not _lock_acquire(lock):
+        pending.touch()
+        print("[release] auto: выпуск уже идёт — поставлен в очередь")
+        return 0
+    rc = 0
+    try:
+        while True:
+            pending.unlink(missing_ok=True)
+            rc = max(rc, run_one(project))
+            if not pending.exists():
+                return rc
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def spawn_auto(project: Path, popen=subprocess.Popen) -> bool:
-    """Автовыпуск отдельным процессом, отвязанным от диспетчера (start.py остановит самого диспетчера). RPV_AUTORELEASE=0 — выкл."""
+    """Автовыпуск отдельным процессом, отвязанным от диспетчера (start.py остановит самого диспетчера). RPV_AUTORELEASE=0 — выкл.
+    Несколько влитых за проход PR дают несколько процессов — их сводит замок (run_auto_locked)."""
     if os.environ.get("RPV_AUTORELEASE", "1") == "0":
         return False
     flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == "nt" else 0
@@ -268,7 +315,7 @@ def main(argv=None) -> int:
         if not pj:
             print("[release] auto: нужен --project <корень проекта>", file=sys.stderr)
             return 2
-        return autorelease(Path(pj).resolve())
+        return run_auto_locked(Path(pj).resolve())
     if cmd == "rollback":
         return rollback(argv[1] if len(argv) > 1 else None)
     if cmd == "check":

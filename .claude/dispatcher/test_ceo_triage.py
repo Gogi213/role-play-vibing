@@ -116,6 +116,13 @@ class RunOnce(Sandbox):
         self.assertIn("ждёт вас", digest)
         self.assertIn("[weird]", digest)
 
+    def test_blocked_with_assignee_is_not_owner_noise(self):  # blocked с next: judge — уже у адресата, в «ждёт вас» не идёт
+        self.ticket("TK-007", "blocked")
+        C.T.write_header_updates(D.TICKETS_DIR / "TK-007.md", {"next": "judge"}, now=NOW, stamp_updated=False)
+        self.inbox("TK-007 [blocked] встал")
+        C.run_once(NOW, classify=lambda ev: ([(C.ACTION, "н")] * len(ev), {}))
+        self.assertFalse(D.DISPATCHER_DIR.joinpath("ceo-digest.md").exists())
+
     def test_haiku_failure_is_action(self):
         res, _ = C.haiku_classify([{"tid": "*", "kind": "k", "note": "n"}], claude_bin="definitely-not-a-binary")
         self.assertEqual(res[0][0], C.ACTION)

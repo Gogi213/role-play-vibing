@@ -130,9 +130,11 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertEqual((rc, len(restarts), [j["result"] for j in self.journal()]), (0, 1, ["ok"]))
         self.assertFalse((self.proj / ".claude" / "dispatcher" / "ceo-digest.md").exists())
 
-    def test_same_version_releases_nothing(self):
+    def test_same_version_is_not_silent(self):  # влит PR без bump: службы не трогаем, но журнал и «ждёт вас»
         rc, fake, restarts = self.auto(["1.8.3"], alive=True)
-        self.assertEqual((rc, restarts, self.journal()), (0, [], []))
+        self.assertEqual((rc, restarts, [j["result"] for j in self.journal()]), (0, [], ["no-bump"]))
+        digest = (self.proj / ".claude" / "dispatcher" / "ceo-digest.md").read_text(encoding="utf-8")
+        self.assertIn("no-bump", digest)
 
     def test_failed_check_rolls_back_and_tells_owner(self):
         rc, fake, restarts = self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
@@ -147,9 +149,41 @@ class AutoReleaseTests(unittest.TestCase):
         rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=False, tags=())  # тега прошлой версии нет
         self.assertEqual((rc, self.journal()[-1]["result"]), (2, "rollback-failed"))
 
-    def test_clean_env_drops_session_vars(self):
-        env = release.clean_env({"RPV_ROLE": "engineer", "ALPHA_ROLE": "x", "CLAUDECODE": "1", "PATH": "p", "HOME": "h"})
-        self.assertEqual(env, {"PATH": "p", "HOME": "h"})
+    def test_clean_env_drops_session_keeps_service_settings(self):
+        env = release.clean_env({"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "ALPHA_ROLE": "x", "ALPHA_TICKET": "y",
+                                 "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "HOST_SESSION": "1", "PATH": "p",
+                                 "ALPHA_DISPATCH_MAX_PARALLEL": "8", "ALPHA_DISPATCH_ROLE_PARALLEL": "engineer:6",
+                                 "RPV_DISPATCH_X": "1"})
+        self.assertEqual(env, {"PATH": "p", "ALPHA_DISPATCH_MAX_PARALLEL": "8", "ALPHA_DISPATCH_ROLE_PARALLEL": "engineer:6",
+                               "RPV_DISPATCH_X": "1"})
+
+    def test_clean_env_matches_supervise_session_env(self):  # supervise отказывает ровно по SESSION_ENV — чистим их
+        import supervise
+        self.assertTrue(set(supervise.SESSION_ENV) <= set(release.SESSION_DROP))
+
+    def test_parallel_auto_serialized_by_lock(self):  # второй выпуск при живом первом — пометка, держатель доделает
+        runs = []
+        lock, pending = release._auto_paths(self.proj)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+
+        def first(p):
+            runs.append("a")
+            if len(runs) == 1:
+                self.assertEqual(release.run_auto_locked(p, lambda q: runs.append("nested") or 0), 0)  # занят → в очередь
+                self.assertTrue(pending.exists())
+            return 0
+
+        self.assertEqual(release.run_auto_locked(self.proj, first), 0)
+        self.assertEqual(runs, ["a", "a"])  # держатель прошёл ещё раз; вложенный сам update не запускал
+        self.assertFalse(lock.exists() or pending.exists())
+
+    def test_stale_lock_is_taken_over(self):
+        lock, _ = release._auto_paths(self.proj)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.touch()
+        old = lock.stat().st_mtime - release.LOCK_STALE_S - 1
+        os.utime(lock, (old, old))
+        self.assertTrue(release._lock_acquire(lock))
 
     def test_installed_dir_prefers_project_scope(self):
         self.assertEqual(release.installed_dir(self.proj, self.reg), self.proj / "plug")

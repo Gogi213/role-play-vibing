@@ -179,8 +179,10 @@ def route_actions(events: list, now: datetime) -> bool:
                 tkt = None
         if tkt is not None and tkt.status in ("done", "cancelled"):
             continue
+        if tkt is not None and tkt.next_role:  # адресат уже назначен (Судья/роль) — владельцу не шум
+            continue
         last = tkt.log[-1].author if tkt is not None and tkt.log else ""
-        if tkt is not None and tkt.status != "needs_owner" and not tkt.next_role and not T.author_is(last, "judge"):
+        if tkt is not None and tkt.status != "needs_owner" and not T.author_is(last, "judge"):
             T.append_log(path, "dispatcher", f"Сигнал [{e['kind']}] {e['note'][:300]} — Судье: решить по методике/гейтам "
                          "либо вернуть владельцу тикета; вопрос о содержании исследования — владельцу (ask-owner).", now=now)
             T.write_header_updates(path, {"next": "judge"}, now=now, stamp_updated=False)
