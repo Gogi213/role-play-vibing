@@ -100,13 +100,13 @@ def continue_streak(tkt, role: str) -> int:
     return n
 
 
-def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "", covered: bool = False) -> dict:
+def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "") -> dict:
     """Правки шапки по итогу. accept и wait правит своя команда (accepted / wait_for), здесь — только ход."""
     rev = (reviewer or "").strip()
     if result == "continue":
         return {"status": "in_progress", "next": role}
     if result == "done":
-        if role == "ceo" or covered:  # ceo закрывает сам; covered — все PR тикета уже приняты Судьёй и влиты (TK-090 а)
+        if role == "ceo":  # ceo закрывает сам
             return {"status": "done", "next": ""}
         if rev and rev != role and role != "judge":
             return {"status": "in_review", "next": rev}

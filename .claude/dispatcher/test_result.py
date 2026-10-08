@@ -185,19 +185,20 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((t.status, t.header.get("next")), ("done", ""))
         self.assertEqual(t.log[-1].author, "ceo")
 
-    def test_done_after_accepted_prs_skips_review(self):
+    def test_engineer_done_after_landed_prs_still_goes_to_judge(self):  # done несёт и не-PR работу — Судья принимает финал
         (self.base / "out.md").write_text("x", encoding="utf-8")
-        T.write_header_updates(self.path, {"pr": "7, 9"}, now=NOW)
+        T.write_header_updates(self.path, {"pr": "7"}, now=NOW)
         T.append_log(self.path, "merge", "PR #7 влит в main на голове aaaaaaa (проверено: merged).", now=NOW)
         self.res("engineer", "done", path="out.md")
-        self.assertEqual(self.tkt().status, "in_review")        # PR 9 не влит — проверка нужна
-        T.write_header_updates(self.path, {"status": "in_progress", "next": ""}, now=NOW)
-        T.append_log(self.path, "merge", "PR #9 влит в main на голове bbbbbbb (проверено: merged).", now=NOW)
-        self.res("engineer", "done", path="out.md")             # accepted уже пуст: merge_rule снимает PR при влитии
         t = self.tkt()
-        self.assertEqual((t.status, t.header.get("next")), ("done", ""))
-        self.assertTrue(D.closed_without_review(t))
-        self.assertIsNone(D.decide(t, {}, NOW))                 # диспетчер Судью не будит
+        self.assertEqual((t.status, t.header.get("next")), ("in_review", "judge"))
+
+    def test_landed_prs_only_from_merge_author(self):
+        import merge_rule
+        T.append_log(self.path, "engineer", "PR #7 влит в main на голове aaaaaaa", now=NOW)
+        self.assertEqual(merge_rule.landed_prs(self.tkt()), set())
+        T.append_log(self.path, "merge", "PR #9 влит в main на голове bbbbbbb (проверено: merged).", now=NOW)
+        self.assertEqual(merge_rule.landed_prs(self.tkt()), {9})
 
     def test_ceo_close_and_comment_after_do_not_wake_judge(self):  # TK-090 б
         (self.base / "out.md").write_text("x", encoding="utf-8")

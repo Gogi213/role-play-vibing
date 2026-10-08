@@ -91,8 +91,10 @@ def _note_not_found(repo: str, number: int) -> None:
 
 
 def landed_prs(tkt) -> set:
-    """Номера PR тикета, влитых программой: запись лога «PR #N влит в …» (_drop_accepted снимает их из `accepted`)."""
-    return {int(m.group(1)) for e in tkt.log for m in [re.match(r"PR #(\d+) влит в ", e.text.strip())] if m}
+    """Номера PR тикета, влитых программой: запись автора `merge` «PR #N влит в …» (_drop_accepted снимает их из
+    `accepted`); запись другой роли с той же фразой не считается."""
+    return {int(m.group(1)) for e in tkt.log if e.author == "merge"
+            for m in [re.match(r"PR #(\d+) влит в ", e.text.strip())] if m}
 
 
 def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
