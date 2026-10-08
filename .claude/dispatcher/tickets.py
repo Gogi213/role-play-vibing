@@ -173,6 +173,9 @@ def cmd_comment(args) -> int:
         if nxt:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
             T.write_header_updates(path, {"next": nxt}, stamp_updated=False)
+            # №15 аудита: blocked + next: роль — запись без запуска; ход роли снимает blocked (иначе тикет висит с будильником)
+            if nxt in ("researcher", "engineer", "judge") and T.read_ticket(path).status == "blocked":
+                T.write_header_updates(path, {"status": "in_progress"}, stamp_updated=False)
         moved = T.compact_log(path)
     payload = {"author": args.author, "next": nxt or ""}
     if args.text.lstrip().upper().startswith("ВОПРОС ВЛАДЕЛЬЦУ"):

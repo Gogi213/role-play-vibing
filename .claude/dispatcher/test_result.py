@@ -225,5 +225,14 @@ class ResultTests(unittest.TestCase):
         self.assertIn("неизвестный", R.check("engineer", "zzz", "x"))
 
 
+    def test_comment_next_role_unblocks_blocked(self):  # №15: blocked + next: роль не остаётся записью без запуска
+        T.write_header_updates(self.path, {"status": "blocked"}, now=NOW)
+        TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="вернуть", next="engineer"))())
+        h = T.read_ticket(self.path).header
+        self.assertEqual((h["status"], h["next"]), ("in_progress", "engineer"))
+        T.write_header_updates(self.path, {"status": "blocked", "next": ""}, now=NOW)
+        TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="заметка", next=None))())
+        self.assertEqual(T.read_ticket(self.path).status, "blocked")
+
 if __name__ == "__main__":
     unittest.main()
