@@ -487,16 +487,18 @@ class CeoSignalGuardTest(unittest.TestCase):
 
 
 class GuardJournalTest(unittest.TestCase):
-    def test_denial_is_journaled_and_failure_is_silent(self):
+    def test_journal_lines_and_silent_failure(self):
         import delete_guard as g
         with tempfile.TemporaryDirectory() as t:
             os.makedirs(os.path.join(t, ".claude", "dispatcher"))
-            g.journal_denial(t, "Bash", "Запрет:  rm\n-rf " + "x" * 200)
-            line = open(os.path.join(t, ".claude", "dispatcher", "guard.log"), encoding="utf-8").read().rstrip("\n")
-            ts, tool, why = line.split("\t")
-            self.assertEqual((tool, why[:14]), ("Bash", "Запрет: rm -rf"))
+            g.journal_guard(t, "Bash", [("temp", "allow"), ("rm", "deny")], "Запрет:  rm\n-rf " + "x" * 200)
+            lines = open(os.path.join(t, ".claude", "dispatcher", "guard.log"), encoding="utf-8").read().splitlines()
+            self.assertEqual([l.split("\t")[1:4] for l in lines], [["Bash", "temp", "allow"], ["Bash", "rm", "deny"]])
+            self.assertEqual(lines[0].split("\t")[4], "")
+            why = lines[1].split("\t")[4]
+            self.assertEqual(why[:14], "Запрет: rm -rf")
             self.assertLessEqual(len(why), 90)
-            g.journal_denial(None, "Bash", "x")           # нет проекта — тихо
+            g.journal_guard(None, "Bash", [("rm", "deny")], "x")           # нет проекта — тихо
 
 
 class HaikuAbstractTest(unittest.TestCase):

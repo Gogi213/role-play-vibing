@@ -685,17 +685,18 @@ def tokenize(s, depth=0):
 # ------------------------------------------------------------------------------------------------------------
 
 class Ctx:
-    __slots__ = ("cwd", "remote", "funcs", "host", "exempt")
+    __slots__ = ("cwd", "remote", "funcs", "host", "exempt", "via")
 
-    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None, exempt=False):
+    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None, exempt=False, via=None):
         self.cwd = cwd          # нормализованный каталог или None (неизвестен)
         self.remote = remote
         self.funcs = funcs      # имена функций оболочки, объявленных в этой же команде (`rsh() { ssh …; }`)
         self.host = host        # хост ssh без `user@`, строчными (для HOST_ROOTS) или None
         self.exempt = exempt    # команда обёрнута в systemd-run: замок замеров (heavy_guard) её не трогает
+        self.via = via          # метка группы журнала для целей из кода Python/PowerShell ("py-ast", "ps"); иначе None
 
     def copy(self):
-        return Ctx(self.cwd, self.remote, self.funcs, self.host, self.exempt)
+        return Ctx(self.cwd, self.remote, self.funcs, self.host, self.exempt, self.via)
 
 
 CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (Storage Box, коллектор, порт 23, хост не определён)
@@ -1636,8 +1637,10 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
                 break                                  # скрипт-файл или -m: тело не видно
         else:
             code = sin
+        pctx = ctx.copy()
+        pctx.via = "py-ast"
         for text in code or ():
-            yield from python_scan(text, ctx, depth)
+            yield from python_scan(text, pctx, depth)
     elif name in SHELLS or name == "eval" or name in ("invoke-expression", "iex"):
         if name in SHELLS:
             text, has_script = shell_code(args)
@@ -1648,8 +1651,10 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
             yield from scan_text(text, ctx, (), depth + 1)
     elif name in PS_NAMES:
         text = ps_code(args)
+        sctx = ctx.copy()
+        sctx.via = "ps"
         for t in ([text] if text is not None else []):
-            yield from scan_text(t, ctx, (), depth + 1)
+            yield from scan_text(t, sctx, (), depth + 1)
     elif name == "cmd":
         for k, a in enumerate(args):
             if a.lower() in ("/c", "/k", "/r"):
@@ -1832,9 +1837,23 @@ def heavy_reason(t):
     return REASON_HEAVY.format(h=heavy_guard.HEAVY_HOST, hint=(" " + hint) if hint else "").format(t=t)
 
 
-def check(cmd, cwd):
-    """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed)."""
+def _deny(trace, group, reason):
+    trace.append((group, "deny"))
+    return reason
+
+
+def _temp_hit(target, trace):
+    """Разрешение во временном каталоге — тоже в журнал: без него нуль отказов ветки temp ничего не говорит."""
+    if temp_rest(norm(target)) is not None and ("temp", "allow") not in trace:
+        trace.append(("temp", "allow"))
+
+
+def check(cmd, cwd, trace=None):
+    """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed).
+    `trace` — список (группа ветки, deny|allow) для журнала: решающая ветка и разрешающие temp/legacy."""
     cmd = cmd or ""
+    trace = [] if trace is None else trace
+    legacy = False
     try:
         role = dispatcher_role()
         start = Ctx(norm(cwd).rstrip("/") if cwd else None, False, frozenset(FUNC_DEF.findall(cmd)))
@@ -1842,25 +1861,31 @@ def check(cmd, cwd):
             found = list(scan_text(cmd, start))
         except ParseError:                          # незакрытая кавычка и т. п. — прежний регэксп как страховка
             found = legacy_found(cmd, cwd)
+            legacy = True
             heavy = heavy_guard.legacy_heavy(cmd)
             if heavy:
-                return heavy_reason(heavy)
+                return _deny(trace, "heavy", heavy_reason(heavy))
         for target, ctx in found:
+            group = "legacy" if legacy else ctx.via or ("ssh" if ctx.remote else None)
             if isinstance(target, Heavy):
-                return heavy_reason(target)
+                return _deny(trace, "heavy", heavy_reason(target))
             if isinstance(target, Forbid):
-                return REASON_IRREVERSIBLE.format(t=target)
+                return _deny(trace, "git", REASON_IRREVERSIBLE.format(t=target))
             why = protected(target, ctx, role, deleting=not isinstance(target, Over))
             if why:
-                return why
+                return _deny(trace, "protected", why)
             if isinstance(target, Over):
                 if not (allowed(target, ctx) or write_only_ok(target, ctx)) and may_exist(target, ctx):
-                    return REASON_OVERWRITE.format(t=target)
+                    return _deny(trace, group or "tee-trunc-cp", REASON_OVERWRITE.format(t=target))
+                _temp_hit(target, trace)
                 continue
             if not allowed(target, ctx):
-                return REASON.format(t=target)
+                return _deny(trace, group or "rm", REASON.format(t=target))
+            _temp_hit(target, trace)
     except Exception as e:                          # страж упал: пропуск был бы дырой — отказ с причиной
-        return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+        return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
+    if legacy:
+        trace.append(("legacy", "allow"))
     return None
 
 
@@ -1879,27 +1904,30 @@ def file_target(tool_input):
     return None
 
 
-def check_file(path, cwd):
+def check_file(path, cwd, trace=None):
     """Запись файловым инструментом. Запуск диспетчера (`RPV_ROLE`) — как перезапись через Bash: путь вне корней (папка
     проекта, scratchpad, temp, автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно.
     Сессия CEO/владельца (аудит-3) правит файлы вне проекта свободно (настройки, соседние репозитории, планы); для неё
     остаётся только «никогда»: root/ и deep/, закрытые узлы. Для всех: внутрь .git и в настройки Claude Code — см. protected."""
     try:
+        trace = [] if trace is None else trace
         ctx = Ctx(norm(cwd).rstrip("/") if cwd else None, False)
         target = Over(path)
         role = dispatcher_role()
         why = protected(target, ctx, role, deleting=False)
         if why:
-            return why
+            return _deny(trace, "protected", why)
         if role is None:
             if hard_forbidden_file(path, ctx) and may_exist(target, ctx):
-                return REASON_FILE_HARD.format(t=path)
+                return _deny(trace, "file", REASON_FILE_HARD.format(t=path))
+            _temp_hit(target, trace)
             return None
         if allowed(target, ctx) or write_only_ok(target, ctx) or not may_exist(target, ctx):
+            _temp_hit(target, trace)
             return None
-        return REASON_FILE.format(t=path)
+        return _deny(trace, "file", REASON_FILE.format(t=path))
     except Exception as e:
-        return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+        return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
 
 
 CEO_SIGNAL_NAMES = ("ceo-inbox.md", "ceo-wake.log")   # В-192: сигналы CEO — только через шину; файлы пишет dispatch.append_ceo_inbox
@@ -1922,11 +1950,12 @@ def ceo_signal_write(tool, ti):
     return bool(path) and path.replace("\\", "/").lower().rsplit("/", 1)[-1] in CEO_SIGNAL_NAMES
 
 
-def check_tool(data):
+def check_tool(data, trace=None):
     """Событие PreToolUse (словарь из JSON хука) → причина отказа или None. Чужой инструмент — None. Путь файлового
     инструмента определить нельзя — отказ (схема могла измениться: молча пропускать нельзя)."""
+    trace = [] if trace is None else trace
     if not isinstance(data, dict):
-        return REASON_CRASH.format(e="событие хука не объект JSON")
+        return _deny(trace, "crash", REASON_CRASH.format(e="событие хука не объект JSON"))
     tool = data.get("tool_name")
     if tool not in GUARDED_TOOLS:
         return None
@@ -1935,25 +1964,32 @@ def check_tool(data):
     cwd = str(data.get("cwd") or "")
     try:
         if ceo_signal_write(tool, ti):
-            return REASON_CEO_SIGNAL
+            return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
         if tool in SHELL_TOOLS:
-            return check(str(ti.get("command") or ""), cwd)
+            reason = check(str(ti.get("command") or ""), cwd, trace)
+            if tool == "PowerShell" and trace and trace[-1] == ("rm", "deny"):
+                trace[-1] = ("ps", "deny")              # инструмент PowerShell: общая ветка удаления — группа ps
+            return reason
         path = file_target(ti)
         if path is None:
-            return REASON_CRASH.format(e=f"{tool}: в tool_input нет пути файла")
-        return check_file(path, cwd)
+            return _deny(trace, "crash", REASON_CRASH.format(e=f"{tool}: в tool_input нет пути файла"))
+        return check_file(path, cwd, trace)
     except Exception as e:
-        return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+        return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
 
 
-def journal_denial(project, tool, reason):
-    """Строка в `<проект>/.claude/dispatcher/guard.log` (время, инструмент, начало причины): по ней видно, какие группы
-    веток стража срабатывают (срез №5, решение Судьи: резать группы с нулём отказов за неделю). Сбой записи не мешает отказу."""
+def journal_guard(project, tool, trace, reason):
+    """Строки в `<проект>/.claude/dispatcher/guard.log`: время, инструмент, группа ветки, deny|allow, начало причины.
+    Отказы — решающей веткой, разрешения — только у temp/legacy (иначе их нуль ничего не значит): по журналу срез №5
+    режет группы с нулём отказов за неделю (решение Судьи). Сбой записи не мешает решению стража."""
     try:
         from datetime import datetime
         path = os.path.join(project, ".claude", "dispatcher", "guard.log")
+        ts = datetime.now().astimezone().isoformat(timespec="seconds")
+        why = " ".join((reason or "").split())[:90]
         with open(path, "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')}\t{tool}\t{' '.join(reason.split())[:90]}\n")
+            for group, verdict in trace:
+                f.write(f"{ts}\t{tool}\t{group}\t{verdict}\t{why if verdict == 'deny' else ''}\n")
     except Exception:
         pass
 
@@ -1981,6 +2017,7 @@ def main():
             return 0
         return deny(REASON_CRASH.format(e=f"событие хука не прочитано: {type(e).__name__}: {e}"[:200]))
     project = None
+    trace = []
     try:
         if data.get("tool_name") not in GUARDED_TOOLS:
             return 0
@@ -1988,11 +2025,11 @@ def main():
         if not has_roles(project):                                      # в проекте нет команды ролей — молчим
             return 0
         configure(project)
-        reason = check_tool(data)
+        reason = check_tool(data, trace)
     except Exception as e:
-        reason = REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
-    if reason:
-        journal_denial(project, data.get("tool_name"), reason)
+        reason = _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
+    if trace and project:
+        journal_guard(project, data.get("tool_name"), trace, reason)
     return deny(reason) if reason else 0
 
 

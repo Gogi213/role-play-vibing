@@ -1859,5 +1859,67 @@ class EnvNames(unittest.TestCase):
         self.assertIn("RPV_GUARD_REMOTE_ROOTS", dg.REASON)
 
 
+class GuardGroups(unittest.TestCase):
+    """Журнал стража (срез №5): решающая ветка проставляет метку группы; temp/legacy пишут и разрешения."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = outside_dir()
+        cls.f = os.path.join(cls.out, "a.txt")
+        Path(cls.f).write_text("x")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.out, ignore_errors=True)
+
+    def setUp(self):
+        from unittest import mock
+        p = mock.patch.dict(os.environ, {"RPV_ROLE": "engineer"})          # файловые правила — для запуска диспетчера
+        p.start()
+        self.addCleanup(p.stop)
+
+    def trace(self, tool, **ti):
+        tr = []
+        reason = dg.check_tool({"tool_name": tool, "tool_input": ti, "cwd": CWD}, tr)
+        return reason, tr
+
+    def test_one_case_per_group(self):
+        cases = {
+            "rm": ("Bash", {"command": "rm -rf /c/Users/x"}),
+            "py-ast": ("Bash", {"command": "python -c \"import shutil; shutil.rmtree('/c/Users/x')\""}),
+            "ps": ("PowerShell", {"command": "del C:\\x"}),
+            "ssh": ("Bash", {"command": "ssh deck@192.0.2.49 'rm -rf /home/other/x'"}),
+            "tee-trunc-cp": ("Bash", {"command": f'echo a > "{self.f}"'}),
+            "git": ("Bash", {"command": "git reset --hard"}),
+            "heavy": ("Bash", {"command": "ssh root@203.0.113.3 'du -sh /data'"}),
+            "file": ("Write", {"file_path": self.f}),
+            "ceo-signal": ("Write", {"file_path": "C:/x/.claude/dispatcher/ceo-inbox.md"}),
+            "legacy": ("Bash", {"command": "echo 'abc; rm -rf /c/Users/x"}),
+        }
+        for group, (tool, ti) in cases.items():
+            reason, tr = self.trace(tool, **ti)
+            self.assertIsNotNone(reason, group)
+            self.assertEqual(tr[-1], (group, "deny"), (group, tr))
+
+    def test_ps_inside_bash(self):
+        reason, tr = self.trace("Bash", command='powershell -c "Remove-Item C:\\x"')
+        self.assertIsNotNone(reason)
+        self.assertEqual(tr[-1], ("ps", "deny"))
+
+    def test_allows_are_journaled_for_temp_and_legacy_only(self):
+        reason, tr = self.trace("Bash", command="rm -rf C:/Users/x/AppData/Local/Temp/abc/f")
+        self.assertIsNone(reason)
+        self.assertEqual(tr, [("temp", "allow")])
+        reason, tr = self.trace("Edit", file_path="C:/Users/x/AppData/Local/Temp/anything/f.txt")
+        self.assertIsNone(reason)
+        self.assertEqual(tr, [("temp", "allow")])
+        reason, tr = self.trace("Bash", command="echo 'abc")
+        self.assertIsNone(reason)
+        self.assertEqual(tr, [("legacy", "allow")])
+        reason, tr = self.trace("Bash", command="rm -rf data/x")          # обычное разрешение — без записи
+        self.assertIsNone(reason)
+        self.assertEqual(tr, [])
+
+
 if __name__ == "__main__":
     unittest.main()
