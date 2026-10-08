@@ -284,15 +284,21 @@ def _wait_target_state(tkt, probe) -> str:
     return "unknown"
 
 
+def _to_judge(path, why: str, now, clear_wait: bool = True) -> None:
+    """Повтор после пробуждения владельца: тикет — Судье (В-206; `next: judge`, статус in_progress), не `blocked`: на
+    blocked диспетчер будит CEO. CEO узнаёт, только если Судья сам встанет (его `result blocked`)."""
+    T.append_log(path, "watch", why + " — второй раз, ход Судьи (не CEO): реши, перезапускать ли и что с wait_for", now)
+    T.write_header_updates(path, {"status": "in_progress", "next": "judge", **({"wait_for": "", "on_met": ""} if clear_wait else {})}, now)
+
+
 def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "job_wakes") -> None:
-    """Задание из `job:` упало/исчезло: владелец тикета будится записью (хвост лога + причина), CEO — только при
-    повторе после пробуждения (тикет blocked)."""
+    """Задание из `job:` упало/исчезло: владелец тикета будится записью (хвост лога + причина), при повторе после
+    пробуждения — Судья (`_to_judge`)."""
     acted = ws.setdefault(key, {})  # у каждой причины свой счётчик повторов: пробуждение по заданию не делает пустое ожидание «вторым разом»
     repeat = tkt.id in acted
     with T.ticket_lock(path):
         if repeat:
-            T.append_log(path, "watch", why + " — второй раз после пробуждения, тикет blocked (решение за CEO)", now)
-            T.write_header_updates(path, {"status": "blocked", "wait_for": "", "on_met": ""}, now)
+            _to_judge(path, why, now)
         else:
             T.append_log(path, "watch", why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
             T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
@@ -324,6 +330,14 @@ def _mark_failed_seen(ws: dict, tid: str, owners: dict, extra: str = "") -> None
     del seen[:-200]
 
 
+def _covered_failure(mine: list, j: dict) -> bool:
+    """Упавшее задание не повод будить владельца: у тикета есть живое задание (идёт/в очереди — та же волна, wait_for
+    снимать рано, п.4) либо пересдача с тем же именем юнита (done — п.1). Снятое владельцем адаптер отдаёт как
+    `done` (договор `RPV_JOB_STATE_CMD`/`RPV_JOB_OWNERS_CMD`, п.2) — до сюда не доходит."""
+    return any(o["id"] != j["id"] and (o["state"] in ("running", "queued") or (o["unit"] == j["unit"] and o["state"] == "done"))
+               for o in mine)
+
+
 def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now) -> str:
     """Задания, записанные на этот тикет (сопоставление адаптера), уточняют цель `wait_for` любой формы: идёт/в очереди —
     производитель есть (не «мёртвая цель»); упало (один раз на задание) — владелец будится с id задания."""
@@ -331,6 +345,9 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     seen = ws.setdefault("owner_failed_seen", [])
     for j in mine:
         if j["state"] == "failed" and j["id"] not in seen:
+            if _covered_failure(mine, j):
+                seen.append(j["id"])
+                continue
             _mark_failed_seen(ws, tkt.id, owners, j["id"])
             _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало; wait_for `{spec}` не дождётся", now)
             return "woken"
@@ -339,7 +356,7 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     return st
 
 
-def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict) -> bool:
+def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict, owners: dict = None) -> bool:
     """Одна проверка `job:`; True — тикет «жив» (ждёт, не сирота). failed — действие сразу (падение однозначно);
     missing — после DEAD_WAIT_STRIKES подряд (задание могло ещё не записаться); ssh-error — как у прочих форм."""
     _, alias, jid = parsed
@@ -364,6 +381,10 @@ def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict) -> bo
         _wake_owner_job(path, tkt, ws, spec, f"сторож: состояние задания `{spec}` не проверить {n} проверок подряд (ssh/адаптер)", now)
         return False
     if st == "failed":
+        mine = [o for lst in (owners or {}).values() for o in lst if o["ticket"] == tkt.id]
+        me = next((o for o in mine if o["id"] == jid), {"id": jid, "unit": ""})
+        if _covered_failure(mine, me):  # пересдача или живое задание того же тикета: wait_for не снимаем
+            return True
         why = f"сторож: задание `{spec}` упало"
         why += f"\nХвост лога:\n{tail}" if tail else ""
         r = LW.reason(jid, tail)
@@ -401,7 +422,7 @@ def _triage_ci_run(path, tkt, parsed, ws: dict, now, run_probe) -> bool:
 def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
-    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение).
+    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → тикет Судье (`next: judge`).
     Молчание ssh при упавшей связи самого ПК (`link_up()` ложно) не считается: счётчик стоит, ожидание не снимается."""
     dead = ws.setdefault("dead_wait", {})
     ssh_fail = ws.setdefault("ssh_fail_wait", {})
@@ -434,7 +455,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         spec = tkt.header["wait_for"].strip()
         parsed = T.parse_wait_for(spec)
         if parsed and parsed[0] == "job":
-            if _triage_job(path, tkt, parsed, ws, now, job_probe, states):
+            if _triage_job(path, tkt, parsed, ws, now, job_probe, states, owners):
                 alive.add(tkt.id)
             else:
                 _mark_failed_seen(ws, tkt.id, owners, parsed[2])
@@ -499,8 +520,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         why = f"сторож: цель wait_for `{spec}` не существует и её никто не производит ({n} проверки подряд)"
         with T.ticket_lock(path):
             if repeat:
-                T.append_log(path, "watch", why + " — второй раз та же цель, тикет blocked (решение за CEO)", now)
-                T.write_header_updates(path, {"status": "blocked"}, now)
+                _to_judge(path, why, now, clear_wait=False)
             else:
                 T.append_log(path, "watch", why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
                 T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
@@ -685,7 +705,7 @@ def _recent_runs(runs_path, tid: str, limit: int) -> list:
 def triage_stalls(ws: dict, now, runs_path=None) -> list:
     """Застой тикета in_progress: последние STALL_RUNS запуска — все timeout (resume уже пробовался) либо все «холостые»
     (status=ok, а роль не оставила в логе ни одной записи между концом прежнего запуска тикета и концом этого) → тикет
-    blocked с записью watch (сигнал CEO через находку blocked). Один раз на последний запуск (ws['stall'])."""
+    запись watch и `next: judge` (Судья, не CEO). Один раз на последний запуск (ws['stall'])."""
     done = ws.setdefault("stall", {})
     acted = []
     for path in T.list_tickets(D.TICKETS_DIR):
@@ -713,8 +733,8 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
         else:
             continue
         with T.ticket_lock(path):
-            T.append_log(path, "watch", f"сторож: {why} — тикет blocked, решение за CEO (по runs.log)", now)
-            T.write_header_updates(path, {"status": "blocked"}, now)
+            T.append_log(path, "watch", f"сторож: {why} (по runs.log) — ход Судьи (не CEO): реши, что с тикетом", now)
+            T.write_header_updates(path, {"next": "judge"}, now)
         done[tkt.id] = T.now_iso(rows[-1][0])
         acted.append(tkt.id)
     return acted
