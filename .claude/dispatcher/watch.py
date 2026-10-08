@@ -25,6 +25,7 @@ import atexit
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -251,6 +252,22 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     return out[0]
 
 
+LINK_PROBES = [h.strip() for h in P.env("WATCH_LINK_PROBES", "1.1.1.1:443,8.8.8.8:53").split(",") if h.strip()]
+
+
+def pc_link_up() -> bool:
+    """Есть ли у самого ПК выход в сеть (TK-090 Д-8): TCP-connect к опорным адресам. Молчание ssh при упавшей связи ПК —
+    не молчание машины, и ожидание снимать нельзя (обрыв 07.10 21:40–00:50 снял wait_for у 5 тикетов)."""
+    for item in LINK_PROBES:
+        host, _, port = item.rpartition(":")
+        try:
+            with socket.create_connection((host, int(port)), timeout=3):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
 def _wait_target_state(tkt, probe) -> str:
     parsed = T.parse_wait_for(tkt.header.get("wait_for") or "")
     if parsed is None:
@@ -381,10 +398,11 @@ def _triage_ci_run(path, tkt, parsed, ws: dict, now, run_probe) -> bool:
     return False
 
 
-def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None) -> set:
+def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
-    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
+    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение).
+    Молчание ssh при упавшей связи самого ПК (`link_up()` ложно) не считается: счётчик стоит, ожидание не снимается."""
     dead = ws.setdefault("dead_wait", {})
     ssh_fail = ws.setdefault("ssh_fail_wait", {})
     alive, seen, states, empty_seen = set(), set(), {}, set()
@@ -393,6 +411,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         run_probe = ci_watch.run_state
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, D._ssh_cmd))
     owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет» (и для табло)
+    link = None  # связь ПК проверяется лениво, раз за проход
     for path in T.list_tickets(D.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
@@ -429,6 +448,11 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         if st == "woken":
             continue
         if st == "ssh-error":  # ssh молчит: условие не проверить; N раз подряд — владельцу тикета, не CEO
+            if link is None:
+                link = link_up()
+            if not link:  # обрыв связи ПК, а не машины: страйк не засчитываем, ожидание живо (Д-8)
+                alive.add(tkt.id)
+                continue
             ent = ssh_fail.get(tkt.id) or {}
             n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
             ssh_fail[tkt.id] = {"spec": spec, "n": n}
