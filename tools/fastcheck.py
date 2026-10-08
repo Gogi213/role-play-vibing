@@ -13,12 +13,16 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PYTEST = ["-m", "pytest", ".claude", "-q", "-p", "no:cacheprovider", "-n", "auto", "--durations=15"]
+BASE = ["-m", "pytest", ".claude", "-q", "-p", "no:cacheprovider"]
+# endurance — по часам ~3 мин на раунд: отдельным процессом рядом с основным, иначе они одни держат круг (TK-095)
+MAIN = BASE + ["-n", "auto", "-m", "not endurance", "--durations=15"]
+ENDU = BASE + ["-n", "4", "-m", "endurance"]
 
 
 def local():
     t = time.time()
-    rc = subprocess.run([sys.executable] + PYTEST, cwd=ROOT).returncode
+    ps = [subprocess.Popen([sys.executable] + a, cwd=ROOT) for a in (MAIN, ENDU)]
+    rc = max(p.wait() for p in ps)
     return rc, time.time() - t
 
 
@@ -31,8 +35,9 @@ def calc(a):
     if up.returncode:
         return up.returncode, time.time() - t
     cmd = (f"python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 "
-           f"--cores {a.cores} --mem {a.mem} -- bash -c 'cd {d} && python3 -m pytest .claude -q -p no:cacheprovider "
-           f"-n {a.cores} --durations=15'")
+           f"--cores {a.cores} --mem {a.mem} -- bash -c 'cd {d}; python3 -m pytest .claude -q -p no:cacheprovider "
+           f"-n {a.cores} -m \"not endurance\" --durations=15 & python3 -m pytest .claude -q -p no:cacheprovider "
+           f"-n 4 -m endurance & r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r'")
     rc = subprocess.run(ssh + [cmd]).returncode
     subprocess.run(ssh + [f"rm -rf {d}"])
     return rc, time.time() - t

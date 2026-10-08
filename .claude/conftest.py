@@ -28,6 +28,16 @@ def pytest_sessionstart(session):
     _strip_live_env()
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "endurance: раунды выносливости, ~3 мин каждый по часам (TK-095) — гоняются отдельным процессом параллельно основному")
+
+
+def pytest_collection_modifyitems(items):
+    for it in items:
+        if it.path.name == "test_endurance.py" and "inbox_pages" not in it.name:
+            it.add_marker(pytest.mark.endurance)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_environ():
     # снимок окружения до теста и полный возврат после: тест шины, оставивший RPV_BUS_URL/TOKEN, не течёт в следующие
