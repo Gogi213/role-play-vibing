@@ -59,8 +59,7 @@
 |---|---|---|
 | `RPV_WATCH_INTERVAL` | `120` | цикл, с |
 | `RPV_WATCH_REPEAT_HOURS` | `2` | повтор тревоги, пока проблема не снята, ч |
-| `RPV_WATCH_LONG_REPEAT_HOURS` | `24` | повтор для редких видов находок (сироты, `blocked`, `needs_owner`, тревоги второй машины), ч |
-| `RPV_WATCH_DISPATCH_STALE_MIN` | `5` | через сколько минут после последнего тика диспетчер считается неживым |
+| `RPV_WATCH_LONG_REPEAT_HOURS` | `24` | повтор для редких видов находок (сироты, `blocked`, `needs_owner`), ч |
 | `RPV_WATCH_NO_PLAN_MIN` | `30` | через сколько минут «в работе без плана шагов» или «шаги на табло не менялись» сторож пишет роли в тикет и будит её |
 | `RPV_WATCH_PLAN_LAG_MIN` | `5` | допуск: запись роли в логе не считается «новее плана», если позже обновления шагов меньше чем на столько минут |
 | `RPV_WATCH_ORPHAN_HOURS` | `2` | через сколько часов без новой записи открытый тикет считается сиротой |
@@ -72,7 +71,6 @@
 | `RPV_WATCH_STRAY_WAKE_REPEAT_HOURS` | `2` | не чаще одного сигнала о том же прогоне мимо планировщика за N ч: замер идёт часами, напоминание раз в 2 ч, не спам |
 | `RPV_JOB_STATE_CMD` | не задано | адаптер формы `wait_for: job:<алиас>:<id>`: команда с `{id}`, выполняется по ssh на машине алиаса; 1-я строка вывода `running\|queued\|done\|failed\|missing`, далее хвост лога. Не задан — форма не проверяется, сторож пишет «не проверить» после `RPV_WATCH_SSH_FAIL_STRIKES` циклов. Падение (`failed`) будит владельца тикета сразу (оно однозначно); `missing` — после `RPV_WATCH_DEAD_WAIT_STRIKES` циклов подряд (≈ 2 × `RPV_WATCH_INTERVAL` = 4 мин: задание могло ещё не записаться). Причину по хвосту лога одной строкой пишет Haiku (`haiku_aux`), если он есть |
 | `RPV_WATCH_STALL_RUNS` | `2` | подряд таймаутов или холостых запусков до блока |
-| `RPV_WATCH_SUMMARY_HOURS` | `1` | период сводки некритичных находок, ч |
 
 ## Вторая машина и ssh
 
@@ -80,13 +78,13 @@
 
 | переменная | по умолчанию | смысл |
 |---|---|---|
+<<<<<<< HEAD
 | `RPV_CALC_HOST`, `RPV_VPS_HOST`, `RPV_DECK_HOST` | не заданы | хосты для `wait_for: host:<calc\|vps\|deck>:…` (`user@host` или алиас из `~/.ssh/config`) |
+=======
+| `RPV_CALC_HOST`, `RPV_VPS_HOST`, `RPV_DECK_HOST` | не заданы | хосты для `wait_for: host:<calc\|vps\|deck>:…` (`user@host` или алиас из `~/.ssh/config`); `RPV_DECK_HOST` |
+>>>>>>> origin/main
 | `RPV_DECK_KEY` | — | ключ ssh (`-i`) |
 | `RPV_DECK_KNOWN_HOSTS` | — | файл known_hosts (`-o UserKnownHostsFile=`) |
-| `RPV_DECK_ROOT` | `~/rpv` | корень очереди заданий на второй машине |
-| `RPV_WATCH_DECK_QUEUE_STALE_MIN` | `10` | через сколько минут без обновления `STATUS` непустая очередь на второй машине считается простоем |
-| `RPV_WATCH_DECK_SSH_RETRIES` | `1` | повторов ssh внутри цикла |
-| `RPV_WATCH_DECK_SSH_FAIL_STREAK` | `3` | подряд неудачных циклов ssh, после которых будят CEO |
 | `RPV_WATCH_SERVER_LOAD_MAX` | `4` | простой сервера (алиас `calc`): нагрузка (loadavg) машины ниже порога, а задания под замком `benchrun.sh` ждут дольше `RPV_WATCH_SERVER_LOCK_WAIT_MIN`… |
 | `RPV_WATCH_SERVER_LOCK_WAIT_MIN` | `20` | …минут — сторож будит владельца тикета, державшего замок |
 | `RPV_WATCH_SERVER_WAKE_REPEAT_HOURS` | `2` | повтор такого сигнала, ч |
