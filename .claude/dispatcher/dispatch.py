@@ -34,6 +34,7 @@ import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import bus_link  # noqa: E402
 import downtime  # noqa: E402
+import haiku_aux as HA  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -194,7 +195,7 @@ def _expected_model_family(info: dict) -> str:
 # Обход Судьи запрещён (условие г): reviewer: judge или owner: researcher — не Haiku, tickets.py new
 # отказывает раньше, чем тикет вообще появится; здесь — вторая защита на случай ручной правки шапки.
 CLAUDE_HAIKU_MODEL = P.env("DISPATCH_HAIKU_MODEL", "claude-haiku-5-5")
-HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish"}
+HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
@@ -380,6 +381,8 @@ def record_wait_event(ev: dict) -> None:
             with _EVENT_LOCK:
                 _EVENT_VERIFIED.add(k)
         keys.append(k)
+        if addr.endswith(".юнит.упал") and P.env("HAIKU_DIAG") != "0":
+            threading.Thread(target=_diagnose_failed_unit, args=(host, str(pl["unit"])), daemon=True).start()
     elif addr.startswith("машина.") and addr.endswith(".файл.появился") and pl.get("path"):
         keys.append((host, "path", str(pl["path"])))
     elif addr.startswith("задача.") and addr.endswith(".задание.готово") and pl.get("job"):
@@ -387,6 +390,26 @@ def record_wait_event(ev: dict) -> None:
     with _EVENT_LOCK:
         for k in keys:
             _EVENT_MET[k] = time.time()
+
+
+def _diagnose_failed_unit(host: str, unit: str) -> None:
+    """TK-087 п.1: упал юнит → Haiku читает хвост journalctl и пишет причину в тикеты, ждущие этот юнит. Сбой — тихо."""
+    try:
+        base = _unit_base(unit)
+        paths = []
+        for path in T.list_tickets(TICKETS_DIR):
+            parsed = T.parse_wait_for(T.read_ticket(path).wait_for)
+            if parsed and parsed[:3] == ("host", host, "unit") and _unit_base(parsed[3]) == base:
+                paths.append(path)
+        if not paths:
+            return
+        r = subprocess.run(_ssh_cmd(host, f"journalctl -u {shlex.quote(base)} -n 80 --no-pager 2>&1 | tail -c 8000"),
+                           capture_output=True, timeout=30)
+        diag = HA.diagnose(unit, (r.stdout or b"").decode("utf-8", "replace"))
+        for path in paths if diag else []:
+            T.append_log(path, "haiku", f"диагноз упавшего юнита {unit} на {host} (Haiku, по journalctl):\n{diag}")
+    except Exception as e:  # noqa: BLE001 — рутина не должна ронять слушатель шины
+        print(f"[dispatch] haiku-diag {host}/{unit}: {e}", file=sys.stderr, flush=True)
 
 
 def _event_met(alias: str, what: str, arg: str) -> bool:
