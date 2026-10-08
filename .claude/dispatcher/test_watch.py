@@ -789,8 +789,9 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_probe_progress_json_in_flight_is_producer_not_met(self):
         import subprocess as sp
-        orig = W.subprocess.run
+        orig, orig_ssh = W.subprocess.run, W.D._ssh_cmd
         try:
+            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]  # хост из среды на раннере не задан
             W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "producer")
             W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
@@ -798,7 +799,7 @@ class TriageWaitsTests(WatchSandbox):
             W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.mark"), "met")
         finally:
-            W.subprocess.run = orig
+            W.subprocess.run, W.D._ssh_cmd = orig, orig_ssh
 
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch
