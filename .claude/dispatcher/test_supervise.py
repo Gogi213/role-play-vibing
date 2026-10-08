@@ -18,6 +18,12 @@ class _Started:
 
 
 class SuperviseTest(unittest.TestCase):
+    def setUp(self):  # другие тесты набора ставят RPV_CI_REPO на уровне модуля — здесь ci_watch по умолчанию не нужен
+        p = mock.patch.dict(os.environ)
+        p.start()
+        self.addCleanup(p.stop)
+        os.environ.pop("RPV_CI_REPO", None)
+
     def test_decide(self):
         self.assertEqual(V.decide(5, True), "ok")
         self.assertEqual(V.decide(700, True), "restart")
@@ -81,6 +87,35 @@ class SuperviseTest(unittest.TestCase):
                 del os.environ["RPV_CEO_TRIAGE"]
             self.assertEqual(out, {"dispatch": "start", "watch": "start", "ceo_triage": "start"})
             self.assertEqual(spawned, ["dispatch.py", "watch.py", "ceo_triage.py"])
+
+    def test_ci_watch_supervised_only_with_repo(self):  # TK-090 Д-1
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            (project / ".claude" / "dispatcher").mkdir(parents=True)
+            spawned = []
+            kw = dict(stop=lambda p, s, unit=None: 0,
+                      spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+            with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
+                out = V.run_once(project, **kw)
+            self.assertEqual(out, {"dispatch": "start", "watch": "start", "ci_watch": "start"})
+            self.assertEqual(spawned, ["dispatch.py", "watch.py", "ci_watch.py"])
+
+    def test_load_env_rereads_project_settings(self):  # TK-090 Д-5: settings.json свежее снимка, секреты не берём
+        with tempfile.TemporaryDirectory() as d:
+            sd = Path(d) / ".claude" / "dispatcher"
+            sd.mkdir(parents=True)
+            (sd / "supervise.env.json").write_text(json.dumps({"RPV_X_OLD": "1", "RPV_Y": "old"}), encoding="utf-8")
+            (sd.parent / "settings.json").write_text(json.dumps(
+                {"env": {"RPV_Y": "new", "RPV_CI_REPO": "o/r", "RPV_BUS_TOKEN": "s", "PATH": "x"}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO", "RPV_BUS_TOKEN"):
+                    os.environ.pop(k, None)
+                V.load_env(sd)
+                self.assertEqual((os.environ["RPV_X_OLD"], os.environ["RPV_Y"], os.environ["RPV_CI_REPO"]),
+                                 ("1", "new", "o/r"))
+                self.assertNotIn("RPV_BUS_TOKEN", os.environ)
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO"):
+                    os.environ.pop(k, None)
 
 
 class InstallFilesTest(unittest.TestCase):

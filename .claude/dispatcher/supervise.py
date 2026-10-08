@@ -49,11 +49,20 @@ def _log(state_dir: Path, msg: str) -> None:
         f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')} {msg}\n")
 
 
+def _forwarded(env: dict) -> dict:
+    return {k: str(v) for k, v in env.items()
+            if (k.startswith(S.FORWARD_ENV_PREFIXES) or k in S.FORWARD_ENV_NAMES) and not _secret_name(k)}
+
+
 def load_env(state_dir: Path) -> None:
-    try:
-        os.environ.update(json.loads((state_dir / "supervise.env.json").read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        pass
+    """Снимок `supervise.env.json`, поверх него — `env` проектного `settings.json` (TK-090 Д-5): правка env там
+    подхватывается на ближайшем проходе, без повторного `--install`."""
+    for f, key in ((state_dir / "supervise.env.json", None), (state_dir.parent / "settings.json", "env")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            os.environ.update(_forwarded(data[key] if key else data))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            pass
 
 
 def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> dict:
@@ -67,6 +76,8 @@ def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> 
     beats = dict(BEATS)
     if os.environ.get("RPV_CEO_TRIAGE") == "1":  # TK-086: сортировщик сигналов CEO — по включению, умолчание прежнее
         beats["ceo_triage"] = ("triage-heartbeat.json", "ts")
+    if os.environ.get("RPV_CI_REPO"):  # TK-090 Д-1: автовлив PR (ci_watch) под присмотром, когда репозиторий задан
+        beats["ci_watch"] = ("ci-heartbeat.json", "ts")
     for name, (beat, field) in beats.items():
         age = heartbeat_age(state_dir / beat, field, now)
         alive = S.is_ours(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")

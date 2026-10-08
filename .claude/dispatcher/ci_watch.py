@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -172,6 +173,11 @@ def ci_done(repo: str, number: int, gh=gh_api) -> bool:
     return head == ent.get("sha")
 
 
+def write_heartbeat() -> None:
+    f = D.STATE_FILE.parent / "ci-heartbeat.json"
+    T.atomic_write_text(f, json.dumps({"ts": datetime.now().astimezone().isoformat(timespec="seconds")}))
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not D.ensure_project(argv, "ci_watch"):
@@ -180,6 +186,14 @@ def main(argv=None) -> int:
     if not repo:
         print("ci_watch: нужен --repo=<владелец/репо> или RPV_CI_REPO", file=sys.stderr)
         return 2
+    if "--once" not in argv:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра supervise (TK-090 Д-1)
+        lock = D.DISPATCHER_DIR / "ci_watch.pid"
+        ok, why = D.acquire_instance_lock(lock)
+        if not ok:
+            print(f"[ci_watch] {why}", file=sys.stderr)
+            return 1
+        import atexit
+        atexit.register(D.release_instance_lock, lock)
     while True:
         try:
             for n, s7, state, woke in run_once(repo):
@@ -190,6 +204,7 @@ def main(argv=None) -> int:
                 print(f"[merge_rule] PR #{n}: {what}")
         except Exception as e:
             print(f"[ci_watch] цикл: {type(e).__name__}: {e}", file=sys.stderr)
+        write_heartbeat()
         if "--once" in argv:
             return 0
         time.sleep(INTERVAL_S)
