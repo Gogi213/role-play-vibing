@@ -219,5 +219,14 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class VerifyAliveTests(unittest.TestCase):
+    def test_verify_alive_asks_doctor_without_accumulated_idle(self):
+        """№13: проверка выпуска зовёт doctor --alive, чтобы простой за сутки не откатывал исправную версию."""
+        calls = []
+        run = lambda cmd, **kw: (calls.append(cmd), subprocess.CompletedProcess(cmd, 0, "", ""))[1]
+        self.assertTrue(release.verify_alive(Path("."), Path("."), run=run))
+        self.assertIn("--alive", calls[0])
+
+
 if __name__ == "__main__":
     unittest.main()

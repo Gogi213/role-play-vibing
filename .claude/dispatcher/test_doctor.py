@@ -151,6 +151,26 @@ class DoctorTests(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_alive_only_ignores_accumulated_idle(self):
+        """№13: накопленный за сутки простой не откатывает исправный выпуск (verify_alive зовёт doctor --alive)."""
+        now = time.time()
+        today = datetime.fromtimestamp(now).date().isoformat()
+        (self.sd / "state.json").write_text(json.dumps({"last_tick": iso(now - 5), "downtime": {
+            today: {"idle_s": 99999, "wait_s": 0, "stall_s": 0, "throttle_s": 0, "limit_s": 0}}}), encoding="utf-8")
+        self.assertEqual(self.rows(now=now)["простой сегодня"][1], D.FAIL)
+        self.assertNotIn("простой сегодня", self.rows(now=now, alive_only=True))
+
+    def test_all_services_checked_and_duplicate_copy_fails(self):
+        """№12: проверяются все S.services(); две копии одной службы — FAIL."""
+        with mock.patch.object(D.S, "services", return_value=("dispatch", "watch", "ci_watch")):
+            self.assertIn("ci_watch", self.rows())
+        proj = str(self.project)
+        procs = [(11, f"python -u /x/dispatch.py --project {proj}"), (12, f"python -u /y/dispatch.py --project {proj}")]
+        rows = self.rows(procs=procs)
+        self.assertEqual(rows["копии dispatch"][1], D.FAIL)
+        self.assertNotIn("копии watch", rows)
+
+
 
 if __name__ == "__main__":
     unittest.main()

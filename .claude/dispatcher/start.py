@@ -104,6 +104,42 @@ def _cmdline(pid: int) -> str | None:
     return D._ps_field(pid, "args") or None   # macOS/BSD: /proc нет
 
 
+def _list_procs() -> list:
+    """[(pid, командная строка)] всех процессов; не получилось — пусто. Linux — /proc, macOS — ps, Windows — CIM."""
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                                  "Get-CimInstance Win32_Process | Where-Object CommandLine | ForEach-Object "
+                                  "{ \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60).stdout
+            rows = [l.split("	", 1) for l in out.splitlines() if "	" in l]
+        elif Path("/proc/self").exists():
+            rows = []
+            for d in Path("/proc").iterdir():
+                if d.name.isdigit():
+                    try:
+                        rows.append((d.name, (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")))
+                    except OSError:
+                        pass
+        else:
+            out = subprocess.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True, timeout=20).stdout
+            rows = [l.strip().split(None, 1) for l in out.splitlines() if l.strip()]
+        return [(int(p), c) for p, c in rows if len(p) and str(p).isdigit()]
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+
+
+def find_copies(script_name: str, project: Path, procs=None) -> list:
+    """pid всех живых копий службы проекта по командной строке (`<script> --project <проект>`), не только из pid-файла."""
+    proj = str(project).replace("\\", "/").lower().rstrip("/")
+    out = []
+    for pid, line in (_list_procs() if procs is None else procs):
+        l = line.replace("\\", "/").lower()
+        if pid != os.getpid() and script_name.lower() in l and "--project" in l and proj in l:
+            out.append(pid)
+    return out
+
+
 def is_ours(pid: int, script_name: str) -> bool:
     """Живой процесс из pid-файла — наш скрипт, а не чужой python с переиспользованным pid. Командную строку
     узнать не удалось — считаем нашим (как и сам pid-замок диспетчера)."""
@@ -280,7 +316,8 @@ class Started:
         return None if self.pid and D._pid_alive(self.pid, "cmd" if self.how == "wmi" else LOCK_IMAGE) else "?"
 
 
-def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT_S, unit: str | None = None) -> int:
+def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT_S, unit: str | None = None,
+                 project: Path | None = None) -> int:
     """Останавливает процесс из pid-замка, если он жив и наш (и наш юнит systemd, если он есть); осиротевший pid-файл
     удаляет. Возвращает pid остановленного процесса или 0."""
     stopped = stop_unit(unit) if unit else 0
@@ -297,6 +334,10 @@ def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT
                 pass
             time.sleep(0.3)
         stopped = pid
+    for extra in (find_copies(script_name, project) if project else []):   # копия без pid-файла (упавший старт) — тоже гасим
+        if extra != pid:
+            D._pid_kill(extra)
+            stopped = stopped or extra
     try:
         pid_file.unlink()
     except FileNotFoundError:
@@ -356,7 +397,7 @@ def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) ->
     procs = []
     for name in services():
         restarted = stop_running(state_dir / f"{name}.pid", f"{name}.py",
-                                 unit=unit_name(name, project) if use_systemd else None)
+                                 unit=unit_name(name, project) if use_systemd else None, project=project)
         log = state_dir / f"{name}.run.log"
         procs.append((name, spawn(code_dir / f"{name}.py", project, log, BOARD_ARGS if name == BOARD_SERVICE else ()),
                       log, restarted))

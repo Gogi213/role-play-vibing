@@ -217,7 +217,7 @@ def verify_alive(project: Path, code_dir: Path | None, run=subprocess.run, wait_
         return False
     deadline = time.time() + wait_s
     while True:
-        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project)],
+        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project), "--alive"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env())
         if r.returncode == 0:
             return True
