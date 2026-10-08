@@ -4132,6 +4132,33 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
             D.release_instance_lock(pid_file)
             self.assertTrue(pid_file.exists(), "чужой замок не снимается")
 
+    def test_simultaneous_acquire_exactly_one_wins(self):
+        """TK-093: N процессов берут замок в один момент — ровно один (раньше второй видел пустой файл и забирал)."""
+        code = chr(10).join([
+            "import sys, time",
+            "sys.path.insert(0, sys.argv[1])",
+            "import dispatch as D",
+            "t = float(sys.argv[3])",
+            "while time.time() < t: pass",
+            "ok, _ = D.acquire_instance_lock(sys.argv[2], expect_name='')",
+            "print('OK' if ok else 'NO', flush=True)",
+            "time.sleep(30)",
+        ])
+        here = str(Path(D.__file__).resolve().parent)
+        for rnd in range(15):
+            with tempfile.TemporaryDirectory() as d:
+                pid_file = str(Path(d) / "x.pid")
+                t0 = time.time() + 1.0
+                procs = [subprocess.Popen([sys.executable, "-c", code, here, pid_file, str(t0)],
+                                          stdout=subprocess.PIPE, text=True) for _ in range(4)]
+                try:
+                    res = [p.stdout.readline().strip() for p in procs]
+                finally:
+                    for p in procs:
+                        p.kill()
+                        p.wait(timeout=10)
+                self.assertEqual(res.count("OK"), 1, f"раунд {rnd}: {res}")
+
     def test_main_refuses_second_dispatcher_and_does_not_tick(self):
         with tempfile.TemporaryDirectory() as d:
             orig = (D.PID_FILE, D.TICKETS_DIR, D.tick)
