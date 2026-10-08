@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = ["-m", "pytest", ".claude", "-q", "-p", "no:cacheprovider"]
@@ -65,9 +66,13 @@ def main():
     p.add_argument("--cores", type=int, default=8)
     p.add_argument("--mem", type=int, default=8)
     a = p.parse_args()
-    res = {} if a.no_pc else {"pc": local()}
-    if a.calc:
-        res["calc"] = calc(a)
+    res = {}
+    # ПК и сервер — одновременно: круг = max, а не сумма
+    jobs = ([] if a.no_pc else [("pc", local)]) + ([("calc", lambda: calc(a))] if a.calc else [])
+    with ThreadPoolExecutor(len(jobs) or 1) as ex:
+        futs = [(k, ex.submit(f)) for k, f in jobs]
+        for k, fu in futs:
+            res[k] = fu.result()
     print(" | ".join(f"{k}: {'ok' if rc == 0 else 'fail'} {s:.0f} с" for k, (rc, s) in res.items()))
     return 0 if all(rc == 0 for rc, _ in res.values()) else 1
 

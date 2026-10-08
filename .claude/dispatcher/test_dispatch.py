@@ -753,6 +753,8 @@ class DispatchRunTests(unittest.TestCase):
                 self.tmp.cleanup()
                 break
             except PermissionError:
+                if attempt == 19:
+                    raise
                 time.sleep(0.5)
 
     def set_fake_bin(self, body: str) -> Path:
