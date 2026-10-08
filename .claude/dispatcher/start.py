@@ -45,8 +45,7 @@ BOARD_ARGS = ("--loop", "5")
 
 # необязательные службы под присмотром (TK-090 Д-1): включаются настройкой — один список для start.py (выпуск версии
 # перезапускает их вместе с остальными) и supervise.py (сердцебиение и подъём)
-OPTIONAL = (("ci_watch", lambda: bool(P.env("CI_REPO"))),          # автовлив PR
-            ("ceo_triage", lambda: P.env("CEO_TRIAGE") == "1"))     # сортировщик сигналов CEO (TK-086)
+OPTIONAL = (("ci_watch", lambda: bool(P.env("CI_REPO"))),)          # автовлив PR
 
 
 def services() -> tuple:

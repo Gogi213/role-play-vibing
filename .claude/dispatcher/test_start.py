@@ -50,7 +50,7 @@ def wait_alive(pid, want=True, timeout=10.0):
     return False
 
 
-_OPTIONAL_ENV = ("RPV_CI_REPO", "RPV_CEO_TRIAGE", "ALPHA_CI_REPO", "ALPHA_CEO_TRIAGE")
+_OPTIONAL_ENV = ("RPV_CI_REPO", "ALPHA_CI_REPO")
 _saved_optional = {}
 
 
