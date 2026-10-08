@@ -1,6 +1,7 @@
 """Выпуск и откат (TK-076 п.5): версии согласованы, bump/update/rollback — по последовательности команд claude."""
 import json
 import os
+import re
 import subprocess
 import time
 import tempfile
@@ -258,6 +259,25 @@ class TimeoutAndAtomicRollbackTests(unittest.TestCase):
             self.assertEqual(release.rollback("1.8.3", fake, Path(t) / "s.json"), 1)
             self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
             self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]])
+
+
+class ChangelogTagTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def headings(self):
+        return re.findall(r"^## (\d+\.\d+\.\d+)", (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
+
+    def test_manifest_version_is_top_changelog_entry(self):
+        ver = json.loads((self.ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+        self.assertEqual(self.headings()[0], ver)
+
+    def test_every_tag_has_changelog_entry(self):
+        r = subprocess.run(["git", "tag", "--list", "v*"], cwd=self.ROOT, capture_output=True, text=True)
+        tags = [t[1:] for t in r.stdout.split() if re.fullmatch(r"v\d+\.\d+\.\d+", t)]
+        if r.returncode or not tags:
+            self.skipTest("тегов нет (клон без тегов)")
+        # 1.8.4 выпущена без тега — исторический пропуск; тег без записи — ошибка
+        self.assertEqual([t for t in tags if t not in self.headings()], [])
 
 
 if __name__ == "__main__":
