@@ -4,16 +4,21 @@
                                             коммит и тег vX.Y.Z (--push: и отправить)
     python release.py update                обновить установленный плагин до последнего выпуска (версия до/после)
     python release.py rollback [X.Y.Z]      вернуть прошлую версию (по умолчанию — записанная перед последним update)
+    python release.py auto --project P      автовыпуск после влития PR (TK-094): update, службы проекта заново из чистого
+                                            окружения, doctor; провал — откат на прошлую версию, службы заново, сигнал владельцу
     python release.py check                 версии в plugin.json, marketplace.json и CHANGELOG.md совпадают
 Откат: проверка тега на GitHub до любых изменений, маркетплейс `owner/repo#vX.Y.Z`, при сбое — возврат прежнего;
 update снимает прибивку к тегу и возвращает маркетплейс на main."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +26,8 @@ NAME = "role-play-vibing"
 REPO = "Gogi213/role-play-vibing"
 STATE = Path.home() / ".claude" / "rpv-release.json"
 SEMVER = re.compile(r"\d+\.\d+\.\d+")
+INSTALLED = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
+CLEAN_DROP = ("RPV_", "ALPHA_", "CLAUDE", "HOST_SESSION", "ANTHROPIC_")  # окружение сессии роли службам не передаём
 
 
 def read_versions(root: Path = ROOT) -> dict:
@@ -140,6 +147,104 @@ def rollback(version: str | None = None, run=subprocess.run, state: Path = STATE
     return 0
 
 
+def installed_dir(project: Path, registry: Path = INSTALLED) -> Path | None:
+    """Каталог установленного плагина для проекта (installPath из installed_plugins.json); нет записи — None."""
+    try:
+        entries = json.loads(registry.read_text(encoding="utf-8"))["plugins"].get(f"{NAME}@{NAME}") or []
+    except (OSError, ValueError, KeyError):
+        return None
+    mine = [e for e in entries if e.get("scope") == "project" and Path(e.get("projectPath", "")) == project]
+    pick = (mine or entries or [None])[-1]
+    return Path(pick["installPath"]) if pick else None
+
+
+def clean_env(env: dict | None = None) -> dict:
+    """Окружение для перезапуска служб: без RPV_ROLE/сессии Claude — иначе supervise --install откажет (дыра (г) TK-090)."""
+    return {k: v for k, v in (os.environ if env is None else env).items() if not k.upper().startswith(CLEAN_DROP)}
+
+
+def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -> bool:
+    """start.py и supervise --install из каталога плагина `code_dir`, окружение чистое. True — оба кода 0."""
+    if code_dir is None:
+        return False
+    ok = True
+    for args in (["start.py", "--project", str(project)], ["supervise.py", "--project", str(project), "--install"]):
+        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / args[0]), *args[1:]], capture_output=True,
+                text=True, encoding="utf-8", errors="replace", env=clean_env(), cwd=str(project))
+        if r.returncode:
+            print(f"[release] {args[0]} -> код {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}", file=sys.stderr)
+            ok = False
+    return ok
+
+
+def verify_alive(project: Path, code_dir: Path | None, run=subprocess.run, wait_s: float = 60.0, step_s: float = 5.0) -> bool:
+    """doctor.py без FAIL; службам нужно время на первое сердцебиение — повтор до wait_s."""
+    if code_dir is None:
+        return False
+    deadline = time.time() + wait_s
+    while True:
+        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env())
+        if r.returncode == 0:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(step_s)
+
+
+def _journal(project: Path, rec: dict) -> None:
+    d = project / ".claude" / "dispatcher"
+    d.mkdir(parents=True, exist_ok=True)
+    rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"), **rec}
+    with open(d / "release-journal.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if rec["result"] != "ok":  # строка «ждёт вас» в сводку Диспетчерской, CEO не будится
+        with open(d / "ceo-digest.md", "a", encoding="utf-8") as fh:
+            fh.write(f"- {rec['ts']} * [release] ждёт вас: выпуск {rec.get('after')} — {rec['result']}"
+                     f" ({rec.get('detail', '')})\n")
+
+
+def autorelease(project: Path, run=subprocess.run, state: Path = STATE, registry: Path = INSTALLED,
+                restart=restart_services, verify=verify_alive) -> int:
+    """TK-094: после влития PR плагина — update, службы заново, проверка живы; не прошла — откат и сигнал владельцу.
+    0 — выпущено или нечего выпускать; 1 — откатили; 2 — откат тоже не удался (службы могут стоять)."""
+    before = installed_version(run)
+    if update(run, state):
+        _journal(project, {"result": "update-failed", "before": before, "after": before, "detail": "claude plugin update"})
+        return 1
+    after = installed_version(run)
+    if before == after:
+        print(f"[release] auto: версия {after} уже стоит — нечего выпускать")
+        return 0
+    code_dir = installed_dir(project, registry)
+    if restart(project, code_dir, run) and verify(project, code_dir, run):
+        _journal(project, {"result": "ok", "before": before, "after": after})
+        print(f"[release] auto: {before} -> {after}, службы живы")
+        return 0
+    if rollback(before, run, state):
+        _journal(project, {"result": "rollback-failed", "before": before, "after": after, "detail": "службы могут стоять"})
+        return 2
+    old_dir = installed_dir(project, registry)
+    alive = restart(project, old_dir, run) and verify(project, old_dir, run)
+    _journal(project, {"result": "rolled-back", "before": before, "after": after,
+                       "detail": "службы живы на прежней версии" if alive else "после отката службы не поднялись"})
+    print(f"[release] auto: {after} не прошла проверку — откат на {before}", file=sys.stderr)
+    return 1 if alive else 2
+
+
+def spawn_auto(project: Path, popen=subprocess.Popen) -> bool:
+    """Автовыпуск отдельным процессом, отвязанным от диспетчера (start.py остановит самого диспетчера). RPV_AUTORELEASE=0 — выкл."""
+    if os.environ.get("RPV_AUTORELEASE", "1") == "0":
+        return False
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == "nt" else 0
+    log = project / ".claude" / "dispatcher" / "release-auto.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    popen([sys.executable, str(Path(__file__).resolve()), "auto", "--project", str(project)], env=clean_env(),
+          cwd=str(project), stdout=open(log, "a", encoding="utf-8"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+          creationflags=flags, start_new_session=(os.name != "nt"))
+    return True
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if hasattr(sys.stdout, "reconfigure"):
@@ -158,6 +263,12 @@ def main(argv=None) -> int:
         return 0
     if cmd == "update":
         return update()
+    if cmd == "auto":
+        pj = argv[argv.index("--project") + 1] if "--project" in argv[1:] else None
+        if not pj:
+            print("[release] auto: нужен --project <корень проекта>", file=sys.stderr)
+            return 2
+        return autorelease(Path(pj).resolve())
     if cmd == "rollback":
         return rollback(argv[1] if len(argv) > 1 else None)
     if cmd == "check":

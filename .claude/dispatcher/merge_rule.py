@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
+import release as R  # noqa: E402
 import ticket as T  # noqa: E402
 
 
@@ -199,6 +200,8 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
             _drop_accepted(tkt, n)
             st[key] = {"merged": sha}
             out.append((n, "влит"))
+            if repo == R.REPO:  # TK-094: влит PR самого плагина — выпуск, службы заново, проверка, при провале откат
+                R.spawn_auto(D.PROJECT_ROOT)
         else:
             _note(tkt, f"PR #{n}: запрос слияния принят, но merged=false на {sha[:7]} — проверь вручную.",
                   wake_owner=True, bus=bus)

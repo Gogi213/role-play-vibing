@@ -1,5 +1,6 @@
 """Выпуск и откат (TK-076 п.5): версии согласованы, bump/update/rollback — по последовательности команд claude."""
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -97,6 +98,74 @@ class ReleaseTests(unittest.TestCase):
             fake = FakeClaude(["1.7.1", "1.8.0"])
             release.update(fake, Path(t) / "s.json")
             self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
+
+
+class AutoReleaseTests(unittest.TestCase):
+    """TK-094: автовыпуск — update, службы заново, проверка; провал → откат + сигнал владельцу."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = Path(self.tmp.name)
+        self.st = self.proj / "s.json"
+        self.reg = self.proj / "installed.json"
+        self.reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [
+            {"scope": "project", "projectPath": str(self.proj), "installPath": str(self.proj / "plug")}]}}), encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def journal(self):
+        f = self.proj / ".claude" / "dispatcher" / "release-journal.jsonl"
+        return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+
+    def auto(self, versions, alive, **kw):
+        restarts = []
+        fake = FakeClaude(versions, **kw)
+        rc = release.autorelease(self.proj, fake, self.st, self.reg,
+                                 restart=lambda p, d, run: restarts.append(d) or True, verify=lambda p, d, run: alive)
+        return rc, fake, restarts
+
+    def test_ok_restarts_services_and_journals(self):
+        rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=True)
+        self.assertEqual((rc, len(restarts), [j["result"] for j in self.journal()]), (0, 1, ["ok"]))
+        self.assertFalse((self.proj / ".claude" / "dispatcher" / "ceo-digest.md").exists())
+
+    def test_same_version_releases_nothing(self):
+        rc, fake, restarts = self.auto(["1.8.3"], alive=True)
+        self.assertEqual((rc, restarts, self.journal()), (0, [], []))
+
+    def test_failed_check_rolls_back_and_tells_owner(self):
+        rc, fake, restarts = self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
+        self.assertEqual(rc, 2)  # проверка не прошла и после отката (verify всегда False)
+        self.assertIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.8.3"], fake.calls)
+        self.assertEqual(len(restarts), 2)  # службы подняты заново и после отката
+        self.assertEqual(self.journal()[-1]["result"], "rolled-back")
+        digest = (self.proj / ".claude" / "dispatcher" / "ceo-digest.md").read_text(encoding="utf-8")
+        self.assertIn("ждёт вас", digest)
+
+    def test_rollback_failure_is_reported(self):
+        rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=False, tags=())  # тега прошлой версии нет
+        self.assertEqual((rc, self.journal()[-1]["result"]), (2, "rollback-failed"))
+
+    def test_clean_env_drops_session_vars(self):
+        env = release.clean_env({"RPV_ROLE": "engineer", "ALPHA_ROLE": "x", "CLAUDECODE": "1", "PATH": "p", "HOME": "h"})
+        self.assertEqual(env, {"PATH": "p", "HOME": "h"})
+
+    def test_installed_dir_prefers_project_scope(self):
+        self.assertEqual(release.installed_dir(self.proj, self.reg), self.proj / "plug")
+        self.assertIsNone(release.installed_dir(self.proj, self.proj / "none.json"))
+
+    def test_spawn_auto_detached_and_switchable(self):
+        calls = []
+        self.assertTrue(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append((a, k))))
+        self.assertIn("auto", calls[0][0][0])
+        old = os.environ.get("RPV_AUTORELEASE")
+        os.environ["RPV_AUTORELEASE"] = "0"
+        try:
+            self.assertFalse(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append(1)))
+        finally:
+            os.environ.pop("RPV_AUTORELEASE") if old is None else os.environ.update(RPV_AUTORELEASE=old)
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":
