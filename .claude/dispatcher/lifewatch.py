@@ -98,3 +98,24 @@ def save_owners(dispatcher_dir, owners: dict) -> None:
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(owners, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     tmp.replace(p)
+
+
+# --- прогоны мимо планировщика поверх чужих (п.5 CEO 05:45) -----------------------------------------------------
+def fetch_strays(alias: str, ssh_cmd, timeout: float = 25.0):
+    """Адаптер `RPV_STRAY_CMD` (по ssh на машине алиаса): строка на прогон мимо планировщика поверх чужого задания,
+    поля через TAB — тикет-нарушитель (или пусто), описание. Список (тикет, описание) или None (адаптер не задан / не ответил)."""
+    cmd = P.env("STRAY_CMD")
+    if not cmd:
+        return None
+    try:
+        r = subprocess.run(ssh_cmd(alias, cmd), capture_output=True, timeout=timeout)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    out = []
+    for ln in (r.stdout or b"").decode("utf-8", "replace").splitlines():
+        if ln.strip():
+            tid, _, desc = ln.partition("\t")
+            out.append((tid.strip(), (desc or tid).strip()))
+    return out

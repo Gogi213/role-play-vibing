@@ -213,6 +213,7 @@ def check_stale_plan(now) -> list:
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
 OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # находки адресуются владельцу тикета, не CEO
 AT_GRACE_MIN = int(P.env("WATCH_AT_GRACE_MIN", "30"))  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
+EMPTY_WAIT_STRIKES = int(P.env("WATCH_EMPTY_WAIT_STRIKES", "3"))  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
 SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
@@ -359,7 +360,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
     записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
     dead = ws.setdefault("dead_wait", {})
     ssh_fail = ws.setdefault("ssh_fail_wait", {})
-    alive, seen, states = set(), set(), {}
+    alive, seen, states, empty_seen = set(), set(), {}, set()
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, D._ssh_cmd))
     owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет» (и для табло)
     for path in T.list_tickets(D.TICKETS_DIR):
@@ -367,7 +368,19 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
             tkt = T.read_ticket(path)
         except Exception:
             continue
-        if tkt.status != "waiting" or not (tkt.header.get("wait_for") or "").strip():
+        if tkt.status != "waiting":
+            continue
+        if not (tkt.header.get("wait_for") or "").strip():  # waiting без условия и без next — ждать нечего, производителя нет
+            empty = ws.setdefault("empty_wait", {})
+            if (tkt.header.get("next") or "").strip():
+                empty.pop(tkt.id, None)
+                continue
+            empty_seen.add(tkt.id)
+            n = empty.get(tkt.id, 0) + 1
+            empty[tkt.id] = n
+            if n >= EMPTY_WAIT_STRIKES:
+                empty.pop(tkt.id, None)
+                _wake_owner_job(path, tkt, ws, "", f"сторож: тикет waiting без wait_for и без next {n} проверок подряд — ждать нечего", now)
             continue
         spec = tkt.header["wait_for"].strip()
         parsed = T.parse_wait_for(spec)
@@ -430,6 +443,10 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
     for tid in list(ssh_fail):
         if tid not in alive:
             ssh_fail.pop(tid, None)
+    empty = ws.get("empty_wait", {})
+    for tid in list(empty):
+        if tid not in empty_seen:
+            empty.pop(tid, None)
     return alive
 
 
@@ -515,6 +532,51 @@ def check_server_idle(ws: dict, now, ssh_run=None) -> list:
         except Exception as e:
             print(f"[watch] server-idle: не разбудил {tid}: {type(e).__name__}: {e}", file=sys.stderr)
     return [Finding("server-idle", tid, why + " — владельца тикета определить не удалось, решение за CEO")]
+
+
+STRAY_WAKE_REPEAT_HOURS = float(P.env("WATCH_STRAY_WAKE_REPEAT_HOURS", "2"))  # повтор сигнала о том же прогоне: замер идёт часами, раз в 2 ч напомнить, не спамить
+
+
+def check_strays(ws: dict, now, probe=None) -> list:
+    """Прогон мимо планировщика поверх чужого задания (замер портит чужую волну): адаптер проекта `RPV_STRAY_CMD` даёт
+    строки «тикет<TAB>описание»; владельца тикета-нарушителя будим записью, нет тикета — строка CEO. Один сигнал на
+    (тикет, описание) за STRAY_WAKE_REPEAT_HOURS. Адаптер не задан — тихо ничего."""
+    probe = probe or (lambda alias: LW.fetch_strays(alias, D._ssh_cmd))
+    seen, out = ws.setdefault("stray_seen", {}), []
+    for alias in sorted(D.WATCHED_ALIASES):
+        for tid, desc in probe(alias) or []:
+            key = f"{tid or '?'}|{desc}"
+            prev = seen.get(key)
+            if prev:
+                try:
+                    if now - T.parse_dt(prev) < timedelta(hours=STRAY_WAKE_REPEAT_HOURS):
+                        continue
+                except ValueError:
+                    pass
+            seen[key] = T.now_iso(now)
+            why = f"сторож: на {alias} идёт прогон мимо планировщика поверх чужого задания — {desc[:200]}"
+            path = D.TICKETS_DIR / f"{tid}.md"
+            if tid and path.exists():
+                try:
+                    with T.ticket_lock(path):
+                        tkt = T.read_ticket(path)
+                        if tkt.owner in ("researcher", "engineer", "judge"):
+                            T.append_log(path, "watch", why + ". Замер искажён: останови его и подай через планировщик.", now)
+                            T.write_header_updates(path, {"next": tkt.owner}, stamp_updated=False)
+                            continue
+                except Exception as e:
+                    print(f"[watch] stray: не разбудил {tid}: {type(e).__name__}: {e}", file=sys.stderr)
+            out.append(Finding("stray-run", tid or "?", why + " — владельца определить не удалось, решение за CEO"))
+    for key in [k for k, v in seen.items() if _stale(v, now)]:
+        seen.pop(key, None)
+    return out
+
+
+def _stale(ts: str, now) -> bool:
+    try:
+        return now - T.parse_dt(ts) > timedelta(hours=24)
+    except ValueError:
+        return True
 
 
 # --- счётчик застоя по runs.log (TK-056 п.4) -----------------------------------------------------
@@ -946,6 +1008,11 @@ def run_once(now=None, ssh_run=_ssh_run) -> list:
             server_findings = check_server_idle(ws, now)
     except Exception as e:
         print(f"[watch] check_server_idle: {type(e).__name__}: {e}", file=sys.stderr)
+    try:
+        if ssh_run is _ssh_run:
+            server_findings += check_strays(ws, now)
+    except Exception as e:
+        print(f"[watch] check_strays: {type(e).__name__}: {e}", file=sys.stderr)
     findings = collect_findings(state, now, ssh_run, started_at, hold_hint=ws.get("deck_hold"), observed=observed,
                                 alive_waits=alive_waits)
     if "hold" in observed:

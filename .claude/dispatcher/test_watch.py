@@ -736,6 +736,48 @@ class TriageWaitsTests(WatchSandbox):
             W.triage_waits(ws, self.now, probe=lambda *a: "unknown")
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
+    def test_waiting_without_wait_for_and_next_wakes_owner_after_strikes(self):
+        """Случай (4) CEO 06:00: ci_watch снял wait_for, роль не запущена — тикет не висит до сироты через 2 ч."""
+        p = self._waiting("")
+        ws = {}
+        for _ in range(W.EMPTY_WAIT_STRIKES - 1):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertEqual(t.log[-1].author, "watch")
+        self.assertIn("без wait_for и без next", t.log[-1].text)
+
+    def test_waiting_without_wait_for_but_with_next_is_left_alone(self):
+        p = self._waiting("")
+        T.write_header_updates(p, {"next": "engineer"}, now=self.now)
+        ws = {}
+        for _ in range(W.EMPTY_WAIT_STRIKES + 2):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_stray_run_wakes_offender_ticket_owner_once(self):
+        """Случай (5): замер мимо планировщика поверх чужого — сигнал владельцу тикета-нарушителя, повтор не чаще порога."""
+        p = self._waiting("")
+        tid = T.read_ticket(p).id
+        ws = {}
+        probe = lambda alias: [(tid, "systemd-run tk065-g2pgo поверх волны tk048")]
+        self.assertEqual(W.check_strays(ws, self.now, probe=probe), [])
+        t = T.read_ticket(p)
+        self.assertEqual(t.header.get("next"), "engineer")
+        self.assertIn("мимо планировщика", t.log[-1].text)
+        n = len(t.log)
+        W.check_strays(ws, self.now + timedelta(minutes=10), probe=probe)
+        self.assertEqual(len(T.read_ticket(p).log), n)
+        W.check_strays(ws, self.now + timedelta(hours=3), probe=probe)
+        self.assertEqual(len(T.read_ticket(p).log), n + 1)
+
+    def test_stray_run_without_ticket_goes_to_ceo_and_no_adapter_is_silent(self):
+        f = W.check_strays({}, self.now, probe=lambda alias: [("", "голый замер")])
+        self.assertEqual([x.kind for x in f], ["stray-run"])
+        self.assertEqual(W.check_strays({}, self.now, probe=lambda alias: None), [])
+
     def test_ssh_silent_n_checks_wakes_owner_not_ceo(self):
         p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
         ws = {}
