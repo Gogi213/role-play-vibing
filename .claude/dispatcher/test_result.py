@@ -173,6 +173,35 @@ class ResultTests(unittest.TestCase):
         self.refused("engineer", "accept", pr=7, sha=SHA)         # accept не для инженера
         self.refused("judge", "pr", pr=7, sha=SHA)                # pr не для Судьи
         self.refused("", "blocked")                               # не роль
+        self.refused("", "continue")                              # не роль
+        self.refused("judge", "continue")                         # continue не для Судьи
+        self.refused("", "done")                                  # CEO: done требует --path
+
+    # --- TK-090: закрытие CEO, done после принятых PR, continue
+    def test_ceo_closes_ticket_with_done(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.assertEqual(self.res("", "done", path="out.md"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("done", ""))
+        self.assertEqual(t.log[-1].author, "ceo")
+
+    def test_done_after_accepted_prs_skips_review(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        T.write_header_updates(self.path, {"pr": "7, 9", "accepted": f"7@{SHA}"}, now=NOW)
+        self.res("engineer", "done", path="out.md")
+        self.assertEqual(self.tkt().status, "in_review")        # PR 9 не принят — проверка нужна
+        T.write_header_updates(self.path, {"status": "in_progress", "next": "", "accepted": f"7@{SHA}, 9@{SHA}"}, now=NOW)
+        self.res("engineer", "done", path="out.md")
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("done", ""))
+
+    def test_continue_keeps_role_and_is_capped(self):
+        for _ in range(R.CONTINUE_MAX):
+            self.assertEqual(self.res("engineer", "continue"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("in_progress", "engineer"))
+        self.refused("engineer", "continue")                    # шестой подряд
+        self.assertEqual(self.res("engineer", "blocked"), 0)
+        self.assertEqual(self.res("engineer", "continue"), 0)   # серию оборвал другой итог
 
     def test_check_unit(self):
         self.assertEqual(R.check("engineer", "blocked", "x"), "")

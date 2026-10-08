@@ -1,24 +1,26 @@
 """Маршруты итога шага (TK-079 п.0, В-195): роль сдаёт шаг командой `tickets.py result <ID> <итог> --why …`, а кого будить
-дальше решает эта таблица, не текст записи. Итогов семь: done, pr, accept, return, blocked, ask-owner, wait."""
+дальше решает эта таблица, не текст записи. Итогов восемь: done, pr, accept, return, blocked, ask-owner, wait, continue."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-RESULTS = ("done", "pr", "accept", "return", "blocked", "ask-owner", "wait")
+RESULTS = ("done", "pr", "accept", "return", "blocked", "ask-owner", "wait", "continue")
 WHY_MAX = 200
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 
 # итог → (кто вправе, обязательное доказательство)
 RULES = {
-    "done": ({"researcher", "engineer"}, "path"),
+    "done": ({"researcher", "engineer", "ceo"}, "path"),  # ceo — сессия без роли: закрыть тикет (TK-090 б)
     "pr": ({"engineer", "researcher"}, "pr+sha"),
     "accept": ({"judge"}, "pr+sha|path"),
     "return": ({"judge"}, "sha|path"),
     "blocked": ({"researcher", "engineer", "judge"}, ""),
     "ask-owner": ({"researcher", "engineer", "judge"}, ""),
     "wait": ({"researcher", "engineer", "judge"}, "form"),
+    "continue": ({"researcher", "engineer"}, ""),  # TK-090 в: длинная работа кусками — следующий запуск той же роли
 }
+CONTINUE_MAX = 5  # подряд идущих continue у одной роли в тикете; дальше — wait/blocked/pr/done
 HINT = {
     "path": "--path <файл или каталог с результатом, существует на диске>",
     "pr+sha": "--pr <номер> --sha <голова PR, 7–40 hex>",
@@ -35,6 +37,8 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
     if result not in RESULTS:
         return f"неизвестный итог {result!r}; допустимо: {', '.join(RESULTS)}"
     who, need = RULES[result]
+    if not role and result == "done":
+        role = "ceo"
     if role not in who:
         return f"итог {result} — не для роли {role or '(не роль)'}; вправе: {', '.join(sorted(who))}"
     why = (why or "").strip()
@@ -83,10 +87,27 @@ def last_owner_result(tkt) -> str:
     return ""
 
 
-def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "") -> dict:
+def continue_streak(tkt, role: str) -> int:
+    """Сколько итогов `continue` этой роли подряд в конце лога (запись другого итога обрывает серию)."""
+    n = 0
+    for e in reversed(tkt.log):
+        m = re.match(r"\[итог: ([\w-]+)\]", e.text.strip())
+        if not m or not T_author_is(e.author, role):
+            continue
+        if m.group(1) != "continue":
+            break
+        n += 1
+    return n
+
+
+def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "", covered: bool = False) -> dict:
     """Правки шапки по итогу. accept и wait правит своя команда (accepted / wait_for), здесь — только ход."""
     rev = (reviewer or "").strip()
+    if result == "continue":
+        return {"status": "in_progress", "next": role}
     if result == "done":
+        if role == "ceo" or covered:  # ceo закрывает сам; covered — все PR тикета уже приняты Судьёй и влиты (TK-090 а)
+            return {"status": "done", "next": ""}
         if rev and rev != role and role != "judge":
             return {"status": "in_review", "next": rev}
         return {"status": "done", "next": ""}

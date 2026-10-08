@@ -11,7 +11,7 @@
     tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
-    tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait; следующую роль ставит маршрут
+    tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait|continue; следующую роль ставит маршрут
     tickets.py comment TK-001 --author researcher --text "..."  # промежуточная заметка без смены хода
     tickets.py accept TK-001 --pr 7 --sha <голова>              # только Судья: принято на этой голове → вливает merge_rule
     tickets.py start TK-001                                     # backlog|stopped → todo
@@ -203,6 +203,11 @@ def cmd_result(args) -> int:
         print(f"result: {err}", file=sys.stderr)
         return 1
     tkt = T.read_ticket(path)
+    if args.result == "continue" and routes.continue_streak(tkt, role) >= routes.CONTINUE_MAX:
+        print(f"result: continue уже {routes.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
+              f"либо blocked", file=sys.stderr)
+        return 1
+    role = role or "ceo"  # check() пускает сессию без роли только к done (закрыть тикет)
     why = args.why.strip()
     on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
@@ -225,8 +230,13 @@ def cmd_result(args) -> int:
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
+    covered = False
+    if args.result == "done":  # все PR тикета приняты Судьёй (и влиты — иначе владелец не проснулся бы): повторной проверки нет
+        import merge_rule
+        prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))}
+        covered = bool(prs) and prs <= set(merge_rule.parse_accepted(tkt.header.get("accepted")))
     upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
-                       owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "")
+                       owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "", covered=covered)
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
     print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
@@ -417,7 +427,7 @@ def main(argv=None) -> int:
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
     p_result.add_argument("id")
-    p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait")
+    p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait | continue")
     p_result.add_argument("--why", default="", help="зачем/почему, ≤ 200 знаков (обязательно)")
     p_result.add_argument("--pr", type=int, default=None, help="pr, accept: номер PR")
     p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")
