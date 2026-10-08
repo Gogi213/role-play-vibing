@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -737,23 +738,47 @@ class TriageWaitsTests(WatchSandbox):
         p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
         ws = {}
         for _ in range(W.SSH_FAIL_STRIKES - 1):
-            alive = W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+            alive = W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
             self.assertEqual(len(alive), 1)
         self.assertEqual(T.read_ticket(p).status, "waiting")
-        W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+        W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
         self.assertEqual(t.log[-1].author, "watch")
         self.assertIn("ssh", t.log[-1].text)
 
+    def test_pc_link_down_never_drops_wait_for(self):
+        """Обрыв связи ПК (Д-8): ssh молчит у всех, но это не машина — сколько бы проверок ни прошло, wait_for на месте."""
+        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        ws = {}
+        for _ in range(W.SSH_FAIL_STRIKES * 3):
+            alive = W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: False)
+            self.assertEqual(len(alive), 1)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "host:calc:/var/rpv/progress/job-a.json"))
+        self.assertEqual(ws.get("ssh_fail_wait", {}), {})
+        # связь вернулась, а ssh всё ещё молчит — счёт идёт с нуля и снимает ожидание только через N проверок
+        for _ in range(W.SSH_FAIL_STRIKES - 1):
+            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+    def test_pc_link_probe_uses_tcp_connect(self):
+        with mock.patch.object(W.socket, "create_connection", side_effect=OSError("down")):
+            self.assertFalse(W.pc_link_up())
+        with mock.patch.object(W.socket, "create_connection") as cc:
+            self.assertTrue(W.pc_link_up())
+            cc.assert_called_once()
+
     def test_ssh_answer_resets_the_count(self):
         p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
         ws = {}
         for _ in range(W.SSH_FAIL_STRIKES - 1):
-            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
         W.triage_waits(ws, self.now, probe=lambda *a: "producer")
         for _ in range(W.SSH_FAIL_STRIKES - 1):
-            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error")
+            W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
     def test_unknown_probe_is_not_orphan(self):
