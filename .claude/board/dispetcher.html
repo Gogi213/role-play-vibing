@@ -47,14 +47,8 @@
 .d3 .pip::after{font-size:11px}
 
 /* раскладка на всю ширину */
-.d3 .lay{display:grid;grid-template-columns:minmax(0,1fr);gap:1.1em 2.4ch;align-items:start;grid-template-areas:"main" "rest"}
-.d3 .main{grid-area:main;min-width:0}.d3 .rest{grid-area:rest;min-width:0}
-@media (min-width:1100px){
-  .d3 .lay{grid-template-columns:minmax(0,1fr) minmax(23em,28em);grid-template-areas:"main rest"}
-}
-@media (min-width:1700px){
-  .d3 .lay{grid-template-columns:minmax(0,1fr) minmax(22em,26em);grid-template-areas:"main rest"}
-}
+.d3 .lay{display:grid;grid-template-columns:minmax(0,1fr);gap:1.1em 2.4ch;align-items:start;grid-template-areas:"main"}
+.d3 .main{grid-area:main;min-width:0}
 .d3 .ttl{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.4em 3ch}
 .d3 .ttl h1{margin:0;font-size:calc(var(--fs)*1.5);letter-spacing:.24em;text-transform:uppercase;color:var(--hot);text-shadow:0 0 1.5px var(--fg),0 0 9px rgba(var(--fg-rgb),.7)}
 .d3 .big{padding:.1em 1ch;font-weight:700;letter-spacing:.06em}
@@ -76,10 +70,6 @@
 .d3 .opt:hover{border-color:rgba(var(--fg-rgb),.5);box-shadow:none}
 .d3 .asknote{margin-top:.6em}
 
-/* что стало возможно */
-.d3 .sums{display:grid;gap:.6em;margin:0;padding:0;list-style:none}
-.d3 .sums li{display:grid;gap:.1em}
-.d3 .sums b{color:var(--hot)}
 
 /* таблица «машина × задача» */
 .d3 .mxw{overflow-x:auto;border:1px solid rgba(var(--fg-rgb),.55)}
@@ -127,8 +117,6 @@
 .d3 .tl .tb b{color:var(--hot)}
 .d3 .tl .s-todo .tb b{color:rgba(var(--fg-rgb),.6);font-weight:400}
 
-/* лента */
-.d3 .fl{display:grid;grid-template-columns:5ch 2.4ch minmax(0,1fr);gap:0 1.2ch;align-items:baseline;padding:.1em 0}
 
 @media (max-width:860px){
   .d3 .pick{display:flex}
@@ -164,11 +152,6 @@
 .d3 .lay{gap:.4em 2ch}
 .d3 .h4{margin:.8em 0 .35em}
 .d3 .h4:first-child{margin-top:0}
-@media (min-width:1100px){.d3 .lay{grid-template-columns:minmax(0,1fr) minmax(18em,22em)}}
-@media (min-width:1700px){.d3 .lay{grid-template-columns:minmax(0,1fr) minmax(18em,22em)}}
-.d3 .sums{gap:.35em}
-.d3 .sums li{gap:0}
-.d3 .fl{padding:0}
 .d3 .pr{margin-top:0;gap:.2em 1.6ch}
 
 /* шапка: заголовок, чипы команд, «+» — одна строка */
@@ -264,7 +247,7 @@
 <script src="phosphor.js"></script>
 <script>
 (() => {
-  const { E, arr, bar, lamp, sdet, fmtMin, qOf, feedWho, ui, tagOf, tok, whoOn, tm, waitTxt, pinfo, forTxt, flow } = Board;
+  const { E, arr, bar, lamp, sdet, fmtMin, qOf, ui, tagOf, tok, whoOn, tm, waitTxt, pinfo, forTxt, flow } = Board;
   const STALE = (v, age) => age == null || age > 2 * (Number(v && v.tick_s) || 5) + 5;
   const ROLE = { engineer: "Инженер", researcher: "Исследователь", judge: "Судья", ceo: "CEO" };
   const n = (c, k) => Number((c || {})[k]) || 0;
@@ -326,11 +309,8 @@
         act.forEach((p, i) => { mx += cell(r.id, p).replace('class="cl', 'class="cl' + (you ? " yr" : "") + (i === np - 1 ? " lc" : "") + (last ? " lr" : "")); });
       });
     }
-    const feed = arr(v.feed).slice().reverse().map((f) => `<div class="fl"><span class="dim">${E(f.time)}</span><i class="pip s-${Board.sk(f.state)}"></i><span>${feedWho(f)} ${E(f.text)}</span></div>`).join("") || `<div class="none">пока тихо</div>`;
     const pick = all.length > 1 ? `<div class="pick${done.length ? " hd" : ""}"><span class="dim">подробно о задаче:</span>${all.map((p) => `<button type="button"${p.state === "done" ? "" : ' class="pa"'} data-act="select" data-id="${E(p.id)}" aria-pressed="${p.id === sel}">${E(p.title)}</button>`).join("")}</div>` : "";
-    const sums = all.filter((p) => p.summary).map((p) => `<li><b>${E(p.title)}</b><span>${E(p.summary)}</span></li>`).join("");
-    return `<div class="main"><div class="h4 hot">Кто что делает и для чего</div>${np ? `<div class="mxw"><div class="mx" style="--np:${np}">${mx}</div></div><div class="mxh dim small" hidden>таблица шире окна: листайте её вправо</div>` : '<div class="none">все задачи готовы</div>'}${pick}${selP ? `<div class="h4 hot">Подробно · выберите задачу в шапке таблицы</div>${drawer(selP)}` : ""}</div>
-   <div class="rest"><div class="h4 hot">Что стало возможно</div>${sums ? `<ul class="sums">${sums}</ul>` : '<div class="none">пока ничего не закрыто</div>'}<div class="h4 hot">Недавно</div>${feed}</div>`;
+    return `<div class="main"><div class="h4 hot">Кто что делает и для чего</div>${np ? `<div class="mxw"><div class="mx" style="--np:${np}">${mx}</div></div><div class="mxh dim small" hidden>таблица шире окна: листайте её вправо</div>` : '<div class="none">все задачи готовы</div>'}${pick}${selP ? `<div class="h4 hot">Подробно · выберите задачу в шапке таблицы</div>${drawer(selP)}` : ""}</div>`;
   };
 
   const modal = `<div class="md" id="md" role="dialog" aria-modal="true" aria-labelledby="md-t" hidden><div class="md-box">
