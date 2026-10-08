@@ -30,6 +30,11 @@ class SuperviseTest(unittest.TestCase):
         self.assertEqual(V.decide(None, True), "restart")
         self.assertEqual(V.decide(5, False), "start")
 
+    def test_decide_unknown_alive_fresh_heartbeat_is_ok(self):
+        """В-209 Д-1: tasklist не ответил (alive=None) при свежем сердцебиении — не start/restart."""
+        self.assertEqual(V.decide(5, None), "ok")
+        self.assertEqual(V.decide(700, None), "restart")
+
     def test_age(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "hb.json"
@@ -52,12 +57,12 @@ class SuperviseTest(unittest.TestCase):
             (sd / "watch.pid").write_text(str(os.getpid()), encoding="utf-8")
             stopped, spawned = [], []
             real = S.is_ours
-            S.is_ours = lambda pid, script: pid > 0   # оба «живы»
+            S.is_ours_state = lambda pid, script: pid > 0   # оба «живы»
             try:
                 out = V.run_once(project, now.timestamp(), stop=lambda p, s, unit=None: stopped.append(s) or 1,
                                  spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
             finally:
-                S.is_ours = real
+                S.is_ours_state = real
             self.assertEqual(out, {"dispatch": "ok", "watch": "restart"})
             self.assertEqual((stopped, spawned), (["watch.py"], ["watch.py"]))
             self.assertIn("watch: restart", (sd / "supervise.log").read_text(encoding="utf-8"))
