@@ -151,6 +151,9 @@ class StartTests(unittest.TestCase):
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)  # rpv-cmdline-probe"])
         self.pids.append(child.pid)
         self.assertTrue(wait_alive(child.pid))
+        end = time.time() + 30   # до exec (форк под нагрузкой xdist) видна командная строка родителя
+        while "rpv-cmdline-probe" not in (S._cmdline(child.pid) or "") and time.time() < end:
+            time.sleep(0.05)
         line = S._cmdline(child.pid)
         self.assertIsNotNone(line, "командная строка не прочитана")
         self.assertIn("rpv-cmdline-probe", line)
