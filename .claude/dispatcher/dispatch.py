@@ -1332,25 +1332,38 @@ def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
     return _pid_alive_name(pid, expect_name)
 
 
+PID_CHECK_TRIES = 3          # tasklist на нагруженной машине отвечает позже 5 с — повтор, не «мёртв»
+PID_CHECK_TIMEOUT_S = 10
+
+
 def _pid_alive_name(pid, expect_name: str = None) -> bool:
-    """Жив ли pid — и похож ли на наш `claude` (судья 27.09, «можно потом»): подстрочный поиск pid в
-    `tasklist` ловил чужие совпадения (123 ⊂ 1234), а pid мог переиспользоваться ОС после перезагрузки
-    — точное сравнение PID-колонки через `/FO CSV` + проверка имени образа снижают оба риска (не
-    устраняют полностью: другой процесс `claude.exe` с тем же pid теоретически всё ещё возможен)."""
+    """Жив ли pid. Сбой проверки (таймаут tasklist) — не «мёртв»: см. `_pid_state`; здесь «неизвестно» = жив, чтобы
+    нагруженная машина не объявляла живую службу мёртвой (В-209 Д-1)."""
+    return _pid_state(pid, expect_name) is not False
+
+
+def _pid_state(pid, expect_name: str = None):
+    """True — жив и похож на наш `claude`; False — процесса нет / чужой образ; None — узнать не удалось (таймаут,
+    сбой tasklist после повторов). Подстрочный поиск pid ловил чужие совпадения (123 ⊂ 1234) — сравнение PID-колонки
+    через `/FO CSV` + имя образа."""
     expect_name = PID_EXPECT_NAME if expect_name is None else expect_name
     if not pid:
         return False
     if os.name == "nt":
-        try:
-            out = hide.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
+        for attempt in range(PID_CHECK_TRIES):
+            try:
+                out = hide.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PID_CHECK_TIMEOUT_S)
+            except Exception:
+                continue
+            if out.returncode:
+                continue
             for line in (out.stdout or "").splitlines():
                 fields = [f.strip().strip('"') for f in line.split(",")]
                 if len(fields) >= 2 and fields[1] == str(pid):
                     return (expect_name or "").lower() in fields[0].lower()
             return False
-        except Exception:
-            return False
+        return None
     return _pid_alive_posix(pid, expect_name)
 
 

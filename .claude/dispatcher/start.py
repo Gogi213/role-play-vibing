@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import os
 import re
@@ -149,13 +150,21 @@ def find_copies(script_name: str, project: Path, procs=None) -> list:
     return out
 
 
-def is_ours(pid: int, script_name: str) -> bool:
-    """Живой процесс из pid-файла — наш скрипт, а не чужой python с переиспользованным pid. Командную строку
-    узнать не удалось — считаем нашим (как и сам pid-замок диспетчера)."""
-    if not (pid and D._pid_alive(pid, LOCK_IMAGE)):
+def is_ours_state(pid: int, script_name: str):
+    """True — живой процесс из pid-файла наш скрипт; False — нет; None — жив ли он, узнать не удалось (сбой tasklist).
+    Командную строку узнать не удалось — считаем нашим (как и сам pid-замок диспетчера)."""
+    if not pid:
         return False
+    alive = D._pid_state(pid, LOCK_IMAGE)
+    if not alive:
+        return alive
     line = _cmdline(pid)
     return True if line is None else script_name.lower() in line.lower()
+
+
+def is_ours(pid: int, script_name: str) -> bool:
+    """Как `is_ours_state`; «не удалось узнать» — наш (ложная смерть службы хуже лишнего ожидания, В-209 Д-1)."""
+    return is_ours_state(pid, script_name) is not False
 
 
 # --- systemd (Linux) ----------------------------------------------------------------------------------------------
@@ -347,10 +356,11 @@ def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT
         if extra != pid:
             D._pid_kill(extra)
             stopped = stopped or extra
-    try:
-        pid_file.unlink()
-    except FileNotFoundError:
-        pass
+    if read_pid(pid_file) == pid:   # перезапись другим процессом (свежий диспетчер) не стираем (В-209 Д-2)
+        try:
+            pid_file.unlink()
+        except FileNotFoundError:
+            pass
     return stopped
 
 
@@ -397,6 +407,35 @@ def spawn(script: Path, project: Path, log: Path, extra: tuple = ()) -> Started:
     return _popen_detached(cmd, project, log)
 
 
+@contextlib.contextmanager
+def restart_lock(state_dir: Path, wait_s: float = 60.0, stale_s: float = 180.0):
+    """Общий замок start.py и присмотра на «остановить + запустить»: без него два перезапуска идут вперемешку — двойной
+    диспетчер и стёртый свежий pid-файл (В-209 Д-2). Файл `restart.lock` создаётся O_EXCL; старше `stale_s` — бесхозный."""
+    lock = state_dir / "restart.lock"
+    deadline = time.time() + wait_s
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > stale_s:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            if time.time() >= deadline:
+                break   # замок не отдали — работаем без него, а не стоим вечно
+            time.sleep(0.2)
+    try:
+        yield
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
 def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) -> list[dict]:
     """Останавливает уже запущенные диспетчер и сторож проекта и запускает заново. Результат — по строке на службу:
     {name, pid, log, restarted (pid остановленного или 0), ok, rc, how, detached (True/False/None — не проверить)}."""
@@ -405,11 +444,12 @@ def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) ->
     use_systemd = _launcher() == "systemd"
     procs = []
     for name in services():
-        restarted = stop_running(state_dir / f"{name}.pid", f"{name}.py",
-                                 unit=unit_name(name, project) if use_systemd else None, project=project)
-        log = state_dir / f"{name}.run.log"
-        procs.append((name, spawn(code_dir / f"{name}.py", project, log, BOARD_ARGS if name == BOARD_SERVICE else ()),
-                      log, restarted))
+        with restart_lock(state_dir):
+            restarted = stop_running(state_dir / f"{name}.pid", f"{name}.py",
+                                     unit=unit_name(name, project) if use_systemd else None, project=project)
+            log = state_dir / f"{name}.run.log"
+            procs.append((name, spawn(code_dir / f"{name}.py", project, log, BOARD_ARGS if name == BOARD_SERVICE else ()),
+                          log, restarted))
     time.sleep(settle)
     rows = []
     for name, p, log, restarted in procs:

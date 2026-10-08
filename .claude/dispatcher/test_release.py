@@ -286,6 +286,15 @@ class VerifyAliveTests(unittest.TestCase):
         """Б1: doctor любой версии (и старый, без --alive) может вернуть FAIL по простою — выпуск от этого не откатывается."""
         self.assertTrue(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(self.ROWS), wait_s=0))
 
+    def test_bus_queue_errors_fail_does_not_fail_release(self):
+        """В-209 п.1: шина/очередь/ошибки за сутки — не повод откатывать исправный выпуск."""
+        rows = self.ROWS + [{"check": c, "status": "FAIL", "detail": "x"} for c in ("шина", "очередь ceo", "ошибки за сутки")]
+        self.assertTrue(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))
+
+    def test_extra_copy_fails_release(self):
+        rows = self.ROWS + [{"check": "копии dispatch", "status": "FAIL", "detail": "2 копий вместо одной"}]
+        self.assertFalse(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))
+
     def test_service_fail_fails_release(self):
         rows = self.ROWS + [{"check": "сторож", "status": "FAIL", "detail": "не запущен"}]
         self.assertFalse(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))

@@ -291,17 +291,19 @@ def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -
     return ok
 
 
-IDLE_ROW = "простой сегодня"
-
-
 def alive_problems(doctor_out: str) -> list:
-    """FAIL-строки вывода `doctor.py --json`, кроме накопленного простоя: решает именно этот код, а не doctor того каталога,
-    откуда запущен (старый doctor без --alive ронял исправный выпуск — Б1 КТ-3). Не JSON — одна проблема «вывод»."""
+    """FAIL-строки вывода `doctor.py --json` только по службам («не запущен», «завис») и «ровно одна копия»: простой,
+    шина, очередь, ошибки за сутки — не свойство новой версии и не повод для отката (В-209 п.1; ложный откат исправной
+    1.8.17). Не JSON — одна проблема «вывод»."""
     try:
         rows = json.loads(doctor_out)
     except ValueError:
         return [f"doctor: не JSON ({doctor_out.strip()[:80]})"]
-    return [f"{r['check']}: {r['detail']}" for r in rows if r.get("status") == "FAIL" and r.get("check") != IDLE_ROW]
+    import start
+    raw = set(start.services())
+    shown = {"диспетчер" if n == "dispatch" else "сторож" if n == "watch" else n for n in raw}
+    return [f"{r['check']}: {r['detail']}" for r in rows if r.get("status") == "FAIL"
+            and (r.get("check") in shown or str(r.get("check", "")).startswith("копии ") and r["check"][6:] in raw)]
 
 
 def verify_alive(project: Path, code_dir: Path | None, run=subprocess.run, wait_s: float = 60.0, step_s: float = 5.0) -> bool:

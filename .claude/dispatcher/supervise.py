@@ -38,8 +38,11 @@ def heartbeat_age(path: Path, field: str, now: float) -> float | None:
         return None
 
 
-def decide(age: float | None, alive: bool, stale_s: float = STALE_S) -> str:
-    """ok | start (процесса нет) | restart (процесс есть, сердцебиение старое — завис)."""
+def decide(age: float | None, alive: bool | None, stale_s: float = STALE_S) -> str:
+    """ok | start (процесса нет) | restart (процесс есть, сердцебиение старое — завис). alive=None — проверить не удалось:
+    свежее сердцебиение → ok (не start поверх живого), иначе restart."""
+    if alive is None:
+        return "restart" if age is None or age > stale_s else "ok"
     if not alive:
         return "start"
     return "restart" if age is None or age > stale_s else "ok"
@@ -81,13 +84,18 @@ def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> 
     beats = {n: BEATS[n] for n in S.services() if n in BEATS}  # тот же список, что у start.py
     for name, (beat, field) in beats.items():
         age = heartbeat_age(state_dir / beat, field, now)
-        alive = S.is_ours(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")
+        alive = S.is_ours_state(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")
         act = out[name] = decide(age, alive)
         if act == "ok":
             continue
         unit = S.unit_name(name, project) if use_systemd else None
-        stopped = stop(state_dir / f"{name}.pid", f"{name}.py", unit=unit)
-        r = spawn(CODE_DIR / f"{name}.py", project, state_dir / f"{name}.run.log")
+        with S.restart_lock(state_dir):
+            alive = S.is_ours_state(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")   # пока ждали замок, start.py мог перезапустить
+            if decide(age, alive) == "ok" or (alive and act == "start"):
+                out[name] = "ok"
+                continue
+            stopped = stop(state_dir / f"{name}.pid", f"{name}.py", unit=unit)
+            r = spawn(CODE_DIR / f"{name}.py", project, state_dir / f"{name}.run.log")
         _log(state_dir, f"{name}: {act} (сердцебиение {'нет' if age is None else f'{age:.0f} с'}, "
                         f"остановлен pid {stopped or '-'}) -> pid {r.pid} {r.how}")
     return out
