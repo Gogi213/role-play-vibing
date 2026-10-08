@@ -53,6 +53,11 @@ class WatchSandbox(unittest.TestCase):
         self.now = dt("2026-09-27T12:00:00+04:00")
         os.environ["ALPHA_DECK_HOST"] = "deck@test-host"  # без переменной проверки второй машины выключены
         self.addCleanup(lambda: os.environ.pop("ALPHA_DECK_HOST", None))
+        env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        for name in ("RPV_JOB_OWNERS_CMD", "RPV_JOB_STATE_CMD", "RPV_STRAY_CMD"):
+            os.environ.pop(name, None)
 
     def tearDown(self):
         for k, v in self._orig.items():
@@ -748,6 +753,78 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
         self.assertEqual(t.log[-1].author, "watch")
         self.assertIn("без wait_for и без next", t.log[-1].text)
+
+    def test_waiting_without_wait_for_with_live_role_run_is_quiet(self):
+        """Приёмка: ci_watch снял wait_for, диспетчер запустил Судью (active_runs) — 20 мин тихо, счётчик не растёт."""
+        p = self._waiting("")
+        tid = T.read_ticket(p).id
+        D.save_state({"active_runs": {tid: {"role": "judge", "pid": 1}}})
+        ws = {}
+        for _ in range(W.EMPTY_WAIT_STRIKES * 4):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertEqual(ws.get("empty_wait", {}), {})
+
+    def test_job_wake_then_empty_wait_is_not_blocked(self):
+        """Пробуждение по заданию раньше + пустое ожидание теперь = первое пробуждение по этой причине, не blocked."""
+        p = self._waiting("")
+        tid = T.read_ticket(p).id
+        ws = {"job_wakes": {tid: "job:calc:1"}}
+        for _ in range(W.EMPTY_WAIT_STRIKES):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+    def test_host_path_met_but_not_woken_wakes_owner_after_grace(self):
+        """Случай (6): файл на машине есть, а диспетчер не разбудил — через допуск владелец будится сам."""
+        p = self._waiting("host:calc:/data/sched/validity/1008032552475.json")
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "met")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now + timedelta(minutes=W.MET_GRACE_MIN - 1), probe=lambda *a: "met")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now + timedelta(minutes=W.MET_GRACE_MIN + 1), probe=lambda *a: "met")
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("диспетчер не разбудил", t.log[-1].text)
+
+    def test_probe_progress_json_in_flight_is_producer_not_met(self):
+        import subprocess as sp
+        orig = W.subprocess.run
+        try:
+            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
+            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "producer")
+            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
+            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "met")
+            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
+            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.mark"), "met")
+        finally:
+            W.subprocess.run = orig
+
+    def test_ci_run_form_parse_and_dispatcher_check(self):
+        import ci_watch
+        self.assertEqual(T.parse_wait_for("ci-run:o/r#123"), ("ci-run", "o/r", 123))
+        self.assertIsNone(T.parse_wait_for("ci-run:bad"))
+        self.assertEqual(ci_watch.run_state("o/r", 1, gh=lambda p: {"status": "in_progress"}), "running")
+        self.assertTrue(ci_watch.run_done("o/r", 1, gh=lambda p: {"status": "completed", "conclusion": "failure"}))
+        def gone(p):
+            raise RuntimeError("gh: Not Found (HTTP 404)")
+        def boom(p):
+            raise RuntimeError("timeout")
+        self.assertEqual(ci_watch.run_state("o/r", 1, gh=gone), "missing")
+        self.assertEqual(ci_watch.run_state("o/r", 1, gh=boom), "error")
+
+    def test_ci_run_missing_two_strikes_wakes_owner_running_is_alive(self):
+        p = self._waiting("ci-run:o/r#99")
+        ws = {}
+        alive = W.triage_waits(ws, self.now, run_probe=lambda r, i: "running")
+        self.assertEqual(len(alive), 1)
+        W.triage_waits(ws, self.now, run_probe=lambda r, i: "error")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        for _ in range(W.DEAD_WAIT_STRIKES):
+            W.triage_waits(ws, self.now, run_probe=lambda r, i: "missing")
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("прогон CI", t.log[-1].text)
 
     def test_waiting_without_wait_for_but_with_next_is_left_alone(self):
         p = self._waiting("")

@@ -68,7 +68,7 @@ WAIT_FOR_HOSTS = ("calc", "vps", "deck")
 WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
                     "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
-                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | job:<calc|vps|deck>:<id задания> (готово при done; "
+                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<calc|vps|deck>:<id задания> (готово при done; "
                     "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD) | "
                     "at:<время ISO> (готово по наступлении времени; суточное наблюдение — сторож жизни его не трогает)")
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
@@ -110,6 +110,9 @@ def parse_wait_for(spec: str):
     if spec.startswith("ci:"):
         m = _CI_RE.match(spec[len("ci:"):].strip())
         return ("ci", m.group(1), int(m.group(2))) if m else None
+    if spec.startswith("ci-run:"):  # конкретный прогон CI (а не голова PR): завершён → владелец, исчез → сторож
+        m = _CI_RE.match(spec[len("ci-run:"):].strip())
+        return ("ci-run", m.group(1), int(m.group(2))) if m else None
     if spec.startswith("merged:"):
         m = _CI_RE.match(spec[len("merged:"):].strip())
         return ("merged", m.group(1), int(m.group(2))) if m else None

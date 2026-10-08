@@ -176,6 +176,21 @@ def ci_done(repo: str, number: int, gh=gh_api) -> bool:
     return head == ent.get("sha")
 
 
+def run_state(repo: str, run_id: int, gh=gh_api) -> str:
+    """Прогон CI по id: `running` (идёт/в очереди), `completed` (с любым исходом), `missing` (GitHub ответил 404),
+    `error` (не удалось спросить — не считается ни за что)."""
+    try:
+        run = gh(f"repos/{repo}/actions/runs/{run_id}")
+    except Exception as e:
+        return "missing" if "404" in str(e) or "Not Found" in str(e) else "error"
+    return "completed" if run.get("status") == "completed" else "running"
+
+
+def run_done(repo: str, run_id: int, gh=gh_api) -> bool:
+    """wait_for `ci-run:<репо>#<id>`: прогон завершён (успех или красный — владелец сам смотрит исход)."""
+    return run_state(repo, run_id, gh) == "completed"
+
+
 def write_heartbeat() -> None:
     f = D.STATE_FILE.parent / "ci-heartbeat.json"
     T.atomic_write_text(f, json.dumps({"ts": datetime.now().astimezone().isoformat(timespec="seconds")}))
