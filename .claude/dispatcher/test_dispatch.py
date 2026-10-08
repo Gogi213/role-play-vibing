@@ -733,7 +733,7 @@ class DispatchRunTests(unittest.TestCase):
         for tid, info in list(D.RUNNING.items()):
             try:
                 info["popen"].kill()
-                info["popen"].wait(timeout=5)
+                info["popen"].wait(timeout=30)
             except Exception:
                 pass
             for fh in (info.get("out_fh"), info.get("err_fh")):
@@ -748,7 +748,14 @@ class DispatchRunTests(unittest.TestCase):
         del os.environ["FAKE_TICKETS_DIR"]
         for k, v in self._orig.items():
             setattr(D, k, v)
-        self.tmp.cleanup()
+        for attempt in range(20):   # Windows под xdist: потомок ещё держит err.log (WinError 32), TK-095
+            try:
+                self.tmp.cleanup()
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.5)
 
     def set_fake_bin(self, body: str) -> Path:
         """Пишет фейковый `claude` и подменяет `D._popen`, чтобы CLAUDE_BIN подменялся на python-скрипт."""
@@ -761,7 +768,7 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = fake_popen
         return script
 
-    def wait_running(self, timeout=10.0):
+    def wait_running(self, timeout=60.0):   # предел, не пауза: выходит по завершении; 10 с не хватало ПК под xdist (TK-095)
         deadline = time.time() + timeout
         while D.RUNNING and time.time() < deadline:
             state = D.load_state()

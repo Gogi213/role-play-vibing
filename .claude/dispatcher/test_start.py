@@ -133,6 +133,10 @@ class StartTests(unittest.TestCase):
         stranger = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         self.pids.append(stranger.pid)
         self.assertTrue(wait_alive(stranger.pid))
+        # до exec (форк под нагрузкой xdist) cmdline пуст/родительский → is_ours() принял бы чужой pid за свой: ждём, пока видно sleep
+        end = time.time() + 30
+        while "time.sleep" not in (S._cmdline(stranger.pid) or "") and time.time() < end:
+            time.sleep(0.05)
         state = self.project / ".claude" / "dispatcher"
         state.mkdir(parents=True)
         (state / "dispatch.pid").write_text(str(stranger.pid), encoding="utf-8")
@@ -147,6 +151,9 @@ class StartTests(unittest.TestCase):
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)  # rpv-cmdline-probe"])
         self.pids.append(child.pid)
         self.assertTrue(wait_alive(child.pid))
+        end = time.time() + 30   # до exec (форк под нагрузкой xdist) видна командная строка родителя
+        while "rpv-cmdline-probe" not in (S._cmdline(child.pid) or "") and time.time() < end:
+            time.sleep(0.05)
         line = S._cmdline(child.pid)
         self.assertIsNotNone(line, "командная строка не прочитана")
         self.assertIn("rpv-cmdline-probe", line)

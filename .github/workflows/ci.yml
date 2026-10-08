@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["*"]
   workflow_dispatch:
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,14 +17,20 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.11", "3.12", "3.13"]
+        # PR: одна версия Python (быстрый круг); main, теги и ручной запуск: полная матрица 3×3 (TK-095)
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11","3.12","3.13"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install pytest
-      - run: python -m pytest .claude -q -p no:cacheprovider
+      - run: python -m pip install pytest pytest-xdist
+      # endurance (~3 мин по часам на раунд) — параллельным процессом рядом с основным прогоном, оба должны быть зелёными
+      - shell: bash
+        run: |
+          python -m pytest .claude -q -p no:cacheprovider -n auto -m "not endurance" --durations=15 &
+          python -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
+          r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r
   ci-ok:
     name: ci-ok
     if: always()
