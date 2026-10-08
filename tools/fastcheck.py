@@ -39,6 +39,7 @@ def calc(a):
     script = f"""set -u
 cat > {d}/run.sh <<'EOS'
 cd {d}
+mkdir -p {d}/bin && ln -sf $(command -v python3) {d}/bin/python; export PATH={d}/bin:$PATH   # тесты зовут `python`
 python3 -m pytest .claude -q -p no:cacheprovider -n {a.cores} -m "not endurance" --durations=15 &
 python3 -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
 r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r
