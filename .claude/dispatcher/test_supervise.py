@@ -139,6 +139,23 @@ class InstallFilesTest(unittest.TestCase):
         self.assertTrue(cmd[-1].startswith(f'"{Path("C:/Py")}'))
         self.assertIn(f'--project "{Path("C:/proj")}"', cmd[-1])
 
+    def test_schtasks_settings_run_on_battery_and_catch_up(self):
+        ps = V.schtasks_settings("rpv-supervise-ab12")[-1]
+        for flag in ("-AllowStartIfOnBatteries", "-DontStopIfGoingOnBatteries", "-StartWhenAvailable"):
+            self.assertIn(flag, ps)
+        self.assertIn("'rpv-supervise-ab12'", ps)
+
+    def test_install_on_windows_applies_battery_settings_after_create(self):
+        calls = []
+        with mock.patch.object(V.os, "name", "nt"), mock.patch.object(V, "snapshot_env"),                 mock.patch.object(V.subprocess, "run", side_effect=lambda cmd, **kw: calls.append(cmd)):
+            V.install(Path("C:/proj"))
+        self.assertEqual([c[0] for c in calls], ["schtasks", "powershell"])
+        calls.clear()
+        with mock.patch.object(V.os, "name", "nt"), mock.patch.object(V.subprocess, "run",
+                                                                      side_effect=lambda cmd, **kw: calls.append(cmd)):
+            V.install(Path("C:/proj"), remove=True)
+        self.assertEqual([c[:2] for c in calls], [["schtasks", "/Delete"]])
+
     def test_python_for_service_is_not_pythonw(self):
         real = sys.executable
         try:
