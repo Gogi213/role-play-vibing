@@ -1557,14 +1557,19 @@ def effort_for(role: str, tkt=None) -> str:
     return ROLE_EFFORT.get(role, "high")
 
 
+def _py() -> str:
+    """Интерпретатор для команд, которые диспетчер выдаёт ролям: на Mac/Linux слова `python` может не быть (TK-110 В-1)."""
+    return shlex.quote(Path(sys.executable).as_posix()) + " "
+
+
 def tickets_cli() -> str:
     """Команда tickets.py из папки плагина: проект роль берёт из RPV_PROJECT (его ставит launch_run) и своего cwd."""
-    return "python " + shlex.quote((CODE_DIR / "tickets.py").as_posix())
+    return _py() + shlex.quote((CODE_DIR / "tickets.py").as_posix())
 
 
 def plan_cli() -> str:
     """plan.py из папки плагина (шаги ролей для веб-табло): проект роль берёт из RPV_PROJECT, как и tickets.py."""
-    return "python " + shlex.quote((CODE_DIR / "plan.py").as_posix())
+    return _py() + shlex.quote((CODE_DIR / "plan.py").as_posix())
 
 
 def build_prompt(role: str, tid: str, extra_note: str = None) -> str:

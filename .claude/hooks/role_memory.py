@@ -114,6 +114,9 @@ def digest_path(role, cli_id):
     return os.path.join(digest_dir(role), name)
 
 
+HAIKU_HOOK_S = 20  # SessionEnd: таймаут хука 30 с — Haiku укладывается раньше (TK-110 В-2)
+
+
 def haiku_abstract(turns):
     """TK-087 п.2: краткий конспект сверху (Haiku, не источник — ниже дословные сообщения); выкл RPV_HAIKU_COMPACT=0; сбой — ''."""
     if os.environ.get("RPV_HAIKU_COMPACT") == "0":
@@ -121,10 +124,17 @@ def haiku_abstract(turns):
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
         import haiku_aux
-        text = haiku_aux.compact("\n".join(turns))
+        text = haiku_aux.compact("\n".join(turns), timeout=HAIKU_HOOK_S)
     except Exception:
         return ""
     return f"## Краткий конспект (Haiku, не источник — дословно ниже)\n{text}\n\n" if text else ""
+
+
+def _atomic_write(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
 
 
 def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
@@ -163,10 +173,11 @@ def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
     head = (f"# Конспект сессии «{title}» ({why})\n\n"
             f"Сессия CLI `{cli_id}`, полный транскрипт: `{transcript}`. Только сообщения и ответы — "
             f"без инструментов и рассуждений. Читать секциями/грепом, не целиком.\n\n")
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(head + haiku_abstract(turns) + "\n".join(turns))
-    os.replace(tmp, path)
+    body = "\n".join(turns)
+    _atomic_write(path, head + body)                      # сначала без Haiku: убитый по таймауту хук не теряет конспект
+    abstract = haiku_abstract(turns)
+    if abstract:
+        _atomic_write(path, head + abstract + body)
     return path
 
 
