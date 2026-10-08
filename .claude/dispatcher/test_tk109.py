@@ -99,7 +99,8 @@ class AnswerRetryTests(unittest.TestCase):  # п.16
     def test_comment_timeout_keeps_answer_and_retries_once(self):
         import ask
         with tempfile.TemporaryDirectory() as d:
-            qdir = Path(d)
+            qdir = Path(d) / ".claude" / "pulse" / "questions"  # ask берёт корень проекта как parents[2]
+            qdir.mkdir(parents=True)
             q = {"id": "q-TK-9-1", "process": "TK-9", "from": "engineer", "from_role": "engineer", "text": "?",
                  "options": [{"key": "a", "label": "да", "effect": ""}], "since": "x", "answered_at": None}
             (qdir / "q-TK-9-1.json").write_text(json.dumps(q), encoding="utf-8")
