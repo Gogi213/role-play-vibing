@@ -141,6 +141,14 @@ def schtasks_create(name: str, python: str, script: Path, project: Path) -> list
             "/TR", f'"{pyw}" "{script}" --project "{project}"']
 
 
+def schtasks_settings(name: str) -> list:
+    """Ноутбук: по умолчанию задание не стартует и снимается на батарее и не нагоняет пропущенный запуск (после сна или
+    выключения присмотр молчал бы до следующего окна) — на ПК с батареей выставляем явно (TK-090 Д-7)."""
+    ps = ("Set-ScheduledTask -TaskName '%s' -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
+          "-DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew) | Out-Null" % name)
+    return ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]
+
+
 def install(project: Path, remove: bool = False) -> None:
     name, script, py = task_name(project), CODE_DIR / "supervise.py", sys.executable
     if not remove:
@@ -148,6 +156,8 @@ def install(project: Path, remove: bool = False) -> None:
     if os.name == "nt":
         cmd = ["schtasks", "/Delete", "/F", "/TN", name] if remove else schtasks_create(name, py, script, project)
         subprocess.run(cmd, check=not remove)
+        if not remove:
+            subprocess.run(schtasks_settings(name), check=True)
     elif sys.platform == "darwin":
         label = f"dev.rpv.{name}"
         plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
