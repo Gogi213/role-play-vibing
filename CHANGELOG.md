@@ -2,7 +2,7 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
-## 1.8.13 — 2026-10-08
+## 1.8.14 — 2026-10-08
 
 ### Исправлено (TK-101, ложные блоки сторожа жизни)
 
@@ -10,6 +10,12 @@
 - Повтор падения (и застой запусков) — тикет Судье (`next: judge`, `in_progress`), а не `blocked` → CEO.
 - Договор адаптера: снятое владельцем задание — `done`, не `failed` (`lifewatch.py`, `docs/reliability.md`).
 - Тесты: `pytest.ini` в корне (conftest.py подхватывается из любого каталога), `RPV_BUS_DISABLE=1` в conftest — токен `~/.rpv-bus-token` владельца больше не включает шину в тестах.
+
+## 1.8.13 — 2026-10-08
+
+### Удалено (TK-102, срез TK-100)
+
+- Сортировщик сигналов CEO `ceo_triage.py` с тестами (В-205: отключён владельцем): убраны из `start.OPTIONAL`, `supervise.BEATS`, сводка `ceo-digest.md` в хуке `role_memory`; `RPV_CEO_TRIAGE` больше ничего не включает.
 
 ## 1.8.12 — 2026-10-08
 
