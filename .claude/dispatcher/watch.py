@@ -296,7 +296,7 @@ def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict) -> bo
     if st == "failed":
         why = f"сторож: задание `{spec}` упало"
         why += f"\nХвост лога:\n{tail}" if tail else ""
-        r = LW.reason(tail)
+        r = LW.reason(jid, tail)
         _wake_owner_job(path, tkt, ws, spec, why + (f"\nПричина (Haiku): {r}" if r else ""), now)
         return False
     ent = dead.get(tkt.id) or {}  # missing: задание не найдено

@@ -68,7 +68,8 @@ WAIT_FOR_HOSTS = ("calc", "vps", "deck")
 WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
                     "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
-                    "merged:<владелец/репо>#<PR> (готово, когда PR влит)")
+                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | job:<calc|vps|deck>:<id задания> (готово при done; "
+                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD)")
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 _TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")

@@ -54,13 +54,15 @@ def job_done(dispatcher_dir, alias: str, jid: str) -> bool:
         return False
 
 
-def reason(tail: str) -> str:
-    """Одна строка причины по хвосту лога — Haiku (`haiku_aux`), только разбор; нет помощника или ответ пуст — пусто."""
+def reason(jid: str, tail: str) -> str:
+    """Одна строка причины по хвосту лога — Haiku (`haiku_aux.diagnose`, TK-087), только разбор. Нет помощника,
+    claude или ответа — пусто: пробуждение владельца от разбора не зависит."""
     if not tail.strip():
         return ""
     try:
         import haiku_aux
-        out = haiku_aux.ask("Хвост лога упавшего задания. Ответь ОДНОЙ строкой: почему оно упало.\n\n" + tail)
+        out = haiku_aux.diagnose(jid, tail)
     except Exception:
         return ""
-    return (out or "").strip().splitlines()[0][:300] if (out or "").strip() else ""
+    out = (out or "").strip()
+    return out.splitlines()[0][:300] if out else ""

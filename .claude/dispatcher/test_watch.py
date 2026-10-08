@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 from datetime import datetime, timedelta, timezone
@@ -828,6 +829,15 @@ class TriageWaitsTests(WatchSandbox):
         self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
         self.assertTrue(D.check_wait_for(self.SPEC))
         self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_job_reason_is_one_line_from_haiku_and_empty_without_it(self):
+        import lifewatch
+        fake = types.SimpleNamespace(diagnose=lambda jid, tail: "кончилось место\nвторая строка")
+        with mock.patch.dict(sys.modules, {"haiku_aux": fake}):
+            self.assertEqual(lifewatch.reason("j1", "OSError"), "кончилось место")
+        with mock.patch.dict(sys.modules, {"haiku_aux": None}):  # импорт невозможен
+            self.assertEqual(lifewatch.reason("j1", "OSError"), "")
+        self.assertEqual(lifewatch.reason("j1", "  "), "")
 
     def test_job_adapter_silent_wakes_owner_after_ssh_strikes(self):
         p = self._waiting(self.SPEC)
