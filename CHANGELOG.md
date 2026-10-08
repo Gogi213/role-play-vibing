@@ -2,6 +2,14 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.17 — 2026-10-08
+
+### Изменено (TK-100, срезы №6 и №26)
+
+- `watch.py`: удалён блок «вторая машина» (`check_second_machine`, `check_deck_frozen`, `_ssh_run`/`_ssh_run_once`, `_apply_ssh_fail_streak`, `deck_off`, флаг `deck-off`, `RPV_DECK_ROOT`, `RPV_WATCH_DECK_*`) и всё, что жило только ради него: сводка `WATCH_SUMMARY_KINDS` с `pending_summary`, сигнатура содержимого (`normalize_signature`, `_content_signature`) — дедуп теперь только по (вид, ключ) с повтором `_repeat_hours`. Тревоги хоста — по-прежнему адаптер `RPV_HOST_ALERTS_CMD`; `RPV_DECK_HOST` остаётся для `wait_for` `host:deck:…`.
+- Удалён `check_dispatcher_alive` (`dispatcher-down`, `RPV_WATCH_DISPATCH_STALE_MIN`): «диспетчер жив» остаётся у `supervise` (BEATS) и `doctor`.
+- `run_once(now, probes=True)` вместо `ssh_run`; `collect_findings(now, alive_waits)`. Старые ключи `watch-state.json` (`notified[*].sig`, `deck_hold`, `deck_ssh_fail_streak`, `pending_summary`, `started_at`) читаются и игнорируются.
+
 ## 1.8.16 — 2026-10-08
 
 ### Изменено (TK-100, срез №23)

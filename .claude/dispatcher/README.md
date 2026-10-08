@@ -11,7 +11,7 @@
 ```
 python <плагин>/.claude/dispatcher/start.py [--project <проект>]    # диспетчер + сторож в фоне, уже запущенные перезапускает (/rpv-start)
 python <плагин>/.claude/dispatcher/dispatch.py --project <проект>   # диспетчер, боевой цикл (--once — один тик; --help — справка)
-python <плагин>/.claude/dispatcher/watch.py --project <проект>      # сторож: диспетчер жив, сироты, blocked (--once — один цикл)
+python <плагин>/.claude/dispatcher/watch.py --project <проект>      # сторож: сироты, blocked (--once — один цикл)
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." [--reviewer judge] [--effort high]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> comment TK-001 --author engineer --text "..." [--next judge|ceo]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> start TK-001 | status
@@ -49,7 +49,7 @@ needs_owner, stopped (остановлено CEO — не будит, пока C
 | `RPV_DISPATCH_ROTATE_TOKENS` | контекст, после которого сессия роли начинается заново (120000) |
 | `RPV_DISPATCH_MODEL` / `_ROLE_MODEL` / `_EFFORT` | модель и усилие ролей, `роль:значение,…` |
 | `RPV_WATCH_INTERVAL` / `_ORPHAN_HOURS` | цикл сторожа (120 с) / порог сирот (2 ч) |
-| `RPV_DECK_HOST` (+ `_KEY`, `_KNOWN_HOSTS`, `_ROOT`) | вторая машина для ssh-проверок (`_ROOT` — корень очереди на ней, `~/rpv`); **нет хоста — проверки выключены**; флаг-файл `<проект>/.claude/dispatcher/deck-off` — тоже |
+| `RPV_DECK_HOST` (+ `_KEY`, `_KNOWN_HOSTS`, `_ROOT`) | хост для `wait_for` `host:deck:…` (ключ и known_hosts); сторож вторую машину не опрашивает |
 | `RPV_GUARD_REMOTE_ROOTS` / `_HOST_ROOTS` / `_STAGE` / `_FORBIDDEN_HOSTS` | страж удаления: где можно удалять на любых удалённых машинах / только при ssh на хост (`хост=корень,корень;хост2=…`) / стадия / закрытые хосты (через запятую; нет — нигде) |
 
 `git reset --hard` и `git clean -f` страж пропускает только в каталоге вне основного дерева, заданном явным путём (scratchpad, корни из переменных выше, `/tmp/<подкаталог>`, связанный worktree); `git push --force` — никогда. Перезапись файлов в автопамяти проекта (`~/.claude/projects/<проект>/memory/`) разрешена.
