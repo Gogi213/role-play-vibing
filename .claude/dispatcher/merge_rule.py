@@ -187,8 +187,22 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
             continue
         if not ci_ok or detail.get("mergeable") is None:
             continue
+        if repo == R.REPO:  # TK-094: PR плагина — только с bump версии (автовыпуск и откат опираются на версию и тег)
+            try:
+                problem = R.bump_problem(gh, repo, sha, default)
+            except Exception as e:
+                r = _gh_error(st, key, sha, tkt, "проверка версии плагина", e, bus)
+                if r:
+                    out.append((n, r))
+                continue
+            if problem:
+                if (st.get(key) or {}).get("nobump") != sha:
+                    _note(tkt, f"PR #{n} принят на {sha[:7]} и CI зелёный, но не влит: {problem}.", wake_owner=True, bus=bus)
+                    st[key] = {"nobump": sha}
+                    out.append((n, "без bump → владельцу тикета"))
+                continue
         try:
-            gh(f"repos/{repo}/pulls/{n}/merge", method="PUT", merge_method="merge", sha=sha)
+            merged_resp = gh(f"repos/{repo}/pulls/{n}/merge", method="PUT", merge_method="merge", sha=sha)
         except Exception as e:
             r = _gh_error(st, key, sha, tkt, "слияние", e, bus)
             if r:
@@ -200,7 +214,13 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
             _drop_accepted(tkt, n)
             st[key] = {"merged": sha}
             out.append((n, "влит"))
-            if repo == R.REPO:  # TK-094: влит PR самого плагина — выпуск, службы заново, проверка, при провале откат
+            if repo == R.REPO:  # TK-094: влит PR самого плагина — тег, выпуск, службы заново, проверка, при провале откат
+                try:
+                    msha = (merged_resp or {}).get("sha") or sha
+                    R.tag_release(gh, repo, R.plugin_version_at(gh, repo, msha), msha)
+                except Exception as e:
+                    _note(tkt, f"PR #{n} влит, но тег выпуска не поставлен ({str(e)[:120]}) — откат на эту версию невозможен "
+                               "до тега.", wake_owner=True, bus=bus)
                 R.spawn_auto(D.PROJECT_ROOT)
         else:
             _note(tkt, f"PR #{n}: запрос слияния принят, но merged=false на {sha[:7]} — проверь вручную.",

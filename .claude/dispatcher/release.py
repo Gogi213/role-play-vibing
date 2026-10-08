@@ -149,6 +149,36 @@ def rollback(version: str | None = None, run=subprocess.run, state: Path = STATE
     return 0
 
 
+def _vtuple(v: str) -> tuple:
+    return tuple(int(x) for x in v.split("."))
+
+
+def plugin_version_at(gh, repo: str, ref: str) -> str:
+    """Версия из .claude-plugin/plugin.json на ref (ветка или sha) — через API GitHub, без клона."""
+    import base64
+    data = gh(f"repos/{repo}/contents/.claude-plugin/plugin.json?ref={ref}")
+    return json.loads(base64.b64decode(data["content"]).decode("utf-8"))["version"]
+
+
+def bump_problem(gh, repo: str, head_sha: str, default: str) -> str | None:
+    """TK-094: PR плагина вливается только с выпуском — версия головы выше версии main (иначе нечего ставить и откату
+    не к чему возвращаться). None — можно вливать; иначе текст причины."""
+    head_v, base_v = plugin_version_at(gh, repo, head_sha), plugin_version_at(gh, repo, default)
+    if SEMVER.fullmatch(head_v) and SEMVER.fullmatch(base_v) and _vtuple(head_v) > _vtuple(base_v):
+        return None
+    return (f"версия в PR {head_v} не выше версии {default} ({base_v}): поднять `python .claude/dispatcher/release.py bump X.Y.Z` "
+            "(раздел в CHANGELOG.md, plugin.json, marketplace.json) и запушить — иначе автовыпуск нечего ставить")
+
+
+def tag_release(gh, repo: str, version: str, sha: str) -> None:
+    """Тег vX.Y.Z на коммите слияния (на него опирается откат `rollback`); уже есть — не ошибка."""
+    try:
+        gh(f"repos/{repo}/git/refs", method="POST", ref=f"refs/tags/v{version}", sha=sha)
+    except Exception as e:
+        if "already exists" not in str(e):
+            raise
+
+
 def installed_dir(project: Path, registry: Path = INSTALLED) -> Path | None:
     """Каталог установленного плагина для проекта (installPath из installed_plugins.json); нет записи — None."""
     try:
