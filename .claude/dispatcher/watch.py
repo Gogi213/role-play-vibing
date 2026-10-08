@@ -247,6 +247,8 @@ def _wait_target_state(tkt, probe) -> str:
         return "invalid"
     if parsed[0] == "file":
         return "exists"
+    if parsed[0] == "at":  # ожидание по времени: не зависло и не сирота, пока не наступит время (TK-092 п.6)
+        return "exists"
     if parsed[0] == "ticket":
         return "exists" if (D.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
     if parsed[0] == "host":
@@ -284,6 +286,16 @@ def _fetch_owners(owners_probe) -> dict:
     return res
 
 
+def _mark_failed_seen(ws: dict, tid: str, owners: dict, extra: str = "") -> None:
+    """Пробуждение владельца покрывает ВСЕ упавшие к этому часу задания тикета (и то, что поймала форма `job:`):
+    старое упавшее задание не будит повторно и не ведёт к ложному blocked → CEO (Судья 08.10)."""
+    seen = ws.setdefault("owner_failed_seen", [])
+    for jid in [j["id"] for lst in owners.values() for j in lst if j["ticket"] == tid and j["state"] == "failed"] + ([extra] if extra else []):
+        if jid not in seen:
+            seen.append(jid)
+    del seen[:-200]
+
+
 def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now) -> str:
     """Задания, записанные на этот тикет (сопоставление адаптера), уточняют цель `wait_for` любой формы: идёт/в очереди —
     производитель есть (не «мёртвая цель»); упало (один раз на задание) — владелец будится с id задания."""
@@ -291,8 +303,7 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     seen = ws.setdefault("owner_failed_seen", [])
     for j in mine:
         if j["state"] == "failed" and j["id"] not in seen:
-            seen.append(j["id"])
-            del seen[:-200]
+            _mark_failed_seen(ws, tkt.id, owners, j["id"])
             _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало; wait_for `{spec}` не дождётся", now)
             return "woken"
     if st == "dead" and any(j["state"] in ("running", "queued") for j in mine):
@@ -361,6 +372,8 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         if parsed and parsed[0] == "job":
             if _triage_job(path, tkt, parsed, ws, now, job_probe, states):
                 alive.add(tkt.id)
+            else:
+                _mark_failed_seen(ws, tkt.id, owners, parsed[2])
             continue
         st = _wait_target_state(tkt, probe)
         st = _apply_owned_jobs(path, tkt, ws, spec, st, owners, now)

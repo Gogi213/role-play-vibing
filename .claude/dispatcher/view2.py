@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pulsedata as P  # noqa: E402
+import ticket as T  # noqa: E402
 
 TAGS_ALL = {"pc": {"tag": "ПК", "name": "этот ПК", "color": "purple"}, "vps": {"tag": "VPS", "name": "сервер", "color": "teal"},
         "calc": {"tag": "СЧЁТ", "name": "сервер счёта", "color": "blue"},

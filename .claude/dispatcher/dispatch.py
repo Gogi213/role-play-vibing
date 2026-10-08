@@ -285,6 +285,8 @@ def check_wait_for(spec: str) -> bool:
         if not path.is_absolute():
             path = PROJECT_ROOT / path
         return path.exists()
+    if parsed[0] == "at":
+        return datetime.now().astimezone() >= parsed[1]
     if parsed[0] == "ticket":
         return _other_ticket_done(parsed[1])
     if parsed[0] == "ci":

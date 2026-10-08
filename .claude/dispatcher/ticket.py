@@ -69,15 +69,36 @@ WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<пу�
                     "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
                     "merged:<владелец/репо>#<PR> (готово, когда PR влит) | job:<calc|vps|deck>:<id задания> (готово при done; "
-                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD)")
+                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD) | "
+                    "at:<время ISO> (готово по наступлении времени; суточное наблюдение — сторож жизни его не трогает)")
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 _TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _CI_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
 
 
+def parse_at(text: str):
+    """Время из `at:<ISO>` → aware datetime; без пояса — местное время машины; не разобрать — None."""
+    try:
+        dt = datetime.fromisoformat((text or "").strip())
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.astimezone()
+
+
+def at_left_text(spec: str, now: datetime | None = None) -> str:
+    """`at:<ISO>` → «ждёт до 09.10 02:00, осталось 21 ч» (для Диспетчерской и status); не `at:` — пусто."""
+    parsed = parse_wait_for(spec)
+    if not parsed or parsed[0] != "at":
+        return ""
+    at, left = parsed[1], parsed[1] - (now or datetime.now().astimezone())
+    mins = max(0, int(left.total_seconds() // 60))
+    rest = f"{mins // 60} ч {mins % 60:02d} мин" if mins >= 60 else f"{mins} мин"
+    return f"ждёт до {at.astimezone():%d.%m %H:%M}, осталось {rest}"
+
+
 def parse_wait_for(spec: str):
-    """Разбор `wait_for`. Возвращает ("file", путь) | ("ticket", ID) | ("job", алиас, id) | ("host", алиас, "path"|"unit", арг) либо None
+    """Разбор `wait_for`. Возвращает ("file", путь) | ("at", время) | ("ticket", ID) | ("job", алиас, id) | ("host", алиас, "path"|"unit", арг) либо None
     (форма не понята). Пустая строка — None: «ничего не ждём» проверяется отдельно."""
     spec = (spec or "").strip()
     if spec.startswith("file:"):
@@ -92,6 +113,9 @@ def parse_wait_for(spec: str):
     if spec.startswith("merged:"):
         m = _CI_RE.match(spec[len("merged:"):].strip())
         return ("merged", m.group(1), int(m.group(2))) if m else None
+    if spec.startswith("at:"):  # ожидание по времени: без метки-файла и задания планировщика (TK-092)
+        at = parse_at(spec[len("at:"):])
+        return ("at", at) if at else None
     if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, RPV_JOB_STATE_CMD)
         alias, sep, jid = spec[len("job:"):].partition(":")
         jid = jid.strip()

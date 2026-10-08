@@ -868,6 +868,38 @@ class TriageWaitsTests(WatchSandbox):
         data = json.loads((D.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
         self.assertEqual(data["calc"][0]["ticket"], tid)
 
+    def test_old_failed_job_after_job_form_wake_does_not_block_for_ceo(self):
+        """Судья 08.10: ждали job:A → A упало → владелец разбужен; поставил host:-ожидание другого задания; A (упало < 1 ч) не будит снова."""
+        p = self._waiting("job:calc:A")
+        tid = T.read_ticket(p).id
+        ws = {}
+        owners = lambda alias: [{"id": "A", "ticket": tid, "unit": "tk0s-x-A", "state": "failed"}]
+        with mock.patch.object(W.LW, "reason", return_value=""):
+            W.triage_waits(ws, self.now, job_probe=self._job("failed"), owners_probe=owners)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/data/x/b.done"})
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=owners)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        owners2 = lambda alias: [{"id": "A", "ticket": tid, "unit": "u", "state": "failed"},
+                                 {"id": "B", "ticket": tid, "unit": "u", "state": "failed"}]
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=owners2)  # новое упавшее B — повтор после пробуждения: решение за CEO
+        self.assertEqual(T.read_ticket(p).status, "blocked")
+
+    # --- ожидание по времени at:<ISO> ---
+    def test_at_form_parses_and_is_met_by_time(self):
+        self.assertEqual(T.parse_wait_for("at:2026-10-09T02:00:00+04:00")[0], "at")
+        self.assertIsNone(T.parse_wait_for("at:вчера"))
+        self.assertTrue(D.check_wait_for("at:2000-01-01T00:00:00+00:00"))
+        self.assertFalse(D.check_wait_for("at:2999-01-01T00:00:00+00:00"))
+
+    def test_at_wait_is_alive_for_watch_and_shows_time_left(self):
+        p = self._waiting("at:2999-01-01T00:00:00+00:00")
+        alive = W.triage_waits({}, self.now, probe=lambda *a: "dead")
+        self.assertEqual(alive, {T.read_ticket(p).id})
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        text = T.at_left_text("at:2026-10-09T02:00:00+04:00", datetime.fromisoformat("2026-10-08T05:00:00+04:00"))
+        self.assertEqual(text, "ждёт до 09.10 02:00, осталось 21 ч 00 мин")
+
     def test_job_adapter_silent_wakes_owner_after_ssh_strikes(self):
         p = self._waiting(self.SPEC)
         ws = {}
