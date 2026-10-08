@@ -45,7 +45,7 @@ $V/bin/python -m pytest .claude -q -p no:cacheprovider -n {a.cores} -m "not endu
 $V/bin/python -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
 r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r
 EOS
-id=$(python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 --cores {a.cores} --mem {a.mem} -- bash {d}/run.sh) || exit 125
+id=$(python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 --cores {a.cores} --mem {a.mem} -- bash {d}/run.sh | tail -n 1) || exit 125
 echo "job $id"
 for i in $(seq 1 450); do [ -f /data/sched/rc/$id ] && break; sleep 2; done
 [ -f /data/sched/rc/$id ] || {{ echo "нет rc за 15 мин"; exit 124; }}
