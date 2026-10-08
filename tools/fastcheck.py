@@ -34,23 +34,22 @@ def calc(a):
     up = subprocess.run(ssh + [f"mkdir -p {d} && tar -xf - -C {d}"], stdin=tar.stdout)
     if up.returncode:
         return up.returncode, time.time() - t
-    # alsched submit только ставит заявку в очередь и печатает id: ждём rc/<id> демона, берём его rc и хвост лога;
+    # alsched submit только ставит заявку в очередь и печатает id: ждём state=done в jobs/<id>.json, берём его rc и хвост лога;
     # дерево удаляем после конца задания, не раньше
     script = f"""set -u
 cat > {d}/run.sh <<'EOS'
 cd {d}
-V=/data/rpv-fastcheck-venv
-[ -x $V/bin/pytest ] || {{ python3 -m venv $V && $V/bin/pip install -q pytest pytest-xdist; }} || exit 1
-$V/bin/python -m pytest .claude -q -p no:cacheprovider -n {a.cores} -m "not endurance" --durations=15 &
-$V/bin/python -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
+python3 -m pytest .claude -q -p no:cacheprovider -n {a.cores} -m "not endurance" --durations=15 &
+python3 -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
 r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r
 EOS
 id=$(python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 --cores {a.cores} --mem {a.mem} -- bash {d}/run.sh | tail -n 1) || exit 125
 echo "job $id"
-for i in $(seq 1 450); do [ -f /data/sched/rc/$id ] && break; sleep 2; done
-[ -f /data/sched/rc/$id ] || {{ echo "нет rc за 15 мин"; exit 124; }}
+J=/data/sched/jobs/$id.json
+for i in $(seq 1 450); do grep -q '"state": "done"' $J 2>/dev/null && break; sleep 2; done
+grep -q '"state": "done"' $J || {{ echo "нет конца задания за 15 мин"; exit 124; }}
 tail -n 25 /data/sched/logs/$id.log
-rc=$(cat /data/sched/rc/$id); rm -rf {d}; exit $rc
+rc=$(python3 -c "import json;print(json.load(open('$J'))['rc'])"); rm -rf {d}; exit $rc
 """
     rc = subprocess.run(ssh + ["bash -s"], input=script.encode()).returncode
     return rc, time.time() - t
