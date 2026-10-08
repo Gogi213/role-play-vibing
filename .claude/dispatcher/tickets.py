@@ -325,6 +325,9 @@ def cmd_wait(args) -> int:
     if not spec:
         print(f"wait: форма пуста. Допустимо: {T.WAIT_FOR_FORMATS}", file=sys.stderr)
         return 1
+    if why := T.file_wait_problem(spec):  # роль ставит ожидание сама: отказ при постановке, а не вечное «нет»
+        print(f"wait: {why}", file=sys.stderr)
+        return 1
     parsed = T.parse_wait_for(spec)
     if parsed and parsed[0] == "ticket":
         cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
@@ -389,6 +392,14 @@ def cmd_status(args) -> int:
     for r in rows:
         print(fmt.format(*r))
     now = datetime.now().astimezone()
+    for path in T.list_tickets(TICKETS_DIR):  # ожидания по времени: «ждёт до …, осталось N ч»
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        left = T.at_left_text(tkt.header.get("wait_for", "")) if tkt.status == "waiting" else ""
+        if left:
+            print(f"{tkt.id}: {left}")
     print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(D._today(now), 0.0):.2f}, "
           f"за последний час ${D._rolling_hour_cost(state, now):.2f}")
     return 0

@@ -95,6 +95,9 @@ def wake(path, tkt, who: str, text: str, repo: str = "", pr_number: int = 0) -> 
     upd = {"next": who}
     if repo and (tkt.header.get("wait_for") or "").strip() == f"ci:{repo}#{pr_number}":
         upd.update({"wait_for": "", "on_met": ""})
+    elif repo and who != "judge" and (tkt.header.get("wait_for") or "").strip() == f"merged:{repo}#{pr_number}":
+        # красный CI на принятом PR: ждать влития нечего (PR не влить) — владелец будится, ожидание снято (TK-092, CEO 05:25)
+        upd.update({"wait_for": "", "on_met": "", "status": "in_progress"})
     with T.ticket_lock(path):
         T.append_log(path, "ci", text)
         T.write_header_updates(path, upd, stamp_updated=False)
@@ -171,6 +174,21 @@ def ci_done(repo: str, number: int, gh=gh_api) -> bool:
     except Exception:
         return False
     return head == ent.get("sha")
+
+
+def run_state(repo: str, run_id: int, gh=gh_api) -> str:
+    """Прогон CI по id: `running` (идёт/в очереди), `completed` (с любым исходом), `missing` (GitHub ответил 404),
+    `error` (не удалось спросить — не считается ни за что)."""
+    try:
+        run = gh(f"repos/{repo}/actions/runs/{run_id}")
+    except Exception as e:
+        return "missing" if "404" in str(e) or "Not Found" in str(e) else "error"
+    return "completed" if run.get("status") == "completed" else "running"
+
+
+def run_done(repo: str, run_id: int, gh=gh_api) -> bool:
+    """wait_for `ci-run:<репо>#<id>`: прогон завершён (успех или красный — владелец сам смотрит исход)."""
+    return run_state(repo, run_id, gh) == "completed"
 
 
 def write_heartbeat() -> None:

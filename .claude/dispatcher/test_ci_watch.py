@@ -129,6 +129,19 @@ class CiWatchTests(unittest.TestCase):
         self.assertEqual(self.run_ci()[0][3], "engineer")
         self.assertEqual(self.tkt().header.get("wait_for", ""), "")
 
+    def test_merged_wait_with_red_ci_wakes_owner_and_clears_wait(self):
+        T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"merged:{REPO}#7"}, now=NOW)
+        self.runs = [{"name": "a", "status": "completed", "conclusion": "failure"}]
+        self.assertEqual(self.run_ci()[0][3], "engineer")
+        h = self.tkt().header
+        self.assertEqual((h.get("status"), h.get("wait_for", ""), h.get("next")), ("in_progress", "", "engineer"))
+
+    def test_merged_wait_with_green_ci_keeps_waiting_for_merge(self):
+        T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"merged:{REPO}#7"}, now=NOW)
+        self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
+        self.run_ci()
+        self.assertEqual(self.tkt().header.get("wait_for"), f"merged:{REPO}#7")
+
     def test_ci_done_requires_current_head(self):
         self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
         self.run_ci()

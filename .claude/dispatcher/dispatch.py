@@ -286,14 +286,22 @@ def check_wait_for(spec: str) -> bool:
         if not path.is_absolute():
             path = PROJECT_ROOT / path
         return path.exists()
+    if parsed[0] == "at":
+        return datetime.now().astimezone() >= parsed[1]
     if parsed[0] == "ticket":
         return _other_ticket_done(parsed[1])
     if parsed[0] == "ci":
         import ci_watch
         return ci_watch.ci_done(parsed[1], parsed[2])
+    if parsed[0] == "ci-run":
+        import ci_watch
+        return ci_watch.run_done(parsed[1], parsed[2])
     if parsed[0] == "merged":
         import merge_rule
         return merge_rule.merged_done(parsed[1], parsed[2])
+    if parsed[0] == "job":  # состояние пишет сторож жизни (watch.py → lifewatch.py), своего ssh нет
+        import lifewatch
+        return lifewatch.job_done(DISPATCHER_DIR, parsed[1], parsed[2])
     _, alias, what, arg = parsed
     return _host_wait_met(alias, what, arg)
 
@@ -869,8 +877,12 @@ def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
     spec = (tkt.header.get("wait_for") or "").strip()
     if spec:
         if T.parse_wait_for(spec) is not None:
-            return
-        note = f"wait_for не понят: {spec[:150]} — допустимо: {T.WAIT_FOR_FORMATS}"
+            why = T.file_wait_problem(spec)
+            if not why:
+                return
+            note = f"wait_for не сработает: {why}"
+        else:
+            note = f"wait_for не понят: {spec[:150]} — допустимо: {T.WAIT_FOR_FORMATS}"
     else:
         try:
             idle = now - T.parse_dt(tkt.header.get("updated", ""))

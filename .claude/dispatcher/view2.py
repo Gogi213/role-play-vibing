@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pulsedata as P  # noqa: E402
+import ticket as T  # noqa: E402
 
 TAGS_ALL = {"pc": {"tag": "ПК", "name": "этот ПК", "color": "purple"}, "vps": {"tag": "VPS", "name": "сервер", "color": "teal"},
         "calc": {"tag": "СЧЁТ", "name": "сервер счёта", "color": "blue"},
@@ -243,6 +244,10 @@ def _t_updated(t, default: float) -> float:
 def _wait_human(t) -> tuple:
     wf = (t.header.get("wait_for") or "").strip().lower()
     m = re.match(r"(?:host:)?(calc|vps)\b", wf)
+    if t.status == "waiting" and wf.startswith("at:"):
+        left = T.at_left_text(t.header.get("wait_for") or "")
+        if left:
+            return left, "pc"
     if t.status == "needs_owner":
         return "ждёт вашего слова", "you"
     if t.next_role == "ceo" or wf.startswith(("ceo", "mention")) or (t.status == "waiting" and not wf):

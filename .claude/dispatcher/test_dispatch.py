@@ -948,7 +948,7 @@ class DispatchRunTests(unittest.TestCase):
         try:
             self.assertEqual(TK.main(["wait", ic, f"ticket:{ia}"]), 1)
             self.assertEqual(T.read_ticket(c).status, "todo")  # отказ — шапка не тронута
-            self.assertEqual(TK.main(["wait", ic, "file:/tmp/ok"]), 0)
+            self.assertEqual(TK.main(["wait", ic, "file:flags/ok"]), 0)
         finally:
             TK.TICKETS_DIR = orig
 

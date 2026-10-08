@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 from datetime import datetime, timedelta, timezone
@@ -39,18 +40,24 @@ class WatchSandbox(unittest.TestCase):
         self.tickets_dir.mkdir(parents=True)
         self._orig = {
             "TICKETS_DIR": D.TICKETS_DIR, "STATE_FILE": D.STATE_FILE, "CEO_INBOX": D.CEO_INBOX,
-            "CEO_WAKE_LOG": D.CEO_WAKE_LOG,
+            "CEO_WAKE_LOG": D.CEO_WAKE_LOG, "DISPATCHER_DIR": D.DISPATCHER_DIR,
         }
         D.TICKETS_DIR = self.tickets_dir
         D.STATE_FILE = base / "state.json"
         D.CEO_INBOX = base / "ceo-inbox.md"
         D.CEO_WAKE_LOG = base / "ceo-wake.log"
+        D.DISPATCHER_DIR = base  # job-state.json / job-owners.json сторожа — в песочницу
         W.WATCH_STATE_FILE = base / "watch-state.json"
         W.WATCH_HEARTBEAT_FILE = base / "watch-heartbeat.json"
         W.DECK_OFF_FLAG = base / "deck-off"  # боевой флаг не влияет на тесты; тест «флаг есть» создаёт его сам
         self.now = dt("2026-09-27T12:00:00+04:00")
         os.environ["ALPHA_DECK_HOST"] = "deck@test-host"  # без переменной проверки второй машины выключены
         self.addCleanup(lambda: os.environ.pop("ALPHA_DECK_HOST", None))
+        env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        for name in ("RPV_JOB_OWNERS_CMD", "RPV_JOB_STATE_CMD", "RPV_STRAY_CMD"):
+            os.environ.pop(name, None)
 
     def tearDown(self):
         for k, v in self._orig.items():
@@ -734,6 +741,121 @@ class TriageWaitsTests(WatchSandbox):
             W.triage_waits(ws, self.now, probe=lambda *a: "unknown")
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
+    def test_waiting_without_wait_for_and_next_wakes_owner_after_strikes(self):
+        """Случай (4) CEO 06:00: ci_watch снял wait_for, роль не запущена — тикет не висит до сироты через 2 ч."""
+        p = self._waiting("")
+        ws = {}
+        for _ in range(W.EMPTY_WAIT_STRIKES - 1):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertEqual(t.log[-1].author, "watch")
+        self.assertIn("без wait_for и без next", t.log[-1].text)
+
+    def test_waiting_without_wait_for_with_live_role_run_is_quiet(self):
+        """Приёмка: ci_watch снял wait_for, диспетчер запустил Судью (active_runs) — 20 мин тихо, счётчик не растёт."""
+        p = self._waiting("")
+        tid = T.read_ticket(p).id
+        D.save_state({"active_runs": {tid: {"role": "judge", "pid": 1}}})
+        ws = {}
+        for _ in range(W.EMPTY_WAIT_STRIKES * 4):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertEqual(ws.get("empty_wait", {}), {})
+
+    def test_job_wake_then_empty_wait_is_not_blocked(self):
+        """Пробуждение по заданию раньше + пустое ожидание теперь = первое пробуждение по этой причине, не blocked."""
+        p = self._waiting("")
+        tid = T.read_ticket(p).id
+        ws = {"job_wakes": {tid: "job:calc:1"}}
+        for _ in range(W.EMPTY_WAIT_STRIKES):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+    def test_host_path_met_but_not_woken_wakes_owner_after_grace(self):
+        """Случай (6): файл на машине есть, а диспетчер не разбудил — через допуск владелец будится сам."""
+        p = self._waiting("host:calc:/data/sched/validity/1008032552475.json")
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "met")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now + timedelta(minutes=W.MET_GRACE_MIN - 1), probe=lambda *a: "met")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now + timedelta(minutes=W.MET_GRACE_MIN + 1), probe=lambda *a: "met")
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("диспетчер не разбудил", t.log[-1].text)
+
+    def test_probe_progress_json_in_flight_is_producer_not_met(self):
+        import subprocess as sp
+        orig, orig_ssh = W.subprocess.run, W.D._ssh_cmd
+        try:
+            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]  # хост из среды на раннере не задан
+            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
+            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "producer")
+            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
+            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "met")
+            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
+            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.mark"), "met")
+        finally:
+            W.subprocess.run, W.D._ssh_cmd = orig, orig_ssh
+
+    def test_ci_run_form_parse_and_dispatcher_check(self):
+        import ci_watch
+        self.assertEqual(T.parse_wait_for("ci-run:o/r#123"), ("ci-run", "o/r", 123))
+        self.assertIsNone(T.parse_wait_for("ci-run:bad"))
+        self.assertEqual(ci_watch.run_state("o/r", 1, gh=lambda p: {"status": "in_progress"}), "running")
+        self.assertTrue(ci_watch.run_done("o/r", 1, gh=lambda p: {"status": "completed", "conclusion": "failure"}))
+        def gone(p):
+            raise RuntimeError("gh: Not Found (HTTP 404)")
+        def boom(p):
+            raise RuntimeError("timeout")
+        self.assertEqual(ci_watch.run_state("o/r", 1, gh=gone), "missing")
+        self.assertEqual(ci_watch.run_state("o/r", 1, gh=boom), "error")
+
+    def test_ci_run_missing_two_strikes_wakes_owner_running_is_alive(self):
+        p = self._waiting("ci-run:o/r#99")
+        ws = {}
+        alive = W.triage_waits(ws, self.now, run_probe=lambda r, i: "running")
+        self.assertEqual(len(alive), 1)
+        W.triage_waits(ws, self.now, run_probe=lambda r, i: "error")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        for _ in range(W.DEAD_WAIT_STRIKES):
+            W.triage_waits(ws, self.now, run_probe=lambda r, i: "missing")
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("прогон CI", t.log[-1].text)
+
+    def test_waiting_without_wait_for_but_with_next_is_left_alone(self):
+        p = self._waiting("")
+        T.write_header_updates(p, {"next": "engineer"}, now=self.now)
+        ws = {}
+        for _ in range(W.EMPTY_WAIT_STRIKES + 2):
+            W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_stray_run_wakes_offender_ticket_owner_once(self):
+        """Случай (5): замер мимо планировщика поверх чужого — сигнал владельцу тикета-нарушителя, повтор не чаще порога."""
+        p = self._waiting("")
+        tid = T.read_ticket(p).id
+        ws = {}
+        probe = lambda alias: [(tid, "systemd-run tk065-g2pgo поверх волны tk048")]
+        self.assertEqual(W.check_strays(ws, self.now, probe=probe), [])
+        t = T.read_ticket(p)
+        self.assertEqual(t.header.get("next"), "engineer")
+        self.assertIn("мимо планировщика", t.log[-1].text)
+        n = len(t.log)
+        W.check_strays(ws, self.now + timedelta(minutes=10), probe=probe)
+        self.assertEqual(len(T.read_ticket(p).log), n)
+        W.check_strays(ws, self.now + timedelta(hours=3), probe=probe)
+        self.assertEqual(len(T.read_ticket(p).log), n + 1)
+
+    def test_stray_run_without_ticket_goes_to_ceo_and_no_adapter_is_silent(self):
+        f = W.check_strays({}, self.now, probe=lambda alias: [("", "голый замер")])
+        self.assertEqual([x.kind for x in f], ["stray-run"])
+        self.assertEqual(W.check_strays({}, self.now, probe=lambda alias: None), [])
+
     def test_ssh_silent_n_checks_wakes_owner_not_ceo(self):
         p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
         ws = {}
@@ -796,6 +918,151 @@ class TriageWaitsTests(WatchSandbox):
         ws = {}
         W.triage_waits(ws, self.now)
         W.triage_waits(ws, self.now)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
+    # --- сторож жизни (TK-092): форма job:<алиас>:<id> через адаптер проекта ---
+    SPEC = "job:calc:0108041500123"
+
+    def _job(self, state, tail=""):
+        return lambda alias, jid: (state, tail)
+
+    def test_job_form_parses(self):
+        self.assertEqual(T.parse_wait_for(self.SPEC), ("job", "calc", "0108041500123"))
+        self.assertIsNone(T.parse_wait_for("job:nohost:1"))
+        self.assertIsNone(T.parse_wait_for("job:calc:"))
+
+    def test_job_failed_wakes_owner_at_once_with_tail_and_reason(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        tail = "Traceback\nOSError: нет места"
+        with mock.patch.object(W.LW, "reason", return_value="кончилось место"):
+            alive = W.triage_waits(ws, self.now, job_probe=self._job("failed", tail))
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertEqual(alive, set())
+        self.assertEqual(t.log[-1].author, "watch")
+        for part in ("упало", "OSError: нет места", "кончилось место"):
+            self.assertIn(part, t.log[-1].text)
+
+    def test_job_failed_again_after_wake_blocks_for_ceo(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        with mock.patch.object(W.LW, "reason", return_value=""):
+            W.triage_waits(ws, self.now, job_probe=self._job("failed"))
+            T.write_header_updates(p, {"status": "waiting", "wait_for": "job:calc:other2"})
+            W.triage_waits(ws, self.now, job_probe=self._job("failed"))
+        self.assertEqual(T.read_ticket(p).status, "blocked")
+
+    def test_job_vanished_wakes_owner_after_strikes(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        for _ in range(W.DEAD_WAIT_STRIKES - 1):
+            self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("missing"))), 1)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now, job_probe=self._job("missing"))
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("не найдено", t.log[-1].text)
+
+    def test_job_running_waits_and_done_is_published_for_dispatcher(self):
+        import lifewatch
+        p = self._waiting(self.SPEC)
+        ws = {}
+        self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("running"))), 1)
+        self.assertFalse(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
+        W.triage_waits(ws, self.now, job_probe=self._job("done"))
+        self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
+        self.assertTrue(D.check_wait_for(self.SPEC))
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_job_reason_is_one_line_from_haiku_and_empty_without_it(self):
+        import lifewatch
+        fake = types.SimpleNamespace(diagnose=lambda jid, tail: "кончилось место\nвторая строка")
+        with mock.patch.dict(sys.modules, {"haiku_aux": fake}):
+            self.assertEqual(lifewatch.reason("j1", "OSError"), "кончилось место")
+        with mock.patch.dict(sys.modules, {"haiku_aux": None}):  # импорт невозможен
+            self.assertEqual(lifewatch.reason("j1", "OSError"), "")
+        self.assertEqual(lifewatch.reason("j1", "  "), "")
+
+    # --- общее сопоставление «задание → тикет» (сторож и табло) ---
+    def _owned(self, tid, state, jid="j1"):
+        return lambda alias: [{"id": jid, "ticket": tid, "unit": "tk0s-x-" + jid, "state": state}]
+
+    def test_owned_running_job_is_a_producer_not_a_dead_target(self):
+        p = self._waiting("host:calc:/data/x/other-name.done")
+        tid = T.read_ticket(p).id
+        ws = {}
+        for _ in range(W.DEAD_WAIT_STRIKES + 1):
+            alive = W.triage_waits(ws, self.now, probe=lambda *a: "dead", owners_probe=self._owned(tid, "running"))
+        self.assertEqual(alive, {tid})
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_owned_failed_job_wakes_owner_once_and_owners_file_is_published(self):
+        import json
+        p = self._waiting("host:calc:/data/x/other-name.done")
+        tid = T.read_ticket(p).id
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("упало", t.log[-1].text)
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/data/x/other-name.done"})
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
+        self.assertEqual(T.read_ticket(p).status, "waiting")  # то же упавшее задание второй раз не будит
+        data = json.loads((D.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["calc"][0]["ticket"], tid)
+
+    def test_old_failed_job_after_job_form_wake_does_not_block_for_ceo(self):
+        """Судья 08.10: ждали job:A → A упало → владелец разбужен; поставил host:-ожидание другого задания; A (упало < 1 ч) не будит снова."""
+        p = self._waiting("job:calc:A")
+        tid = T.read_ticket(p).id
+        ws = {}
+        owners = lambda alias: [{"id": "A", "ticket": tid, "unit": "tk0s-x-A", "state": "failed"}]
+        with mock.patch.object(W.LW, "reason", return_value=""):
+            W.triage_waits(ws, self.now, job_probe=self._job("failed"), owners_probe=owners)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/data/x/b.done"})
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=owners)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        owners2 = lambda alias: [{"id": "A", "ticket": tid, "unit": "u", "state": "failed"},
+                                 {"id": "B", "ticket": tid, "unit": "u", "state": "failed"}]
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=owners2)  # новое упавшее B — повтор после пробуждения: решение за CEO
+        self.assertEqual(T.read_ticket(p).status, "blocked")
+
+    # --- ожидание по времени at:<ISO> ---
+    def test_at_form_parses_and_is_met_by_time(self):
+        self.assertEqual(T.parse_wait_for("at:2026-10-09T02:00:00+04:00")[0], "at")
+        self.assertIsNone(T.parse_wait_for("at:вчера"))
+        self.assertTrue(D.check_wait_for("at:2000-01-01T00:00:00+00:00"))
+        self.assertFalse(D.check_wait_for("at:2999-01-01T00:00:00+00:00"))
+
+    def test_at_wait_is_alive_for_watch_and_shows_time_left(self):
+        p = self._waiting("at:2999-01-01T00:00:00+00:00")
+        alive = W.triage_waits({}, self.now, probe=lambda *a: "dead")
+        self.assertEqual(alive, {T.read_ticket(p).id})
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        text = T.at_left_text("at:2026-10-09T02:00:00+04:00", datetime.fromisoformat("2026-10-08T05:00:00+04:00"))
+        at = datetime.fromisoformat("2026-10-09T02:00:00+04:00").astimezone()  # пояс раннера не важен
+        self.assertEqual(text, f"ждёт до {at:%d.%m %H:%M}, осталось 21 ч 00 мин")
+
+    def test_at_wait_past_time_plus_grace_wakes_owner(self):
+        p = self._waiting("at:2000-01-01T00:00:00+00:00")
+        ws = {}
+        for _ in range(W.DEAD_WAIT_STRIKES):
+            W.triage_waits(ws, self.now)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        recent = (datetime.now().astimezone() - timedelta(minutes=W.AT_GRACE_MIN - 5)).isoformat(timespec="seconds")
+        p2 = self._waiting("at:" + recent)
+        for _ in range(W.DEAD_WAIT_STRIKES + 1):
+            W.triage_waits({}, self.now)
+        self.assertEqual(T.read_ticket(p2).status, "waiting")  # в допуске — молчим
+
+    def test_job_adapter_silent_wakes_owner_after_ssh_strikes(self):
+        p = self._waiting(self.SPEC)
+        ws = {}
+        for _ in range(W.SSH_FAIL_STRIKES):
+            W.triage_waits(ws, self.now, job_probe=self._job("ssh-error"))
         self.assertEqual(T.read_ticket(p).status, "in_progress")
 
 
@@ -1080,6 +1347,33 @@ class NoProgressViewTests(WatchSandbox):
         W.notify_findings([W.Finding("no-plan", T.read_ticket(p).id, "x")], {}, self.now)
         self.assertIn(W._PLAN_PY, T.read_ticket(p).log[-1].text)
         self.assertTrue(Path(W._PLAN_PY).exists())
+
+    def test_posix_file_wait_rejected_on_windows(self):
+        # случай 7 (TK-065): file:/tmp/x на Windows — диспетчер ищет <диск>:\tmp, роль пишет в %TEMP% → вечное ожидание
+        import tickets as TK
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт /tmp", status="in_progress", now=self.now)
+        tid = T.read_ticket(p).id
+        orig, TK.TICKETS_DIR = TK.TICKETS_DIR, self.tickets_dir
+        try:
+            with mock.patch.object(T, "_IS_WINDOWS", True):
+                self.assertEqual(TK.main(["wait", tid, "file:/tmp/done.json"]), 1)
+                self.assertEqual(T.read_ticket(p).status, "in_progress")  # отказ — шапка не тронута
+                for ok in ("file:C:/tmp/x", "file:data/x.json", "file://srv/share/x"):
+                    self.assertEqual(T.file_wait_problem(ok), "")
+            with mock.patch.object(T, "_IS_WINDOWS", False):
+                self.assertEqual(T.file_wait_problem("file:/tmp/done.json"), "")
+        finally:
+            TK.TICKETS_DIR = orig
+
+    def test_posix_file_wait_on_windows_is_reported_to_ceo(self):
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт /tmp", status="waiting", now=self.now)
+        with mock.patch.object(T, "_IS_WINDOWS", False):  # запись допустима: старый тикет мог уже ждать так
+            T.write_header_updates(p, {"wait_for": "file:/tmp/done.json"}, now=self.now)
+        state = {}
+        with mock.patch.object(T, "_IS_WINDOWS", True), mock.patch.object(D, "append_ceo_inbox") as inbox:
+            D.notify_wait_for_problem(T.read_ticket(p), state, self.now)
+        self.assertEqual(inbox.call_count, 1)
+        self.assertIn("posix-путь на Windows", inbox.call_args[0][2])
 
 
 if __name__ == "__main__":
