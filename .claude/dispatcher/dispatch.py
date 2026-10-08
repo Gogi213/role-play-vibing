@@ -1421,14 +1421,14 @@ def acquire_instance_lock(pid_file, expect_name: str = "py"):
     me = os.getpid()
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     mx = pid_file.with_name(pid_file.name + ".mx")
-    deadline = time.time() + 10
+    deadline = time.time() + 40
     while True:
         try:
             os.close(os.open(str(mx), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
             break
         except FileExistsError:
             try:
-                if time.time() - mx.stat().st_mtime > 10:   # мьютекс держит умерший процесс (секция — миллисекунды)
+                if time.time() - mx.stat().st_mtime > 30:   # мьютекс держит умерший процесс (секция — миллисекунды)
                     mx.unlink()
                     continue
             except OSError:
