@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import project as P  # noqa: E402
+import hide  # noqa: E402
 import ticket as T  # noqa: E402
 
 INTERVAL_S = min(60.0, float(P.env("CI_WATCH_INTERVAL_S", "60")))
@@ -43,7 +44,7 @@ def save_state(st: dict) -> None:
 
 def gh_api(path: str, method: str = "GET", **fields):
     args = ["gh", "api", "-X", method, path] + [x for k, v in fields.items() for x in ("-f", f"{k}={v}")]
-    r = subprocess.run(args, capture_output=True, timeout=60)
+    r = hide.run(args, capture_output=True, timeout=60)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or b"").decode("utf-8", "replace").strip()[:200])
     return json.loads(r.stdout.decode("utf-8"))

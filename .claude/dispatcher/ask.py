@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pulsedata as P  # noqa: E402
+import hide  # noqa: E402
 
 FROM = {"инженер": ("инженер", "engineer"), "engineer": ("инженер", "engineer"),
         "исследователь": ("исследователь", "researcher"), "researcher": ("исследователь", "researcher"),
@@ -44,7 +45,7 @@ def ticket_comment(tk: str, author: str, text: str, nxt: str | None = None) -> s
     if nxt:
         cmd += ["--next", nxt]
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=str(P.questions_dir().parents[2]))
+    r = hide.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=str(P.questions_dir().parents[2]))
     return None if r.returncode == 0 else f"tickets.py comment {tk}: код {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}"
 
 

@@ -2039,7 +2039,11 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = lambda cmd, **kw: (seen.update(kw), orig(cmd, **kw))[1]
         T.create_ticket(self.tickets_dir, owner="researcher", title="Группа")
         D.tick()
-        self.assertIs(seen.get("start_new_session"), True)
+        if os.name == "nt":  # TK-105 п.6: скрытая консоль, а не её отсутствие
+            self.assertTrue(seen["creationflags"] & 0x10)
+            self.assertEqual(seen["startupinfo"].wShowWindow, 0)
+        else:
+            self.assertIs(seen.get("start_new_session"), True)
 
     def test_kill_tree_dispatches_by_platform(self):
         from unittest import mock

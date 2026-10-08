@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bus"))
 import project as P  # noqa: E402
 import start as S  # noqa: E402
+import hide  # noqa: E402
 import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
@@ -44,7 +45,7 @@ def check_service(name: str, state_dir: Path, now: float) -> tuple:
     return name, OK, f"pid {pid}, сердцебиение {_age(age)} назад"
 
 
-def scheduler_installed(project: Path, run=subprocess.run) -> bool | None:
+def scheduler_installed(project: Path, run=hide.run) -> bool | None:
     """Стоит ли присмотр ОС (None — не смогли проверить)."""
     name = SV.task_name(project)
     try:

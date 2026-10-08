@@ -36,6 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402 — _pid_alive/_pid_kill; импорт ничего не создаёт
 import project as P  # noqa: E402
+import hide  # noqa: E402
 
 CODE_DIR = Path(__file__).resolve().parent
 SERVICES = ("dispatch", "watch")   # порядок запуска: сначала диспетчер, потом сторож, который за ним следит
@@ -86,7 +87,7 @@ def _cmdline(pid: int) -> str | None:
     if os.name == "nt":
         for attempt in range(3):  # холодный PowerShell на нагруженном раннере: таймаут/пустой ответ — повтор, не «узнать нельзя»
             try:
-                out = subprocess.run(
+                out = hide.run(
                     ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                      f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
@@ -108,7 +109,7 @@ def _list_procs() -> list:
     """[(pid, командная строка)] всех процессов; не получилось — пусто. Linux — /proc, macOS — ps, Windows — CIM."""
     try:
         if os.name == "nt":
-            out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+            out = hide.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                                   "Get-CimInstance Win32_Process | Where-Object CommandLine | ForEach-Object "
                                   "{ \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60).stdout
@@ -122,7 +123,7 @@ def _list_procs() -> list:
                     except OSError:
                         pass
         else:
-            out = subprocess.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True, timeout=20).stdout
+            out = hide.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True, timeout=20).stdout
             rows = [l.strip().split(None, 1) for l in out.splitlines() if l.strip()]
         return [(int(p), c) for p, c in rows if len(p) and str(p).isdigit()]
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -160,7 +161,7 @@ def is_ours(pid: int, script_name: str) -> bool:
 # --- systemd (Linux) ----------------------------------------------------------------------------------------------
 
 def _systemctl(*args: str, timeout: float = 20.0) -> subprocess.CompletedProcess:
-    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, encoding="utf-8",
+    return hide.run(["systemctl", "--user", *args], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=timeout)
 
 
@@ -203,7 +204,7 @@ def _systemd_run(unit: str, cmd: list, project, log, env: dict) -> int:
     args = ["systemd-run", "--user", "--unit", unit, "--collect", "-p", f"WorkingDirectory={project}"]
     args += [f"--setenv={k}={v}" for k, v in env.items()]
     args += ["bash", "-c", shell]
-    done = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    done = hide.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if done.returncode != 0:
         raise OSError(f"systemd-run: {done.stderr.strip() or done.returncode}")
     return _main_pid(unit)
@@ -249,7 +250,7 @@ def _cim_create(cmdline: str, cwd: str) -> int:
     pid из ответа CIM; не вышло (нет PowerShell, ReturnValue ≠ 0, нет pid) — OSError."""
     env = dict(os.environ, RPV_START_CMD=cmdline, RPV_START_CWD=cwd)
     try:
-        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", _CIM_CREATE],
+        out = hide.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", _CIM_CREATE],
                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
     except Exception as e:
         raise OSError(f"powershell: {e}") from e

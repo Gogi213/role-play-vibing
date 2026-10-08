@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lifewatch as LW  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
+import hide  # noqa: E402
 import pulsedata as PD  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -200,7 +201,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
               f"elif {{ systemctl list-units --all --plain --no-legend --state=active,activating 2>/dev/null; "
               f"ps -eo args 2>/dev/null; }} | grep -q -e '{pat}'; then echo producer; else echo dead; fi")
     try:
-        r = subprocess.run(D._ssh_cmd(alias, remote), capture_output=True, timeout=20)
+        r = hide.run(D._ssh_cmd(alias, remote), capture_output=True, timeout=20)
     except Exception:
         return "ssh-error"
     text = (r.stdout or b"").decode("utf-8", "replace").strip()
@@ -564,7 +565,7 @@ def check_server_idle(ws: dict, now, ssh_run=None) -> list:
         if ssh_run is not None:
             out = ssh_run(SERVER_PROBE)
         else:
-            r = subprocess.run(D._ssh_cmd(SERVER_ALIAS, SERVER_PROBE), capture_output=True, timeout=20)
+            r = hide.run(D._ssh_cmd(SERVER_ALIAS, SERVER_PROBE), capture_output=True, timeout=20)
             out = (r.stdout or b"").decode("utf-8", "replace") if r.returncode in (0, 1) else ""
     except Exception:
         return []
@@ -707,7 +708,7 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
     return acted
 
 
-def check_host_alerts(run=subprocess.run) -> int:
+def check_host_alerts(run=hide.run) -> int:
     """№17 аудита: адаптер проекта `RPV_HOST_ALERTS_CMD` печатает новые тревоги хоста по строке на тревогу; каждая
     строка — «ждёт вас» на Диспетчерской (ask.new_notice, тот же непринятый текст не дублируется). Нет настройки — молчим.
     Команда сама отвечает за «только новое»: принятая строка при повторной печати встанет снова. Возвращает число строк."""

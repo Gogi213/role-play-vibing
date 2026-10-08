@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
+import hide  # noqa: E402
 
 JOB_STATES = ("running", "queued", "done", "failed", "missing")
 TAIL_LINES = 30
@@ -28,7 +29,7 @@ def probe_job(alias: str, jid: str, ssh_cmd, timeout: float = 25.0):
     if not tpl or "{id}" not in tpl:
         return "ssh-error", ""
     try:
-        r = subprocess.run(ssh_cmd(alias, tpl.replace("{id}", shlex.quote(jid))), capture_output=True, timeout=timeout)
+        r = hide.run(ssh_cmd(alias, tpl.replace("{id}", shlex.quote(jid))), capture_output=True, timeout=timeout)
     except Exception:
         return "ssh-error", ""
     lines = (r.stdout or b"").decode("utf-8", "replace").splitlines()
@@ -81,7 +82,7 @@ def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
     if not cmd:
         return None
     try:
-        r = subprocess.run(ssh_cmd(alias, cmd), capture_output=True, timeout=timeout)
+        r = hide.run(ssh_cmd(alias, cmd), capture_output=True, timeout=timeout)
     except Exception:
         return None
     if r.returncode != 0:
@@ -110,7 +111,7 @@ def fetch_strays(alias: str, ssh_cmd, timeout: float = 25.0):
     if not cmd:
         return None
     try:
-        r = subprocess.run(ssh_cmd(alias, cmd), capture_output=True, timeout=timeout)
+        r = hide.run(ssh_cmd(alias, cmd), capture_output=True, timeout=timeout)
     except Exception:
         return None
     if r.returncode != 0:
