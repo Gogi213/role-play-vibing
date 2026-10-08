@@ -40,12 +40,13 @@ class WatchSandbox(unittest.TestCase):
         self.tickets_dir.mkdir(parents=True)
         self._orig = {
             "TICKETS_DIR": D.TICKETS_DIR, "STATE_FILE": D.STATE_FILE, "CEO_INBOX": D.CEO_INBOX,
-            "CEO_WAKE_LOG": D.CEO_WAKE_LOG,
+            "CEO_WAKE_LOG": D.CEO_WAKE_LOG, "DISPATCHER_DIR": D.DISPATCHER_DIR,
         }
         D.TICKETS_DIR = self.tickets_dir
         D.STATE_FILE = base / "state.json"
         D.CEO_INBOX = base / "ceo-inbox.md"
         D.CEO_WAKE_LOG = base / "ceo-wake.log"
+        D.DISPATCHER_DIR = base  # job-state.json / job-owners.json сторожа — в песочницу
         W.WATCH_STATE_FILE = base / "watch-state.json"
         W.WATCH_HEARTBEAT_FILE = base / "watch-heartbeat.json"
         W.DECK_OFF_FLAG = base / "deck-off"  # боевой флаг не влияет на тесты; тест «флаг есть» создаёт его сам
@@ -838,6 +839,34 @@ class TriageWaitsTests(WatchSandbox):
         with mock.patch.dict(sys.modules, {"haiku_aux": None}):  # импорт невозможен
             self.assertEqual(lifewatch.reason("j1", "OSError"), "")
         self.assertEqual(lifewatch.reason("j1", "  "), "")
+
+    # --- общее сопоставление «задание → тикет» (сторож и табло) ---
+    def _owned(self, tid, state, jid="j1"):
+        return lambda alias: [{"id": jid, "ticket": tid, "unit": "tk0s-x-" + jid, "state": state}]
+
+    def test_owned_running_job_is_a_producer_not_a_dead_target(self):
+        p = self._waiting("host:calc:/data/x/other-name.done")
+        tid = T.read_ticket(p).id
+        ws = {}
+        for _ in range(W.DEAD_WAIT_STRIKES + 1):
+            alive = W.triage_waits(ws, self.now, probe=lambda *a: "dead", owners_probe=self._owned(tid, "running"))
+        self.assertEqual(alive, {tid})
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_owned_failed_job_wakes_owner_once_and_owners_file_is_published(self):
+        import json
+        p = self._waiting("host:calc:/data/x/other-name.done")
+        tid = T.read_ticket(p).id
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("упало", t.log[-1].text)
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/data/x/other-name.done"})
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
+        self.assertEqual(T.read_ticket(p).status, "waiting")  # то же упавшее задание второй раз не будит
+        data = json.loads((D.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["calc"][0]["ticket"], tid)
 
     def test_job_adapter_silent_wakes_owner_after_ssh_strikes(self):
         p = self._waiting(self.SPEC)

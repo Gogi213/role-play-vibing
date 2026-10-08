@@ -269,6 +269,37 @@ def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now) -> None:
     acted[tkt.id] = spec
 
 
+def _fetch_owners(owners_probe) -> dict:
+    probe = owners_probe or (lambda alias: LW.fetch_owners(alias, D._ssh_cmd))
+    res = {}
+    for alias in sorted(D.WATCHED_ALIASES):
+        got = probe(alias)
+        if got is not None:
+            res[alias] = got
+    if res:
+        try:
+            LW.save_owners(D.DISPATCHER_DIR, res)
+        except OSError:
+            pass
+    return res
+
+
+def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now) -> str:
+    """Задания, записанные на этот тикет (сопоставление адаптера), уточняют цель `wait_for` любой формы: идёт/в очереди —
+    производитель есть (не «мёртвая цель»); упало (один раз на задание) — владелец будится с id задания."""
+    mine = [j for lst in owners.values() for j in lst if j["ticket"] == tkt.id]
+    seen = ws.setdefault("owner_failed_seen", [])
+    for j in mine:
+        if j["state"] == "failed" and j["id"] not in seen:
+            seen.append(j["id"])
+            del seen[:-200]
+            _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало; wait_for `{spec}` не дождётся", now)
+            return "woken"
+    if st == "dead" and any(j["state"] in ("running", "queued") for j in mine):
+        return "producer"
+    return st
+
+
 def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict) -> bool:
     """Одна проверка `job:`; True — тикет «жив» (ждёт, не сирота). failed — действие сразу (падение однозначно);
     missing — после DEAD_WAIT_STRIKES подряд (задание могло ещё не записаться); ssh-error — как у прочих форм."""
@@ -309,7 +340,7 @@ def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict) -> bo
     return False
 
 
-def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None) -> set:
+def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
     записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → blocked (CEO, решение)."""
@@ -317,6 +348,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None) -> set:
     ssh_fail = ws.setdefault("ssh_fail_wait", {})
     alive, seen, states = set(), set(), {}
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, D._ssh_cmd))
+    owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет» (и для табло)
     for path in T.list_tickets(D.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
@@ -331,6 +363,9 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None) -> set:
                 alive.add(tkt.id)
             continue
         st = _wait_target_state(tkt, probe)
+        st = _apply_owned_jobs(path, tkt, ws, spec, st, owners, now)
+        if st == "woken":
+            continue
         if st == "ssh-error":  # ssh молчит: условие не проверить; N раз подряд — владельцу тикета, не CEO
             ent = ssh_fail.get(tkt.id) or {}
             n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
