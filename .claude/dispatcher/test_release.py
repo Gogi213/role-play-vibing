@@ -38,6 +38,13 @@ def make_root(d: Path, version="1.0.0", changelog="## 1.0.0\n"):
 
 
 class ReleaseTests(unittest.TestCase):
+    def setUp(self):  # клоны цели — в каталог рядом с STATE, не в настоящий ~/.claude
+        self._st = tempfile.TemporaryDirectory()
+        patcher = mock.patch.object(release, "STATE", Path(self._st.name) / "s.json")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self._st.cleanup)
+
     def test_repo_versions_consistent(self):
         self.assertIsNone(release.check())
 
@@ -85,15 +92,43 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             fake = FakeClaude(["1.8.0"], fail_on=["plugin", "install", f"{release.NAME}@{release.NAME}"])
             self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 1)
-            adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
+            adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"] and c[3].startswith(release.REPO)]
             self.assertEqual(adds[0], ["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"])
             self.assertEqual(adds[1:], [["plugin", "marketplace", "add", release.REPO]] * 3)   # возврат прежнего — с повторами
 
     def test_update_failure_restores_pinned_marketplace(self):  # add после remove упал — прежний маркетплейс возвращается
         fake = FakeClaude(["1.8.0"], fail_on=["plugin", "marketplace", "add"], pinned="v1.8.0")
         self.assertEqual(release.update(fake, Path(tempfile.gettempdir()) / "x.json"), 1)
-        adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
+        adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"] and c[3].startswith(release.REPO)]
         self.assertEqual(adds, [["plugin", "marketplace", "add", release.REPO]] + [["plugin", "marketplace", "add", f"{release.REPO}#v1.8.0"]] * 3)
+
+    def test_github_down_during_reinstall_adds_from_local_clone(self):  # TK-105 п.1: плагин остаётся установленным
+        fake = FakeClaude(["1.8.0"])
+        base = fake.__call__
+
+        def run(cmd, **kw):
+            if cmd[0] == "git" and "clone" in cmd:
+                Path(cmd[-1]).mkdir(parents=True, exist_ok=True)
+            if cmd[0] != "git" and cmd[1:4] == ["plugin", "marketplace", "add"] and cmd[4].startswith(release.REPO):
+                return subprocess.CompletedProcess(cmd, 1, "", "github down")
+            return base(cmd, **kw)
+        self.assertEqual(release._reinstall(f"{release.REPO}#v1.8.0", run), 0)
+        local = [c[-1] for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]][-1]
+        self.assertTrue(local.startswith(str(release.STATE.parent)) and Path(local).exists())   # источник жив, не в %TEMP%
+        self.assertTrue(any(c[:3] == ["plugin", "install", f"{release.NAME}@{release.NAME}"] for c in fake.calls))
+
+    def test_restart_and_verify_hidden_and_timeout_caught(self):  # TK-105 п.3/п.4
+        seen = []
+
+        def run(cmd, **kw):
+            seen.append(kw)
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        with tempfile.TemporaryDirectory() as t:
+            self.assertFalse(release.restart_services(Path(t), Path(t), run))
+            self.assertFalse(release.verify_alive(Path(t), Path(t), run, wait_s=0))
+        self.assertTrue(seen and all(k["timeout"] == release.CLAUDE_TIMEOUT_S for k in seen))
+        if os.name == "nt":
+            self.assertTrue(all(k["creationflags"] & release.CREATE_NO_WINDOW for k in seen))
 
     def test_install_uses_project_scope_when_installed_there(self):
         with tempfile.TemporaryDirectory() as t:
@@ -222,8 +257,15 @@ class AutoReleaseTests(unittest.TestCase):
 
     def test_spawn_auto_detached_and_switchable(self):
         calls = []
+        env = {k: v for k, v in os.environ.items() if k != "RPV_AUTORELEASE"}   # тест не зависит от env ПК
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.assertTrue(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append((a, k))))
         self.assertIn("auto", calls[0][0][0])
+        if os.name == "nt":
+            fl = calls[0][1]["creationflags"]
+            self.assertTrue(fl & release.CREATE_NO_WINDOW and not fl & subprocess.DETACHED_PROCESS)
         old = os.environ.get("RPV_AUTORELEASE")
         os.environ["RPV_AUTORELEASE"] = "0"
         try:
