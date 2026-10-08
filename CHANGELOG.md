@@ -6,7 +6,7 @@
 
 ### Исправлено (TK-105 пп.5–6)
 
-- Новый `hide.py`: `run()` — скрытое окно и предел времени по умолчанию (120 с, по таймауту процесс убит); `hidden_console()` — роль запускается со СКРЫТОЙ консолью (CREATE_NEW_CONSOLE + SW_HIDE): при `CREATE_NO_WINDOW` у родителя каждый внук (bash, ssh, git) получал свою видимую консоль и зависшие ssh-проверки висели окнами. Все `subprocess.run` служб (dispatch, watch, start, doctor, ci_watch, lifewatch, ask, worktree_hygiene — в т.ч. PowerShell присмотра) идут через `hide.run`.
+- Новый `hide.py`: `run()` — скрытое окно и предел времени по умолчанию (120 с, по таймауту процесс убит); `hidden_console()` — роль запускается со СКРЫТОЙ консолью (CREATE_NEW_CONSOLE + SW_HIDE): при `CREATE_NO_WINDOW` у родителя каждый внук (bash, ssh, git) получал свою видимую консоль и зависшие ssh-проверки висели окнами. Все `subprocess.run` служб (haiku_aux `claude -p`, board machines/plainify, dispatch, watch, start, doctor, ci_watch, lifewatch, ask, worktree_hygiene — в т.ч. PowerShell присмотра) идут через `hide.run`.
 
 ## 1.8.20 — 2026-10-08
 

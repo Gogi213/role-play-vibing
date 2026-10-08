@@ -41,6 +41,13 @@ class HideTests(unittest.TestCase):
             self.assertIsNone(re.search(r"subprocess\.run\(", src), f"{m}.py: голый subprocess.run")
             self.assertNotIn("run=subprocess.run", src, m)
 
+    def test_every_runner_default_is_hidden(self):
+        for rel in ["dispatcher/haiku_aux.py", "board/machines.py", "board/plainify.py", "dispatcher/board_push.py",
+                    "dispatcher/ticket.py"]:
+            src = (HERE.parent / rel).read_text(encoding="utf-8")
+            self.assertNotRegex(src, r"(runner|run)=subprocess\.run", rel)
+            self.assertIsNone(re.search(r"return subprocess\.run\(\w+, capture_output", src), rel)
+
     def test_role_launch_uses_hidden_console(self):
         src = (HERE / "dispatch.py").read_text(encoding="utf-8")
         self.assertIn("**hide.hidden_console()", src)

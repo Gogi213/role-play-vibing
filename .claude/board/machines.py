@@ -71,9 +71,16 @@ def parse_output(text: str) -> dict | None:
     return got if all(k in got for k in ("up", "cpu", "sect", "mem")) else None
 
 
+def _hidden_run(cmd, **kw):
+    """subprocess.run без консольного окна на Windows (TK-105): служба без консоли иначе плодит видимые окна."""
+    if os.name == "nt":
+        kw.setdefault("creationflags", 0x08000000)
+    return subprocess.run(cmd, **kw)
+
+
 def _run(cmd: list, timeout: float = 6) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+        return _hidden_run(cmd, capture_output=True, text=True, timeout=timeout).stdout
     except (OSError, subprocess.SubprocessError):
         return ""
 
@@ -165,7 +172,7 @@ def machine_view(mid: str, sample: dict | None, prev: tuple | None = None, off: 
     return {**base, "load": now["text"], "now": now}
 
 
-def ssh_sample(target: str, progress_dir: str, run=subprocess.run) -> dict | None:
+def ssh_sample(target: str, progress_dir: str, run=_hidden_run) -> dict | None:
     """Один опрос машины; любая ошибка ssh/разбора — None."""
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
     if os.environ.get("RPV_DECK_KEY"):

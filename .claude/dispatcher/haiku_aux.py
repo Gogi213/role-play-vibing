@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import tempfile
 
+import hide
+
 MODEL = os.environ.get("RPV_HAIKU_MODEL") or "claude-haiku-5-5"
 EFFORT = os.environ.get("RPV_HAIKU_EFFORT") or "xhigh"
 TIMEOUT_S = 90
@@ -30,7 +32,7 @@ def _claude():
     return c if c and (os.path.isfile(c) or shutil.which(c)) else None
 
 
-def ask(system: str, text: str, runner=subprocess.run, claude: str | None = None, timeout: int = TIMEOUT_S,
+def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S,
         as_json: bool = False):
     """Ответ модели (str) или None; as_json — весь JSON `--output-format json` (result, usage) как dict. Вход режется до хвоста MAX_IN знаков."""
     claude = claude if claude is not None else _claude()

@@ -22,6 +22,14 @@ from pathlib import Path
 
 MODEL = os.environ.get("RPV_PLAIN_MODEL") or "claude-haiku-5-5"
 CALL_TIMEOUT_S = 60
+
+
+def _hidden_run(cmd, **kw):
+    """subprocess.run без консольного окна на Windows (TK-105): claude -p из службы без консоли иначе открывает окно."""
+    if os.name == "nt":
+        kw.setdefault("creationflags", 0x08000000)
+    return subprocess.run(cmd, **kw)
+
 MAX_PER_HOUR = 60
 RETRY_S = (60, 300, 1800)  # пауза после 1-го, 2-го, 3-го сбоя; после третьего вход не повторяется
 SYSTEM = ("Ты пишешь для табло одну короткую строку по-русски (до 90 знаков) про один процесс команды: что стало готово или что "
@@ -57,7 +65,7 @@ def norm(text: str) -> str | None:
 
 
 class Plain:
-    def __init__(self, cache_path, runner=subprocess.run, claude: str | None = None):
+    def __init__(self, cache_path, runner=_hidden_run, claude: str | None = None):
         self.cache_path, self.runner = Path(cache_path), runner
         self.claude = claude if claude is not None else find_claude()
         self.lock = threading.Lock()
