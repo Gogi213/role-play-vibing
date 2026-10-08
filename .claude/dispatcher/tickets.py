@@ -389,6 +389,14 @@ def cmd_status(args) -> int:
     for r in rows:
         print(fmt.format(*r))
     now = datetime.now().astimezone()
+    for path in T.list_tickets(TICKETS_DIR):  # ожидания по времени: «ждёт до …, осталось N ч»
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        left = T.at_left_text(tkt.header.get("wait_for", "")) if tkt.status == "waiting" else ""
+        if left:
+            print(f"{tkt.id}: {left}")
     print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(D._today(now), 0.0):.2f}, "
           f"за последний час ${D._rolling_hour_cost(state, now):.2f}")
     return 0

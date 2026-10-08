@@ -212,6 +212,7 @@ def check_stale_plan(now) -> list:
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
 OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # находки адресуются владельцу тикета, не CEO
+AT_GRACE_MIN = int(P.env("WATCH_AT_GRACE_MIN", "30"))  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
 SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
@@ -247,8 +248,9 @@ def _wait_target_state(tkt, probe) -> str:
         return "invalid"
     if parsed[0] == "file":
         return "exists"
-    if parsed[0] == "at":  # ожидание по времени: не зависло и не сирота, пока не наступит время (TK-092 п.6)
-        return "exists"
+    if parsed[0] == "at":  # ожидание по времени: не зависло и не сирота до времени + допуск; позже диспетчер уже обязан был разбудить
+        late = datetime.now().astimezone() - parsed[1] > timedelta(minutes=AT_GRACE_MIN)
+        return "dead" if late else "exists"
     if parsed[0] == "ticket":
         return "exists" if (D.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
     if parsed[0] == "host":

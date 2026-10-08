@@ -900,6 +900,19 @@ class TriageWaitsTests(WatchSandbox):
         text = T.at_left_text("at:2026-10-09T02:00:00+04:00", datetime.fromisoformat("2026-10-08T05:00:00+04:00"))
         self.assertEqual(text, "ждёт до 09.10 02:00, осталось 21 ч 00 мин")
 
+    def test_at_wait_past_time_plus_grace_wakes_owner(self):
+        p = self._waiting("at:2000-01-01T00:00:00+00:00")
+        ws = {}
+        for _ in range(W.DEAD_WAIT_STRIKES):
+            W.triage_waits(ws, self.now)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        recent = (datetime.now().astimezone() - timedelta(minutes=W.AT_GRACE_MIN - 5)).isoformat(timespec="seconds")
+        p2 = self._waiting("at:" + recent)
+        for _ in range(W.DEAD_WAIT_STRIKES + 1):
+            W.triage_waits({}, self.now)
+        self.assertEqual(T.read_ticket(p2).status, "waiting")  # в допуске — молчим
+
     def test_job_adapter_silent_wakes_owner_after_ssh_strikes(self):
         p = self._waiting(self.SPEC)
         ws = {}
