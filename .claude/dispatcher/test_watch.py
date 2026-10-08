@@ -1376,5 +1376,22 @@ class NoProgressViewTests(WatchSandbox):
         self.assertIn("posix-путь на Windows", inbox.call_args[0][2])
 
 
+class HostAlertsAdapterTests(WatchSandbox):
+    """№17: RPV_HOST_ALERTS_CMD → строки «ждёт вас» через ask.new_notice."""
+
+    def test_lines_become_notices_without_duplicates(self):
+        root = Path(self.tmp.name) / "proj"
+        out = types.SimpleNamespace(stdout="диск 95 %\n\nсвязь пропала\n")
+        with mock.patch.dict(os.environ, {"RPV_HOST_ALERTS_CMD": "x"}), mock.patch.object(W.D, "PROJECT_ROOT", root):
+            self.assertEqual(W.check_host_alerts(run=lambda *a, **k: out), 2)
+            W.check_host_alerts(run=lambda *a, **k: out)
+        qs = sorted((root / ".claude" / "pulse" / "questions").glob("q-host-*.json"))
+        self.assertEqual(len(qs), 2)
+
+    def test_no_setting_is_silent(self):
+        with mock.patch.dict(os.environ, {"RPV_HOST_ALERTS_CMD": ""}):
+            self.assertEqual(W.check_host_alerts(run=lambda *a, **k: 1 / 0), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
