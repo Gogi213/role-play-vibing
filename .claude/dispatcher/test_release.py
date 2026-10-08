@@ -175,7 +175,6 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertEqual(len(restarts), 2)  # службы подняты заново и после отката
         self.assertEqual(self.journal()[-1]["result"], "rolled-back")
         self.assertIn("rolled-back", self.notices()[0]["text"])
-        self.assertFalse((self.proj / ".claude" / "dispatcher" / "ceo-digest.md").exists())
 
     def test_rollback_failure_is_reported(self):
         rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=False, tags=())  # тега прошлой версии нет

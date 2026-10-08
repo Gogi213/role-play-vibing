@@ -27,7 +27,7 @@ STALE_S = float(os.environ.get("RPV_SUPERVISE_STALE_S", "600"))
 PERIOD_MIN = 5
 # служба -> (файл сердцебиения, поле времени)
 BEATS = {"dispatch": ("state.json", "last_tick"), "watch": ("watch-heartbeat.json", "ts"),
-         "ci_watch": ("ci-heartbeat.json", "ts"), "ceo_triage": ("triage-heartbeat.json", "ts")}
+         "ci_watch": ("ci-heartbeat.json", "ts")}
 
 
 def heartbeat_age(path: Path, field: str, now: float) -> float | None:
