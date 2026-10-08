@@ -173,6 +173,50 @@ class ResultTests(unittest.TestCase):
         self.refused("engineer", "accept", pr=7, sha=SHA)         # accept не для инженера
         self.refused("judge", "pr", pr=7, sha=SHA)                # pr не для Судьи
         self.refused("", "blocked")                               # не роль
+        self.refused("", "continue")                              # не роль
+        self.refused("judge", "continue")                         # continue не для Судьи
+        self.refused("", "done")                                  # CEO: done требует --path
+
+    # --- TK-090: закрытие CEO, done после принятых PR, continue
+    def test_ceo_closes_ticket_with_done(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.assertEqual(self.res("", "done", path="out.md"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("done", ""))
+        self.assertEqual(t.log[-1].author, "ceo")
+
+    def test_engineer_done_after_landed_prs_still_goes_to_judge(self):  # done несёт и не-PR работу — Судья принимает финал
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        T.write_header_updates(self.path, {"pr": "7"}, now=NOW)
+        T.append_log(self.path, "merge", "PR #7 влит в main на голове aaaaaaa (проверено: merged).", now=NOW)
+        self.res("engineer", "done", path="out.md")
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("in_review", "judge"))
+
+    def test_landed_prs_only_from_merge_author(self):
+        import merge_rule
+        T.append_log(self.path, "engineer", "PR #7 влит в main на голове aaaaaaa", now=NOW)
+        self.assertEqual(merge_rule.landed_prs(self.tkt()), set())
+        T.append_log(self.path, "merge", "PR #9 влит в main на голове bbbbbbb (проверено: merged).", now=NOW)
+        self.assertEqual(merge_rule.landed_prs(self.tkt()), {9})
+
+    def test_ceo_close_and_comment_after_do_not_wake_judge(self):  # TK-090 б
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("", "done", path="out.md")
+        self.assertIsNone(D.decide(self.tkt(), {}, NOW))
+        TK.cmd_comment(type("A", (), {"id": self.tid, "author": "ceo", "text": "закрыто", "next": None})())
+        t = self.tkt()
+        self.assertEqual(t.status, "done")
+        self.assertIsNone(D.decide(t, {}, NOW))
+
+    def test_continue_keeps_role_and_is_capped(self):
+        for _ in range(R.CONTINUE_MAX):
+            self.assertEqual(self.res("engineer", "continue"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("in_progress", "engineer"))
+        self.refused("engineer", "continue")                    # шестой подряд
+        self.assertEqual(self.res("engineer", "blocked"), 0)
+        self.assertEqual(self.res("engineer", "continue"), 0)   # серию оборвал другой итог
 
     def test_check_unit(self):
         self.assertEqual(R.check("engineer", "blocked", "x"), "")

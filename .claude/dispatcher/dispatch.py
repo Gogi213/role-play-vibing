@@ -233,7 +233,7 @@ PROMPT_TEMPLATE = (
     "не жди в сессии. Трать минимум: "
     "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
     "результатом. Сделай следующий шаг и сдай итог командой "
-    "`{tickets_cli} result {tid} <done|pr|accept|return|blocked|ask-owner|wait> --why \"что сделал, что "
+    "`{tickets_cli} result {tid} <done|pr|accept|return|blocked|ask-owner|wait|continue> --why \"что сделал, что "
     "дальше\"` ДО истечения лимита (доказательство: done — --path, pr — --pr --sha, accept/return — --sha, "
     "wait — --form; неполная команда — отказ с подсказкой): итог обязателен, частичный прогресс не провал. "
     "Кого будить дальше и status/wait_for ставит таблица маршрутов — --next и шапку руками не правь; "
@@ -896,11 +896,23 @@ def _review_returns(state: dict, tid: str) -> int:
     return int((state or {}).get("review_returns", {}).get(tid, 0))
 
 
+NO_REVIEW_MARK = "закрыто без ревью"  # в записи «[итог: done]…» (tickets.py result: CEO или все PR уже приняты и влиты)
+
+
+def closed_without_review(tkt: T.Ticket) -> bool:
+    """done закрыт без нового круга ревью (TK-090 а/б): последняя запись — CEO (закрыл сам или оставил комментарий к
+    закрытому) либо итог done с пометкой «закрыто без ревью». Иначе (г) будило бы Судью за каждую такую запись."""
+    if tkt.status != "done" or not tkt.log:
+        return False
+    last = tkt.log[-1]
+    return T.author_is(last.author, "ceo") or (last.text.lstrip().startswith("[итог: done]") and NO_REVIEW_MARK in last.text)
+
+
 def _review_pending(tkt: T.Ticket, state: dict = None) -> bool:
     """done при заданном reviewer, но последняя запись лога не от ревьюера (и не dispatcher) — правило (г)
     ещё запустит ревью: задача не закончена. На пределе возвратов (MAX_REVIEW_RETURNS) ревьюера уже не будят —
     ревью не «ожидается», решает CEO."""
-    if tkt.status != "done" or tkt.reviewer not in ROLE_KEYS:
+    if tkt.status != "done" or tkt.reviewer not in ROLE_KEYS or closed_without_review(tkt):
         return False
     if state is not None and _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
         return False
@@ -1010,6 +1022,8 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
     if status in ("done", "in_review") and tkt.reviewer in ROLE_KEYS:
         reviewer = tkt.reviewer
         last_author = tkt.log[-1].author if tkt.log else ""
+        if closed_without_review(tkt):
+            return None
         if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":
             return None
         if _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:

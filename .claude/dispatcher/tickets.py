@@ -11,7 +11,7 @@
     tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
         # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
-    tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait; следующую роль ставит маршрут
+    tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait|continue; следующую роль ставит маршрут
     tickets.py comment TK-001 --author researcher --text "..."  # промежуточная заметка без смены хода
     tickets.py accept TK-001 --pr 7 --sha <голова>              # только Судья: принято на этой голове → вливает merge_rule
     tickets.py start TK-001                                     # backlog|stopped → todo
@@ -203,6 +203,11 @@ def cmd_result(args) -> int:
         print(f"result: {err}", file=sys.stderr)
         return 1
     tkt = T.read_ticket(path)
+    if args.result == "continue" and routes.continue_streak(tkt, role) >= routes.CONTINUE_MAX:
+        print(f"result: continue уже {routes.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
+              f"либо blocked", file=sys.stderr)
+        return 1
+    role = role or "ceo"  # check() пускает сессию без роли только к done (закрыть тикет)
     why = args.why.strip()
     on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
@@ -220,6 +225,8 @@ def cmd_result(args) -> int:
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: wait]{proof} — {why}")
         return rc
+    if args.result == "done" and role == "ceo":
+        proof += f" ({D.NO_REVIEW_MARK})"
     with T.ticket_lock(path):
         T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
         if args.result == "pr":
@@ -253,6 +260,7 @@ def cmd_accept(args) -> int:
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
         return 1
     import merge_rule
+    import routes
     slug = (getattr(args, "repo", None) or D.P.env("CI_REPO", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или RPV_CI_REPO", file=sys.stderr)
@@ -261,6 +269,20 @@ def cmd_accept(args) -> int:
     if err:
         print(f"accept: {err}", file=sys.stderr)
         return 1
+    tkt = T.read_ticket(path)
+    prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))} | {int(args.pr)}
+    if (routes.last_owner_result(tkt) == "done" and prs <= merge_rule.landed_prs(tkt) | {int(args.pr)}
+            and merge_rule.merged_done(slug, int(args.pr))):
+        # финальная приёмка: PR уже влит (все PR тикета влиты), владелец сдавал done — ждать нечего, круга не будет (TK-090 а)
+        with T.ticket_lock(path):
+            T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]} (уже влит). {args.text or 'Тикет закрыт.'}")
+            acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
+            acc.pop(int(args.pr), None)
+            T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "done", "wait_for": "",
+                                         "on_met": "", "next": ""})
+        bus_emit(args.id, "статус", {"accepted": f"{args.pr}@{args.sha}", "status": "done"})
+        print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} (влит) → status: done")
+        return 0
     with T.ticket_lock(path):
         T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}. "
                      + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."))
@@ -417,7 +439,7 @@ def main(argv=None) -> int:
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
     p_result.add_argument("id")
-    p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait")
+    p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait | continue")
     p_result.add_argument("--why", default="", help="зачем/почему, ≤ 200 знаков (обязательно)")
     p_result.add_argument("--pr", type=int, default=None, help="pr, accept: номер PR")
     p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")

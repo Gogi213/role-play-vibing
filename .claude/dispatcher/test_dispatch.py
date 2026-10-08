@@ -2398,7 +2398,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_prompt_has_next_rules_and_no_mention_encouragement(self):
         prompt = D.build_prompt("researcher", "TK-005")
-        self.assertIn(" result TK-005 <done|pr|accept|return|blocked|ask-owner|wait> --why", prompt)
+        self.assertIn(" result TK-005 <done|pr|accept|return|blocked|ask-owner|wait|continue> --why", prompt)
         self.assertIn("--next и шапку руками не правь", prompt)
         self.assertIn("только промежуточная заметка", prompt)
         self.assertIn("@упоминания в тексте никого не будят", prompt)
