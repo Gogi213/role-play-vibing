@@ -9,12 +9,14 @@ import re
 import subprocess
 from pathlib import Path
 
+import hide
+
 CLOSED = ("done", "stopped")
 TOKEN = re.compile(r"tk0*(\d+)", re.I)
 
 
 def _git(project: Path, *a, cwd=None, timeout=60):
-    return subprocess.run(["git", *a], cwd=str(cwd or project), capture_output=True, text=True,
+    return hide.run(["git", *a], cwd=str(cwd or project), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout)
 
 

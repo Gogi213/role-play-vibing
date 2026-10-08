@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
+import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import bus_link  # noqa: E402
@@ -413,7 +414,7 @@ def _diagnose_failed_unit(host: str, unit: str) -> None:
                 paths.append(path)
         if not paths:
             return
-        r = subprocess.run(_ssh_cmd(host, f"journalctl -u {shlex.quote(base)} -n 80 --no-pager 2>&1 | tail -c 8000"),
+        r = hide.run(_ssh_cmd(host, f"journalctl -u {shlex.quote(base)} -n 80 --no-pager 2>&1 | tail -c 8000"),
                            capture_output=True, timeout=30)
         diag = HA.diagnose(unit, (r.stdout or b"").decode("utf-8", "replace"))
         for path in paths if diag else []:
@@ -592,7 +593,7 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
     result = False
     _log_ssh_call(alias, what, arg, "аварийный" if _bus_down_long() else ("первая" if ckey not in _WAIT_CACHE else "событие-юнита"))
     try:
-        r = subprocess.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
+        r = hide.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
         out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
         if out.startswith("@@WL\n") or out.strip() == "@@WL":
             _WL_REG.add((alias, arg))
@@ -662,7 +663,7 @@ def _reconcile() -> None:
         keys.sort()
         _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
         try:
-            r = subprocess.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=45)
+            r = hide.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=45)
         except Exception as e:
             _wait_err(f"reconcile:{alias}", f"ssh: {type(e).__name__}: {e}")
             continue
@@ -1341,7 +1342,7 @@ def _pid_alive_name(pid, expect_name: str = None) -> bool:
         return False
     if os.name == "nt":
         try:
-            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            out = hide.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
             for line in (out.stdout or "").splitlines():
                 fields = [f.strip().strip('"') for f in line.split(",")]
@@ -1357,7 +1358,7 @@ def _ps_field(pid, field: str):
     """Поле процесса из `ps -o <field>= -p <pid>` (macOS/BSD, где нет /proc; stdlib). Строка (может быть пустой),
     None — ps нет или процесса нет."""
     try:
-        out = subprocess.run(["ps", "-o", f"{field}=", "-p", str(int(pid))], capture_output=True, text=True,
+        out = hide.run(["ps", "-o", f"{field}=", "-p", str(int(pid))], capture_output=True, text=True,
                              encoding="utf-8", errors="replace", timeout=5,
                              env=dict(os.environ, LC_ALL="C", TZ="UTC0"))  # lstart зависит от локали и пояса
     except Exception:
@@ -1414,7 +1415,7 @@ def _pid_kill(pid) -> None:
         return
     if os.name == "nt":
         try:
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=5)
+            hide.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=5)
         except Exception:
             pass
         return
@@ -1502,7 +1503,7 @@ def _kill_proc(info: dict) -> None:
 def _kill_tree_nt(pid) -> None:
     """Windows: `taskkill /T /F /PID` — процесс и все его потомки."""
     try:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
+        hide.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
     except Exception:
         pass
 
@@ -1658,7 +1659,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     # своя группа процессов (на Windows параметр без действия): остановка CEO снимает роль вместе с потомками
     try:
         popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
-                       start_new_session=True)
+                       **hide.hidden_console())
     except BaseException:
         state.get("active_runs", {}).pop(tid, None)
         save_state(state)
@@ -2049,14 +2050,14 @@ def _find_pid_by_session(session_id) -> "int | None":
             ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
                   f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
                   "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
-            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+            out = hide.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
                                  encoding="utf-8", errors="replace", timeout=30).stdout
             for ln in out.splitlines():
                 f = ln.split()
                 if len(f) == 2 and all(x.isdigit() for x in f):
                     pairs.append((int(f[0]), int(f[1])))
         else:
-            out = subprocess.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
+            out = hide.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
                                  encoding="utf-8", errors="replace", timeout=10).stdout
             for ln in out.splitlines():
                 f = ln.split(None, 2)
@@ -2240,7 +2241,7 @@ ON_MET_DIRS = ("tools", ".claude")
 
 
 def _git_tracked(rel: str) -> bool:
-    r = subprocess.run(["git", "-C", str(PROJECT_ROOT), "ls-files", "--error-unmatch", "--", rel],
+    r = hide.run(["git", "-C", str(PROJECT_ROOT), "ls-files", "--error-unmatch", "--", rel],
                        capture_output=True, timeout=20)
     return r.returncode == 0
 
@@ -2303,7 +2304,8 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
     out = err = b""
     code, status = None, "ok"
     try:
-        proc = subprocess.Popen(argv, cwd=str(PROJECT_ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(argv, cwd=str(PROJECT_ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                **hide.hidden())
         try:
             out, err = proc.communicate(timeout=ON_MET_TIMEOUT_S)
             code = proc.returncode
