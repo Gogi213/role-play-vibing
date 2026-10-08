@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import timedelta
 
 import sys
 from pathlib import Path
@@ -16,26 +15,18 @@ TAGS_ALL = {"pc": {"tag": "ПК", "name": "этот ПК", "color": "purple"}, "
         "calc": {"tag": "СЧЁТ", "name": "сервер счёта", "color": "blue"},
         "col": {"tag": "КОЛ", "name": "сборщик", "color": "gray"}, "you": {"tag": "ВЫ", "name": "вы", "color": "amber"}}
 MORDER = ("pc", "vps", "calc", "col")
-V2 = {"collector": "col"}  # id машины v1 → v2
 ROLE_LC = {"engineer": "инженер", "researcher": "исследователь", "judge": "судья", "ceo": "CEO"}
 EMPTY_FOR = {"text": "", "on": None}
 ACTIVE = ("run", "review", "repair")  # «в работе»: делается / проверяется / чинится
-STATE_RU = {"done": "готово", "run": "делается", "review": "проверяется", "repair": "чинится", "wait": "ждёт решения владельца",
-            "bad": "проблема", "todo": "впереди"}
 COUNT_KEYS = ("done", "run", "review", "repair", "wait", "todo", "bad")
 EXECUTORS = ("инженер", "исследователь")  # чьи «делается»-шаги после возврата Судьи становятся «чинится»
 ETA_LO, ETA_HI = 0.75, 1.4   # вилка «осталось»: доли суммы eta_min шагов критической цепочки
 ETA_MIN_MEASURES = 2         # меньше замеров (шагов цепочки с eta_min) — вилку не показываем
 WORK_GAP_MIN = 45            # «прошло»: промежуток между событиями длиннее — засчитывается как столько минут
-AUTO_TITLE_LEN = 60
 BOARD_RE = re.compile(r"табло|шкал|дашборд|страниц|диспетчерск", re.I)
 BOARD_TITLE_RE = re.compile(r"табло|дашборд|диспетчерск", re.I)
 FEED_AGE_S = 21600
 WAITING_MAX_AGE_S = 12 * 3600
-
-
-def _mid(m: str) -> str:
-    return V2.get(m, m)
 
 
 HUMAN_WORDS = 6

@@ -81,15 +81,6 @@ class Finding:
 
 # --- сбор находок (чистые функции — без сети, кроме ssh-хелперов ниже) ------------------------
 
-def _ticket_status(tid: str):
-    """status тикета по id или None (файла нет/не читается)."""
-    path = D.TICKETS_DIR / f"{tid}.md"
-    try:
-        return T.read_ticket(path).status
-    except Exception:
-        return None
-
-
 def check_blocked_and_needs_owner(now) -> list:
     """п.2б: blocked/needs_owner — сторож пересобирает список сам (не полагаясь только на то, что
     dispatch.py однажды уже написал в ceo-inbox — вдруг тот запуск и был тем, что легло)."""
