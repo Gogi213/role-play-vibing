@@ -21,6 +21,17 @@ class EnduranceShort(unittest.TestCase):
     def test_watch_round(self):
         self.assertEqual(endurance.main(["--modes", "watch", "--idle-max", "30"]), 0)
 
+    def test_close_kills_everything_started(self):  # №14/9: исключение в раунде не оставляет сторожа/шину/диспетчера
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            h = endurance.Harness(Path(tmp), 30, 1)
+            procs = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]) for _ in range(3)]
+            self.addCleanup(lambda: [p.kill() for p in procs if p.poll() is None])
+            h.proc, h.watch, h.bus = procs
+            h.close()
+            h.log_fh.close()
+            self.assertTrue(all(p.poll() is not None for p in procs))
+
     def test_inbox_pages_past_100_events(self):
         with tempfile.TemporaryDirectory() as tmp:
             h = endurance.Harness(Path(tmp), 30, 1)

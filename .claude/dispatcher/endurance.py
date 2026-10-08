@@ -239,6 +239,12 @@ class Harness:
             self.proc.wait(timeout=10)
         (self.disp / "dispatch.pid").unlink(missing_ok=True)
 
+    def close(self):
+        """Гасит всё, что запустил стенд (№14/9 аудита): исключение посреди раунда не оставляет сторожа и шину жить."""
+        self.kill_dispatcher()
+        self.kill_watcher()
+        self.kill_bus()
+
     # --- наблюдатель простоя: считает независимо от диспетчера ---
     def observe(self):
         idle_since = None
@@ -479,7 +485,7 @@ def main(argv=None) -> int:
             if deadline is None and n >= a.rounds or deadline and time.time() >= deadline:
                 break
     finally:
-        h.kill_dispatcher()
+        h.close()
         if not a.keep and not bad:
             import shutil
             h.log_fh.close()
