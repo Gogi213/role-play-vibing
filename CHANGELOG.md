@@ -2,7 +2,7 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
-## 1.8.12 — 2026-10-08
+## 1.8.13 — 2026-10-08
 
 ### Исправлено (TK-101, ложные блоки сторожа жизни)
 
@@ -10,6 +10,12 @@
 - Повтор падения (и застой запусков) — тикет Судье (`next: judge`, `in_progress`), а не `blocked` → CEO.
 - Договор адаптера: снятое владельцем задание — `done`, не `failed` (`lifewatch.py`, `docs/reliability.md`).
 - Тесты: `pytest.ini` в корне (conftest.py подхватывается из любого каталога), `RPV_BUS_DISABLE=1` в conftest — токен `~/.rpv-bus-token` владельца больше не включает шину в тестах.
+
+## 1.8.12 — 2026-10-08
+
+### Удалено (TK-100, срезы №2 и №3 сводного списка)
+
+- `.claude/board/board.py` (TUI на Textual, 1 033 строки; ни один скрипт и хук его не зовёт), `sample-view2.json` (799) и `page2.html` (403; страница отдаёт только `dispetcher.html`). Ссылки в `VIEW2.md`, `docs/dashboard.md`, `board_push.py` исправлены. Пример `view2` — в живом `status.json`. Веб-табло и `mcp_server.py` без изменений.
 
 ## 1.8.11 — 2026-10-08
 
