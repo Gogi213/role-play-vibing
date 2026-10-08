@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.18 — 2026-10-08
+
+### Изменено (TK-100, хвост №6/№26)
+
+- Доки: убраны описания удалённого — `RPV_WATCH_DISPATCH_STALE_MIN`, `RPV_WATCH_SUMMARY_HOURS`, `RPV_DECK_ROOT`, `RPV_WATCH_DECK_*` (configuration.md), виды `deck-*` (reliability.md).
+
 ## 1.8.17 — 2026-10-08
 
 ### Изменено (TK-100, срезы №6 и №26)
