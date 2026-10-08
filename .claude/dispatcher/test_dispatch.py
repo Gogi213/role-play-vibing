@@ -2662,7 +2662,7 @@ class DispatchRunTests(unittest.TestCase):
         self.review_round(path, 2, "in_review", next_role="ceo")
         self.assertNotIn(path.stem, D.load_state().get("review_returns", {}))
 
-    def test_three_returns_then_resubmit_goes_to_ceo_and_reviewer_is_not_woken(self):
+    def test_three_returns_then_resubmit_goes_to_owner_and_reviewer_is_not_woken(self):
         path = self.review_setup()
         tid = path.stem
         for n in (1, 2, 3):
@@ -2673,12 +2673,12 @@ class DispatchRunTests(unittest.TestCase):
         D.tick()
         tkt = T.read_ticket(path)
         self.assertEqual(calls, [], "ревьюера на четвёртый круг не будим")
-        self.assertEqual(tkt.status, "in_review")
+        self.assertEqual(tkt.status, "needs_owner")  # TK-094: владельцу («ждёт вас»), не next: ceo
         self.assertEqual(tkt.log[-1].author, "dispatcher")
         self.assertIn("3", tkt.log[-1].text)
-        self.assertEqual(tkt.next_role, "", "next: ceo обработан и очищен")
+        self.assertEqual(tkt.next_role, "")
         self.assertEqual(len(self.ceo_lines(tid)), 1, self.ceo_lines(tid))
-        self.assertIn("[next-ceo]", self.ceo_lines(tid)[0])
+        self.assertIn("[needs_owner]", self.ceo_lines(tid)[0])
         D.tick()
         D.tick()
         self.assertEqual(len(self.ceo_lines(tid)), 1, "повторов нет")
@@ -2744,9 +2744,9 @@ class DispatchRunTests(unittest.TestCase):
         proc.wait()
         D.RUNNING.clear()                                               # конец запуска (сам разбор итога — в других тестах)
         self.recording_popen()
-        D.tick(now=dt("2026-10-03T15:20:00+04:00"))                     # запуск кончился — эскалация, одна строка CEO
+        D.tick(now=dt("2026-10-03T15:20:00+04:00"))                     # запуск кончился — эскалация, одна строка
         self.assertEqual(T.read_ticket(path).log[-1].author, "dispatcher")
-        self.assertEqual(len(self.ceo_lines(tid, "next-ceo")), 1, self.ceo_lines(tid))
+        self.assertEqual(len(self.ceo_lines(tid, "needs_owner")), 1, self.ceo_lines(tid))
 
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
         path = self.review_setup()
@@ -2755,7 +2755,7 @@ class DispatchRunTests(unittest.TestCase):
             self.owner_resubmits(path, n, "in_review")
         self.recording_popen()
         D.tick()                                       # эскалация + первый тик (метка «историю done не пересказываем»)
-        self.assertEqual(len(self.ceo_lines(path.stem, "next-ceo")), 1)
+        self.assertEqual(len(self.ceo_lines(path.stem, "needs_owner")), 1)
         T.append_log(path, "ceo", "принимаю как есть", now=dt("2026-10-03T15:00:00+04:00"))
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-03T15:00:00+04:00"))
         D.tick()
