@@ -404,8 +404,7 @@ class RoleInstructionsUseResult(unittest.TestCase):
 
     def test_no_instruction_sends_role_to_comment_for_result(self):
         import delete_guard as dg
-        import ceo_signal_guard as sg
-        for text in (rm.SILENT_TEXT, dg.REASON_IRREVERSIBLE, sg.MSG):
+        for text in (rm.SILENT_TEXT, dg.REASON_IRREVERSIBLE, dg.REASON_CEO_SIGNAL):
             self.assertNotIn("tickets.py comment", text)
             self.assertIn("tickets.py result", text)
 
@@ -474,8 +473,8 @@ class StopResultTest(unittest.TestCase):
 
 class CeoSignalGuardTest(unittest.TestCase):
     def test_denied(self):
-        import ceo_signal_guard as g
-        d = g.denied
+        import delete_guard as g
+        d = g.ceo_signal_write
         self.assertTrue(d("Write", {"file_path": "C:/x/.claude/dispatcher/ceo-inbox.md"}))
         self.assertTrue(d("Edit", {"file_path": r"C:\x\ceo-wake.log"}))
         self.assertTrue(d("Bash", {"command": "echo hi >> .claude/dispatcher/ceo-wake.log"}))
@@ -485,6 +484,21 @@ class CeoSignalGuardTest(unittest.TestCase):
         self.assertFalse(d("Write", {"file_path": "C:/x/other.md"}))
         self.assertFalse(d("Bash", {"command": 'python tickets.py comment TK-1 --author judge --text "проба >> ceo-inbox.md; rm ceo-wake.log"'}))
         self.assertTrue(d("Bash", {"command": 'python tickets.py comment TK-1 --text "x" >> ceo-inbox.md'}))
+
+
+class GuardJournalTest(unittest.TestCase):
+    def test_journal_lines_and_silent_failure(self):
+        import delete_guard as g
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(os.path.join(t, ".claude", "dispatcher"))
+            g.journal_guard(t, "Bash", [("temp", "allow"), ("rm", "deny")], "Запрет:  rm\n-rf " + "x" * 200)
+            lines = open(os.path.join(t, ".claude", "dispatcher", "guard.log"), encoding="utf-8").read().splitlines()
+            self.assertEqual([l.split("\t")[1:4] for l in lines], [["Bash", "temp", "allow"], ["Bash", "rm", "deny"]])
+            self.assertEqual(lines[0].split("\t")[4], "")
+            why = lines[1].split("\t")[4]
+            self.assertEqual(why[:14], "Запрет: rm -rf")
+            self.assertLessEqual(len(why), 90)
+            g.journal_guard(None, "Bash", [("rm", "deny")], "x")           # нет проекта — тихо
 
 
 class HaikuAbstractTest(unittest.TestCase):
