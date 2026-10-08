@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
+import worktree_hygiene as WH  # noqa: E402
 import bus_link  # noqa: E402
 import downtime  # noqa: E402
 import haiku_aux as HA  # noqa: E402
@@ -2517,6 +2518,22 @@ def _account_downtime(state: dict, now, **flags) -> None:
         print(f"[dispatch] downtime: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def sweep_closed_worktrees() -> None:
+    """TK-104: копии закрытых тикетов убираются (грязное — коммитом в ветку); ошибка уборки тик не роняет."""
+    try:
+        status = {}
+        for p in T.list_tickets(TICKETS_DIR):
+            try:
+                t = T.read_ticket(p)
+                status[t.id] = t.status
+            except Exception:
+                continue
+        for line in WH.sweep(PROJECT_ROOT, status):
+            print(f"[dispatch] worktree: {line}", flush=True)
+    except Exception as e:
+        print(f"[dispatch] worktree sweep: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def tick(now=None) -> int:
     now = now or datetime.now().astimezone()
     state = load_state()
@@ -2526,6 +2543,7 @@ def tick(now=None) -> int:
     baseline_done_notified(state)  # v2: историю `done` CEO не пересказываем (один раз, ключ в state.json)
     save_state(state)
 
+    sweep_closed_worktrees()
     unblock_limit_victims(now)
     paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
