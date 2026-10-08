@@ -418,8 +418,22 @@ def _compact_log_locked(path, keep, limit_bytes) -> int:
     atomic_write_text(archive, prev + "\n" + old_part + "\n")
     pointer = (f"{ARCHIVE_POINTER_PREFIX} .claude/tickets/{ARCHIVE_DIRNAME}/{path.stem}-log.md — старые записи "
                "(читать grep-ом, только если нужно).")
+    digest = _haiku_digest(old_part)
+    if digest:
+        pointer += "\n\nКонспект старых записей (Haiku, не источник — дословно в архиве):\n" + digest
     atomic_write_text(path, text[:heading.start()] + "## Лог\n\n" + pointer + "\n\n" + body[cut:])
     return moved
+
+
+def _haiku_digest(old_part: str):
+    """TK-087 п.2: конспект (RPV_HAIKU_COMPACT=0 — выкл) переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
+    if os.environ.get("RPV_HAIKU_COMPACT") == "0":
+        return None
+    try:
+        import haiku_aux
+        return haiku_aux.compact(old_part)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def parse_text(text: str, path: Path = None) -> Ticket:

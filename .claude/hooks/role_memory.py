@@ -114,6 +114,19 @@ def digest_path(role, cli_id):
     return os.path.join(digest_dir(role), name)
 
 
+def haiku_abstract(turns):
+    """TK-087 п.2: краткий конспект сверху (Haiku, не источник — ниже дословные сообщения); выкл RPV_HAIKU_COMPACT=0; сбой — ''."""
+    if os.environ.get("RPV_HAIKU_COMPACT") == "0":
+        return ""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+        import haiku_aux
+        text = haiku_aux.compact("\n".join(turns))
+    except Exception:
+        return ""
+    return f"## Краткий конспект (Haiku, не источник — дословно ниже)\n{text}\n\n" if text else ""
+
+
 def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
     """Конспект разговора из транскрипта; возвращает путь или None (пустой разговор).
     Запуск диспетчера: сообщения пользователя в транскрипте — промпты диспетчера, не владельца."""
@@ -152,7 +165,7 @@ def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
             f"без инструментов и рассуждений. Читать секциями/грепом, не целиком.\n\n")
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(head + "\n".join(turns))
+        fh.write(head + haiku_abstract(turns) + "\n".join(turns))
     os.replace(tmp, path)
     return path
 

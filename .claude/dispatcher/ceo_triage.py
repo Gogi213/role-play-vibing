@@ -18,10 +18,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from datetime import datetime
@@ -30,8 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402 — пути, шина, запуск claude
 import ticket as T  # noqa: E402
+import haiku_aux  # noqa: E402 — Haiku-вызов один на плагин (TK-087)
 
-HAIKU_MODEL = os.environ.get("CEO_TRIAGE_MODEL", "claude-haiku-5-5")
 INTERVAL_S = float(os.environ.get("CEO_TRIAGE_INTERVAL_S", "30"))
 DUP_WINDOW_S = float(os.environ.get("CEO_TRIAGE_DUP_S", "3600"))
 CEO_RUN_TIMEOUT_S = float(os.environ.get("CEO_TRIAGE_RUN_TIMEOUT_S", str(20 * 60)))
@@ -103,18 +101,11 @@ def haiku_classify(events: list, claude_bin: str = None) -> tuple:
     if not events:
         return [], {}
     lines = "\n".join(f"{i + 1}. {e['tid']} [{e['kind']}] {e['note'][:300]}" for i, e in enumerate(events))
-    env = dict(os.environ)
-    for k in list(env):
-        if "HOST_SESSION" in k.upper():
-            env.pop(k, None)
-    env["RPV_ROLE"] = env["ALPHA_ROLE"] = "triage"
     try:
-        # cwd — пустой временный каталог: сортировщику не нужен проект, и он не подтягивает CLAUDE.md проекта
-        with tempfile.TemporaryDirectory() as cwd:
-            p = subprocess.run([claude_bin or D.CLAUDE_BIN, "-p", PROMPT + lines, "--model", HAIKU_MODEL,
-                                "--effort", "xhigh", "--output-format", "json"], capture_output=True, text=True,
-                               encoding="utf-8", timeout=120, env=env, cwd=cwd)
-        out = json.loads(p.stdout)
+        # haiku_aux: claude -p из пустого временного каталога (без CLAUDE.md проекта и инструментов), модель и усилие — там же
+        out = haiku_aux.ask(PROMPT, lines, claude=claude_bin, timeout=120, as_json=True)
+        if not out:
+            return fallback, {}
         text = out.get("result") or ""
         arr = json.loads(text[text.index("["):text.rindex("]") + 1])
         res = []

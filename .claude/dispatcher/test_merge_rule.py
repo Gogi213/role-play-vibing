@@ -202,6 +202,39 @@ class MergeRuleTests(unittest.TestCase):
         self.assertTrue(M.merged_done(REPO, 10, gh=nf))  # чужой PR: записей нет
         self.assertEqual(len(self.tkt().log), n0 + 1)
 
+    def test_final_accept_on_landed_pr_closes_without_round(self):  # TK-090 а: pr→accept→влит→done→accept влитого→done
+        T.write_header_updates(self.path, {"status": "in_review", "accepted": "", "pr": "7", "reviewer": "judge"}, now=NOW)
+        os.environ.pop("RPV_ROLE", None)
+        os.environ.pop("ALPHA_ROLE", None)
+        acc = lambda: TK.cmd_accept(type("A", (), {"id": self.tid, "pr": 7, "sha": SHA, "text": ""})())
+        T.append_log(self.path, "engineer", "[итог: pr] PR #7 — x", now=NOW)
+        self.assertEqual(acc(), 0)
+        self.assertEqual(self.tkt().status, "waiting")                    # владелец ещё не сдавал done — обычное ожидание
+        self.assertEqual(self.run_m(), [(7, "влит")])
+        self.assertEqual(self.tkt().header.get("accepted"), "")
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge", "wait_for": ""}, now=NOW)
+        T.append_log(self.path, "engineer", "[итог: done] результат: x — финал", now=NOW)
+        orig = M.merged_done
+        M.merged_done = lambda repo, n, gh=None: True
+        try:
+            self.assertEqual(acc(), 0)
+        finally:
+            M.merged_done = orig
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next"), t.header.get("wait_for")), ("done", "", ""))
+        self.assertIsNone(D.decide(t, {}, NOW))                           # ни владелец, ни Судья не разбужены
+
+    def test_accept_landed_pr_waits_if_other_pr_open(self):
+        T.write_header_updates(self.path, {"pr": "7, 9", "accepted": ""}, now=NOW)
+        T.append_log(self.path, "engineer", "[итог: done] результат: x — финал", now=NOW)
+        orig = M.merged_done
+        M.merged_done = lambda repo, n, gh=None: True
+        try:
+            self.assertEqual(TK.cmd_accept(type("A", (), {"id": self.tid, "pr": 7, "sha": SHA, "text": ""})()), 0)
+        finally:
+            M.merged_done = orig
+        self.assertEqual(self.tkt().status, "waiting")                    # PR 9 не влит — тикет не закрываем
+
     def test_accept_writes_verdict(self):
         T.write_header_updates(self.path, {"accepted": ""}, now=NOW)
         os.environ.pop("RPV_ROLE", None)

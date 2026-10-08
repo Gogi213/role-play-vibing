@@ -34,6 +34,7 @@ import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import bus_link  # noqa: E402
 import downtime  # noqa: E402
+import haiku_aux as HA  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -194,7 +195,7 @@ def _expected_model_family(info: dict) -> str:
 # Обход Судьи запрещён (условие г): reviewer: judge или owner: researcher — не Haiku, tickets.py new
 # отказывает раньше, чем тикет вообще появится; здесь — вторая защита на случай ручной правки шапки.
 CLAUDE_HAIKU_MODEL = P.env("DISPATCH_HAIKU_MODEL", "claude-haiku-5-5")
-HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish"}
+HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
@@ -232,7 +233,7 @@ PROMPT_TEMPLATE = (
     "не жди в сессии. Трать минимум: "
     "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
     "результатом. Сделай следующий шаг и сдай итог командой "
-    "`{tickets_cli} result {tid} <done|pr|accept|return|blocked|ask-owner|wait> --why \"что сделал, что "
+    "`{tickets_cli} result {tid} <done|pr|accept|return|blocked|ask-owner|wait|continue> --why \"что сделал, что "
     "дальше\"` ДО истечения лимита (доказательство: done — --path, pr — --pr --sha, accept/return — --sha, "
     "wait — --form; неполная команда — отказ с подсказкой): итог обязателен, частичный прогресс не провал. "
     "Кого будить дальше и status/wait_for ставит таблица маршрутов — --next и шапку руками не правь; "
@@ -383,6 +384,8 @@ def record_wait_event(ev: dict) -> None:
             with _EVENT_LOCK:
                 _EVENT_VERIFIED.add(k)
         keys.append(k)
+        if addr.endswith(".юнит.упал") and P.env("HAIKU_DIAG") != "0":
+            threading.Thread(target=_diagnose_failed_unit, args=(host, str(pl["unit"])), daemon=True).start()
     elif addr.startswith("машина.") and addr.endswith(".файл.появился") and pl.get("path"):
         keys.append((host, "path", str(pl["path"])))
     elif addr.startswith("задача.") and addr.endswith(".задание.готово") and pl.get("job"):
@@ -390,6 +393,26 @@ def record_wait_event(ev: dict) -> None:
     with _EVENT_LOCK:
         for k in keys:
             _EVENT_MET[k] = time.time()
+
+
+def _diagnose_failed_unit(host: str, unit: str) -> None:
+    """TK-087 п.1: упал юнит → Haiku читает хвост journalctl и пишет причину в тикеты, ждущие этот юнит. Сбой — тихо."""
+    try:
+        base = _unit_base(unit)
+        paths = []
+        for path in T.list_tickets(TICKETS_DIR):
+            parsed = T.parse_wait_for(T.read_ticket(path).wait_for)
+            if parsed and parsed[:3] == ("host", host, "unit") and _unit_base(parsed[3]) == base:
+                paths.append(path)
+        if not paths:
+            return
+        r = subprocess.run(_ssh_cmd(host, f"journalctl -u {shlex.quote(base)} -n 80 --no-pager 2>&1 | tail -c 8000"),
+                           capture_output=True, timeout=30)
+        diag = HA.diagnose(unit, (r.stdout or b"").decode("utf-8", "replace"))
+        for path in paths if diag else []:
+            T.append_log(path, "haiku", f"диагноз упавшего юнита {unit} на {host} (Haiku, по journalctl):\n{diag}")
+    except Exception as e:  # noqa: BLE001 — рутина не должна ронять слушатель шины
+        print(f"[dispatch] haiku-diag {host}/{unit}: {e}", file=sys.stderr, flush=True)
 
 
 def _event_met(alias: str, what: str, arg: str) -> bool:
@@ -876,11 +899,23 @@ def _review_returns(state: dict, tid: str) -> int:
     return int((state or {}).get("review_returns", {}).get(tid, 0))
 
 
+NO_REVIEW_MARK = "закрыто без ревью"  # в записи «[итог: done]…» (tickets.py result: CEO или все PR уже приняты и влиты)
+
+
+def closed_without_review(tkt: T.Ticket) -> bool:
+    """done закрыт без нового круга ревью (TK-090 а/б): последняя запись — CEO (закрыл сам или оставил комментарий к
+    закрытому) либо итог done с пометкой «закрыто без ревью». Иначе (г) будило бы Судью за каждую такую запись."""
+    if tkt.status != "done" or not tkt.log:
+        return False
+    last = tkt.log[-1]
+    return T.author_is(last.author, "ceo") or (last.text.lstrip().startswith("[итог: done]") and NO_REVIEW_MARK in last.text)
+
+
 def _review_pending(tkt: T.Ticket, state: dict = None) -> bool:
     """done при заданном reviewer, но последняя запись лога не от ревьюера (и не dispatcher) — правило (г)
     ещё запустит ревью: задача не закончена. На пределе возвратов (MAX_REVIEW_RETURNS) ревьюера уже не будят —
     ревью не «ожидается», решает CEO."""
-    if tkt.status != "done" or tkt.reviewer not in ROLE_KEYS:
+    if tkt.status != "done" or tkt.reviewer not in ROLE_KEYS or closed_without_review(tkt):
         return False
     if state is not None and _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
         return False
@@ -990,6 +1025,8 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
     if status in ("done", "in_review") and tkt.reviewer in ROLE_KEYS:
         reviewer = tkt.reviewer
         last_author = tkt.log[-1].author if tkt.log else ""
+        if closed_without_review(tkt):
+            return None
         if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":
             return None
         if _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
