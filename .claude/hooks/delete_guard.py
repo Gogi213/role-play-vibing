@@ -1902,6 +1902,26 @@ def check_file(path, cwd):
         return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
 
 
+CEO_SIGNAL_NAMES = ("ceo-inbox.md", "ceo-wake.log")   # В-192: сигналы CEO — только через шину; файлы пишет dispatch.append_ceo_inbox
+CEO_SIGNAL_WRITE = re.compile(r"(>|\btee\b|\bsed\b[^|;&]*\s-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b|\bdd\b|\binstall\b|"
+                              r"Set-Content|Add-Content|Out-File|Clear-Content|Remove-Item|Move-Item|Copy-Item|\.write|open\()", re.I)
+CEO_SIGNAL_TEXT = re.compile(r"""--text(?:=|\s+)("(?:[^"\\]|\\.)*"|'[^']*')""", re.S)
+REASON_CEO_SIGNAL = ("Сигналы команды идут только через шину: ceo-inbox.md/ceo-wake.log пишет лишь dispatch.append_ceo_inbox "
+                     "(запасной путь). Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; очередь читает `tickets.py inbox` (README «Стандарт сигналов»).")
+
+
+def ceo_signal_write(tool, ti):
+    """Запись в ceo-inbox.md/ceo-wake.log из сессии (Write/Edit/Bash) — отказ; чтение свободно; текст `--text` у tickets.py не в счёт."""
+    if tool in SHELL_TOOLS:
+        cmd = str(ti.get("command") or "")
+        if "tickets.py" in cmd:
+            cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
+        return any(CEO_SIGNAL_WRITE.search(part) and any(n in part.lower() for n in CEO_SIGNAL_NAMES)
+                   for part in re.split(r"\n|&&|\|\||;", cmd))
+    path = file_target(ti)
+    return bool(path) and path.replace("\\", "/").lower().rsplit("/", 1)[-1] in CEO_SIGNAL_NAMES
+
+
 def check_tool(data):
     """Событие PreToolUse (словарь из JSON хука) → причина отказа или None. Чужой инструмент — None. Путь файлового
     инструмента определить нельзя — отказ (схема могла измениться: молча пропускать нельзя)."""
@@ -1914,6 +1934,8 @@ def check_tool(data):
     ti = ti if isinstance(ti, dict) else {}
     cwd = str(data.get("cwd") or "")
     try:
+        if ceo_signal_write(tool, ti):
+            return REASON_CEO_SIGNAL
         if tool in SHELL_TOOLS:
             return check(str(ti.get("command") or ""), cwd)
         path = file_target(ti)
@@ -1922,6 +1944,18 @@ def check_tool(data):
         return check_file(path, cwd)
     except Exception as e:
         return REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+
+
+def journal_denial(project, tool, reason):
+    """Строка в `<проект>/.claude/dispatcher/guard.log` (время, инструмент, начало причины): по ней видно, какие группы
+    веток стража срабатывают (срез №5, решение Судьи: резать группы с нулём отказов за неделю). Сбой записи не мешает отказу."""
+    try:
+        from datetime import datetime
+        path = os.path.join(project, ".claude", "dispatcher", "guard.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')}\t{tool}\t{' '.join(reason.split())[:90]}\n")
+    except Exception:
+        pass
 
 
 def main():
@@ -1946,6 +1980,7 @@ def main():
         if not has_roles(os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())):
             return 0
         return deny(REASON_CRASH.format(e=f"событие хука не прочитано: {type(e).__name__}: {e}"[:200]))
+    project = None
     try:
         if data.get("tool_name") not in GUARDED_TOOLS:
             return 0
@@ -1956,6 +1991,8 @@ def main():
         reason = check_tool(data)
     except Exception as e:
         reason = REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200])
+    if reason:
+        journal_denial(project, data.get("tool_name"), reason)
     return deny(reason) if reason else 0
 
 
