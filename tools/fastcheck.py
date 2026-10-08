@@ -34,24 +34,38 @@ def calc(a):
     up = subprocess.run(ssh + [f"mkdir -p {d} && tar -xf - -C {d}"], stdin=tar.stdout)
     if up.returncode:
         return up.returncode, time.time() - t
-    cmd = (f"python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 "
-           f"--cores {a.cores} --mem {a.mem} -- bash -c 'cd {d}; python3 -m pytest .claude -q -p no:cacheprovider "
-           f"-n {a.cores} -m \"not endurance\" --durations=15 & python3 -m pytest .claude -q -p no:cacheprovider "
-           f"-n 4 -m endurance & r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r'")
-    rc = subprocess.run(ssh + [cmd]).returncode
-    subprocess.run(ssh + [f"rm -rf {d}"])
+    # alsched submit только ставит заявку в очередь и печатает id: ждём rc/<id> демона, берём его rc и хвост лога;
+    # дерево удаляем после конца задания, не раньше
+    script = f"""set -u
+cat > {d}/run.sh <<'EOS'
+cd {d}
+V=/data/rpv-fastcheck-venv
+[ -x $V/bin/pytest ] || {{ python3 -m venv $V && $V/bin/pip install -q pytest pytest-xdist; }} || exit 1
+$V/bin/python -m pytest .claude -q -p no:cacheprovider -n {a.cores} -m "not endurance" --durations=15 &
+$V/bin/python -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
+r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r
+EOS
+id=$(python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 --cores {a.cores} --mem {a.mem} -- bash {d}/run.sh) || exit 125
+echo "job $id"
+for i in $(seq 1 450); do [ -f /data/sched/rc/$id ] && break; sleep 2; done
+[ -f /data/sched/rc/$id ] || {{ echo "нет rc за 15 мин"; exit 124; }}
+tail -n 25 /data/sched/logs/$id.log
+rc=$(cat /data/sched/rc/$id); rm -rf {d}; exit $rc
+"""
+    rc = subprocess.run(ssh + ["bash -s"], input=script.encode()).returncode
     return rc, time.time() - t
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--calc")
+    p.add_argument("--no-pc", action="store_true", help="не гонять на этой машине")
     p.add_argument("--ssh-key")
     p.add_argument("--known-hosts")
     p.add_argument("--cores", type=int, default=8)
     p.add_argument("--mem", type=int, default=8)
     a = p.parse_args()
-    res = {"pc": local()}
+    res = {} if a.no_pc else {"pc": local()}
     if a.calc:
         res["calc"] = calc(a)
     print(" | ".join(f"{k}: {'ok' if rc == 0 else 'fail'} {s:.0f} с" for k, (rc, s) in res.items()))
