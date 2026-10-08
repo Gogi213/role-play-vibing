@@ -73,21 +73,6 @@ class SuperviseTest(unittest.TestCase):
             self.assertEqual(spawned, ["dispatch.py", "watch.py"])
 
 
-    def test_ceo_triage_supervised_only_when_enabled(self):
-        with tempfile.TemporaryDirectory() as d:
-            project = Path(d)
-            (project / ".claude" / "dispatcher").mkdir(parents=True)
-            spawned = []
-            kw = dict(stop=lambda p, s, unit=None: 0,
-                      spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
-            os.environ["RPV_CEO_TRIAGE"] = "1"
-            try:
-                out = V.run_once(project, **kw)
-            finally:
-                del os.environ["RPV_CEO_TRIAGE"]
-            self.assertEqual(out, {"dispatch": "start", "watch": "start", "ceo_triage": "start"})
-            self.assertEqual(spawned, ["dispatch.py", "watch.py", "ceo_triage.py"])
-
     def test_ci_watch_supervised_only_with_repo(self):  # TK-090 Д-1
         with tempfile.TemporaryDirectory() as d:
             project = Path(d)
@@ -200,8 +185,8 @@ class InstallFilesTest(unittest.TestCase):
                 os.environ.pop("RPV_ONLY_SNAP", None)
 
     def test_supervise_and_start_share_one_service_list(self):  # TK-090 Д-1: выпуск версии перезапускает и ci_watch
-        with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r", "RPV_CEO_TRIAGE": "1"}):
-            self.assertEqual(S.services(), ("dispatch", "watch", "ci_watch", "ceo_triage"))
+        with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
+            self.assertEqual(S.services(), ("dispatch", "watch", "ci_watch"))
             self.assertTrue(all(n in V.BEATS for n in S.services()))
 
     def test_session_env_never_snapshotted_and_install_refused_from_role(self):  # TK-090 г

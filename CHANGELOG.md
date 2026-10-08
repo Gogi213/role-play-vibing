@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.12 — 2026-10-08
+
+### Удалено (TK-102, срез TK-100)
+
+- Сортировщик сигналов CEO `ceo_triage.py` с тестами (В-205: отключён владельцем): убраны из `start.OPTIONAL`, `supervise.BEATS`, сводка `ceo-digest.md` в хуке `role_memory`; `RPV_CEO_TRIAGE` больше ничего не включает.
+
 ## 1.8.11 — 2026-10-08
 
 ### Исправлено (TK-096, замечания Судьи к PR #59)
