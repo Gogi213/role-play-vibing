@@ -7,7 +7,7 @@
 
 RPV_BOARD — одна строка подключения из окна «+» (https://host/<токен>/#<ключ>); часть после «#» — ключ, он уходит только
 в заголовке и в логах не печатается. Без RPV_BOARD сводка только пишется в `<проект>/.claude/pulse/status.json`
-(его читают `.claude/board/board.py` и `mcp_server.py`).
+(его читает `.claude/board/mcp_server.py`).
 
 Необязательно (каталог `.claude/board/`): RPV_MACHINES — загрузка машин по ssh (`machines.py`), RPV_PLAIN=0 — выключить человеческие
 строки процессов от Haiku (`plainify.py`). Сбой любой из них кадр не роняет.
