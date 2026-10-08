@@ -6,8 +6,8 @@
   2. остальное — один вызов Haiku 5.5 на пачку (`--effort xhigh`, приказ владельца 08.10): действие CEO / сведения / шум + причина;
      модель не ответила или ответ не разобран → действие (пропуск сигнала дороже лишнего запуска);
   3. шум — ack и запись в triage.jsonl; сведения — строка в ceo-digest.md (её показывает хук UserPromptSubmit
-     на сообщении владельца); действие — один запуск CEO как роли (claude -p со свежим малым контекстом,
-     RPV_ROLE=ceo, устав .claude/roles/ceo.md), по одному за раз.
+     на сообщении владельца); действие — по маршрутам, без CEO (TK-094): по тикету — `next: judge`
+     и запись dispatcher (needs_owner — только строка «ждёт вас»), без тикета — строка «ждёт вас» в сводку.
 Каждая запись triage.jsonl хранит класс, причину и токены Haiku — по ним считается «до/после» и число ложных побудок.
 
     python <плагин>/.claude/dispatcher/ceo_triage.py --project <проект> --once   # один проход
@@ -18,10 +18,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -32,7 +30,6 @@ import haiku_aux  # noqa: E402 — Haiku-вызов один на плагин (
 
 INTERVAL_S = float(os.environ.get("CEO_TRIAGE_INTERVAL_S", "30"))
 DUP_WINDOW_S = float(os.environ.get("CEO_TRIAGE_DUP_S", "3600"))
-CEO_RUN_TIMEOUT_S = float(os.environ.get("CEO_TRIAGE_RUN_TIMEOUT_S", str(20 * 60)))
 
 NOISE, INFO, ACTION = "noise", "info", "action"
 ALWAYS_ACTION = {"blocked", "needs-owner", "needs_owner", "ask-owner", "watch-blocked", "watch-needs-owner"}
@@ -167,38 +164,29 @@ def ack(events: list) -> None:
         _paths()["seen"].write_text(str(max(files)), encoding="utf-8")
 
 
-def ceo_run_alive() -> bool:
-    try:
-        pid = int(_paths()["pid"].read_text(encoding="utf-8").split()[0])
-    except (OSError, ValueError, IndexError):
-        return False
-    return D._pid_alive(pid)
-
-
-def launch_ceo(events: list, now: datetime) -> bool:
-    """Один запуск CEO-роли на пачку действий (свежий малый контекст); пока прошлый жив — не запускаем."""
-    if ceo_run_alive():
-        return False
-    p = _paths()
-    D.RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    stem = D.RUNS_DIR / f"{now.strftime('%Y%m%d-%H%M%S')}-ceo-triage"
-    sig = "\n".join(f"- {e['tid']} [{e['kind']}] ({e['why']}) {e['note'][:400]}" for e in events)
-    prompt = (f"Ты — CEO команды (запуск диспетчера по сигналам, не интерактивная сессия). Устав — .claude/roles/ceo.md, "
-              f"блокнот — .claude/roles/notes/ceo.md; прочитай их и разбери сигналы ниже, действуй по уставу. "
-              f"Общую память проекта пишешь только ты. Ответ владельцу не нужен: итог — в блокнот и в лог тикетов. "
-              f"Лимит запуска {int(CEO_RUN_TIMEOUT_S // 60)} мин.\nСигналы:\n{sig}")
-    env = dict(os.environ)
-    for k in list(env):
-        if "HOST_SESSION" in k.upper():
-            env.pop(k, None)
-    env["RPV_ROLE"] = env["ALPHA_ROLE"] = "ceo"
-    env["RPV_PROJECT"] = str(D.PROJECT_ROOT)
-    model = D.ROLE_MODEL.get("ceo", D.CLAUDE_MODEL)
-    cmd = [D.CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", "medium", "--session-id", str(uuid.uuid4())]
-    popen = subprocess.Popen(cmd, cwd=str(D.PROJECT_ROOT), env=env, stdout=open(f"{stem}.json", "w", encoding="utf-8"),
-                             stderr=open(f"{stem}.err.log", "w", encoding="utf-8"), text=True, start_new_session=True)
-    p["pid"].write_text(f"{popen.pid} {T.now_iso(now)}", encoding="utf-8")
+def route_actions(events: list, now: datetime) -> bool:
+    """TK-094: CEO-сессию не запускаем. Действие по тикету — Судье (`next: judge` + запись dispatcher), кроме
+    needs_owner (ждёт владельца, строка на Диспетчерской) и тикета, где последним писал сам Судья; без тикета
+    (машина, диспетчер) — строка «ждёт вас» в сводку."""
+    for e in events:
+        m = _TID.search(e["tid"]) or _TID.search(e["note"])
+        path = D.TICKETS_DIR / f"{m.group(0)}.md" if m else None
+        tkt = None
+        if path is not None:
+            try:
+                tkt = T.read_ticket(path)
+            except Exception:
+                tkt = None
+        if tkt is not None and tkt.status in ("done", "cancelled"):
+            continue
+        last = tkt.log[-1].author if tkt is not None and tkt.log else ""
+        if tkt is not None and tkt.status != "needs_owner" and not tkt.next_role and not T.author_is(last, "judge"):
+            T.append_log(path, "dispatcher", f"Сигнал [{e['kind']}] {e['note'][:300]} — Судье: решить по методике/гейтам "
+                         "либо вернуть владельцу тикета; вопрос о содержании исследования — владельцу (ask-owner).", now=now)
+            T.write_header_updates(path, {"next": "judge"}, now=now, stamp_updated=False)
+            continue
+        with open(_paths()["digest"], "a", encoding="utf-8") as fh:
+            fh.write(f"- {T.now_iso(now)} {e['tid']} [{e['kind']}] ждёт вас: {e['note'][:300]}\n")
     return True
 
 
@@ -207,7 +195,7 @@ def _log(rec: dict) -> None:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-def run_once(now: datetime = None, classify=haiku_classify, launch=launch_ceo) -> dict:
+def run_once(now: datetime = None, classify=haiku_classify, launch=route_actions) -> dict:
     now = now or datetime.now().astimezone()
     p = _paths()
     events = read_events()
