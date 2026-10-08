@@ -85,8 +85,8 @@ class ReleaseTests(unittest.TestCase):
             fake = FakeClaude(["1.8.0"], fail_on=["plugin", "install", f"{release.NAME}@{release.NAME}"])
             self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 1)
             adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
-            self.assertEqual(adds, [["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"],
-                                    ["plugin", "marketplace", "add", release.REPO]])
+            self.assertEqual(adds[0], ["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"])
+            self.assertEqual(adds[1:], [["plugin", "marketplace", "add", release.REPO]] * 3)   # возврат прежнего — с повторами
 
     def test_update_unpins_marketplace_from_tag(self):
         with tempfile.TemporaryDirectory() as t:
@@ -220,12 +220,44 @@ class AutoReleaseTests(unittest.TestCase):
 
 
 class VerifyAliveTests(unittest.TestCase):
-    def test_verify_alive_asks_doctor_without_accumulated_idle(self):
-        """№13: проверка выпуска зовёт doctor --alive, чтобы простой за сутки не откатывал исправную версию."""
-        calls = []
-        run = lambda cmd, **kw: (calls.append(cmd), subprocess.CompletedProcess(cmd, 0, "", ""))[1]
-        self.assertTrue(release.verify_alive(Path("."), Path("."), run=run))
-        self.assertIn("--alive", calls[0])
+    ROWS = [{"check": "диспетчер", "status": "OK", "detail": "x"},
+            {"check": "простой сегодня", "status": "FAIL", "detail": "84 мин из 10"}]
+
+    def fake_doctor(self, rows):
+        return lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, json.dumps(rows), "")
+
+    def test_idle_fail_alone_does_not_fail_release(self):
+        """Б1: doctor любой версии (и старый, без --alive) может вернуть FAIL по простою — выпуск от этого не откатывается."""
+        self.assertTrue(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(self.ROWS), wait_s=0))
+
+    def test_service_fail_fails_release(self):
+        rows = self.ROWS + [{"check": "сторож", "status": "FAIL", "detail": "не запущен"}]
+        self.assertFalse(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))
+        self.assertFalse(release.verify_alive(Path("."), Path("."), run=lambda c, **k: subprocess.CompletedProcess(c, 1, "boom", ""), wait_s=0))
+
+
+class TimeoutAndAtomicRollbackTests(unittest.TestCase):
+    def test_run_timeout_returns_124_not_hang(self):
+        """Б3: git/claude без предела держали клон часами."""
+        def hang(cmd, **kw):
+            self.assertIn("timeout", kw)
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        r = release._run(["git", "clone", "x"], hang)
+        self.assertEqual(r.returncode, 124)
+
+    def test_rollback_touches_nothing_when_target_not_fetchable(self):
+        """Б2: сбой GitHub при добыче цели — маркетплейс и плагин не тронуты (не remove)."""
+        class NoClone(FakeClaude):
+            def __call__(self, cmd, **kw):
+                if cmd[:2] == ["git", "clone"]:
+                    self.calls.append(cmd[1:])
+                    return subprocess.CompletedProcess(cmd, 128, "", "fetch failed")
+                return super().__call__(cmd, **kw)
+        with tempfile.TemporaryDirectory() as t:
+            fake = NoClone(["1.8.4"], tags=("1.8.3",))
+            self.assertEqual(release.rollback("1.8.3", fake, Path(t) / "s.json"), 1)
+            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
+            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]])
 
 
 if __name__ == "__main__":

@@ -61,10 +61,24 @@ def bump(version: str, root: Path = ROOT) -> None:
         raise SystemExit(problem)
 
 
-def _run(cmd: list, run=subprocess.run) -> subprocess.CompletedProcess:
+GIT_TIMEOUT_S = 120.0     # git без предела держал клон и блокировал установку (Б3 КТ-3)
+CLAUDE_TIMEOUT_S = 300.0
+GIT_STALL_ENV = {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "30", "GIT_TERMINAL_PROMPT": "0"}
+
+
+def _run(cmd: list, run=subprocess.run, timeout: float | None = None) -> subprocess.CompletedProcess:
+    """Команда с пределом времени: зависла — код 124, процесс убит; вызывающий видит обычный отказ."""
+    kw = {}
     if cmd[0] == "claude":
         cmd = [shutil.which("claude") or "claude"] + cmd[1:]
-    return run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        timeout = timeout or CLAUDE_TIMEOUT_S
+    elif cmd[0] == "git":
+        timeout = timeout or GIT_TIMEOUT_S
+        kw["env"] = {**os.environ, **GIT_STALL_ENV}
+    try:
+        return run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, "", f"таймаут {timeout:.0f} с")
 
 
 def installed_version(run=subprocess.run) -> str | None:
@@ -96,8 +110,25 @@ def _fail(cmd: list, r) -> int:
     return 1
 
 
+def _fetchable(ref: str | None, run) -> bool:
+    """Цель достаётся с GitHub: shallow-клон ref (None — main) во временный каталог, с пределом времени. До этого на машине
+    ничего не меняется — сбой сети не должен оставить её без плагина (Б2 КТ-3)."""
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="rpv-fetch-") as tmp:
+        cmd = ["git", "clone", "--depth", "1", *(["--branch", ref] if ref else []), f"https://github.com/{REPO}",
+               str(Path(tmp) / "c")]
+        r = _run(cmd, run)
+        if r.returncode:
+            _fail(cmd, r)
+        return r.returncode == 0
+
+
 def _reinstall(source: str, run) -> int:
-    """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него."""
+    """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него. Сначала цель добывается
+    (_fetchable); не добыта — ничего не трогаем, код 1."""
+    ref = source.split("#", 1)[1] if "#" in source else None
+    if not _fetchable(ref, run):
+        return 1
     for cmd in (["claude", "plugin", "marketplace", "remove", NAME],
                 ["claude", "plugin", "marketplace", "add", source],
                 ["claude", "plugin", "install", f"{NAME}@{NAME}"]):
@@ -142,7 +173,10 @@ def rollback(version: str | None = None, run=subprocess.run, state: Path = STATE
     old_pin = pinned_ref(run)
     if _reinstall(f"{REPO}#v{version}", run):
         print(f"[release] откат не удался — возвращаю прежний маркетплейс ({old_pin or 'main'})", file=sys.stderr)
-        _reinstall(f"{REPO}#{old_pin}" if old_pin else REPO, run)
+        for _ in range(3):   # без плагина машину не оставляем: возврат прежнего — с повтором
+            if not _reinstall(f"{REPO}#{old_pin}" if old_pin else REPO, run):
+                break
+            time.sleep(0 if run is not subprocess.run else 5)
         return 1
     _save_prev(before, state)
     print(f"[release] {before} -> {installed_version(run)} (откат на v{version}; перезапустить Claude Code)")
@@ -211,17 +245,32 @@ def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -
     return ok
 
 
+IDLE_ROW = "простой сегодня"
+
+
+def alive_problems(doctor_out: str) -> list:
+    """FAIL-строки вывода `doctor.py --json`, кроме накопленного простоя: решает именно этот код, а не doctor того каталога,
+    откуда запущен (старый doctor без --alive ронял исправный выпуск — Б1 КТ-3). Не JSON — одна проблема «вывод»."""
+    try:
+        rows = json.loads(doctor_out)
+    except ValueError:
+        return [f"doctor: не JSON ({doctor_out.strip()[:80]})"]
+    return [f"{r['check']}: {r['detail']}" for r in rows if r.get("status") == "FAIL" and r.get("check") != IDLE_ROW]
+
+
 def verify_alive(project: Path, code_dir: Path | None, run=subprocess.run, wait_s: float = 60.0, step_s: float = 5.0) -> bool:
-    """doctor.py без FAIL; службам нужно время на первое сердцебиение — повтор до wait_s."""
+    """doctor без FAIL по службам; службам нужно время на первое сердцебиение — повтор до wait_s."""
     if code_dir is None:
         return False
     deadline = time.time() + wait_s
     while True:
-        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project), "--alive"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env())
-        if r.returncode == 0:
+        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project),
+                 "--json", "--alive"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env())
+        problems = alive_problems(r.stdout or "")
+        if not problems:
             return True
         if time.time() >= deadline:
+            print("[release] проверка: " + "; ".join(problems)[:300], file=sys.stderr)
             return False
         time.sleep(step_s)
 
