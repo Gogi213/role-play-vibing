@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,9 +71,10 @@ class SessionStart(unittest.TestCase):
         for role in ("researcher", "engineer", "judge", "ceo"):
             for source in ("startup", "resume"):
                 text, _ = start_text(role, source)
-                m = re.search(r'python "([^"]+tickets\.py)" --project "([^"]+)"', text)
+                m = re.search(r'(python|"[^"]+") "([^"]+tickets\.py)" --project "([^"]+)"', text)
                 self.assertIsNotNone(m, (role, source, text))
-                script, project = m.group(1), m.group(2)
+                exe, script, project = m.group(1), m.group(2), m.group(3)
+                self.assertEqual(exe, "python" if shutil.which("python") else '"' + sys.executable.replace(os.sep, "/") + '"')  # TK-110 В-1
                 self.assertTrue(os.path.isabs(script), script)
                 self.assertTrue(os.path.isfile(script), script)
                 self.assertEqual(os.path.normpath(script),
@@ -484,6 +486,8 @@ class CeoSignalGuardTest(unittest.TestCase):
         self.assertFalse(d("Write", {"file_path": "C:/x/other.md"}))
         self.assertFalse(d("Bash", {"command": 'python tickets.py comment TK-1 --author judge --text "проба >> ceo-inbox.md; rm ceo-wake.log"'}))
         self.assertTrue(d("Bash", {"command": 'python tickets.py comment TK-1 --text "x" >> ceo-inbox.md'}))
+        self.assertFalse(d("Bash", {"command": 'python tickets.py result TK-1 done --why "читал ceo-inbox.md через open( и > "'}))  # TK-110 Ж-3
+        self.assertTrue(d("Bash", {"command": 'python tickets.py result TK-1 done --why "x" > ceo-inbox.md'}))
 
 
 class GuardJournalTest(unittest.TestCase):
@@ -502,18 +506,70 @@ class GuardJournalTest(unittest.TestCase):
 
 
 class HaikuAbstractTest(unittest.TestCase):
+    def test_tickets_command_python_or_executable(self):  # TK-110 В-1: python есть в PATH — он; нет — sys.executable
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import role_context as rc
+        with mock.patch("shutil.which", return_value="/usr/bin/python"):
+            self.assertTrue(rc.tickets_command().startswith('python "'))
+        with mock.patch("shutil.which", return_value=None):
+            self.assertTrue(rc.tickets_command().startswith('"' + sys.executable.replace(os.sep, "/") + '" "'))
+
+    def test_digest_written_before_haiku_and_env_clean(self):  # TK-110 В-2 + Ж-1
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+        import haiku_aux
+        seen = {}
+
+        def runner(cmd, **kw):
+            seen["env"] = kw["env"]
+            return type("R", (), {"returncode": 0, "stdout": b"X"})()
+        old = {k: os.environ.get(k) for k in ("RPV_ROLE", "CLAUDE_PROJECT_DIR")}
+        os.environ["RPV_ROLE"], os.environ["CLAUDE_PROJECT_DIR"] = "judge", "/p"
+        try:
+            self.assertEqual(haiku_aux.ask("s", "t", runner=runner, claude="claude"), "X")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertFalse([k for k in seen["env"] if k.startswith("RPV_")] or "CLAUDE_PROJECT_DIR" in seen["env"])
+        orig = haiku_aux.compact
+        with tempfile.TemporaryDirectory() as d:
+            tr = os.path.join(d, "t.jsonl")
+            with open(tr, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"type": "user", "message": {"content": "привет"}, "timestamp": ""}) + "\n")
+            out = os.path.join(d, "dg.md")
+            orig_dp, orig_ro = rm.digest_path, os.environ.get("RPV_HAIKU_COMPACT")
+            rm.digest_path = lambda role, cli: out
+            os.environ["RPV_HAIKU_COMPACT"] = "1"
+
+            def boom(t, **kw):
+                self.assertIn("привет", open(out, encoding="utf-8").read())      # файл уже на диске до Haiku
+                self.assertEqual(kw.get("timeout"), rm.HAIKU_HOOK_S)
+                raise KeyboardInterrupt
+            haiku_aux.compact = boom
+            try:
+                with self.assertRaises(KeyboardInterrupt):
+                    rm.write_digest(tr, "judge", "t", "abcdef123", "why", dispatcher=True)
+            finally:
+                haiku_aux.compact, rm.digest_path = orig, orig_dp
+                if orig_ro is None:
+                    os.environ.pop("RPV_HAIKU_COMPACT", None)
+                else:
+                    os.environ["RPV_HAIKU_COMPACT"] = orig_ro
+
     def test_abstract_on_off_and_failure(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
         import haiku_aux
         orig, old = haiku_aux.compact, os.environ.get("RPV_HAIKU_COMPACT")
         try:
-            haiku_aux.compact = lambda t: "KONSPEKT"
+            haiku_aux.compact = lambda t, **kw: "KONSPEKT"
             os.environ["RPV_HAIKU_COMPACT"] = "1"
             self.assertIn("KONSPEKT", rm.haiku_abstract(["a"]))
             os.environ["RPV_HAIKU_COMPACT"] = "0"
             self.assertEqual(rm.haiku_abstract(["a"]), "")
             os.environ["RPV_HAIKU_COMPACT"] = "1"
-            haiku_aux.compact = lambda t: None
+            haiku_aux.compact = lambda t, **kw: None
             self.assertEqual(rm.haiku_abstract(["a"]), "")
         finally:
             haiku_aux.compact = orig
