@@ -66,9 +66,17 @@ CLAUDE_TIMEOUT_S = 300.0
 GIT_STALL_ENV = {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "30", "GIT_TERMINAL_PROMPT": "0"}
 
 
+CREATE_NO_WINDOW = 0x08000000
+
+
+def hidden() -> dict:
+    """kwargs для subprocess: на Windows без консольного окна (TK-105 п.3); на остальных пусто."""
+    return {"creationflags": CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def _run(cmd: list, run=subprocess.run, timeout: float | None = None) -> subprocess.CompletedProcess:
     """Команда с пределом времени: зависла — код 124, процесс убит; вызывающий видит обычный отказ."""
-    kw = {}
+    kw = hidden()
     if cmd[0] == "claude":
         cmd = [shutil.which("claude") or "claude"] + cmd[1:]
         timeout = timeout or CLAUDE_TIMEOUT_S
@@ -110,13 +118,13 @@ def _fail(cmd: list, r) -> int:
     return 1
 
 
-def _fetchable(ref: str | None, run) -> bool:
-    """Цель достаётся с GitHub: shallow-клон ref (None — main) во временный каталог, с пределом времени. До этого на машине
-    ничего не меняется — сбой сети не должен оставить её без плагина (Б2 КТ-3)."""
+def _fetchable(ref: str | None, run, dest: Path | None = None) -> bool:
+    """Цель достаётся с GitHub: shallow-клон ref (None — main) в dest (или временный каталог), с пределом времени. До этого на
+    машине ничего не меняется — сбой сети не должен оставить её без плагина (Б2 КТ-3)."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="rpv-fetch-") as tmp:
-        cmd = ["git", "clone", "--depth", "1", *(["--branch", ref] if ref else []), f"https://github.com/{REPO}",
-               str(Path(tmp) / "c")]
+        target = dest or Path(tmp) / "c"
+        cmd = ["git", "clone", "--depth", "1", *(["--branch", ref] if ref else []), f"https://github.com/{REPO}", str(target)]
         r = _run(cmd, run)
         if r.returncode:
             _fail(cmd, r)
@@ -141,19 +149,32 @@ def _restore(old_pin: str | None, run) -> int:
     return 1
 
 
-def _reinstall(source: str, run) -> int:
-    """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него. Сначала цель добывается
-    (_fetchable); не добыта — ничего не трогаем, код 1."""
+def _reinstall(source: str, run, cache: Path | None = None) -> int:
+    """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него. Сначала цель добывается в локальный
+    клон (_fetchable); не добыта — ничего не трогаем, код 1. Если после remove add с GitHub упал (сеть, замок файла) —
+    add с локального клона: машину без плагина не оставляем (TK-105 п.1)."""
+    import shutil as _sh
+    import tempfile
     ref = source.split("#", 1)[1] if "#" in source else None
-    if not _fetchable(ref, run):
-        return 1
-    for cmd in (["claude", "plugin", "marketplace", "remove", NAME],
-                ["claude", "plugin", "marketplace", "add", source],
-                ["claude", "plugin", "install", f"{NAME}@{NAME}", *_scope_args()]):
-        r = _run(cmd, run)
+    local = Path(tempfile.mkdtemp(prefix="rpv-target-")) / "c"
+    keep = False
+    try:
+        if not _fetchable(ref, run, local):
+            return 1
+        _run(["claude", "plugin", "marketplace", "remove", NAME], run)
+        r = _run(["claude", "plugin", "marketplace", "add", source], run)
         if r.returncode:
-            return _fail(cmd, r)
-    return 0
+            _fail(["claude", "plugin", "marketplace", "add", source], r)
+            keep = True  # маркетплейс ссылается на этот каталог — не удалять
+            r = _run(["claude", "plugin", "marketplace", "add", str(local)], run)
+            if r.returncode:
+                return _fail(["claude", "plugin", "marketplace", "add", str(local)], r)
+        cmd = ["claude", "plugin", "install", f"{NAME}@{NAME}", *_scope_args()]
+        r = _run(cmd, run)
+        return _fail(cmd, r) if r.returncode else 0
+    finally:
+        if not keep:
+            _sh.rmtree(local.parent, ignore_errors=True)
 
 
 def update(run=subprocess.run, state: Path = STATE) -> int:
@@ -254,7 +275,7 @@ def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -
     ok = True
     for args in (["start.py", "--project", str(project)], ["supervise.py", "--project", str(project), "--install"]):
         r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / args[0]), *args[1:]], capture_output=True,
-                text=True, encoding="utf-8", errors="replace", env=clean_env(), cwd=str(project))
+                text=True, encoding="utf-8", errors="replace", env=clean_env(), cwd=str(project), timeout=CLAUDE_TIMEOUT_S, **hidden())
         if r.returncode:
             print(f"[release] {args[0]} -> код {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}", file=sys.stderr)
             ok = False
@@ -281,7 +302,8 @@ def verify_alive(project: Path, code_dir: Path | None, run=subprocess.run, wait_
     deadline = time.time() + wait_s
     while True:
         r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project),
-                 "--json", "--alive"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env())
+                 "--json", "--alive"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env(),
+                timeout=CLAUDE_TIMEOUT_S, **hidden())
         problems = alive_problems(r.stdout or "")
         if not problems:
             return True
@@ -377,7 +399,7 @@ def spawn_auto(project: Path, popen=subprocess.Popen) -> bool:
     Несколько влитых за проход PR дают несколько процессов — их сводит замок (run_auto_locked)."""
     if os.environ.get("RPV_AUTORELEASE", "1") == "0":
         return False
-    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == "nt" else 0
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW) if os.name == "nt" else 0  # DETACHED давал детям новые консоли
     log = project / ".claude" / "dispatcher" / "release-auto.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     popen([sys.executable, str(Path(__file__).resolve()), "auto", "--project", str(project)], env=clean_env(),

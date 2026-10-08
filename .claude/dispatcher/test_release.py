@@ -85,15 +85,31 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             fake = FakeClaude(["1.8.0"], fail_on=["plugin", "install", f"{release.NAME}@{release.NAME}"])
             self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 1)
-            adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
+            adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"] and c[3].startswith(release.REPO)]
             self.assertEqual(adds[0], ["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"])
             self.assertEqual(adds[1:], [["plugin", "marketplace", "add", release.REPO]] * 3)   # возврат прежнего — с повторами
 
     def test_update_failure_restores_pinned_marketplace(self):  # add после remove упал — прежний маркетплейс возвращается
         fake = FakeClaude(["1.8.0"], fail_on=["plugin", "marketplace", "add"], pinned="v1.8.0")
         self.assertEqual(release.update(fake, Path(tempfile.gettempdir()) / "x.json"), 1)
-        adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
+        adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"] and c[3].startswith(release.REPO)]
         self.assertEqual(adds, [["plugin", "marketplace", "add", release.REPO]] + [["plugin", "marketplace", "add", f"{release.REPO}#v1.8.0"]] * 3)
+
+    def test_github_down_during_reinstall_adds_from_local_clone(self):  # TK-105 п.1: плагин остаётся установленным
+        fake = FakeClaude(["1.8.0"])
+        base = fake.__call__
+
+        def run(cmd, **kw):
+            if cmd[0] == "git" and "clone" in cmd:
+                Path(cmd[-1]).mkdir(parents=True, exist_ok=True)
+            if cmd[0] != "git" and cmd[1:4] == ["plugin", "marketplace", "add"] and cmd[4].startswith(release.REPO):
+                return subprocess.CompletedProcess(cmd, 1, "", "github down")
+            return base(cmd, **kw)
+        self.assertEqual(release._reinstall(f"{release.REPO}#v1.8.0", run), 0)
+        self.assertTrue(any(c[:3] == ["plugin", "install", f"{release.NAME}@{release.NAME}"] for c in fake.calls))
+
+    def test_hidden_flags_no_window_on_windows(self):
+        self.assertEqual(release.hidden(), {"creationflags": release.CREATE_NO_WINDOW} if os.name == "nt" else {})
 
     def test_install_uses_project_scope_when_installed_there(self):
         with tempfile.TemporaryDirectory() as t:
