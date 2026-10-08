@@ -42,8 +42,14 @@ BOARD_SERVICE = "board_push"       # третья служба — отправ�
 BOARD_ARGS = ("--loop", "5")
 
 
+# необязательные службы под присмотром (TK-090 Д-1): включаются настройкой — один список для start.py (выпуск версии
+# перезапускает их вместе с остальными) и supervise.py (сердцебиение и подъём)
+OPTIONAL = (("ci_watch", lambda: bool(P.env("CI_REPO"))),          # автовлив PR
+            ("ceo_triage", lambda: P.env("CEO_TRIAGE") == "1"))     # сортировщик сигналов CEO (TK-086)
+
+
 def services() -> tuple:
-    return SERVICES + ((BOARD_SERVICE,) if P.env("BOARD") else ())
+    return SERVICES + ((BOARD_SERVICE,) if P.env("BOARD") else ()) + tuple(n for n, on in OPTIONAL if on())
 LOCK_IMAGE = "py"                  # подстрока имени образа процесса, как в dispatch.acquire_instance_lock
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом

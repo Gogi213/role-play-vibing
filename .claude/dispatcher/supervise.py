@@ -26,7 +26,8 @@ CODE_DIR = Path(__file__).resolve().parent
 STALE_S = float(os.environ.get("RPV_SUPERVISE_STALE_S", "600"))
 PERIOD_MIN = 5
 # служба -> (файл сердцебиения, поле времени)
-BEATS = {"dispatch": ("state.json", "last_tick"), "watch": ("watch-heartbeat.json", "ts")}
+BEATS = {"dispatch": ("state.json", "last_tick"), "watch": ("watch-heartbeat.json", "ts"),
+         "ci_watch": ("ci-heartbeat.json", "ts"), "ceo_triage": ("triage-heartbeat.json", "ts")}
 
 
 def heartbeat_age(path: Path, field: str, now: float) -> float | None:
@@ -77,11 +78,7 @@ def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> 
     load_env(state_dir)
     use_systemd = real and S._launcher() == "systemd"
     out = {}
-    beats = dict(BEATS)
-    if os.environ.get("RPV_CEO_TRIAGE") == "1":  # TK-086: сортировщик сигналов CEO — по включению, умолчание прежнее
-        beats["ceo_triage"] = ("triage-heartbeat.json", "ts")
-    if os.environ.get("RPV_CI_REPO"):  # TK-090 Д-1: автовлив PR (ci_watch) под присмотром, когда репозиторий задан
-        beats["ci_watch"] = ("ci-heartbeat.json", "ts")
+    beats = {n: BEATS[n] for n in S.services() if n in BEATS}  # тот же список, что у start.py
     for name, (beat, field) in beats.items():
         age = heartbeat_age(state_dir / beat, field, now)
         alive = S.is_ours(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")
@@ -106,8 +103,18 @@ def _secret_name(k: str) -> bool:
     return u.endswith(("_TOKEN", "_SECRET", "_PASSWORD", "_PASS", "_API_KEY", "_ACCESS_KEY", "_SECRET_KEY", "_PRIVATE_KEY"))
 
 
+def _settings_env(state_dir: Path) -> dict:
+    try:
+        return _forwarded(json.loads((state_dir.parent / "settings.json").read_text(encoding="utf-8"))["env"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
 def snapshot_env(state_dir: Path) -> None:
-    keep = _forwarded(dict(os.environ))
+    """Снимок — только то, чего нет в `env` проектного settings.json: оно читается заново каждый проход (Д-5), иначе
+    ключ, удалённый из settings.json, жил бы в снимке."""
+    live = _settings_env(state_dir)
+    keep = {k: v for k, v in _forwarded(dict(os.environ)).items() if k not in live}
     (state_dir / "supervise.env.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
 
 

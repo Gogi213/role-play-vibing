@@ -179,6 +179,29 @@ class InstallFilesTest(unittest.TestCase):
         for k in drop:
             self.assertNotIn(k, saved)
 
+    def test_snapshot_skips_settings_keys_so_deleted_key_disappears(self):  # TK-090 Д-5: settings.json — источник правды
+        with tempfile.TemporaryDirectory() as d:
+            sd = Path(d) / ".claude" / "dispatcher"
+            sd.mkdir(parents=True)
+            sf = sd.parent / "settings.json"
+            sf.write_text(json.dumps({"env": {"RPV_LIVE": "1"}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"RPV_LIVE": "1", "RPV_ONLY_SNAP": "2"}):
+                V.snapshot_env(sd)
+            saved = json.loads((sd / "supervise.env.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved.get("RPV_ONLY_SNAP"), "2")
+            self.assertNotIn("RPV_LIVE", saved)
+            sf.write_text(json.dumps({"env": {}}), encoding="utf-8")    # ключ убран из settings.json
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("RPV_LIVE", None)
+                V.load_env(sd)
+                self.assertNotIn("RPV_LIVE", os.environ)
+                os.environ.pop("RPV_ONLY_SNAP", None)
+
+    def test_supervise_and_start_share_one_service_list(self):  # TK-090 Д-1: выпуск версии перезапускает и ci_watch
+        with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r", "RPV_CEO_TRIAGE": "1"}):
+            self.assertEqual(S.services(), ("dispatch", "watch", "ci_watch", "ceo_triage"))
+            self.assertTrue(all(n in V.BEATS for n in S.services()))
+
     def test_session_env_never_snapshotted_and_install_refused_from_role(self):  # TK-090 г
         sess = {"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "ALPHA_ROLE": "engineer", "ALPHA_TICKET": "TK-1"}
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**sess, "RPV_OK": "1"}):
