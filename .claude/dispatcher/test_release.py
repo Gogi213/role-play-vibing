@@ -89,6 +89,20 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(adds[0], ["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"])
             self.assertEqual(adds[1:], [["plugin", "marketplace", "add", release.REPO]] * 3)   # возврат прежнего — с повторами
 
+    def test_update_failure_restores_pinned_marketplace(self):  # add после remove упал — прежний маркетплейс возвращается
+        fake = FakeClaude(["1.8.0"], fail_on=["plugin", "marketplace", "add"], pinned="v1.8.0")
+        self.assertEqual(release.update(fake, Path(tempfile.gettempdir()) / "x.json"), 1)
+        adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]]
+        self.assertEqual(adds, [["plugin", "marketplace", "add", release.REPO]] + [["plugin", "marketplace", "add", f"{release.REPO}#v1.8.0"]] * 3)
+
+    def test_install_uses_project_scope_when_installed_there(self):
+        with tempfile.TemporaryDirectory() as t:
+            reg = Path(t) / "r.json"
+            reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [{"scope": "project"}]}}))
+            self.assertEqual(release._scope_args(reg), ["--scope", "project"])
+            reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [{"scope": "user"}]}}))
+            self.assertEqual(release._scope_args(reg), [])
+
     def test_update_unpins_marketplace_from_tag(self):
         with tempfile.TemporaryDirectory() as t:
             fake = FakeClaude(["1.7.1", "1.8.0"], pinned="v1.7.1")
