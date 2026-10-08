@@ -1348,6 +1348,33 @@ class NoProgressViewTests(WatchSandbox):
         self.assertIn(W._PLAN_PY, T.read_ticket(p).log[-1].text)
         self.assertTrue(Path(W._PLAN_PY).exists())
 
+    def test_posix_file_wait_rejected_on_windows(self):
+        # случай 7 (TK-065): file:/tmp/x на Windows — диспетчер ищет <диск>:\tmp, роль пишет в %TEMP% → вечное ожидание
+        import tickets as TK
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт /tmp", status="in_progress", now=self.now)
+        tid = T.read_ticket(p).id
+        orig, TK.TICKETS_DIR = TK.TICKETS_DIR, self.tickets_dir
+        try:
+            with mock.patch.object(T, "_IS_WINDOWS", True):
+                self.assertEqual(TK.main(["wait", tid, "file:/tmp/done.json"]), 1)
+                self.assertEqual(T.read_ticket(p).status, "in_progress")  # отказ — шапка не тронута
+                for ok in ("file:C:/tmp/x", "file:data/x.json", "file://srv/share/x"):
+                    self.assertEqual(T.file_wait_problem(ok), "")
+            with mock.patch.object(T, "_IS_WINDOWS", False):
+                self.assertEqual(T.file_wait_problem("file:/tmp/done.json"), "")
+        finally:
+            TK.TICKETS_DIR = orig
+
+    def test_posix_file_wait_on_windows_is_reported_to_ceo(self):
+        p = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт /tmp", status="waiting", now=self.now)
+        with mock.patch.object(T, "_IS_WINDOWS", False):  # запись допустима: старый тикет мог уже ждать так
+            T.write_header_updates(p, {"wait_for": "file:/tmp/done.json"}, now=self.now)
+        state = {}
+        with mock.patch.object(T, "_IS_WINDOWS", True), mock.patch.object(D, "append_ceo_inbox") as inbox:
+            D.notify_wait_for_problem(T.read_ticket(p), state, self.now)
+        self.assertEqual(inbox.call_count, 1)
+        self.assertIn("posix-путь на Windows", inbox.call_args[0][2])
+
 
 if __name__ == "__main__":
     unittest.main()

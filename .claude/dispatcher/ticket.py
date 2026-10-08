@@ -165,6 +165,19 @@ def wait_cycle(tickets_dir, tid: str, target: str):
     return chain
 
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def file_wait_problem(spec: str) -> str:
+    """`file:/tmp/x` на Windows: диспетчер (Python) читает `/tmp` как `<диск>:\tmp`, а оболочка роли (Git Bash) кладёт
+    `/tmp` в %TEMP% — файл появится не там, ожидание вечное (случай 7, TK-065). Пусто — путь годится."""
+    p = parse_wait_for(spec)
+    if _IS_WINDOWS and p and p[0] == "file" and p[1].startswith("/") and not p[1].startswith("//"):
+        return (f"file:{p[1]} — posix-путь на Windows: диспетчер и оболочка роли понимают его по-разному. "
+                f"Дай путь с диском (file:C:/…) или относительный от корня проекта")
+    return ""
+
+
 def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()

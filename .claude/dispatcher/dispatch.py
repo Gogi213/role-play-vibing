@@ -877,8 +877,12 @@ def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
     spec = (tkt.header.get("wait_for") or "").strip()
     if spec:
         if T.parse_wait_for(spec) is not None:
-            return
-        note = f"wait_for не понят: {spec[:150]} — допустимо: {T.WAIT_FOR_FORMATS}"
+            why = T.file_wait_problem(spec)
+            if not why:
+                return
+            note = f"wait_for не сработает: {why}"
+        else:
+            note = f"wait_for не понят: {spec[:150]} — допустимо: {T.WAIT_FOR_FORMATS}"
     else:
         try:
             idle = now - T.parse_dt(tkt.header.get("updated", ""))
