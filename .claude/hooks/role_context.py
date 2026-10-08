@@ -17,6 +17,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import sys
 
 # (подстрока названия в нижнем регистре, файл устава) — первое совпадение
@@ -144,13 +145,14 @@ def rel(path):
 
 
 def tickets_command():
-    """Готовая команда тикетов: `"<sys.executable>" "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`.
+    """Готовая команда тикетов: `python|"<sys.executable>" "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`.
 
     Плагин лежит в своей папке, в проекте `tickets.py` нет — хук знает свой путь и подставляет его сам (слэши прямые:
     работают и в Bash, и в PowerShell на Windows). Подкоманда (`comment`, `new` …) дописывается после `--project`."""
     here = os.path.dirname(os.path.abspath(__file__))                      # <плагин>/.claude/hooks
     script = os.path.join(os.path.dirname(here), "dispatcher", "tickets.py")
-    return f'"{sys.executable.replace(os.sep, "/")}" "{script.replace(os.sep, "/")}" --project "{ROOT.replace(os.sep, "/")}"'
+    exe = "python" if shutil.which("python") else '"' + sys.executable.replace(os.sep, "/") + '"'   # TK-110 В-1: путь только без python в PATH
+    return f'{exe} "{script.replace(os.sep, "/")}" --project "{ROOT.replace(os.sep, "/")}"'
 
 
 def ticket_path():

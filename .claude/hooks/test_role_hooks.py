@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,10 +71,10 @@ class SessionStart(unittest.TestCase):
         for role in ("researcher", "engineer", "judge", "ceo"):
             for source in ("startup", "resume"):
                 text, _ = start_text(role, source)
-                m = re.search(r'"([^"]+)" "([^"]+tickets\.py)" --project "([^"]+)"', text)
+                m = re.search(r'(python|"[^"]+") "([^"]+tickets\.py)" --project "([^"]+)"', text)
                 self.assertIsNotNone(m, (role, source, text))
                 exe, script, project = m.group(1), m.group(2), m.group(3)
-                self.assertEqual(os.path.normpath(exe), os.path.normpath(sys.executable))  # TK-110 В-1
+                self.assertEqual(exe, "python" if shutil.which("python") else '"' + sys.executable.replace(os.sep, "/") + '"')  # TK-110 В-1
                 self.assertTrue(os.path.isabs(script), script)
                 self.assertTrue(os.path.isfile(script), script)
                 self.assertEqual(os.path.normpath(script),
@@ -505,6 +506,14 @@ class GuardJournalTest(unittest.TestCase):
 
 
 class HaikuAbstractTest(unittest.TestCase):
+    def test_tickets_command_python_or_executable(self):  # TK-110 В-1: python есть в PATH — он; нет — sys.executable
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import role_context as rc
+        with mock.patch("shutil.which", return_value="/usr/bin/python"):
+            self.assertTrue(rc.tickets_command().startswith('python "'))
+        with mock.patch("shutil.which", return_value=None):
+            self.assertTrue(rc.tickets_command().startswith('"' + sys.executable.replace(os.sep, "/") + '" "'))
+
     def test_digest_written_before_haiku_and_env_clean(self):  # TK-110 В-2 + Ж-1
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
         import haiku_aux

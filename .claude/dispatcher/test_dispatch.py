@@ -4270,9 +4270,11 @@ class ProjectRootTests(unittest.TestCase):
         self.assertEqual([p.name for p in self.proj.rglob(".claude")], [])
 
     def test_cli_hints_use_sys_executable(self):  # TK-110 В-1
-        for cli in (D.tickets_cli(), D.plan_cli()):
-            self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
-            self.assertFalse(cli.startswith("python "), cli)
+        with mock.patch("shutil.which", return_value="/usr/bin/python"):
+            self.assertTrue(D.tickets_cli().startswith("python ") and D.plan_cli().startswith("python "))
+        with mock.patch("shutil.which", return_value=None):
+            for cli in (D.tickets_cli(), D.plan_cli()):
+                self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
 
     def test_tickets_cli_from_subfolder_creates_ticket_in_project_root(self):
         proj = self.make_project(self.proj / "work")

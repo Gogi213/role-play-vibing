@@ -1558,8 +1558,8 @@ def effort_for(role: str, tkt=None) -> str:
 
 
 def _py() -> str:
-    """Интерпретатор для команд, которые диспетчер выдаёт ролям: на Mac/Linux слова `python` может не быть (TK-110 В-1)."""
-    return shlex.quote(Path(sys.executable).as_posix()) + " "
+    """Интерпретатор для команд, которые диспетчер выдаёт ролям: на Mac/Linux слова `python` может не быть (TK-110 В-1); есть в PATH — прежнее `python` (кавычки вокруг пути ломают PowerShell)."""
+    return "python " if shutil.which("python") else shlex.quote(Path(sys.executable).as_posix()) + " "
 
 
 def tickets_cli() -> str:
