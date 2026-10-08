@@ -898,7 +898,8 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(alive, {T.read_ticket(p).id})
         self.assertEqual(T.read_ticket(p).status, "waiting")
         text = T.at_left_text("at:2026-10-09T02:00:00+04:00", datetime.fromisoformat("2026-10-08T05:00:00+04:00"))
-        self.assertEqual(text, "ждёт до 09.10 02:00, осталось 21 ч 00 мин")
+        at = datetime.fromisoformat("2026-10-09T02:00:00+04:00").astimezone()  # пояс раннера не важен
+        self.assertEqual(text, f"ждёт до {at:%d.%m %H:%M}, осталось 21 ч 00 мин")
 
     def test_at_wait_past_time_plus_grace_wakes_owner(self):
         p = self._waiting("at:2000-01-01T00:00:00+00:00")
