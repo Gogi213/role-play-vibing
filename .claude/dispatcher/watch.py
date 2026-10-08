@@ -852,6 +852,24 @@ def check_deck_frozen(ssh_run=_ssh_run) -> list:
                     + (f" ({units})" if units else "") + " — счёт стоит, нужно место/разморозка")]
 
 
+def check_host_alerts(run=subprocess.run) -> int:
+    """№17 аудита: адаптер проекта `RPV_HOST_ALERTS_CMD` печатает новые тревоги хоста по строке на тревогу; каждая
+    строка — «ждёт вас» на Диспетчерской (ask.new_notice, тот же непринятый текст не дублируется). Нет настройки — молчим.
+    Команда сама отвечает за «только новое»: принятая строка при повторной печати встанет снова. Возвращает число строк."""
+    cmd = os.environ.get("RPV_HOST_ALERTS_CMD", "").strip()
+    if not cmd:
+        return 0
+    import ask
+    try:
+        r = run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    for ln in lines:
+        ask.new_notice(D.PROJECT_ROOT, "host", ln[:300])
+    return len(lines)
+
+
 def collect_findings(state: dict, now, ssh_run=_ssh_run, started_at=None, hold_hint=None,
                      observed: dict = None, alive_waits=()) -> list:
     findings = []
@@ -861,6 +879,7 @@ def collect_findings(state: dict, now, ssh_run=_ssh_run, started_at=None, hold_h
     findings += check_no_progress_view(now)
     findings += check_stale_plan(now)
     findings += check_second_machine(ssh_run, hold_hint=hold_hint, observed=observed)
+    check_host_alerts()
     return findings
 
 
