@@ -244,6 +244,10 @@ def _t_updated(t, default: float) -> float:
 def _wait_human(t) -> tuple:
     wf = (t.header.get("wait_for") or "").strip().lower()
     m = re.match(r"(?:host:)?(calc|vps)\b", wf)
+    if t.status == "waiting" and wf.startswith("at:"):
+        left = T.at_left_text(t.header.get("wait_for") or "")
+        if left:
+            return left, "pc"
     if t.status == "needs_owner":
         return "ждёт вашего слова", "you"
     if t.next_role == "ceo" or wf.startswith(("ceo", "mention")) or (t.status == "waiting" and not wf):
