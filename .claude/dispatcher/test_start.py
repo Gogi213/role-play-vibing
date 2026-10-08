@@ -50,6 +50,20 @@ def wait_alive(pid, want=True, timeout=10.0):
     return False
 
 
+_OPTIONAL_ENV = ("RPV_CI_REPO", "RPV_CEO_TRIAGE", "ALPHA_CI_REPO", "ALPHA_CEO_TRIAGE")
+_saved_optional = {}
+
+
+def setUpModule():  # необязательные службы (TK-090 Д-1) включаются средой; другие модули ставят RPV_CI_REPO при импорте
+    for k in _OPTIONAL_ENV:
+        if k in os.environ:
+            _saved_optional[k] = os.environ.pop(k)
+
+
+def tearDownModule():
+    os.environ.update(_saved_optional)
+
+
 class StartTests(unittest.TestCase):
     def test_board_service_only_with_rpv_board(self):
         old = os.environ.pop("RPV_BOARD", None), os.environ.pop("ALPHA_BOARD", None)

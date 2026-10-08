@@ -16,6 +16,8 @@
 
 - Сортировщик сигналов CEO `ceo_triage.py` (TK-086): правила без ИИ (дубль, закрытый тикет, план-сигналы, orphan при годном wait_for) + Haiku 5.5 `--effort xhigh` на остаток; шум — ack, сведения — `ceo-digest.md` (показывает хук на сообщении владельца), действия — один запуск CEO как роли; журнал `triage.jsonl` с токенами. Запуск вручную/присмотром (`ceo_triage.py --project …`), по умолчанию ничего не меняется; тесты `test_ceo_triage.py`.
 - Присмотр поднимает сортировщик при `RPV_CEO_TRIAGE=1` (сердцебиение `triage-heartbeat.json`, замок `ceo_triage.pid`); `ceo_triage.py --report` — замер TK-086 (классы событий, токены Haiku и запусков CEO).
+- Один список служб (TK-090 Д-1/Д-5): `start.services()` включает `ci_watch` (при `RPV_CI_REPO`) и `ceo_triage` (при `RPV_CEO_TRIAGE=1`) — выпуск версии перезапускает их вместе с диспетчером и сторожем, `supervise` берёт тот же список. Снимок `supervise.env.json` не содержит ключей из `env` settings.json — удалённый там ключ исчезает на ближайшем проходе.
+
 - Присмотр держит `ci_watch.py` при заданном `RPV_CI_REPO` (TK-090 Д-1): замок `ci_watch.pid`, сердцебиение `ci-heartbeat.json`; `supervise` перечитывает `env` проектного `settings.json` на каждом проходе поверх снимка (Д-5) — правка env не требует `--install`.
 
 ### Изменено
