@@ -139,6 +139,33 @@ def _gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception, bus) -
     return f"{what}: сбой → владельцу"
 
 
+def _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out, bus) -> None:
+    """Послеслияние: проверка merged, запись в тикет, accepted, для плагина — тег и автовыпуск."""
+    key = f"{repo}#{n}"
+    try:
+        confirmed = bool(gh(f"repos/{repo}/pulls/{n}").get("merged"))
+    except Exception:                                         # PUT прошёл, а проверка упала (сбой, таймаут gh) — верим ответу PUT
+        confirmed = bool((merged_resp or {}).get("merged"))
+    if confirmed:
+        _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).", bus=bus)
+        _drop_accepted(tkt, n)
+        st[key] = {"merged": sha}
+        out.append((n, "влит"))
+        if repo == R.REPO:  # TK-094: влит PR самого плагина — тег, выпуск, службы заново, проверка, при провале откат
+            try:
+                msha = (merged_resp or {}).get("sha") or sha
+                R.tag_release(gh, repo, R.plugin_version_at(gh, repo, msha), msha)
+            except Exception as e:
+                _note(tkt, f"PR #{n} влит, но тег выпуска не поставлен ({str(e)[:120]}) — откат на эту версию невозможен "
+                           "до тега.", wake_owner=True, bus=bus)
+            R.spawn_auto(D.PROJECT_ROOT)
+    else:
+        _note(tkt, f"PR #{n}: запрос слияния принят, но merged=false на {sha[:7]} — проверь вручную.",
+              wake_owner=True, bus=bus)
+        st[key] = {"failed": sha}
+        out.append((n, "не подтверждено → владельцу"))
+
+
 def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
     """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
     st, out = _load(), []
@@ -152,8 +179,26 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
     prs = gh(f"repos/{repo}/pulls?state=open&per_page=100")
     open_heads = {p["head"]["ref"] for p in prs}
     ci = C.load_state()
+    swept = set()
+    for key, ent in list(st.items()):                          # TK-109 п.1/14: PUT без ответа — смотрим PR вне списка open
+        if not (isinstance(ent, dict) and ent.get("put_pending") and key.startswith(f"{repo}#")):
+            continue
+        n, psha = int(key.rsplit("#", 1)[1]), ent["put_pending"]
+        ptkt = next((t for t in tickets if t.id == ent.get("tid")), None)
+        try:
+            d2 = gh(f"repos/{repo}/pulls/{n}")
+        except Exception:
+            continue
+        if ptkt is None or d2.get("state") == "open" and not d2.get("merged"):
+            st.pop(key)
+        elif d2.get("merged"):
+            st.pop(key)
+            swept.add(n)
+            _after_merge(gh, repo, n, psha, default, ptkt, {"merged": True, "sha": d2.get("merge_commit_sha")}, st, out, bus)
     for pr in prs:
         n, sha = pr["number"], pr["head"]["sha"]
+        if n in swept:
+            continue
         tkt = C.ticket_for_pr(pr, tickets)
         if tkt is None or tkt.status not in C.ACTIVE + ("done",):
             continue
@@ -210,32 +255,19 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
         try:
             merged_resp = gh(f"repos/{repo}/pulls/{n}/merge", method="PUT", merge_method="merge", sha=sha)
         except Exception as e:
-            r = _gh_error(st, key, sha, tkt, "слияние", e, bus)
-            if r:
-                out.append((n, r))
-            continue
+            # TK-109 п.1/14: таймаут/5xx самого PUT мог прийти ПОСЛЕ слияния — переспрашиваем, влитый PR из open уйдёт
+            try:
+                d2 = gh(f"repos/{repo}/pulls/{n}")
+            except Exception:
+                st[key] = {"put_pending": sha, "tid": tkt.id}   # не знаем — досмотр вне списка open на следующих проходах
+                continue
+            if not d2.get("merged"):
+                r = _gh_error(st, key, sha, tkt, "слияние", e, bus)
+                if r:
+                    out.append((n, r))
+                continue
+            merged_resp = {"merged": True, "sha": d2.get("merge_commit_sha")}
         st.pop(key, None)
-        try:
-            confirmed = bool(gh(f"repos/{repo}/pulls/{n}").get("merged"))
-        except Exception:                                     # TK-109 п.1/14: PUT прошёл, а проверка упала (сбой, таймаут gh)
-            confirmed = bool((merged_resp or {}).get("merged"))  # — слияние не теряем, верим ответу PUT
-        if confirmed:
-            _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).", bus=bus)
-            _drop_accepted(tkt, n)
-            st[key] = {"merged": sha}
-            out.append((n, "влит"))
-            if repo == R.REPO:  # TK-094: влит PR самого плагина — тег, выпуск, службы заново, проверка, при провале откат
-                try:
-                    msha = (merged_resp or {}).get("sha") or sha
-                    R.tag_release(gh, repo, R.plugin_version_at(gh, repo, msha), msha)
-                except Exception as e:
-                    _note(tkt, f"PR #{n} влит, но тег выпуска не поставлен ({str(e)[:120]}) — откат на эту версию невозможен "
-                               "до тега.", wake_owner=True, bus=bus)
-                R.spawn_auto(D.PROJECT_ROOT)
-        else:
-            _note(tkt, f"PR #{n}: запрос слияния принят, но merged=false на {sha[:7]} — проверь вручную.",
-                  wake_owner=True, bus=bus)
-            st[key] = {"failed": sha}
-            out.append((n, "не подтверждено → владельцу"))
+        _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out, bus)
     _save(st)
     return out

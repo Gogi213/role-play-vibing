@@ -35,6 +35,42 @@ class MergeAfterPutTests(Base):
         self.assertTrue(any("PR #7 влит" in e.text for e in cur.log))
         self.assertNotIn("7@", cur.header.get("accepted") or "")
 
+    def _put_times_out(self, merged_on_server, get_fails=False):
+        base_gh, st = self.gh, {"put": False}
+
+        def gh(path, method="GET", **f):
+            if method == "PUT":
+                st["put"] = merged_on_server
+                self.calls.append((method, path, f))
+                raise subprocess.TimeoutExpired("gh", 30)
+            if st["put"] and get_fails and path == f"repos/{TM.REPO}/pulls/7":
+                raise subprocess.TimeoutExpired("gh", 30)
+            if st["put"] and path.endswith("pulls?state=open&per_page=100"):
+                return []   # влитый PR из open ушёл
+            r = base_gh(path, method, **f)
+            if st["put"] and isinstance(r, dict) and "mergeable" in r:
+                r["merged"] = True
+            return r
+        return gh
+
+    def test_put_timeout_but_merged_on_server(self):  # п.1/14 (Судья): таймаут самого PUT
+        out = M.merge_once(TM.REPO, gh=self._put_times_out(True))
+        self.assertEqual(out, [(7, "влит")])
+        self.assertTrue(any("PR #7 влит" in e.text for e in T.read_ticket(self.path).log))
+
+    def test_put_timeout_and_get_fails_then_seen_outside_open(self):
+        gh = self._put_times_out(True, get_fails=True)
+        self.assertEqual(M.merge_once(TM.REPO, gh=gh), [])
+        self.assertFalse(any("PR #7 влит" in e.text for e in T.read_ticket(self.path).log))
+        gh2 = self._put_times_out(True)
+        self.assertEqual(M.merge_once(TM.REPO, gh=lambda p, method="GET", **f: gh2(p, method, **f)), [(7, "влит")])
+        self.assertEqual(M.merge_once(TM.REPO, gh=gh2), [])  # второй раз не пишет
+
+    def test_put_timeout_not_merged_is_ordinary_error(self):
+        self.merged = False
+        self.assertEqual(M.merge_once(TM.REPO, gh=self._put_times_out(False)), [])
+        self.assertFalse(any("PR #7 влит" in e.text for e in T.read_ticket(self.path).log))
+
     def test_patch_failure_does_not_abort_pass(self):  # п.2
         self.base = "feat/parent"
         base_gh = self.gh
@@ -53,7 +89,8 @@ class ProofTests(unittest.TestCase):  # п.3
             (root / "a.md").write_text("x")
             (Path(o) / "b.md").write_text("x")
             chk = lambda p: R.check("engineer", "done", "ok", path=p, root=root)  # noqa: E731
-            for bad in (".", "/", str(root), "", str(Path(o) / "b.md"), "../x", "нет.md"):
+            (root / "docs").mkdir()
+            for bad in (".", "/", str(root), "docs", "", str(Path(o) / "b.md"), "../x", "нет.md"):
                 self.assertTrue(chk(bad), bad)
             self.assertEqual(chk("a.md"), "")
 
@@ -79,8 +116,8 @@ class AnswerRetryTests(unittest.TestCase):  # п.16
                 ok, _, warns = ask.answer_question("q-TK-9-1", "a")
                 self.assertTrue(ok)
                 self.assertTrue(warns)
-                ok, msg, warns = ask.answer_question("q-TK-9-1", "a")  # повтор: только запись, не новый ответ
-                self.assertEqual((ok, warns, len(calls)), (True, [], 2))
+                self.assertEqual(ask.flush_pending(), 1)  # тик диспетчера досылает; новый ответ не нужен
+                self.assertEqual(len(calls), 2)
                 self.assertNotIn("log_pending", json.loads((qdir / "q-TK-9-1.json").read_text(encoding="utf-8")))
                 ok, _, _ = ask.answer_question("q-TK-9-1", "a")
                 self.assertFalse(ok)

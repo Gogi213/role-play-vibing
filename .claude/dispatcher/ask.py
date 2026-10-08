@@ -141,6 +141,20 @@ def _retry_log(qid: str, q: dict) -> tuple[bool, str, list[str]]:
     return True, f"{qid}: запись ответа в тикет доставлена", []
 
 
+def flush_pending() -> int:
+    """TK-109 п.16: тик диспетчера досылает недошедшие записи ответов (log_pending); → сколько доставлено."""
+    n = 0
+    for p in sorted(P.questions_dir().glob("q-*.json")):
+        q = P.read_json(p)
+        if isinstance(q, dict) and q.get("answered_at") and q.get("log_pending") and P.is_ticket(q.get("process", "")):
+            try:
+                _retry_log(q["id"], q)
+                n += not P.read_json(p).get("log_pending")
+            except Exception as e:  # noqa: BLE001
+                print(f"[ask] досылка {p.name}: {type(e).__name__}: {e}", file=sys.stderr)
+    return n
+
+
 def answer_question(qid: str, key: str) -> tuple[bool, str, list[str]]:
     """→ (ответ принят, сообщение, предупреждения). Принят — файл вопроса записан; сбои побочных записей — в предупреждениях."""
     q = P.read_json(qpath(qid))

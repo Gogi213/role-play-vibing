@@ -53,7 +53,7 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
         try:  # TK-109 п.3: не '.', '/', каталог проекта и не путь вне проекта
             base = root.resolve()
             f = (Path(p) if Path(p).is_absolute() else root / p).resolve()
-            return f != base and f.exists() and f.is_relative_to(base)
+            return f != base and f.is_file() and f.is_relative_to(base)
         except (OSError, ValueError):
             return False
 

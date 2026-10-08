@@ -2546,6 +2546,11 @@ def tick(now=None) -> int:
     save_state(state)
 
     sweep_closed_worktrees()
+    try:  # TK-109 п.16: недошедшие записи ответов владельца с табло
+        import ask
+        ask.flush_pending()
+    except Exception as e:
+        print(f"[dispatch] досылка ответов: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     unblock_limit_victims(now)
     paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
