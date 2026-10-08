@@ -48,6 +48,29 @@ class WorktreeHygieneTests(unittest.TestCase):
         WH.sweep(self.p, {"TK-104": "stopped"})
         self.assertTrue(a.exists())
 
+    def test_closed_name_live_branch_kept(self):
+        a = self.add("tk065-x", "tk084-r2dl")
+        WH.sweep(self.p, {"TK-065": "done", "TK-084": "waiting"})
+        self.assertTrue(a.exists())
+        WH.sweep(self.p, {"TK-065": "done", "TK-084": "done"})
+        self.assertFalse(a.exists())
+
+    def test_ignored_data_kept_build_dirs_not(self):
+        (self.p / ".gitignore").write_text("data/\ntarget/\n")
+        git(self.p, "add", "-A")
+        git(self.p, "commit", "-qm", "ign")
+        a = self.add("tk104-i", "br-i")
+        (a / "target").mkdir()
+        (a / "target" / "x").write_text("b")
+        WH.sweep(self.p, {"TK-104": "done"})
+        self.assertFalse(a.exists())
+        b = self.add("tk104-j", "br-j")
+        (b / "data").mkdir()
+        (b / "data" / "r.csv").write_text("r")
+        out = WH.sweep(self.p, {"TK-104": "done"})
+        self.assertTrue(b.exists())
+        self.assertIn("data/", out[0])
+
     def test_foreign_copy_reported_not_removed(self):
         out = self.add("tk104-f", "br-f", base=self.root / "proj-tk104")
         closed, foreign = WH.findings(self.p, {"TK-104": "done"})

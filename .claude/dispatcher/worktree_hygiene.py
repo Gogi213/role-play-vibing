@@ -46,19 +46,45 @@ def ticket_of(path: Path) -> str | None:
     return f"TK-{int(m.group(1)):03d}" if m else None
 
 
+def ticket_of_branch(branch: str | None) -> str | None:
+    m = TOKEN.search(branch or "")
+    return f"TK-{int(m.group(1)):03d}" if m else None
+
+
+def is_closed(path: Path, branch: str | None, status_of: dict) -> bool:
+    """Копия закрыта, только если имя папки И ветка (если в ней есть токен тикета) указывают на закрытые тикеты."""
+    if status_of.get(ticket_of(path)) not in CLOSED:
+        return False
+    bt = ticket_of_branch(branch)
+    return bt is None or status_of.get(bt) in CLOSED
+
+
 def findings(project: Path, status_of: dict) -> tuple:
     """status_of: {id тикета: status}. -> (копии закрытых тикетов, копии вне .claude/worktrees)."""
     closed, foreign = [], []
-    for path, _ in list_worktrees(project):
+    for path, branch in list_worktrees(project):
         if not _inside(project, path):
             foreign.append(path)
-        elif status_of.get(ticket_of(path)) in CLOSED:
+        elif is_closed(path, branch, status_of):
             closed.append(path)
     return closed, foreign
 
 
+BUILD_IGNORED = ("target/", "node_modules/", "__pycache__/", ".pytest_cache/", ".venv/")
+
+
+def precious_ignored(path: Path) -> list:
+    """Игнорируемое git'ом, кроме артефактов сборки: удаление worktree потеряло бы это без следа."""
+    r = _git(path, "status", "--ignored", "--porcelain", cwd=path)
+    out = [l[3:] for l in r.stdout.splitlines() if l.startswith("!! ")]
+    return [f for f in out if not any(f.startswith(b) or f"/{b}" in f for b in BUILD_IGNORED)]
+
+
 def remove(project: Path, path: Path, branch: str | None) -> str:
     """Убрать копию; грязное — коммит в ветку (у detached HEAD сохранять некуда — копия остаётся). Ответ — что сделано."""
+    keep = precious_ignored(path)
+    if keep:
+        return f"оставлена {path.name}: игнорируемые файлы {', '.join(keep[:3])}"
     dirty = _git(project, "status", "--porcelain", cwd=path).stdout.strip()
     if dirty:
         if not branch:
