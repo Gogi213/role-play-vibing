@@ -20,6 +20,7 @@ import project as P  # noqa: E402
 import start as S  # noqa: E402
 import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
+import worktree_hygiene as WH  # noqa: E402
 
 OK, WARN, FAIL, OFF = "OK", "WARN", "FAIL", "—"
 DAY = 86400
@@ -132,6 +133,26 @@ def check_queue(project: Path, state_dir: Path) -> list:
     return rows
 
 
+def check_worktrees(project: Path) -> tuple:
+    status = {}
+    for p in (project / ".claude" / "tickets").glob("*.md"):
+        try:
+            t = T.read_ticket(p)
+            status[t.id] = t.status
+        except Exception:
+            continue
+    try:
+        closed, foreign = WH.findings(project, status)
+    except (OSError, subprocess.SubprocessError):
+        return "рабочие копии", OFF, "git недоступен"
+    if closed or foreign:
+        msg = "; ".join(x for x in (
+            closed and "закрытых тикетов: " + ", ".join(p.name for p in closed),
+            foreign and "вне .claude/worktrees: " + ", ".join(str(p) for p in foreign)) if x)
+        return "рабочие копии", WARN, msg
+    return "рабочие копии", OK, "лишних нет"
+
+
 def check_errors(state_dir: Path, now: float) -> tuple:
     lines = _log_lines_since(state_dir / "runs.log", now - DAY)
     bad = [l for l in lines if " status=ok" not in l and "status=" in l]
@@ -183,7 +204,7 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
     rows += [check_supervise(project, sd, now, installed), check_bus(bus_request, _state_bus_url(sd))]
     if not alive_only:
         rows.append(check_idle(sd, now, float(P.env("IDLE_SLO_MIN", "10"))))
-    rows += [*check_queue(project, sd), check_errors(sd, now)]
+    rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
 
 
