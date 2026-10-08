@@ -257,6 +257,10 @@ class AutoReleaseTests(unittest.TestCase):
 
     def test_spawn_auto_detached_and_switchable(self):
         calls = []
+        env = {k: v for k, v in os.environ.items() if k != "RPV_AUTORELEASE"}   # тест не зависит от env ПК
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.assertTrue(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append((a, k))))
         self.assertIn("auto", calls[0][0][0])
         if os.name == "nt":
