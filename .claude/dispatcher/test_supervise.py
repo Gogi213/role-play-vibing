@@ -56,7 +56,7 @@ class SuperviseTest(unittest.TestCase):
             (sd / "dispatch.pid").write_text(str(os.getpid()), encoding="utf-8")
             (sd / "watch.pid").write_text(str(os.getpid()), encoding="utf-8")
             stopped, spawned = [], []
-            real = S.is_ours
+            real = S.is_ours_state
             S.is_ours_state = lambda pid, script: pid > 0   # оба «живы»
             try:
                 out = V.run_once(project, now.timestamp(), stop=lambda p, s, unit=None: stopped.append(s) or 1,
