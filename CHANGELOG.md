@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.19 — 2026-10-08
+
+### Изменено (TK-100, №20 мёртвое)
+
+- Удалён неиспользуемый код: `board_push` (`TAGS`, `_plan_steps`, `_step`, `STATE`, `TZ`, `MORDER`, `ACTIVE`), `view2` (`STATE_RU`, `AUTO_TITLE_LEN`, `_mid`, `V2`), `watch._ticket_status`; −54 строки. Поведение не менялось.
+
 ## 1.8.18 — 2026-10-08
 
 ### Изменено (TK-100, хвост №6/№26)
