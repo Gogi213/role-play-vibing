@@ -2,8 +2,7 @@
 
 Концепт владельца — канвас https://claude.ai/artifact/3N12ZHATKRWT6zdjM3s7L6, артборды «Концепт · Обзор» и
 «Концепт · Процесс подробно (enter)». Сборщик (`board_push.py` → `view2.py`, плагин `.claude/dispatcher/`) пишет `view2`; все экраны (страница-артефакт,
-веб-страница) только рисуют его. Пример — `sample-view2.json` (все поля ниже, в том числе волны, `review`/`repair`,
-`summary`, `progress`, `default`).
+веб-страница) только рисуют его. Поля ниже (волны, `review`/`repair`, `summary`, `progress`, `default`) — полный список; живой пример — `view2` в `status.json`.
 
 ```jsonc
 "view2": {
@@ -136,7 +135,7 @@ Enter / кнопка «Ок» отвечает им (`ask.py answer <id> <defaul
 `{"view2": …, "built_at": …}`), `POST /teams {"name"}` (создать команду; ключ показывается один раз, хранится его sha256; ≤ 20 команд),
 `POST /teams/<id>/delete`; остальное — 404. Ответы на вопросы кнопкой не принимаются: владелец отвечает в чате (`ask.py answer`).
 Команда шлёт сводку: `python .claude/dispatcher/board_push.py --loop 5` с `RPV_BOARD` (строка из окна «+»). Эта же сводка раз в
-цикл пишется в `<проект>/.claude/pulse/status.json` — его читают `board.py` (TUI) и `mcp_server.py` (MCP «rpv-pulse»).
+цикл пишется в `<проект>/.claude/pulse/status.json` — его читает `mcp_server.py` (MCP «rpv-pulse»).
 Деплой: файлы `.claude/board/*` в `/opt/rpv-board`, `systemctl restart rpv-board` (см. комментарии в `rpv-board.service`).
 
 ## Машины и строки процессов (1.7.0)
