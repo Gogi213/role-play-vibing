@@ -1,8 +1,11 @@
 """Выпуск и откат (TK-076 п.5): версии согласованы, bump/update/rollback — по последовательности команд claude."""
 import json
+import os
 import subprocess
+import time
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import release
@@ -97,6 +100,123 @@ class ReleaseTests(unittest.TestCase):
             fake = FakeClaude(["1.7.1", "1.8.0"])
             release.update(fake, Path(t) / "s.json")
             self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
+
+
+class AutoReleaseTests(unittest.TestCase):
+    """TK-094: автовыпуск — update, службы заново, проверка; провал → откат + сигнал владельцу."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = Path(self.tmp.name)
+        self.st = self.proj / "s.json"
+        self.reg = self.proj / "installed.json"
+        self.reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [
+            {"scope": "project", "projectPath": str(self.proj), "installPath": str(self.proj / "plug")}]}}), encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def journal(self):
+        f = self.proj / ".claude" / "dispatcher" / "release-journal.jsonl"
+        return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+
+    def notices(self):
+        qs = sorted((self.proj / ".claude" / "pulse" / "questions").glob("q-release-*.json"))
+        return [json.loads(p.read_text(encoding="utf-8")) for p in qs]
+
+    def test_notice_visible_on_dispatcher_and_answerable(self):  # сигнал выпуска виден на Диспетчерской, снимается ответом
+        self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
+        import view2, ask
+        qs = self.notices()
+        v = view2.make({}, {}, qs, time.time())
+        self.assertIn("rolled-back", v["questions"][0]["text"])
+        qdir = self.proj / ".claude" / "pulse" / "questions"
+        with mock.patch.object(ask.P, "questions_dir", return_value=qdir):
+            ok, msg, _ = ask.answer_question(qs[0]["id"], "a")
+        self.assertTrue(ok)
+        self.assertFalse(view2.make({}, {}, self.notices(), time.time())["questions"])
+
+    def auto(self, versions, alive, **kw):
+        restarts = []
+        fake = FakeClaude(versions, **kw)
+        rc = release.autorelease(self.proj, fake, self.st, self.reg,
+                                 restart=lambda p, d, run: restarts.append(d) or True, verify=lambda p, d, run: alive)
+        return rc, fake, restarts
+
+    def test_ok_restarts_services_and_journals(self):
+        rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=True)
+        self.assertEqual((rc, len(restarts), [j["result"] for j in self.journal()]), (0, 1, ["ok"]))
+        self.assertEqual(self.notices(), [])
+
+    def test_same_version_is_not_silent(self):  # влит PR без bump: службы не трогаем, но журнал и «ждёт вас»
+        rc, fake, restarts = self.auto(["1.8.3"], alive=True)
+        self.assertEqual((rc, restarts, [j["result"] for j in self.journal()]), (0, [], ["no-bump"]))
+        self.assertIn("no-bump", self.notices()[0]["text"])
+
+    def test_failed_check_rolls_back_and_tells_owner(self):
+        rc, fake, restarts = self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
+        self.assertEqual(rc, 2)  # проверка не прошла и после отката (verify всегда False)
+        self.assertIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.8.3"], fake.calls)
+        self.assertEqual(len(restarts), 2)  # службы подняты заново и после отката
+        self.assertEqual(self.journal()[-1]["result"], "rolled-back")
+        self.assertIn("rolled-back", self.notices()[0]["text"])
+        self.assertFalse((self.proj / ".claude" / "dispatcher" / "ceo-digest.md").exists())
+
+    def test_rollback_failure_is_reported(self):
+        rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=False, tags=())  # тега прошлой версии нет
+        self.assertEqual((rc, self.journal()[-1]["result"]), (2, "rollback-failed"))
+
+    def test_clean_env_drops_session_keeps_service_settings(self):
+        env = release.clean_env({"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "ALPHA_ROLE": "x", "ALPHA_TICKET": "y",
+                                 "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "HOST_SESSION": "1", "PATH": "p",
+                                 "ALPHA_DISPATCH_MAX_PARALLEL": "8", "ALPHA_DISPATCH_ROLE_PARALLEL": "engineer:6",
+                                 "RPV_DISPATCH_X": "1"})
+        self.assertEqual(env, {"PATH": "p", "ALPHA_DISPATCH_MAX_PARALLEL": "8", "ALPHA_DISPATCH_ROLE_PARALLEL": "engineer:6",
+                               "RPV_DISPATCH_X": "1"})
+
+    def test_clean_env_matches_supervise_session_env(self):  # supervise отказывает ровно по SESSION_ENV — чистим их
+        import supervise
+        self.assertTrue(set(supervise.SESSION_ENV) <= set(release.SESSION_DROP))
+
+    def test_parallel_auto_serialized_by_lock(self):  # второй выпуск при живом первом — пометка, держатель доделает
+        runs = []
+        lock, pending = release._auto_paths(self.proj)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+
+        def first(p):
+            runs.append("a")
+            if len(runs) == 1:
+                self.assertEqual(release.run_auto_locked(p, lambda q: runs.append("nested") or 0), 0)  # занят → в очередь
+                self.assertTrue(pending.exists())
+            return 0
+
+        self.assertEqual(release.run_auto_locked(self.proj, first), 0)
+        self.assertEqual(runs, ["a", "a"])  # держатель прошёл ещё раз; вложенный сам update не запускал
+        self.assertFalse(lock.exists() or pending.exists())
+
+    def test_stale_lock_is_taken_over(self):
+        lock, _ = release._auto_paths(self.proj)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.touch()
+        old = lock.stat().st_mtime - release.LOCK_STALE_S - 1
+        os.utime(lock, (old, old))
+        self.assertTrue(release._lock_acquire(lock))
+
+    def test_installed_dir_prefers_project_scope(self):
+        self.assertEqual(release.installed_dir(self.proj, self.reg), self.proj / "plug")
+        self.assertIsNone(release.installed_dir(self.proj, self.proj / "none.json"))
+
+    def test_spawn_auto_detached_and_switchable(self):
+        calls = []
+        self.assertTrue(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append((a, k))))
+        self.assertIn("auto", calls[0][0][0])
+        old = os.environ.get("RPV_AUTORELEASE")
+        os.environ["RPV_AUTORELEASE"] = "0"
+        try:
+            self.assertFalse(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append(1)))
+        finally:
+            os.environ.pop("RPV_AUTORELEASE") if old is None else os.environ.update(RPV_AUTORELEASE=old)
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

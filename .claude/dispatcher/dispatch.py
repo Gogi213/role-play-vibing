@@ -237,7 +237,8 @@ PROMPT_TEMPLATE = (
     "дальше\"` ДО истечения лимита (доказательство: done — --path, pr — --pr --sha, accept/return — --sha, "
     "wait — --form; неполная команда — отказ с подсказкой): итог обязателен, частичный прогресс не провал. "
     "Кого будить дальше и status/wait_for ставит таблица маршрутов — --next и шапку руками не правь; "
-    "CEO будят только blocked (задача встала) и ask-owner (нужно решение владельца). "
+    "blocked (задача встала) уходит Судье, ask-owner — только вопрос о содержании исследования (какие гипотезы, "
+    "гиперпараметры, метрики, что хотим увидеть) — владельцу; CEO не будят. "
     "`{tickets_cli} comment {tid} --author {role} --text \"...\"` — только промежуточная заметка без смены "
     "хода. @упоминания в тексте никого не будят. "
     "Табло: нет плана шагов — в начале работы `{plan_cli} set {tid} --title \"...\" --step \"название|кто|где|для чего\" ...` "
@@ -815,8 +816,7 @@ def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
 
 def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
     """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
-    ревьюера не будим; запись dispatcher + `next: ceo` (одну строку CEO пишет handle_next_ceo этого же тика), статус
-    in_review. Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
+    ревьюера не будим; запись dispatcher, статус needs_owner (строка «ждёт вас» на Диспетчерской, CEO не будится). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
     не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
     if tkt.status not in ("done", "in_review") or tkt.reviewer not in ROLE_KEYS:
         return tkt
@@ -827,10 +827,10 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     if not T.author_is(last_author, tkt.owner):
         return tkt
     T.append_log(path, "dispatcher",
-                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд — на новый круг не будим. Решение за CEO: "
+                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (спор ревью, не вопрос об исследовании) — на новый круг не будим. Решение за владельцем: "
                  f"ещё один круг (`tickets.py comment {tkt.id} --author ceo --text \"...\" --next {tkt.reviewer}`) "
                  "либо принять/закрыть самому.", now=now)
-    T.write_header_updates(path, {"status": "in_review", "next": "ceo"}, now=now)
+    T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)
     return T.read_ticket(path)
 
 
@@ -2600,7 +2600,7 @@ def _start_bus_link():
             return None
         link = bus_link.Link(lambda kind, note: append_ceo_inbox(
             kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event,
-            ceo_wake=ceo_queue_wake)
+            ceo_wake=ceo_queue_wake if os.environ.get("RPV_CEO_WAKE") == "1" else None)  # TK-094: CEO-будильник по запросу
         link.start()
         return link
     except Exception as e:

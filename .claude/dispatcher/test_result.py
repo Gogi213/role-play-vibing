@@ -141,11 +141,13 @@ class ResultTests(unittest.TestCase):
         t = self.tkt()
         self.assertEqual((t.status, t.header.get("next")), ("in_progress", "engineer"))
 
-    def test_blocked_and_ask_owner_go_to_ceo(self):
+    def test_blocked_goes_to_judge_ask_owner_to_owner(self):
         self.assertEqual(self.res("engineer", "blocked"), 0)
-        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", "ceo"))
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", "judge"))
+        self.assertEqual(self.res("judge", "blocked"), 0)  # Судья сам встал — Судье некуда, ждёт владельца
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", ""))
         self.assertEqual(self.res("engineer", "ask-owner"), 0)
-        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", "ceo"))
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_sets_waiting_with_form(self):
         self.assertEqual(self.res("engineer", "wait", form="file:/tmp/rpv-flag"), 0)

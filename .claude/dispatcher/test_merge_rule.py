@@ -61,6 +61,53 @@ class MergeRuleTests(unittest.TestCase):
             return {"merged": True}
         return {"mergeable": self.mergeable, "merged": self.merged and any(c[0] == "PUT" for c in self.calls)}
 
+    def plugin_gh(self, head_v, base_v, tag_exists=False):
+        """gh для PR плагина (repo = release.REPO): версии в plugin.json головы и main, слияние с sha, постановка тега."""
+        import base64
+        import json as _j
+
+        def gh(path, method="GET", **f):
+            self.calls.append((method, path, f))
+            if path == f"repos/{M.R.REPO}":
+                return {"default_branch": "main"}
+            if path.endswith("pulls?state=open&per_page=100"):
+                return [{"number": 7, "title": self.tid, "head": {"sha": self.head, "ref": "feat/x"}, "base": {"ref": "main"}}]
+            if "contents/.claude-plugin/plugin.json" in path:
+                v = base_v if path.endswith("ref=main") else head_v
+                return {"content": base64.b64encode(_j.dumps({"version": v}).encode()).decode()}
+            if path.endswith("/merge"):
+                return {"merged": True, "sha": "m" * 40}
+            if path.endswith("/git/refs"):
+                if tag_exists:
+                    raise RuntimeError("Reference already exists")
+                return {}
+            return {"mergeable": True, "merged": any(c[0] == "PUT" for c in self.calls)}
+        return gh
+
+    def test_plugin_pr_without_bump_is_not_merged_and_owner_told_once(self):
+        C.save_state({f"{M.R.REPO}#7": {"sha": SHA, "state": "success"}})
+        gh = self.plugin_gh("1.8.3", "1.8.3")
+        self.assertEqual(M.merge_once(M.R.REPO, gh=gh), [(7, "без bump → владельцу тикета")])
+        self.assertFalse([c for c in self.calls if c[0] == "PUT"])
+        self.assertEqual(M.merge_once(M.R.REPO, gh=gh), [])  # одна запись на голову
+
+    def test_plugin_pr_with_bump_is_merged_tagged_and_released(self):
+        C.save_state({f"{M.R.REPO}#7": {"sha": SHA, "state": "success"}})
+        spawned = []
+        real, M.R.spawn_auto = M.R.spawn_auto, lambda proj: spawned.append(proj)
+        self.addCleanup(setattr, M.R, "spawn_auto", real)
+        out = M.merge_once(M.R.REPO, gh=self.plugin_gh("1.8.4", "1.8.3"))
+        self.assertEqual(out, [(7, "влит")])
+        tag = [c for c in self.calls if c[1].endswith("/git/refs")]
+        self.assertEqual(tag, [("POST", f"repos/{M.R.REPO}/git/refs", {"ref": "refs/tags/v1.8.4", "sha": "m" * 40})])
+        self.assertEqual(len(spawned), 1)
+
+    def test_existing_tag_is_not_an_error(self):
+        C.save_state({f"{M.R.REPO}#7": {"sha": SHA, "state": "success"}})
+        M.R.spawn_auto, real = (lambda proj: None), M.R.spawn_auto
+        self.addCleanup(setattr, M.R, "spawn_auto", real)
+        self.assertEqual(M.merge_once(M.R.REPO, gh=self.plugin_gh("1.8.4", "1.8.3", tag_exists=True)), [(7, "влит")])
+
     def run_m(self):
         return M.merge_once(REPO, gh=self.gh)
 

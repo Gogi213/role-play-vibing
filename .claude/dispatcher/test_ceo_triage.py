@@ -102,6 +102,28 @@ class RunOnce(Sandbox):
         r = C.run_once(NOW + timedelta(seconds=30), launch=lambda ev, now: True)
         self.assertEqual((r["noise"], r["action"], r["launched"]), (0, 1, True))
 
+    def test_actions_route_to_judge_without_ceo(self):  # TK-094
+        self.ticket("TK-005", "blocked")
+        self.ticket("TK-006", "needs_owner")
+        self.inbox("TK-005 [blocked] встал", "TK-006 [needs_owner] вопрос", "* [weird] машина")
+        r = C.run_once(NOW, classify=lambda ev: ([(C.ACTION, "н")] * len(ev), {}))
+        self.assertEqual((r["action"], r["launched"]), (3, True))
+        t5 = C.T.read_ticket(D.TICKETS_DIR / "TK-005.md")
+        self.assertEqual(t5.next_role, "judge")
+        self.assertEqual(t5.log[-1].author, "dispatcher")
+        self.assertEqual(C.T.read_ticket(D.TICKETS_DIR / "TK-006.md").next_role, "")  # владельцу, не Судье
+        qdir = D.PROJECT_ROOT / ".claude" / "pulse" / "questions"
+        qs = [json.loads(p.read_text(encoding="utf-8")) for p in qdir.glob("q-triage-*.json")]
+        self.assertEqual(len(qs), 1)  # needs_owner — уже строка тикета; машинный сигнал без тикета — на Диспетчерскую
+        self.assertIn("[weird]", qs[0]["text"])
+
+    def test_blocked_with_assignee_is_not_owner_noise(self):  # blocked с next: judge — уже у адресата, в «ждёт вас» не идёт
+        self.ticket("TK-007", "blocked")
+        C.T.write_header_updates(D.TICKETS_DIR / "TK-007.md", {"next": "judge"}, now=NOW, stamp_updated=False)
+        self.inbox("TK-007 [blocked] встал")
+        C.run_once(NOW, classify=lambda ev: ([(C.ACTION, "н")] * len(ev), {}))
+        self.assertFalse(D.DISPATCHER_DIR.joinpath("ceo-digest.md").exists())
+
     def test_haiku_failure_is_action(self):
         res, _ = C.haiku_classify([{"tid": "*", "kind": "k", "note": "n"}], claude_bin="definitely-not-a-binary")
         self.assertEqual(res[0][0], C.ACTION)
