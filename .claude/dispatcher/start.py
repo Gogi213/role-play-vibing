@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -129,13 +130,21 @@ def _list_procs() -> list:
         return []
 
 
+def _norm(p: str) -> str:
+    return p.replace("\\", "/").lower().rstrip("/")
+
+
 def find_copies(script_name: str, project: Path, procs=None) -> list:
-    """pid всех живых копий службы проекта по командной строке (`<script> --project <проект>`), не только из pid-файла."""
-    proj = str(project).replace("\\", "/").lower().rstrip("/")
-    out = []
+    """pid живых копий службы проекта по командной строке `python … <script> --project <проект>`, не только из pid-файла.
+    Имя скрипта — отдельный токен (`watch.py` не `ci_watch.py`); обёртки `cmd /c`, `sh -c` — не копия (exe не python)."""
+    proj, out = _norm(str(project)), []
     for pid, line in (_list_procs() if procs is None else procs):
-        l = line.replace("\\", "/").lower()
-        if pid != os.getpid() and script_name.lower() in l and "--project" in l and proj in l:
+        toks = [t.strip('"') for t in re.findall(r'"[^"]*"|\S+', line)]
+        if pid == os.getpid() or not toks or "python" not in _norm(toks[0]).rsplit("/", 1)[-1]:
+            continue
+        if script_name.lower() not in (_norm(t).rsplit("/", 1)[-1] for t in toks):
+            continue
+        if any(t == "--project" and i + 1 < len(toks) and _norm(toks[i + 1]) == proj for i, t in enumerate(toks)):
             out.append(pid)
     return out
 

@@ -359,6 +359,14 @@ class StartTests(unittest.TestCase):
                  (3, f"python -u /a/watch.py --project {p}"), (os.getpid(), f"python dispatch.py --project {p}")]
         self.assertEqual(S.find_copies("dispatch.py", p, procs), [1])
 
+    def test_find_copies_ignores_wrapper_and_substring_names(self):
+        """Судья PR58: cmd-обёртка WMI + python-потомок = 1 копия; ci_watch — не копия watch."""
+        p = self.project
+        procs = [(1, f'cmd.exe /c "python -u C:/x/watch.py --project {p}"'), (2, f"python -u C:/x/watch.py --project {p}"),
+                 (3, f"python -u C:/x/ci_watch.py --project {p}"), (4, f'"C:/Py 3/python.exe" -u "C:/x y/watch.py" --project "{p}"')]
+        self.assertEqual(S.find_copies("watch.py", p, procs), [2, 4])
+        self.assertEqual(S.find_copies("ci_watch.py", p, procs), [3])
+
     def test_stop_running_kills_copy_without_pid_file(self):
         killed = []
         pid_file = self.project / ".claude" / "dispatcher" / "dispatch.pid"

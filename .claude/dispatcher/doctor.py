@@ -177,6 +177,7 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
     now = time.time() if now is None else now
     sd = project / ".claude" / "dispatcher"
     names = S.services()
+    procs = S._list_procs() if procs is None else procs   # один снимок на все службы
     rows = [check_service(n, sd, now) for n in names]
     rows += [c for c in (check_copies(project, n, procs) for n in names) if c]
     rows += [check_supervise(project, sd, now, installed), check_bus(bus_request, _state_bus_url(sd))]
