@@ -38,6 +38,13 @@ def make_root(d: Path, version="1.0.0", changelog="## 1.0.0\n"):
 
 
 class ReleaseTests(unittest.TestCase):
+    def setUp(self):  # клоны цели — в каталог рядом с STATE, не в настоящий ~/.claude
+        self._st = tempfile.TemporaryDirectory()
+        patcher = mock.patch.object(release, "STATE", Path(self._st.name) / "s.json")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self._st.cleanup)
+
     def test_repo_versions_consistent(self):
         self.assertIsNone(release.check())
 
@@ -106,10 +113,22 @@ class ReleaseTests(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 1, "", "github down")
             return base(cmd, **kw)
         self.assertEqual(release._reinstall(f"{release.REPO}#v1.8.0", run), 0)
+        local = [c[-1] for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]][-1]
+        self.assertTrue(local.startswith(str(release.STATE.parent)) and Path(local).exists())   # источник жив, не в %TEMP%
         self.assertTrue(any(c[:3] == ["plugin", "install", f"{release.NAME}@{release.NAME}"] for c in fake.calls))
 
-    def test_hidden_flags_no_window_on_windows(self):
-        self.assertEqual(release.hidden(), {"creationflags": release.CREATE_NO_WINDOW} if os.name == "nt" else {})
+    def test_restart_and_verify_hidden_and_timeout_caught(self):  # TK-105 п.3/п.4
+        seen = []
+
+        def run(cmd, **kw):
+            seen.append(kw)
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        with tempfile.TemporaryDirectory() as t:
+            self.assertFalse(release.restart_services(Path(t), Path(t), run))
+            self.assertFalse(release.verify_alive(Path(t), Path(t), run, wait_s=0))
+        self.assertTrue(seen and all(k["timeout"] == release.CLAUDE_TIMEOUT_S for k in seen))
+        if os.name == "nt":
+            self.assertTrue(all(k["creationflags"] & release.CREATE_NO_WINDOW for k in seen))
 
     def test_install_uses_project_scope_when_installed_there(self):
         with tempfile.TemporaryDirectory() as t:
@@ -240,6 +259,9 @@ class AutoReleaseTests(unittest.TestCase):
         calls = []
         self.assertTrue(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append((a, k))))
         self.assertIn("auto", calls[0][0][0])
+        if os.name == "nt":
+            fl = calls[0][1]["creationflags"]
+            self.assertTrue(fl & release.CREATE_NO_WINDOW and not fl & subprocess.DETACHED_PROCESS)
         old = os.environ.get("RPV_AUTORELEASE")
         os.environ["RPV_AUTORELEASE"] = "0"
         try:

@@ -153,10 +153,9 @@ def _reinstall(source: str, run, cache: Path | None = None) -> int:
     """Маркетплейс заново на source (owner/repo или owner/repo#vX.Y.Z) и плагин из него. Сначала цель добывается в локальный
     клон (_fetchable); не добыта — ничего не трогаем, код 1. Если после remove add с GitHub упал (сеть, замок файла) —
     add с локального клона: машину без плагина не оставляем (TK-105 п.1)."""
-    import shutil as _sh
-    import tempfile
     ref = source.split("#", 1)[1] if "#" in source else None
-    local = Path(tempfile.mkdtemp(prefix="rpv-target-")) / "c"
+    targets = STATE.parent / "rpv-targets"   # постоянный каталог: очистка %TEMP% источник маркетплейса не ломает
+    local = targets / f"t{int(time.time() * 1000)}"
     keep = False
     try:
         if not _fetchable(ref, run, local):
@@ -171,10 +170,16 @@ def _reinstall(source: str, run, cache: Path | None = None) -> int:
                 return _fail(["claude", "plugin", "marketplace", "add", str(local)], r)
         cmd = ["claude", "plugin", "install", f"{NAME}@{NAME}", *_scope_args()]
         r = _run(cmd, run)
-        return _fail(cmd, r) if r.returncode else 0
+        if r.returncode:
+            return _fail(cmd, r)
+        if keep:  # прежние локальные клоны больше не источник — убрать при успешной установке
+            for old in targets.glob("t*"):
+                if old != local:
+                    shutil.rmtree(old, ignore_errors=True)
+        return 0
     finally:
         if not keep:
-            _sh.rmtree(local.parent, ignore_errors=True)
+            shutil.rmtree(local, ignore_errors=True)
 
 
 def update(run=subprocess.run, state: Path = STATE) -> int:
@@ -274,8 +279,12 @@ def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -
         return False
     ok = True
     for args in (["start.py", "--project", str(project)], ["supervise.py", "--project", str(project), "--install"]):
-        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / args[0]), *args[1:]], capture_output=True,
-                text=True, encoding="utf-8", errors="replace", env=clean_env(), cwd=str(project), timeout=CLAUDE_TIMEOUT_S, **hidden())
+        try:
+            r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / args[0]), *args[1:]], capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", env=clean_env(), cwd=str(project), timeout=CLAUDE_TIMEOUT_S,
+                    **hidden())
+        except subprocess.TimeoutExpired:
+            r = subprocess.CompletedProcess(args, 124, "", f"таймаут {CLAUDE_TIMEOUT_S:.0f} с")
         if r.returncode:
             print(f"[release] {args[0]} -> код {r.returncode}: {(r.stderr or r.stdout).strip()[:300]}", file=sys.stderr)
             ok = False
@@ -301,10 +310,13 @@ def verify_alive(project: Path, code_dir: Path | None, run=subprocess.run, wait_
         return False
     deadline = time.time() + wait_s
     while True:
-        r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project),
-                 "--json", "--alive"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env(),
-                timeout=CLAUDE_TIMEOUT_S, **hidden())
-        problems = alive_problems(r.stdout or "")
+        try:
+            r = run([sys.executable, str(code_dir / ".claude" / "dispatcher" / "doctor.py"), "--project", str(project),
+                     "--json", "--alive"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=clean_env(),
+                    timeout=CLAUDE_TIMEOUT_S, **hidden())
+            problems = alive_problems(r.stdout or "")
+        except subprocess.TimeoutExpired:
+            problems = [f"doctor: таймаут {CLAUDE_TIMEOUT_S:.0f} с"]
         if not problems:
             return True
         if time.time() >= deadline:
