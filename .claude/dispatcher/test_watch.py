@@ -1057,6 +1057,18 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "host:calc:/data/x/other-name.done"))
 
+    def test_failure_beside_live_job_is_deferred_not_forgotten(self):
+        """Судья TK-101: сосед доделал, упавшее не пересдано — владелец будится."""
+        p = self._waiting("host:calc:/data/x/other-name.done")
+        tid = T.read_ticket(p).id
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown",
+                       owners_probe=self._jobs(tid, ("a", "u-a", "failed"), ("c", "u-c", "running")))
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now, probe=lambda *a: "unknown",
+                       owners_probe=self._jobs(tid, ("a", "u-a", "failed"), ("c", "u-c", "done")))
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+
     def test_job_form_failed_with_live_sibling_stays_waiting(self):
         p = self._waiting("job:calc:A")
         tid = T.read_ticket(p).id

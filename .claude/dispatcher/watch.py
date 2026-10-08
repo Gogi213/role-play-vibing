@@ -330,6 +330,10 @@ def _mark_failed_seen(ws: dict, tid: str, owners: dict, extra: str = "") -> None
     del seen[:-200]
 
 
+def _resubmitted(mine: list, j: dict) -> bool:
+    return any(o["id"] != j["id"] and o["unit"] == j["unit"] and o["state"] == "done" for o in mine)
+
+
 def _covered_failure(mine: list, j: dict) -> bool:
     """Упавшее задание не повод будить владельца: у тикета есть живое задание (идёт/в очереди — та же волна, wait_for
     снимать рано, п.4) либо пересдача с тем же именем юнита (done — п.1). Снятое владельцем адаптер отдаёт как
@@ -345,8 +349,10 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     seen = ws.setdefault("owner_failed_seen", [])
     for j in mine:
         if j["state"] == "failed" and j["id"] not in seen:
-            if _covered_failure(mine, j):
+            if _resubmitted(mine, j):  # пересдано: упавшее закрыто навсегда
                 seen.append(j["id"])
+                continue
+            if _covered_failure(mine, j):  # живой сосед: только отложить — кончится волна без пересдачи, упавшее разбудит
                 continue
             _mark_failed_seen(ws, tkt.id, owners, j["id"])
             _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало; wait_for `{spec}` не дождётся", now)
