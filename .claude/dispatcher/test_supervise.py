@@ -148,7 +148,9 @@ class InstallFilesTest(unittest.TestCase):
     def test_install_on_windows_applies_battery_settings_after_create(self):
         calls = []
         proj = Path("C:/proj")  # до подмены os.name: на posix WindowsPath не создать
-        with mock.patch.object(V.os, "name", "nt"), mock.patch.object(V, "snapshot_env"), \n                mock.patch.object(V, "schtasks_create", return_value=["schtasks", "/Create"]), \n                mock.patch.object(V.subprocess, "run", side_effect=lambda cmd, **kw: calls.append(cmd)):
+        with mock.patch.object(V.os, "name", "nt"), mock.patch.object(V, "snapshot_env"), \
+                mock.patch.object(V, "schtasks_create", return_value=["schtasks", "/Create"]), \
+                mock.patch.object(V.subprocess, "run", side_effect=lambda cmd, **kw: calls.append(cmd)):
             V.install(proj)
         self.assertEqual([c[0] for c in calls], ["schtasks", "powershell"])
         calls.clear()
