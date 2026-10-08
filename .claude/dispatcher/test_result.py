@@ -187,12 +187,26 @@ class ResultTests(unittest.TestCase):
 
     def test_done_after_accepted_prs_skips_review(self):
         (self.base / "out.md").write_text("x", encoding="utf-8")
-        T.write_header_updates(self.path, {"pr": "7, 9", "accepted": f"7@{SHA}"}, now=NOW)
+        T.write_header_updates(self.path, {"pr": "7, 9"}, now=NOW)
+        T.append_log(self.path, "merge", "PR #7 влит в main на голове aaaaaaa (проверено: merged).", now=NOW)
         self.res("engineer", "done", path="out.md")
-        self.assertEqual(self.tkt().status, "in_review")        # PR 9 не принят — проверка нужна
-        T.write_header_updates(self.path, {"status": "in_progress", "next": "", "accepted": f"7@{SHA}, 9@{SHA}"}, now=NOW)
-        self.res("engineer", "done", path="out.md")
-        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("done", ""))
+        self.assertEqual(self.tkt().status, "in_review")        # PR 9 не влит — проверка нужна
+        T.write_header_updates(self.path, {"status": "in_progress", "next": ""}, now=NOW)
+        T.append_log(self.path, "merge", "PR #9 влит в main на голове bbbbbbb (проверено: merged).", now=NOW)
+        self.res("engineer", "done", path="out.md")             # accepted уже пуст: merge_rule снимает PR при влитии
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("done", ""))
+        self.assertTrue(D.closed_without_review(t))
+        self.assertIsNone(D.decide(t, {}, NOW))                 # диспетчер Судью не будит
+
+    def test_ceo_close_and_comment_after_do_not_wake_judge(self):  # TK-090 б
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("", "done", path="out.md")
+        self.assertIsNone(D.decide(self.tkt(), {}, NOW))
+        TK.cmd_comment(type("A", (), {"id": self.tid, "author": "ceo", "text": "закрыто", "next": None})())
+        t = self.tkt()
+        self.assertEqual(t.status, "done")
+        self.assertIsNone(D.decide(t, {}, NOW))
 
     def test_continue_keeps_role_and_is_capped(self):
         for _ in range(R.CONTINUE_MAX):

@@ -90,6 +90,11 @@ def _note_not_found(repo: str, number: int) -> None:
         _note(tkt, text)
 
 
+def landed_prs(tkt) -> set:
+    """Номера PR тикета, влитых программой: запись лога «PR #N влит в …» (_drop_accepted снимает их из `accepted`)."""
+    return {int(m.group(1)) for e in tkt.log for m in [re.match(r"PR #(\d+) влит в ", e.text.strip())] if m}
+
+
 def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
     """wait_for `merged:<репо>#<PR>`: PR влит. PR не найден (404) — ожидание вечным не делаем: «готово», в тикет пишется
     причина, владелец просыпается. Прочий сбой GitHub — не готово (повтор на след. тике)."""

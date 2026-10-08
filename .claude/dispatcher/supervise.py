@@ -49,9 +49,13 @@ def _log(state_dir: Path, msg: str) -> None:
         f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')} {msg}\n")
 
 
+# роль и тикет запуска — не свойство проекта: в снимок/настройки не попадают (TK-090 г)
+SESSION_ENV = ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET")
+
+
 def _forwarded(env: dict) -> dict:
-    return {k: str(v) for k, v in env.items()
-            if (k.startswith(S.FORWARD_ENV_PREFIXES) or k in S.FORWARD_ENV_NAMES) and not _secret_name(k)}
+    return {k: str(v) for k, v in env.items() if k not in SESSION_ENV
+            and (k.startswith(S.FORWARD_ENV_PREFIXES) or k in S.FORWARD_ENV_NAMES) and not _secret_name(k)}
 
 
 def load_env(state_dir: Path) -> None:
@@ -103,8 +107,7 @@ def _secret_name(k: str) -> bool:
 
 
 def snapshot_env(state_dir: Path) -> None:
-    keep = {k: v for k, v in os.environ.items()
-            if (k.startswith(S.FORWARD_ENV_PREFIXES) or k in S.FORWARD_ENV_NAMES) and not _secret_name(k)}
+    keep = _forwarded(dict(os.environ))
     (state_dir / "supervise.env.json").write_text(json.dumps(keep, ensure_ascii=False), encoding="utf-8")
 
 
@@ -169,6 +172,10 @@ def main(argv=None) -> int:
     ap.add_argument("--uninstall", action="store_true")
     a = ap.parse_args(sys.argv[1:] if argv is None else argv)
     project = P.resolve_project(["--project", a.project] if a.project else [])
+    if a.install and any(os.environ.get(k) for k in SESSION_ENV[:2]):  # из сессии роли планировщик поднял бы «роль»
+        print("supervise --install: из сессии роли нельзя (RPV_ROLE задан) — запусти из обычной сессии/терминала",
+              file=sys.stderr)
+        return 1
     if a.install or a.uninstall:
         install(project, remove=a.uninstall)
         return 0

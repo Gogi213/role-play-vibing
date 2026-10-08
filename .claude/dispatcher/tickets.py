@@ -225,16 +225,18 @@ def cmd_result(args) -> int:
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: wait]{proof} — {why}")
         return rc
+    covered = False
+    if args.result == "done":  # все PR тикета приняты Судьёй (и влиты — иначе владелец не проснулся бы): повторной проверки нет
+        import merge_rule
+        prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))}
+        covered = bool(prs) and prs <= merge_rule.landed_prs(tkt)
+    if args.result == "done" and (role == "ceo" or covered):
+        proof += f" ({D.NO_REVIEW_MARK})"
     with T.ticket_lock(path):
         T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
-    covered = False
-    if args.result == "done":  # все PR тикета приняты Судьёй (и влиты — иначе владелец не проснулся бы): повторной проверки нет
-        import merge_rule
-        prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))}
-        covered = bool(prs) and prs <= set(merge_rule.parse_accepted(tkt.header.get("accepted")))
     upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                        owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "", covered=covered)
     T.write_header_updates(path, upd)

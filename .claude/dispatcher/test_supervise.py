@@ -161,6 +161,18 @@ class InstallFilesTest(unittest.TestCase):
         for k in drop:
             self.assertNotIn(k, saved)
 
+    def test_session_env_never_snapshotted_and_install_refused_from_role(self):  # TK-090 г
+        sess = {"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "ALPHA_ROLE": "engineer", "ALPHA_TICKET": "TK-1"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**sess, "RPV_OK": "1"}):
+            V.snapshot_env(Path(d))
+            saved = json.loads((Path(d) / "supervise.env.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved.get("RPV_OK"), "1")
+            for k in sess:
+                self.assertNotIn(k, saved)
+            with mock.patch.object(V, "install") as inst:
+                self.assertEqual(V.main(["--install", "--project", d]), 1)
+                inst.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
