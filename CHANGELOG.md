@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.12 — 2026-10-08
+
+### Удалено (TK-100, срезы №2 и №3 сводного списка)
+
+- `.claude/board/board.py` (TUI на Textual, 1 033 строки; ни один скрипт и хук его не зовёт), `sample-view2.json` (799) и `page2.html` (403; страница отдаёт только `dispetcher.html`). Ссылки в `VIEW2.md`, `docs/dashboard.md`, `board_push.py` исправлены. Пример `view2` — в живом `status.json`. Веб-табло и `mcp_server.py` без изменений.
+
 ## 1.8.11 — 2026-10-08
 
 ### Исправлено (TK-096, замечания Судьи к PR #59)
