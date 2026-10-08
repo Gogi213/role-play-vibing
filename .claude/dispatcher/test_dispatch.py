@@ -768,7 +768,7 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = fake_popen
         return script
 
-    def wait_running(self, timeout=10.0):
+    def wait_running(self, timeout=60.0):   # предел, не пауза: выходит по завершении; 10 с не хватало ПК под xdist (TK-095)
         deadline = time.time() + timeout
         while D.RUNNING and time.time() < deadline:
             state = D.load_state()
