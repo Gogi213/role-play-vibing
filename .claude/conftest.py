@@ -19,6 +19,9 @@ def _strip_live_env():
     for k in [k for k in os.environ if k.startswith(_PREFIXES)]:
         del os.environ[k]
     os.environ["RPV_BUS_SPOOL"] = _SPOOL
+    # токен шины читается ещё и из ~/.rpv-bus-token владельца: без отключения на его ПК тесты находят «шину» и пишут
+    # сигналы в очередь, а не в ceo-inbox.md (красные test_watch локально при зелёном CI, TK-101 п.5)
+    os.environ["RPV_BUS_DISABLE"] = "1"
 
 
 _strip_live_env()
