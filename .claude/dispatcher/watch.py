@@ -178,6 +178,7 @@ OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # наход
 AT_GRACE_MIN = int(P.env("WATCH_AT_GRACE_MIN", "30"))  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
 EMPTY_WAIT_STRIKES = int(P.env("WATCH_EMPTY_WAIT_STRIKES", "3"))  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
 MET_GRACE_MIN = int(P.env("WATCH_MET_GRACE_MIN", "15"))  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (RPV_DISPATCH_WAIT_RECON_S) — 15 мин = 3 сверки без реакции
+IDLE_WAIT_MIN = int(P.env("WATCH_IDLE_WAIT_MIN", "15"))  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
 SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
 
@@ -322,6 +323,32 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     if st == "dead" and any(j["state"] in ("running", "queued") for j in mine):
         return "producer"
     return st
+
+
+def _idle_wait(path, tkt, ws: dict, spec: str, parsed, owners: dict, now) -> bool:
+    """П-1 (TK-117): тикет waiting с `host:<алиас>:<путь>`, цель не выполнена и у тикета нет ни одного задания машины в
+    running/queued дольше IDLE_WAIT_MIN — ждать некого (задания кончились/упали, файл не ляжет). Не смотрим «жив ли юнит с
+    именем задания»: ждущий юнит жив и после гибели волны. Алиас без адаптера заданий (owners) не проверяется. True — разбудил."""
+    idle = ws.setdefault("idle_wait", {})
+    if not parsed or parsed[0] != "host" or parsed[2] != "path" or parsed[1] not in owners:
+        idle.pop(tkt.id, None)
+        return False
+    mine = [j for j in owners[parsed[1]] if j["ticket"] == tkt.id]
+    if any(j["state"] in ("running", "queued") for j in mine):
+        idle.pop(tkt.id, None)
+        return False
+    ent = idle.get(tkt.id)
+    if not ent or ent.get("spec") != spec:
+        idle[tkt.id] = {"spec": spec, "ts": T.now_iso(now)}
+        return False
+    if now - T.parse_dt(ent["ts"]) <= timedelta(minutes=IDLE_WAIT_MIN):
+        return False
+    idle.pop(tkt.id, None)
+    last = ", ".join(f"{j['unit']} {j['state']}" for j in mine[:5]) or "заданий тикета на машине нет"
+    _mark_failed_seen(ws, tkt.id, owners)
+    _wake_owner_job(path, tkt, ws, spec, f"сторож: ждёшь `{spec}`, а работающих заданий тикета на машине 0 дольше {IDLE_WAIT_MIN} мин; последние: {last}",
+                    now, key="idle_wakes")
+    return True
 
 
 def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict, owners: dict = None) -> bool:
@@ -472,6 +499,8 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
             dead.pop(tkt.id, None)
             continue
         met.pop(tkt.id, None)
+        if st != "dead" and _idle_wait(path, tkt, ws, spec, parsed, owners, now):
+            continue
         if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
             alive.add(tkt.id)
             dead.pop(tkt.id, None)
@@ -510,6 +539,10 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         if tid not in alive:
             met.pop(tid, None)
     empty = ws.get("empty_wait", {})
+    idle = ws.get("idle_wait", {})
+    for tid in list(idle):
+        if tid not in alive:
+            idle.pop(tid, None)
     for tid in list(empty):
         if tid not in empty_seen:
             empty.pop(tid, None)

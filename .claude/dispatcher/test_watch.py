@@ -528,6 +528,43 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("next")), ("in_progress", "judge"))  # повтор — Судье (В-206), не blocked → CEO
 
+    # --- TK-117 П-1: ждёт, а работающих заданий нет ---
+    def test_idle_wait_wakes_owner_after_grace_with_reason(self):
+        """TK-114/115: цель не лежит, заданий тикета running/queued нет — через IDLE_WAIT_MIN владелец будится с причиной."""
+        p = self._waiting("host:calc:/data/x/tier1.done")  # TK-114: файл не ляжет, задания tier1 кончились
+        tid = T.read_ticket(p).id
+        ws, owners = {}, self._jobs(tid, ("a", "tk0s-tk114-w", "done"))
+        W.triage_waits(ws, self.now, probe=lambda *a: "producer", owners_probe=owners)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        later = self.now + timedelta(minutes=W.IDLE_WAIT_MIN, seconds=30)
+        W.triage_waits(ws, later, probe=lambda *a: "producer", owners_probe=lambda al: [{"id": "a", "ticket": tid, "unit": "tk0s-tk114-w", "state": "done"}])
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("работающих заданий тикета на машине 0", t.log[-1].text)
+        self.assertIn("tk0s-tk114-w done", t.log[-1].text)
+
+    def test_idle_wait_silent_with_running_job_or_without_adapter(self):
+        p = self._waiting("host:calc:/data/x/tier1.done")
+        tid = T.read_ticket(p).id
+        later = self.now + timedelta(minutes=60)
+        ws = {}
+        for n in (self.now, later):
+            W.triage_waits(ws, n, probe=lambda *a: "producer", owners_probe=self._jobs(tid, ("a", "u", "running")))
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        ws = {}
+        for n in (self.now, later):  # адаптер заданий молчит (owners пуст) — не проверяем, ложных нет
+            W.triage_waits(ws, n, probe=lambda *a: "producer", owners_probe=lambda al: None)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_idle_wait_timer_resets_when_job_appears(self):
+        p = self._waiting("host:calc:/data/x/tier1.done")
+        tid = T.read_ticket(p).id
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "producer", owners_probe=self._jobs(tid))
+        W.triage_waits(ws, self.now + timedelta(minutes=10), probe=lambda *a: "producer", owners_probe=self._jobs(tid, ("a", "u", "queued")))
+        W.triage_waits(ws, self.now + timedelta(minutes=20), probe=lambda *a: "producer", owners_probe=self._jobs(tid))
+        self.assertEqual(T.read_ticket(p).status, "waiting")  # таймер пошёл заново с 20-й минуты
+
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
         return lambda alias: [{"id": i, "ticket": tid, "unit": u, "state": st} for i, u, st in rows]
