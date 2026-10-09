@@ -3800,7 +3800,8 @@ class WaitForHostTests(unittest.TestCase):
             self.assertEqual(T.parse_wait_for(spec), want, spec)
         bad = ["", "mention", "ceo — решение владельца", "прогон окон на сервере счёта (…) — готов, когда done=total",
                "file:", "ticket:", "ticket:TK 1", "deck:", "host:calc", "host:calc:", "host:calc:unit:",
-               "host:calc:unit:a b", "host:nas:/x", "host:calc/x", "calc:/x"]
+               "host:calc:unit:a b", "host:nas:/x", "host:calc/x", "calc:/x",
+               "host:calc:file:/data/x.done", "host:calc:data/x", "deck:rel/path"]  # TK-117 К1.1: путь только абсолютный
         for spec in bad:
             self.assertIsNone(T.parse_wait_for(spec), spec)
 

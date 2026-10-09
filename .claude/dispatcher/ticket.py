@@ -97,6 +97,12 @@ def at_left_text(spec: str, now: datetime | None = None) -> str:
     return f"ждёт до {at.astimezone():%d.%m %H:%M}, осталось {rest}"
 
 
+def host_path_ok(arg: str) -> bool:
+    """Путь на машине — только абсолютный (`/…` или `~/…`): `host:calc:file:/x` и относительный путь молча
+    ждали бы вечно (TK-117, К1.1). Одна проверка для `wait`, диспетчера и сторожа (все идут через parse_wait_for)."""
+    return arg.startswith(("/", "~/"))
+
+
 def parse_wait_for(spec: str):
     """Разбор `wait_for`. Возвращает ("file", путь) | ("at", время) | ("ticket", ID) | ("job", алиас, id) | ("host", алиас, "path"|"unit", арг) либо None
     (форма не понята). Пустая строка — None: «ничего не ждём» проверяется отдельно."""
@@ -125,7 +131,7 @@ def parse_wait_for(spec: str):
         return ("job", alias, jid) if alias in WAIT_FOR_HOSTS and sep and _JOB_ID_RE.match(jid) else None
     if spec.startswith("deck:"):
         arg = spec[len("deck:"):].strip()
-        return ("host", "deck", "path", arg) if arg else None
+        return ("host", "deck", "path", arg) if host_path_ok(arg) else None
     if spec.startswith("host:"):
         alias, sep, rest = spec[len("host:"):].partition(":")
         rest = rest.strip()
@@ -134,7 +140,7 @@ def parse_wait_for(spec: str):
         if rest.startswith("unit:"):
             unit = rest[len("unit:"):].strip()
             return ("host", alias, "unit", unit) if _UNIT_NAME_RE.match(unit) else None
-        return ("host", alias, "path", rest)
+        return ("host", alias, "path", rest) if host_path_ok(rest) else None
     return None
 
 
@@ -182,7 +188,8 @@ def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()
     if spec and parse_wait_for(spec) is None:
-        raise ValueError(f"wait_for не понят: {spec!r}. Допустимо: {WAIT_FOR_FORMATS}")
+        hint = " У host:/deck: путь только абсолютный (`/…` или `~/…`), без `file:` внутри." if spec.startswith(("host:", "deck:")) else ""
+        raise ValueError(f"wait_for не понят: {spec!r}.{hint} Допустимо: {WAIT_FOR_FORMATS}")
 
 
 def now_iso(now: datetime | None = None) -> str:
