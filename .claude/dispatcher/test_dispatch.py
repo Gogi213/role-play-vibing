@@ -1107,6 +1107,8 @@ class DispatchRunTests(unittest.TestCase):
         # v1.6.1: модель — по роли (ROLE_MODEL[judge], по умолчанию opus), не общий CLAUDE_MODEL
         self.assertEqual(captured_cmd[captured_cmd.index("--model") + 1], D.ROLE_MODEL["judge"])
         self.assertEqual(captured_cmd[captured_cmd.index("--effort") + 1], "xhigh")  # ROLE_EFFORT[judge]
+        self.assertIn("--strict-mcp-config", captured_cmd)  # TK-140: роли без MCP
+        self.assertNotIn("--mcp-config", captured_cmd)
         self.assertNotIn("--max-budget-usd", captured_cmd)
         for info in list(D.RUNNING.values()):
             info["popen"].wait(timeout=10)
