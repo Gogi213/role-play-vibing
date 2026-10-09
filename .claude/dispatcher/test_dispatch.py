@@ -956,7 +956,7 @@ class DispatchRunTests(unittest.TestCase):
         try:
             self.assertEqual(TK.main(["wait", ic, f"ticket:{ia}"]), 1)
             self.assertEqual(T.read_ticket(c).status, "todo")  # отказ — шапка не тронута
-            self.assertEqual(TK.main(["wait", ic, "file:flags/ok"]), 0)
+            self.assertEqual(TK.main(["wait", ic, "file:flags/ok", "--by", "2099-01-01T00:00+04:00"]), 0)
         finally:
             TK.TICKETS_DIR = orig
 
@@ -3800,7 +3800,8 @@ class WaitForHostTests(unittest.TestCase):
             self.assertEqual(T.parse_wait_for(spec), want, spec)
         bad = ["", "mention", "ceo — решение владельца", "прогон окон на сервере счёта (…) — готов, когда done=total",
                "file:", "ticket:", "ticket:TK 1", "deck:", "host:calc", "host:calc:", "host:calc:unit:",
-               "host:calc:unit:a b", "host:nas:/x", "host:calc/x", "calc:/x"]
+               "host:calc:unit:a b", "host:nas:/x", "host:calc/x", "calc:/x",
+               "host:calc:file:/data/x.done", "host:calc:data/x", "deck:rel/path"]  # TK-117 К1.1: путь только абсолютный
         for spec in bad:
             self.assertIsNone(T.parse_wait_for(spec), spec)
 
@@ -4011,7 +4012,7 @@ class WaitForNoticeTests(unittest.TestCase):
     def test_cli_wait_sets_status_and_checks_form(self):
         path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(TK.main(["wait", path.stem, "host:calc:/var/rpv/progress/tk044.json"]), 0)
+            self.assertEqual(TK.main(["wait", path.stem, "host:calc:/var/rpv/progress/tk044.json", "--by", "2099-01-01T00:00+04:00"]), 0)
         tkt = T.read_ticket(path)
         self.assertEqual((tkt.status, tkt.header["wait_for"]), ("waiting", "host:calc:/var/rpv/progress/tk044.json"))
         err = io.StringIO()

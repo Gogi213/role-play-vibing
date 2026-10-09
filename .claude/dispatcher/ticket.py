@@ -31,7 +31,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -97,6 +97,50 @@ def at_left_text(spec: str, now: datetime | None = None) -> str:
     return f"ждёт до {at.astimezone():%d.%m %H:%M}, осталось {rest}"
 
 
+def wait_needs_by(spec: str) -> bool:
+    """TK-117 (В-212): срок `--by` обязателен для ожиданий вычислений/файлов (host:, deck:, file:, job:); `at:` (само время),
+    ticket:/ci:/merged:/ci-run: (их закрывают диспетчер и CI-сторож) — без срока."""
+    p = parse_wait_for(spec)
+    return bool(p) and p[0] in ("host", "file", "job")
+
+
+def parse_by(text: str, now: datetime | None = None) -> datetime:
+    """`--by`: `ЧЧ:ММ` (ближайшее такое время по часам машины, GMT+4) или ISO; прошлое/непонятое — ValueError."""
+    now = now or datetime.now().astimezone()
+    text = (text or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if m:
+        hh, mm = int(m.group(1)), int(m.group(2))
+        if hh > 23 or mm > 59:
+            raise ValueError(f"--by: {text!r} — не время ЧЧ:ММ")
+        dt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        return dt if dt > now else dt + timedelta(days=1)
+    dt = parse_at(text)
+    if dt is None:
+        raise ValueError(f"--by: {text!r} — нужно ЧЧ:ММ или ISO (например 2026-10-10T06:00+04:00)")
+    if dt <= now:
+        raise ValueError(f"--by: {text!r} уже прошло")
+    return dt
+
+
+def by_left_text(tkt, now: datetime | None = None) -> str:
+    """«срок 06:00 (через 2 ч 10 мин)» / «срок прошёл 20 мин назад» для тикета waiting со сроком; иначе пусто."""
+    raw = (tkt.header.get("wait_by") or "").strip()
+    dt = parse_at(raw) if raw else None
+    if not dt or tkt.status != "waiting":
+        return ""
+    mins = int((dt - (now or datetime.now().astimezone())).total_seconds() // 60)
+    span = lambda m: f"{m // 60} ч {m % 60:02d} мин" if m >= 60 else f"{m} мин"
+    when = f"{dt.astimezone():%d.%m %H:%M}"
+    return f"срок {when} (через {span(mins)})" if mins >= 0 else f"срок {when} прошёл {span(-mins)} назад"
+
+
+def host_path_ok(arg: str) -> bool:
+    """Путь на машине — только абсолютный (`/…` или `~/…`): `host:calc:file:/x` и относительный путь молча
+    ждали бы вечно (TK-117, К1.1). Одна проверка для `wait`, диспетчера и сторожа (все идут через parse_wait_for)."""
+    return arg.startswith(("/", "~/"))
+
+
 def parse_wait_for(spec: str):
     """Разбор `wait_for`. Возвращает ("file", путь) | ("at", время) | ("ticket", ID) | ("job", алиас, id) | ("host", алиас, "path"|"unit", арг) либо None
     (форма не понята). Пустая строка — None: «ничего не ждём» проверяется отдельно."""
@@ -125,7 +169,7 @@ def parse_wait_for(spec: str):
         return ("job", alias, jid) if alias in WAIT_FOR_HOSTS and sep and _JOB_ID_RE.match(jid) else None
     if spec.startswith("deck:"):
         arg = spec[len("deck:"):].strip()
-        return ("host", "deck", "path", arg) if arg else None
+        return ("host", "deck", "path", arg) if host_path_ok(arg) else None
     if spec.startswith("host:"):
         alias, sep, rest = spec[len("host:"):].partition(":")
         rest = rest.strip()
@@ -134,7 +178,7 @@ def parse_wait_for(spec: str):
         if rest.startswith("unit:"):
             unit = rest[len("unit:"):].strip()
             return ("host", alias, "unit", unit) if _UNIT_NAME_RE.match(unit) else None
-        return ("host", alias, "path", rest)
+        return ("host", alias, "path", rest) if host_path_ok(rest) else None
     return None
 
 
@@ -182,7 +226,8 @@ def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()
     if spec and parse_wait_for(spec) is None:
-        raise ValueError(f"wait_for не понят: {spec!r}. Допустимо: {WAIT_FOR_FORMATS}")
+        hint = " У host:/deck: путь только абсолютный (`/…` или `~/…`), без `file:` внутри." if spec.startswith(("host:", "deck:")) else ""
+        raise ValueError(f"wait_for не понят: {spec!r}.{hint} Допустимо: {WAIT_FOR_FORMATS}")
 
 
 def now_iso(now: datetime | None = None) -> str:
@@ -501,6 +546,8 @@ def write_header_updates(path, updates: dict, now: datetime = None, stamp_update
         m = _match_header(text)
         lines = m.group(1).splitlines()
         updates = dict(updates)
+        if "wait_for" in updates and "wait_by" not in updates and any(l.startswith("wait_by:") for l in lines):
+            updates["wait_by"] = ""  # новое/снятое ожидание — старый срок не переносится
         if stamp_updated and "updated" not in updates:
             updates["updated"] = now_iso(now)
         seen = set()

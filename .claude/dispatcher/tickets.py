@@ -223,7 +223,7 @@ def cmd_result(args) -> int:
                 T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]} — {why}")
         return rc
     if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
-        rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None})())
+        rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None)})())
         if rc == 0:
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: wait]{proof} — {why}")
@@ -331,6 +331,17 @@ def cmd_wait(args) -> int:
     if why := T.file_wait_problem(spec):  # роль ставит ожидание сама: отказ при постановке, а не вечное «нет»
         print(f"wait: {why}", file=sys.stderr)
         return 1
+    by = (getattr(args, "by", None) or "").strip()
+    if T.wait_needs_by(spec) and not by:
+        print("wait: нужен срок `--by ЧЧ:ММ|ISO` (GMT+4) — когда ждать конца самое позднее; прошёл срок (+15 мин) и цель "
+              "не выполнена — сторож разбудит тебя (TK-117). Оцени по ходу (done/total, скорость), не «с запасом на всю ночь»", file=sys.stderr)
+        return 1
+    if by:
+        try:
+            by_dt = T.parse_by(by)
+        except ValueError as e:
+            print(f"wait: {e}", file=sys.stderr)
+            return 1
     parsed = T.parse_wait_for(spec)
     if parsed and parsed[0] == "ticket":
         cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
@@ -339,7 +350,7 @@ def cmd_wait(args) -> int:
                   f"результат (file:/host:…), а не тикет, или разорвите цепочку.", file=sys.stderr)
             return 1
     try:
-        upd = {"status": "waiting", "wait_for": spec}
+        upd = {"status": "waiting", "wait_for": spec, "wait_by": by_dt.isoformat(timespec="seconds") if by else ""}
         if getattr(args, "on_met", None):
             upd["on_met"] = args.on_met.strip()
         T.write_header_updates(path, upd)
@@ -347,7 +358,7 @@ def cmd_wait(args) -> int:
         print(e, file=sys.stderr)
         return 1
     bus_emit(args.id, "статус", {"status": "waiting", "wait_for": spec})
-    print(f"{args.id}: status: waiting, wait_for: {spec}")
+    print(f"{args.id}: status: waiting, wait_for: {spec}" + (f", срок {upd['wait_by']}" if by else ""))
     return 0
 
 
@@ -403,6 +414,8 @@ def cmd_status(args) -> int:
         left = T.at_left_text(tkt.header.get("wait_for", "")) if tkt.status == "waiting" else ""
         if left:
             print(f"{tkt.id}: {left}")
+        if by_left := T.by_left_text(tkt, now):
+            print(f"{tkt.id}: {by_left}")
     print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(D._today(now), 0.0):.2f}, "
           f"за последний час ${D._rolling_hour_cost(state, now):.2f}")
     return 0
@@ -459,6 +472,7 @@ def main(argv=None) -> int:
     p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")
     p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
     p_result.add_argument("--form", default=None, help="wait: форма wait_for")
+    p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
     p_result.set_defaults(func=cmd_result)
 
@@ -469,6 +483,7 @@ def main(argv=None) -> int:
     p_wait = sub.add_parser("wait", help="status: waiting + wait_for (форма проверяется)")
     p_wait.add_argument("id")
     p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
+    p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/deck:/file:/job:")
     p_wait.add_argument("--on-met", default=None,
                         help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
     p_wait.set_defaults(func=cmd_wait)
