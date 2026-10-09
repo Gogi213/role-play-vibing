@@ -565,6 +565,31 @@ class TriageWaitsTests(WatchSandbox):
         W.triage_waits(ws, self.now + timedelta(minutes=20), probe=lambda *a: "producer", owners_probe=self._jobs(tid))
         self.assertEqual(T.read_ticket(p).status, "waiting")  # таймер пошёл заново с 20-й минуты
 
+    # --- TK-117: «поймала бы» на копиях TK-114 / TK-115 ---
+    def test_replay_tk114_bad_form_wakes_within_three_cycles(self):
+        """TK-114: wait_for `host:calc:file:/…` (файл лёг 05:58, никто не проверял) — тревога владельцу за EMPTY_WAIT_STRIKES циклов."""
+        p = self._waiting("host:calc:/data/tk114/tier1.done")
+        p.write_text(p.read_text(encoding="utf-8").replace("host:calc:/data", "host:calc:file:/data"), encoding="utf-8")  # старая запись, до проверки формы
+        ws = {}
+        for i in range(W.EMPTY_WAIT_STRIKES - 1):
+            W.triage_waits(ws, self.now + timedelta(minutes=2 * i), probe=lambda *a: "unknown", owners_probe=lambda al: None)
+            self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, self.now + timedelta(minutes=6), probe=lambda *a: "unknown", owners_probe=lambda al: None)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
+        self.assertIn("форма wait_for", t.log[-1].text)
+
+    def test_replay_tk115_oom_wave_dead_jobs_wakes_owner(self):
+        """TK-115: 11 заданий rc 143 (oom), ждущий юнит жив (producer), работающих 0 — владелец будится через IDLE_WAIT_MIN с последними rc."""
+        p = self._waiting("host:calc:/data/tk115/out/wave.done")
+        tid = T.read_ticket(p).id
+        rows = [(f"j{i}", f"tk115-w{i}", "failed") for i in range(11)]
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "producer", owners_probe=self._jobs(tid, *rows))
+        t = T.read_ticket(p)  # падение задания будит уже с первого цикла (ждущий юнит жив — не помеха)
+        self.assertEqual(t.status, "in_progress")
+        self.assertIn("tk115-w0", t.log[-1].text)
+
     # --- TK-117: срок ожидания ---
     def test_parse_by_and_text(self):
         now = datetime(2026, 10, 9, 17, 0).astimezone()
