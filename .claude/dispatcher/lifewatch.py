@@ -77,7 +77,7 @@ OWNERS_NAME = "job-owners.json"
 
 def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
     """Адаптер `RPV_JOB_OWNERS_CMD` (по ssh на машине алиаса): строка на задание, поля через TAB — id, тикет (или пусто),
-    юнит, состояние running|queued|done|failed. Список dict или None (адаптер не задан / не ответил)."""
+    юнит, состояние running|queued|done|failed, необязательно 5-е — причина падения (TK-117). Список dict или None (адаптер не задан / не ответил)."""
     cmd = P.env("JOB_OWNERS_CMD")
     if not cmd:
         return None
@@ -91,7 +91,7 @@ def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
     for ln in (r.stdout or b"").decode("utf-8", "replace").splitlines():
         f = ln.split("\t")
         if len(f) >= 4 and f[3].strip() in JOB_STATES:
-            out.append({"id": f[0].strip(), "ticket": f[1].strip(), "unit": f[2].strip(), "state": f[3].strip()})
+            out.append({"id": f[0].strip(), "ticket": f[1].strip(), "unit": f[2].strip(), "state": f[3].strip(), "reason": f[4].strip() if len(f) > 4 else ""})
     return out
 
 

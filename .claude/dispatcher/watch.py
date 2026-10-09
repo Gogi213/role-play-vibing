@@ -284,6 +284,11 @@ def _fetch_owners(owners_probe) -> dict:
     return res
 
 
+def _why(j: dict) -> str:
+    """Причина падения из адаптера заданий (5-е поле, TK-117): «rc 143: oom-kill …»; адаптер без поля — пусто."""
+    return f" [{j['reason']}]" if j.get("reason") else ""
+
+
 def _mark_failed_seen(ws: dict, tid: str, owners: dict, extra: str = "") -> None:
     """Пробуждение владельца покрывает ВСЕ упавшие к этому часу задания тикета (и то, что поймала форма `job:`):
     старое упавшее задание не будит повторно и не ведёт к ложному blocked → CEO (Судья 08.10)."""
@@ -319,7 +324,7 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
             if _covered_failure(mine, j):  # живой сосед: только отложить — кончится волна без пересдачи, упавшее разбудит
                 continue
             _mark_failed_seen(ws, tkt.id, owners, j["id"])
-            _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало; wait_for `{spec}` не дождётся", now)
+            _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало{_why(j)}; wait_for `{spec}` не дождётся", now)
             return "woken"
     if st == "dead" and any(j["state"] in ("running", "queued") for j in mine):
         return "producer"
@@ -360,7 +365,7 @@ def _idle_wait(path, tkt, ws: dict, spec: str, parsed, owners: dict, now) -> boo
     if now - T.parse_dt(ent["ts"]) <= timedelta(minutes=IDLE_WAIT_MIN):
         return False
     idle.pop(tkt.id, None)
-    last = ", ".join(f"{j['unit']} {j['state']}" for j in mine[:5]) or "заданий тикета на машине нет"
+    last = "; ".join(f"{j['unit']} {j['state']}{_why(j)}" for j in mine[:5]) or "заданий тикета на машине нет"
     _mark_failed_seen(ws, tkt.id, owners)
     _wake_owner_job(path, tkt, ws, spec, f"сторож: ждёшь `{spec}`, а работающих заданий тикета на машине 0 дольше {IDLE_WAIT_MIN} мин; последние: {last}",
                     now, key="idle_wakes")

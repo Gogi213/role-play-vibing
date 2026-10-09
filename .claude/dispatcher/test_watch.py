@@ -590,6 +590,29 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(t.status, "in_progress")
         self.assertIn("tk115-w0", t.log[-1].text)
 
+    def test_failed_job_reason_reaches_owner_log(self):
+        """Судья TK-117: причина падения (5-е поле адаптера заданий) — в записи пробуждения и у П-1."""
+        p = self._waiting("host:calc:/data/x/tier1.done")
+        tid = T.read_ticket(p).id
+        rows = lambda al: [{"id": "a", "ticket": tid, "unit": "tk0s-tk115-w1-a", "state": "failed", "reason": "rc 143: oom-kill (cgroup)"}]
+        W.triage_waits({}, self.now, probe=lambda *a: "producer", owners_probe=rows)
+        self.assertIn("[rc 143: oom-kill (cgroup)]", T.read_ticket(p).log[-1].text)
+        p2 = self._waiting("host:calc:/data/y/tier1.done")
+        tid2 = T.read_ticket(p2).id
+        done = lambda al: [{"id": "b", "ticket": tid2, "unit": "tk0s-tk116-w-b", "state": "done", "reason": ""}]
+        ws = {}
+        W.triage_waits(ws, self.now, probe=lambda *a: "producer", owners_probe=done)
+        W.triage_waits(ws, self.now + timedelta(minutes=W.IDLE_WAIT_MIN, seconds=30), probe=lambda *a: "producer", owners_probe=done)
+        self.assertNotIn("[", T.read_ticket(p2).log[-1].text.split("последние:")[1])  # причины нет — скобок нет
+
+    def test_fetch_owners_parses_reason_field(self):
+        class R:
+            returncode = 0
+            stdout = "a\tTK-1\tu1\tfailed\trc 143: oom-kill\nb\tTK-1\tu2\trunning\t\nc\tTK-1\tu3\tdone\n".encode()
+        with mock.patch.object(W.LW.hide, "run", return_value=R()), mock.patch.dict(os.environ, {"RPV_JOB_OWNERS_CMD": "x"}):
+            got = W.LW.fetch_owners("calc", lambda a, c: ["ssh"])
+        self.assertEqual([j["reason"] for j in got], ["rc 143: oom-kill", "", ""])
+
     # --- TK-117: срок ожидания ---
     def test_parse_by_and_text(self):
         now = datetime(2026, 10, 9, 17, 0).astimezone()
