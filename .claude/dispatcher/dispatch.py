@@ -1641,7 +1641,9 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     if executor == "haiku":
         effort = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", effort]
+           "--model", model, "--effort", effort,
+           # TK-140: роли без MCP (свой Playwright/pulse на каждый запуск ≈600 МБ); без --mcp-config = ни одного сервера
+           "--strict-mcp-config"]
     if sid:
         cmd += ["--resume", sid]
     else:
