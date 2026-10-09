@@ -150,7 +150,7 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_sets_waiting_with_form(self):
-        self.assertEqual(self.res("engineer", "wait", form="file:flags/rpv-flag"), 0)
+        self.assertEqual(self.res("engineer", "wait", form="file:flags/rpv-flag", by="2099-01-01T00:00+04:00"), 0)
         t = self.tkt()
         self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "file:flags/rpv-flag"))
 
@@ -166,6 +166,9 @@ class ResultTests(unittest.TestCase):
         self.refused("engineer", "pr", pr=7, sha="zzz")           # sha не hex
         self.refused("engineer", "done")                          # нет пути
         self.refused("engineer", "done", path="нет-такого.md")    # пути нет на диске
+        self.refused("engineer", "wait", form="file:flags/rpv-flag")  # TK-117: у file:/host:/job: срок --by обязателен
+        self.refused("engineer", "wait", form="file:flags/rpv-flag", by="00:00-")  # срок непонятен
+        self.refused("engineer", "wait", form="file:flags/rpv-flag", by="2020-01-01T00:00+04:00")  # срок в прошлом
         self.refused("engineer", "wait")                          # нет формы
         self.refused("engineer", "wait", form="когда-нибудь")     # форма неизвестна
         self.refused("judge", "return")                           # нет sha

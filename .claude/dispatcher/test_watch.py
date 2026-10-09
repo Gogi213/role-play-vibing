@@ -565,6 +565,35 @@ class TriageWaitsTests(WatchSandbox):
         W.triage_waits(ws, self.now + timedelta(minutes=20), probe=lambda *a: "producer", owners_probe=self._jobs(tid))
         self.assertEqual(T.read_ticket(p).status, "waiting")  # таймер пошёл заново с 20-й минуты
 
+    # --- TK-117: срок ожидания ---
+    def test_parse_by_and_text(self):
+        now = datetime(2026, 10, 9, 17, 0).astimezone()
+        self.assertEqual(T.parse_by("18:30", now).strftime("%d %H:%M"), "09 18:30")
+        self.assertEqual(T.parse_by("06:00", now).strftime("%d %H:%M"), "10 06:00")  # ближайшее будущее
+        for bad in ("25:00", "завтра", "2020-01-01T00:00+04:00"):
+            with self.assertRaises(ValueError):
+                T.parse_by(bad, now)
+        self.assertTrue(T.wait_needs_by("host:calc:/x/y.done") and T.wait_needs_by("file:x") and not T.wait_needs_by("at:2026-10-10T02:00+04:00"))
+
+    def test_deadline_passed_wakes_owner_only_after_grace(self):
+        p = self._waiting("host:calc:/data/x/tier1.done")
+        by = self.now + timedelta(hours=1)
+        T.write_header_updates(p, {"wait_by": by.isoformat(timespec="seconds")})
+        ws = {}
+        for n in (self.now, by + timedelta(minutes=W.BY_GRACE_MIN - 1)):
+            W.triage_waits(ws, n, probe=lambda *a: "producer", owners_probe=lambda al: None)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        W.triage_waits(ws, by + timedelta(minutes=W.BY_GRACE_MIN + 1), probe=lambda *a: "producer", owners_probe=lambda al: None)
+        t = T.read_ticket(p)
+        self.assertEqual((t.status, t.header.get("wait_for", ""), t.header.get("wait_by", "")), ("in_progress", "", ""))
+        self.assertIn("срок ожидания", t.log[-1].text)
+
+    def test_deadline_ignored_when_target_met(self):
+        p = self._waiting("host:calc:/data/x/tier1.done")
+        T.write_header_updates(p, {"wait_by": (self.now - timedelta(hours=3)).isoformat(timespec="seconds")})
+        W.triage_waits({}, self.now, probe=lambda *a: "met", owners_probe=lambda al: None)
+        self.assertEqual(T.read_ticket(p).status, "waiting")  # цель выполнена — будит диспетчер, не срок
+
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
         return lambda alias: [{"id": i, "ticket": tid, "unit": u, "state": st} for i, u, st in rows]

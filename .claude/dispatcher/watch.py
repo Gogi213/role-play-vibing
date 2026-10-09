@@ -178,6 +178,7 @@ OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # наход
 AT_GRACE_MIN = int(P.env("WATCH_AT_GRACE_MIN", "30"))  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
 EMPTY_WAIT_STRIKES = int(P.env("WATCH_EMPTY_WAIT_STRIKES", "3"))  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
 MET_GRACE_MIN = int(P.env("WATCH_MET_GRACE_MIN", "15"))  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (RPV_DISPATCH_WAIT_RECON_S) — 15 мин = 3 сверки без реакции
+BY_GRACE_MIN = int(P.env("WATCH_BY_GRACE_MIN", "15"))  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
 IDLE_WAIT_MIN = int(P.env("WATCH_IDLE_WAIT_MIN", "15"))  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
 SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
 
@@ -325,6 +326,21 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     return st
 
 
+def _past_deadline(path, tkt, ws: dict, spec: str, now) -> bool:
+    """Срок ожидания (`wait_by`, TK-117) вышел больше BY_GRACE_MIN назад, а цель не выполнена — владелец будится с причиной.
+    Вызывать только для невыполненной цели. Нет срока (старые ожидания, `at:`, наблюдения) — не трогаем."""
+    raw = (tkt.header.get("wait_by") or "").strip()
+    by = T.parse_at(raw) if raw else None
+    if by is None or now - by <= timedelta(minutes=BY_GRACE_MIN):
+        return False
+    parsed = T.parse_wait_for(spec)
+    if parsed and parsed[0] == "file" and D.check_wait_for(spec):  # файл лёг — будит диспетчер, срок ни при чём
+        return False
+    _wake_owner_job(path, tkt, ws, spec, f"сторож: срок ожидания {by.astimezone():%d.%m %H:%M} прошёл (+{BY_GRACE_MIN} мин), цель `{spec}` не выполнена",
+                    now, key="by_wakes")
+    return True
+
+
 def _idle_wait(path, tkt, ws: dict, spec: str, parsed, owners: dict, now) -> bool:
     """П-1 (TK-117): тикет waiting с `host:<алиас>:<путь>`, цель не выполнена и у тикета нет ни одного задания машины в
     running/queued дольше IDLE_WAIT_MIN — ждать некого (задания кончились/упали, файл не ляжет). Не смотрим «жив ли юнит с
@@ -451,6 +467,8 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         parsed = T.parse_wait_for(spec)
         if parsed and parsed[0] == "job":
             if _triage_job(path, tkt, parsed, ws, now, job_probe, states, owners):
+                if states.get(f"{parsed[1]}:{parsed[2]}") != "done" and _past_deadline(path, tkt, ws, spec, now):
+                    continue
                 alive.add(tkt.id)
             else:
                 _mark_failed_seen(ws, tkt.id, owners, parsed[2])
@@ -499,6 +517,8 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
             dead.pop(tkt.id, None)
             continue
         met.pop(tkt.id, None)
+        if st != "dead" and (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, ws, spec, now):
+            continue
         if st != "dead" and _idle_wait(path, tkt, ws, spec, parsed, owners, now):
             continue
         if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
