@@ -1108,7 +1108,7 @@ class DispatchRunTests(unittest.TestCase):
         # v1.6.1: модель — по роли (ROLE_MODEL[judge], по умолчанию opus), не общий CLAUDE_MODEL
         self.assertEqual(captured_cmd[captured_cmd.index("--model") + 1], D.ROLE_MODEL["judge"])
         self.assertEqual(captured_cmd[captured_cmd.index("--effort") + 1], "xhigh")  # ROLE_EFFORT[judge]
-        self.assertIn("--strict-mcp-config", captured_cmd)  # TK-140: роли без MCP
+        self.assertNotIn("--strict-mcp-config", captured_cmd)  # TK-171: умолчание RPV_ROLE_MCP=all — как до 1.8.26
         self.assertNotIn("--mcp-config", captured_cmd)
         self.assertNotIn("--max-budget-usd", captured_cmd)
         for info in list(D.RUNNING.values()):
@@ -3228,6 +3228,47 @@ def iso(d):
     return d.isoformat(timespec="seconds")
 
 
+class RoleMcpTests(unittest.TestCase):
+    """TK-171: RPV_ROLE_MCP — all (умолчание, без флагов) | none | список имён."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        home, proj = self.tmp / "home", self.tmp / "proj"
+        home.mkdir()
+        proj.mkdir()
+        (home / ".claude.json").write_text(json.dumps({
+            "mcpServers": {"figma": {"type": "http", "url": "https://f"}, "pulse": {"command": "p"}},
+            "projects": {str(proj): {"mcpServers": {"local": {"command": "l"}}}}}), encoding="utf-8")
+        (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {"xcodebuildmcp": {"command": "x"}}}), encoding="utf-8")
+        self.runs = self.tmp / "runs"
+        self.runs.mkdir()
+        env = {"HOME": str(home), "USERPROFILE": str(home)}
+        for patcher in (mock.patch.dict(os.environ, env), mock.patch.object(D, "PROJECT_ROOT", proj),
+                        mock.patch.object(D, "RUNS_DIR", self.runs)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _args(self, mode):
+        env = {"RPV_ROLE_MCP": mode} if mode is not None else {}
+        with mock.patch.dict(os.environ, env):
+            if mode is None:
+                os.environ.pop("RPV_ROLE_MCP", None)
+            return D.role_mcp_args("run1")
+
+    def test_default_and_all_have_no_flags(self):
+        self.assertEqual(self._args(None), [])
+        self.assertEqual(self._args("all"), [])
+
+    def test_none_is_strict_without_config(self):
+        self.assertEqual(self._args("none"), ["--strict-mcp-config"])
+
+    def test_list_builds_config_from_user_project_and_mcp_json(self):
+        args = self._args("figma, xcodebuildmcp,local,ghost")
+        self.assertEqual(args[:2], ["--strict-mcp-config", "--mcp-config"])
+        cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
+        self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # pulse не просили, ghost нет
+
 class RateLimitTests(unittest.TestCase):
     """v1.1, чистые функции — без процессов и без сети."""
 
@@ -3254,6 +3295,26 @@ class RateLimitTests(unittest.TestCase):
         self.assertTrue(D._rate_limited(self.state, "TK-1", probe), "часовой лимит должен был сработать")
         far_later = self.now + timedelta(hours=2)
         self.assertFalse(D._rate_limited(self.state, "TK-1", far_later), "час прошёл — лимит снят")
+
+    def test_progress_runs_do_not_spend_hourly_limit(self):
+        """TK-171: запуски с записью/сменой статуса не тратят MAX_RUNS_PER_TICKET_HOUR; без прогресса — тратят."""
+        step = timedelta(seconds=D.MIN_GAP_S + 1)
+        n = D.MAX_RUNS_PER_TICKET_HOUR * 2
+        for i in range(n):
+            D._record_launch(self.state, "TK-1", self.now + i * step)
+            D._record_progress(self.state, "TK-1", self.now + i * step)
+        probe = self.now + n * step
+        self.assertFalse(D._rate_limited(self.state, "TK-1", probe), "честные шаги лимит не режут")
+        self.state["progress_history"]["TK-1"] = self.state["progress_history"]["TK-1"][:1]
+        self.assertTrue(D._rate_limited(self.state, "TK-1", probe), "запуски без прогресса — режутся")
+
+    def test_hard_cap_counts_all_runs(self):
+        step = timedelta(seconds=1)
+        with mock.patch.object(D, "MAX_RUNS_HARD_PER_TICKET_HOUR", 8), mock.patch.object(D, "MIN_GAP_S", 0):
+            for i in range(8):
+                D._record_launch(self.state, "TK-1", self.now + i * step)
+                D._record_progress(self.state, "TK-1", self.now + i * step)
+            self.assertTrue(D._rate_limited(self.state, "TK-1", self.now + 9 * step))
 
     def test_daily_cost_is_only_accounted_per_day(self):
         """Суточный учёт — по календарной дате; никакого «превышено» нет (В-149)."""

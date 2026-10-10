@@ -119,7 +119,12 @@ RUN_TIMEOUT = float(P.env("DISPATCH_TIMEOUT", str(20 * 60)))
 # они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
 # В-173 (03.10) — на тикет, владелец 03.10 («бюджет до конца убирай») — и потолок запуска; траты только считаются
 # (runs.log, state.json).
+# TK-171: в окне считаются запуски БЕЗ прогресса (нет новой записи роли и статус не сменён); запуск с прогрессом лимит
+# не тратит — исследователь делает шаг за 50–100 с, и 6 честных шагов стоили тикету остаток часа. Петлю с записями режет
+# MAX_SAME_STATUS_RUNS, холостую — MAX_IDLE_RUNS; потолок MAX_RUNS_HARD_PER_TICKET_HOUR (все запуски) — страховка.
+# Замер runs.log alpha (166 тикетов, окно 1 ч): пик ≤6 у 88, 7–12 у 58, 13–21 у 20 тикетов, максимум 21 (при лимите 20).
 MAX_RUNS_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
+MAX_RUNS_HARD_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_HARD_PER_TICKET_HOUR", "30"))
 MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
 # Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Числа НАЗНАЧЕНЫ CEO 03.10,
 # не измерены: MAX_SAME_STATUS_RUNS (12) — роль пишет запись, а статус (in_progress; waiting при выполненном wait_for) не
@@ -1152,12 +1157,24 @@ def _record_launch(state: dict, tid: str, now) -> None:
     state["launch_history"][tid] = [t for t in hist if T.parse_dt(t) > cutoff]
 
 
+def _record_progress(state: dict, tid: str, now) -> None:
+    """TK-171: запуск, закончившийся записью роли или сменой статуса, не считается в MAX_RUNS_PER_TICKET_HOUR."""
+    hist = state.setdefault("progress_history", {}).setdefault(tid, [])
+    hist.append(T.now_iso(now))
+    cutoff = now - timedelta(hours=2)
+    state["progress_history"][tid] = [t for t in hist if T.parse_dt(t) > cutoff]
+
+
 def _rate_limited(state: dict, tid: str, now) -> bool:
     """MAX_RUNS_PER_TICKET_HOUR / MIN_GAP_S — троттлинг решений (а)-(г); ретраи (д) их не проходят."""
     hist = [T.parse_dt(t) for t in state.get("launch_history", {}).get(tid, [])]
     if not hist:
         return False
-    if len([t for t in hist if (now - t) < timedelta(hours=1)]) >= MAX_RUNS_PER_TICKET_HOUR:
+    recent = len([t for t in hist if (now - t) < timedelta(hours=1)])
+    if recent >= MAX_RUNS_HARD_PER_TICKET_HOUR:
+        return True
+    free = len([t for t in state.get("progress_history", {}).get(tid, []) if (now - T.parse_dt(t)) < timedelta(hours=1)])
+    if recent - min(free, recent) >= MAX_RUNS_PER_TICKET_HOUR:
         return True
     return (now - max(hist)).total_seconds() < MIN_GAP_S
 
@@ -1555,6 +1572,46 @@ def _popen(cmd, **kwargs):
     return subprocess.Popen(cmd, **kwargs)
 
 
+def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
+    """`mcpServers` из json-файла (`~/.claude.json`, `.mcp.json`); с `project_key` — ещё и записи проекта
+    (`projects[<путь>].mcpServers`, они перекрывают пользовательские). Нет файла/битый json — пусто."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = dict(data.get("mcpServers") or {}) if isinstance(data, dict) else {}
+    if project_key and isinstance(data, dict):
+        projects = data.get("projects") or {}
+        for k, v in projects.items():
+            if isinstance(v, dict) and os.path.normcase(os.path.normpath(k)) == os.path.normcase(os.path.normpath(project_key)):
+                out.update(v.get("mcpServers") or {})
+    return out
+
+
+def role_mcp_args(run_stem: str) -> list[str]:
+    """TK-171: MCP-серверы роли по `RPV_ROLE_MCP`. Не задана/`all` — флагов нет, роль видит всё, что видит обычный
+    `claude` (поведение до 1.8.26); `none` — `--strict-mcp-config` без конфига, ни одного сервера (TK-140: свой
+    Playwright/pulse на каждый запуск ≈ 600 МБ); список имён через запятую — временный json только с этими серверами
+    (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
+    `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
+    mode = (P.env("ROLE_MCP", "all") or "all").strip()
+    if mode.lower() == "all":
+        return []
+    if mode.lower() == "none":
+        return ["--strict-mcp-config"]
+    names = [n.strip() for n in mode.split(",") if n.strip()]
+    servers = _read_mcp_servers(Path.home() / ".claude.json", str(PROJECT_ROOT))
+    servers.update(_read_mcp_servers(PROJECT_ROOT / ".mcp.json"))
+    picked = {n: servers[n] for n in names if n in servers}
+    for n in names:
+        if n not in picked:
+            print(f"[dispatch] RPV_ROLE_MCP: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
+                  file=sys.stderr, flush=True)
+    cfg = RUNS_DIR / f"{run_stem}.mcp.json"
+    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return ["--strict-mcp-config", "--mcp-config", str(cfg)]
+
+
 def effort_for(role: str, tkt=None) -> str:
     """v2: усилие запуска — поле `effort:` тикета, иначе умолчание роли (ROLE_EFFORT: исследователь/инженер
     high, Судья xhigh; env RPV_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
@@ -1634,9 +1691,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     if executor == "haiku":
         effort = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", effort,
-           # TK-140: роли без MCP (свой Playwright/pulse на каждый запуск ≈600 МБ); без --mcp-config = ни одного сервера
-           "--strict-mcp-config"]
+           "--model", model, "--effort", effort] + role_mcp_args(run_file.stem)  # RPV_ROLE_MCP: all|none|имена (TK-171)
     if sid:
         cmd += ["--resume", sid]
     else:
@@ -1843,6 +1898,8 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     logged = _role_logged(tkt, role, info)  # судья 27.09, п.7: таймаут сам по себе — не провал, если запись успела
     stuck_todo = role == tkt.owner and logged and tkt.status == "todo"  # отчиталась, но не увела статус с todo
     status_changed = tkt.status != info.get("status_at_launch")
+    if logged or status_changed:
+        _record_progress(state, tid, now)
     if role == tkt.reviewer and info.get("status_at_launch") == "in_review" and logged:
         # запуск ревьюера на ревью: вернул владельцу (todo/in_progress либо `--next` другой роли) — счётчик +1, иначе
         # (принял, заблокировал, передал CEO) ревью состоялось — серия кончилась
