@@ -4721,6 +4721,12 @@ class WaitReconcileTest(unittest.TestCase):
         D._reconcile()
         self.assertEqual(self.alarms, [])
 
+    def test_recon_script_keeps_tilde_unquoted(self):
+        script = D._recon_script([("calc", "path", "~/x.done"), ("calc", "path", "~/rpv/progress/a.json")])
+        self.assertIn("test -e ~/x.done", script)
+        self.assertIn("cat ~/rpv/progress/a.json", script)
+        self.assertNotIn("'~/", script)
+
     def test_reconcile_missing_file_stays_unmet(self):
         D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
         self._ssh(b"@@0\n@@reg\n@@rc 1\n")

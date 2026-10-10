@@ -41,7 +41,7 @@
 | `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-5-5` | модель для механических задач (`executor: haiku`); усилие у них всегда `xhigh` |
 | `RPV_DISPATCH_SESSION_SCOPE` | `judge:ticket,researcher:ticket,engineer:ticket` | область сессии роли: `ticket` — своя сессия на тикет, `role` — одна долгая сессия на все тикеты |
 | `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст прошлого запуска, после которого роль начинает новую сессию |
-| `RPV_DISPATCH_WAIT_POLL_S` | `300` | период запасного ssh-опроса `wait_for host:…`, с |
+| `RPV_DISPATCH_WAIT_POLL_S` | `300` | предел ожидания потока `wait-poller` между шагами (не ssh-период; ssh — сверка `RPV_DISPATCH_WAIT_RECON_S`), с |
 | `RPV_DISPATCH_WAIT_RECON_S` | `300` | период сверки `wait_for host:…` одним ssh на машину (с шиной), с |
 | `RPV_WATCHED_ALIASES` | не задан | машины со сторожем (`calc,vps`): сверка, закрывшая условие без события с такой машины, даёт тревогу `recon-miss` |
 | `RPV_DISPATCH_DECK_CACHE_S` | `60` | кэш ssh-проверок `wait_for`, с |

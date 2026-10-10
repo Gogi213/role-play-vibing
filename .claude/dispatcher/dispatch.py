@@ -611,7 +611,7 @@ def _recon_script(keys: list) -> str:
             continue
         if arg.startswith("/") and not _is_progress_json(arg):
             parts.append(f"{{ grep -qxF {q} {WATCH_LIST} 2>/dev/null || echo {q} >> {WATCH_LIST}; }} >/dev/null 2>&1 && echo @@reg")
-        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {q} 2>/dev/null; echo \"@@rc $?\"")
+        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {_remote_test_arg(arg)} 2>/dev/null; echo \"@@rc $?\"")
     return "; ".join(parts)
 
 
