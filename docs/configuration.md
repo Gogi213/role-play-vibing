@@ -31,7 +31,6 @@
 | `RPV_DISPATCH_MIN_GAP_S` | `60` | пауза между запусками одного тикета, с |
 | `RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR` | `6` | запусков тикета в час |
 | `RPV_DISPATCH_MAX_SAME_STATUS_RUNS` | `12` | запусков подряд с записью, но без смены статуса: на половине порога одна строка CEO, на пороге тикет становится `blocked` |
-| `RPV_DISPATCH_SAME_STATUS_WARN_RUNS` | `0` (половина `…MAX_SAME_STATUS_RUNS`) | порог предупреждения CEO |
 | `RPV_DISPATCH_MAX_IDLE_RUNS` | `2` | запусков подряд без записи и без смены статуса → `blocked` |
 | `RPV_DISPATCH_MAX_REVIEW_RETURNS` | `3` | сколько раз ревьюер может вернуть работу; после предела тикет, снова пришедший на ревью, уходит CEO (`next: ceo`), ревьюера не будим |
 | `RPV_DISPATCH_STOP_VERIFY_S` | `10` | сколько ждать смерти процесса после `tickets.py stop`, с |
@@ -106,6 +105,7 @@
 | `RPV_BUS_TOKEN` | — | токен значением |
 | `RPV_BUS_TOKEN_FILE` | запасной `~/.rpv-bus-token` | токен файлом |
 | `RPV_BUS_SPOOL` | `<tmp>/rpv-bus-spool.jsonl` | очередь неотправленных событий |
+| `RPV_BUS_DOWN_NOTICE_S` | `120` | простой шины короче — CEO не будим (`bus-down`/`bus-up` только при простое дольше) |
 | `RPV_BUS_DISABLE` | — | `1` — выключить шину |
 | `RPV_BUS_SNAPSHOT_S` | `300` | период полного снимка блокеров, с |
 | `RPV_RUNS_DIR` | `/var/lib/rpv/runs` | куда `jobrun.sh` пишет запись запуска (InvocationID) |

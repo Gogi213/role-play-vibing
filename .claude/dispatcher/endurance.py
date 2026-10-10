@@ -148,7 +148,7 @@ class Harness:
             (self.base / "bus-token").write_text("endurance", encoding="utf-8")
             self.env.pop("RPV_BUS_DISABLE", None)
             self.env.update(RPV_BUS_URL=f"http://127.0.0.1:{self.bus_port}", RPV_BUS_TOKEN="endurance",
-                            RPV_BUS_SPOOL=str(self.base / "spool.jsonl"), RPV_BUS_SNAPSHOT_S="3")
+                            RPV_BUS_SPOOL=str(self.base / "spool.jsonl"), RPV_BUS_SNAPSHOT_S="3", RPV_BUS_DOWN_NOTICE_S="2")
             for k in ("RPV_BUS_URL", "RPV_BUS_TOKEN", "RPV_BUS_SPOOL"):
                 os.environ[k] = self.env[k]
             os.environ.pop("RPV_BUS_DISABLE", None)

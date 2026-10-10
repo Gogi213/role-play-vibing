@@ -185,11 +185,29 @@ class DownTest(unittest.TestCase):
             link = bus_link.Link(lambda k, n: lines.append(k))
             link.start()
             time.sleep(4)
+            link.down_since -= bus_link.DOWN_NOTICE_S
+            link.maybe_snapshot([])
             link.disp.stop_flag.set()
             self.assertEqual(lines.count("bus-down"), 1)
         finally:
             os.environ["RPV_BUS_DISABLE"] = "1"
             os.environ.pop("RPV_BUS_URL", None)
+
+    def test_short_outage_is_silent_long_outage_reports_down_and_up(self):
+        lines = []
+        link = bus_link.Link(lambda k, n: lines.append(k))
+        link._on_state(False, "x")
+        link.down_since -= 60
+        link.maybe_snapshot([])
+        link._on_state(True, "")
+        self.assertEqual(lines, [], "простой 60 с — ни одной строки")
+        link._on_state(False, "x")
+        link.down_since -= 130
+        link.maybe_snapshot([])
+        link.maybe_snapshot([])
+        self.assertEqual(lines, ["bus-down"], "простой 130 с — одна строка, повтор не пишет")
+        link._on_state(True, "")
+        self.assertEqual(lines, ["bus-down", "bus-up"])
 
 
 if __name__ == "__main__":

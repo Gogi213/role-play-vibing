@@ -1972,7 +1972,6 @@ class DispatchRunTests(unittest.TestCase):
         state = D.load_state()
         state["idle_runs"] = {key: 1}
         state["same_status_runs"] = {key: 5}
-        state["same_status_warned"] = {key: 5}
         state.setdefault("sessions", {}).setdefault(key, {})["retries"] = 1
         state["ticket_sessions"] = {key: {"session_id": "old", "last_context_tokens": D.ROTATE_TOKENS + 1}}
         D.save_state(state)
@@ -1982,7 +1981,6 @@ class DispatchRunTests(unittest.TestCase):
         state = D.load_state()
         self.assertNotIn(key, state["idle_runs"])
         self.assertNotIn(key, state["same_status_runs"])
-        self.assertNotIn(key, state["same_status_warned"])
         self.assertEqual(state["sessions"][key]["retries"], 0)
         self.assertEqual(state["ticket_sessions"][key], {}, "сессия и контекст — с нуля")
         self.assertNotIn(tid, state["launch_history"], "часовой лимит запусков по тикету — с нуля")
@@ -2503,53 +2501,44 @@ class DispatchRunTests(unittest.TestCase):
         T.write_header_updates(path, {"status": "in_progress"}, now=dt("2026-10-03T09:00:00+04:00"))
         return path
 
-    def limits(self, max_runs, warn_runs=99):
-        """Пороги тормоза цикла на время теста (warn 99 — предупреждение выключено, если тест о блоке)."""
-        old = (D.MAX_SAME_STATUS_RUNS, D.SAME_STATUS_WARN_RUNS)
-        D.MAX_SAME_STATUS_RUNS, D.SAME_STATUS_WARN_RUNS = max_runs, warn_runs
-        self.addCleanup(lambda: (setattr(D, "MAX_SAME_STATUS_RUNS", old[0]), setattr(D, "SAME_STATUS_WARN_RUNS", old[1])))
+    def limits(self, max_runs):
+        """Порог тормоза цикла на время теста."""
+        old = D.MAX_SAME_STATUS_RUNS
+        D.MAX_SAME_STATUS_RUNS = max_runs
+        self.addCleanup(lambda: setattr(D, "MAX_SAME_STATUS_RUNS", old))
 
-    def test_default_same_status_limit_is_twelve_warn_is_half_and_env_name(self):
-        if P.env("DISPATCH_MAX_SAME_STATUS_RUNS") or P.env("DISPATCH_SAME_STATUS_WARN_RUNS"):
+    def test_default_same_status_limit_is_twelve_and_env_name(self):
+        if P.env("DISPATCH_MAX_SAME_STATUS_RUNS"):
             self.skipTest("порог тормоза цикла задан в окружении")
         self.assertEqual(D.MAX_SAME_STATUS_RUNS, 12)
-        self.assertEqual(D.same_status_warn_at(), 6)
         source = Path(D.__file__).read_text(encoding="utf-8")
         self.assertIn("DISPATCH_MAX_SAME_STATUS_RUNS", source)
+        self.assertNotIn("SAME_STATUS_WARN", source, "предупреждение на полпути снято (TK-100 №27)")
 
-    def test_warning_line_at_half_then_block_at_max_each_exactly_one_line(self):
-        self.limits(6, 0)                                    # 0 — предупреждение на половине порога (3)
-        path = self.make_in_progress("Предупреждение")
+    def test_silent_until_max_then_block_with_exactly_one_line(self):
+        self.limits(6)
+        path = self.make_in_progress("Без предупреждения")
         tid = path.stem
 
         def lines():
             if not D.CEO_INBOX.exists():
                 return []
             return [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines() if tid in ln]
-        for n in (1, 2):
+        for n in range(1, 6):
             self.same_status_step(path, n, "in_progress")
-        self.assertEqual(lines(), [], "до половины порога тихо")
-        self.same_status_step(path, 3, "in_progress")
-        got = lines()
-        self.assertEqual(len(got), 1, got)
-        self.assertIn("[loop-warning]", got[0])
-        self.assertEqual(T.read_ticket(path).status, "in_progress", "предупреждение — не блок")
-        for n in (4, 5):
-            self.same_status_step(path, n, "in_progress")
-        self.assertEqual(len(lines()), 1, "второго предупреждения в той же серии нет")
-        self.assertEqual(T.read_ticket(path).status, "in_progress")
+        self.assertEqual(lines(), [], "до порога тихо — предупреждения нет")
         self.same_status_step(path, 6, "in_progress")
         got = lines()
         self.assertEqual(T.read_ticket(path).status, "blocked")
-        self.assertEqual([("[loop-warning]" in g, "[blocked]" in g) for g in got], [(True, False), (False, True)])
+        self.assertEqual(len(got), 1, got)
+        self.assertIn("[blocked]", got[0])
         D.tick()
         D.tick()
-        self.assertEqual(len(lines()), 2, "после блока строк больше нет")
+        self.assertEqual(len(lines()), 1, "после блока строк больше нет")
 
-    def test_status_change_rearms_the_warning(self):
-        self.limits(6, 2)
-        path = self.make_in_progress("Повторное предупреждение")
-        tid = path.stem
+    def test_status_change_restarts_the_series(self):
+        self.limits(3)
+        path = self.make_in_progress("Серия с нуля")
         for n in (1, 2):
             self.same_status_step(path, n, "in_progress")
         T.write_header_updates(path, {"status": "waiting", "wait_for": "file:/no/such"},
@@ -2558,9 +2547,7 @@ class DispatchRunTests(unittest.TestCase):
         T.write_header_updates(path, {"status": "in_progress", "wait_for": ""}, now=dt("2026-10-03T10:06:00+04:00"))
         for n in (4, 5):
             self.same_status_step(path, n, "in_progress")
-        warns = [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines()
-                 if tid in ln and "[loop-warning]" in ln]
-        self.assertEqual(len(warns), 2, warns)
+        self.assertEqual(T.read_ticket(path).status, "in_progress", "после смены статуса счёт начат заново")
 
     def test_n_runs_with_entry_but_same_status_block_the_ticket_with_one_ceo_line(self):
         self.limits(3)
