@@ -1555,6 +1555,46 @@ def _popen(cmd, **kwargs):
     return subprocess.Popen(cmd, **kwargs)
 
 
+def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
+    """`mcpServers` из json-файла (`~/.claude.json`, `.mcp.json`); с `project_key` — ещё и записи проекта
+    (`projects[<путь>].mcpServers`, они перекрывают пользовательские). Нет файла/битый json — пусто."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = dict(data.get("mcpServers") or {}) if isinstance(data, dict) else {}
+    if project_key and isinstance(data, dict):
+        projects = data.get("projects") or {}
+        for k, v in projects.items():
+            if isinstance(v, dict) and os.path.normcase(os.path.normpath(k)) == os.path.normcase(os.path.normpath(project_key)):
+                out.update(v.get("mcpServers") or {})
+    return out
+
+
+def role_mcp_args(run_stem: str) -> list[str]:
+    """TK-171: MCP-серверы роли по `RPV_ROLE_MCP`. Не задана/`all` — флагов нет, роль видит всё, что видит обычный
+    `claude` (поведение до 1.8.26); `none` — `--strict-mcp-config` без конфига, ни одного сервера (TK-140: свой
+    Playwright/pulse на каждый запуск ≈ 600 МБ); список имён через запятую — временный json только с этими серверами
+    (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
+    `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
+    mode = (P.env("ROLE_MCP", "all") or "all").strip()
+    if mode.lower() == "all":
+        return []
+    if mode.lower() == "none":
+        return ["--strict-mcp-config"]
+    names = [n.strip() for n in mode.split(",") if n.strip()]
+    servers = _read_mcp_servers(Path.home() / ".claude.json", str(PROJECT_ROOT))
+    servers.update(_read_mcp_servers(PROJECT_ROOT / ".mcp.json"))
+    picked = {n: servers[n] for n in names if n in servers}
+    for n in names:
+        if n not in picked:
+            print(f"[dispatch] RPV_ROLE_MCP: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
+                  file=sys.stderr, flush=True)
+    cfg = RUNS_DIR / f"{run_stem}.mcp.json"
+    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return ["--strict-mcp-config", "--mcp-config", str(cfg)]
+
+
 def effort_for(role: str, tkt=None) -> str:
     """v2: усилие запуска — поле `effort:` тикета, иначе умолчание роли (ROLE_EFFORT: исследователь/инженер
     high, Судья xhigh; env RPV_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
@@ -1634,9 +1674,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     if executor == "haiku":
         effort = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", effort,
-           # TK-140: роли без MCP (свой Playwright/pulse на каждый запуск ≈600 МБ); без --mcp-config = ни одного сервера
-           "--strict-mcp-config"]
+           "--model", model, "--effort", effort] + role_mcp_args(run_file.stem)  # RPV_ROLE_MCP: all|none|имена (TK-171)
     if sid:
         cmd += ["--resume", sid]
     else:
