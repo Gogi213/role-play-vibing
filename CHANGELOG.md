@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.30 — 2026-10-10
+
+### Удалено (TK-100, №12 — сторож не следит за планом шагов)
+
+- `watch.check_no_progress_view`, `check_stale_plan`, `_wake_for_plan`, `_remind_plan_waiting`, находки `no-plan` / `plan-stale` / `plan-stale-waiting`, `OWNER_ONLY_KINDS`, настройки `RPV_WATCH_NO_PLAN_MIN` и `RPV_WATCH_PLAN_LAG_MIN`; тесты этих находок. Табло и так показывает «нет плана»; сторож читал чужой `pulse/status.json`. Остальные проверки сторожа не менялись.
+
 ## 1.8.29 — 2026-10-10
 
 ### Изменено (TK-100, шаг 5 — сложность)

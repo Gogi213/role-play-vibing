@@ -34,7 +34,6 @@ import lifewatch as LW  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
 import hide  # noqa: E402
-import pulsedata as PD  # noqa: E402
 import ticket as T  # noqa: E402
 
 # Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
@@ -67,9 +66,6 @@ WATCH_DEDUP_REPEAT_HOURS = float(P.env("WATCH_REPEAT_HOURS", "2"))
 WATCH_LONG_REPEAT_HOURS = float(P.env("WATCH_LONG_REPEAT_HOURS", "24"))
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner"}
 CLOSED_TICKET_STATUSES = ("done", "cancelled")
-# План шагов на табло: через сколько минут «в работе без плана» / «шаги не менялись» сторож напоминает роли
-NO_PLAN_MINUTES = float(P.env("WATCH_NO_PLAN_MIN", "30"))
-PLAN_LAG_MINUTES = float(P.env("WATCH_PLAN_LAG_MIN", "5"))  # роль обновляет шаги чуть раньше итогового comment — это не «застыл»
 ORPHAN_TICKET_HOURS = float(P.env("WATCH_ORPHAN_HOURS", "2"))
 
 
@@ -124,57 +120,8 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
     return out
 
 
-def check_no_progress_view(now) -> list:
-    """TK-060: тикет in_progress дольше NO_PLAN_MINUTES без плана шагов (plan.py set) — у табло нет честного процента.
-    Читает status.json сборщика (без LLM, без сети); исполнителя будит notify_findings."""
-    try:
-        view = json.loads((D.PROJECT_ROOT / ".claude" / "pulse" / "status.json").read_text(encoding="utf-8"))["view2"]
-        if now.timestamp() - float(view["built_ts"]) > 300:
-            return []  # сборщик стоит — это другая находка, не эта
-        procs = {p["id"]: p for p in view["processes"]}
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
-    out = []
-    for path in T.list_tickets(D.TICKETS_DIR):
-        try:
-            tkt = T.read_ticket(path)
-        except Exception:
-            continue
-        p = procs.get(tkt.id)
-        if tkt.status != "in_progress" or p is None or p.get("plan"):
-            continue
-        upd = T.parse_dt(tkt.header.get("updated")) if tkt.header.get("updated") else None
-        if upd is not None and (now - upd).total_seconds() / 60 > NO_PLAN_MINUTES:
-            out.append(Finding("no-plan", tkt.id, f"{tkt.id}: в работе > {NO_PLAN_MINUTES:.0f} мин без плана шагов на табло"))
-    return out
-
-
-def check_stale_plan(now) -> list:
-    """TK-061: у in_progress-тикета есть план, в логе запись роли новее плана, а шаги не менялись > NO_PLAN_MINUTES."""
-    out = []
-    for path in T.list_tickets(D.TICKETS_DIR):
-        try:
-            tkt = T.read_ticket(path)
-            if tkt.status not in ("in_progress", "waiting") or tkt.owner not in ("researcher", "engineer", "judge"):
-                continue
-            plan = json.loads((PD.plans_dir(D.PROJECT_ROOT) / f"{tkt.id}.json").read_text(encoding="utf-8"))
-            if not plan.get("steps") or all(s.get("state") == "done" for s in plan["steps"]):
-                continue
-            upd = T.parse_dt(plan["updated"])
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        except Exception:
-            continue
-        role_logs = [e for e in tkt.log if not (T.author_is(e.author, "ceo") or T.author_is(e.author, "watch"))]
-        if role_logs and role_logs[-1].ts - upd > timedelta(minutes=PLAN_LAG_MINUTES) and (now - upd).total_seconds() / 60 > NO_PLAN_MINUTES:
-            out.append(Finding("plan-stale" if tkt.status == "in_progress" else "plan-stale-waiting", tkt.id,
-                               f"{tkt.id}: запись роли в логе новее плана, шаги на табло не менялись > {NO_PLAN_MINUTES:.0f} мин"))
-    return out
-
-
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
 DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
-OWNER_ONLY_KINDS = ("no-plan", "plan-stale", "plan-stale-waiting")  # находки адресуются владельцу тикета, не CEO
 AT_GRACE_MIN = int(P.env("WATCH_AT_GRACE_MIN", "30"))  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
 EMPTY_WAIT_STRIKES = int(P.env("WATCH_EMPTY_WAIT_STRIKES", "3"))  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
 MET_GRACE_MIN = int(P.env("WATCH_MET_GRACE_MIN", "15"))  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (RPV_DISPATCH_WAIT_RECON_S) — 15 мин = 3 сверки без реакции
@@ -802,8 +749,6 @@ def collect_findings(now, alive_waits=()) -> list:
     findings = []
     findings += check_blocked_and_needs_owner(now)
     findings += check_orphan_tickets(now, alive_waits)
-    findings += check_no_progress_view(now)
-    findings += check_stale_plan(now)
     check_host_alerts()
     return findings
 
@@ -829,42 +774,6 @@ def save_watch_state(ws: dict) -> None:
     T.atomic_write_text(WATCH_STATE_FILE, json.dumps(ws, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-_PLAN_PY = str(Path(__file__).resolve().with_name("plan.py"))
-
-
-def _wake_for_plan(tid: str, now, stale: bool = False) -> None:
-    """no-plan: запись в лог тикета и `next: <владелец>` — исполнитель запишет план (plan.py set, 3–6 шагов)."""
-    path = D.TICKETS_DIR / f"{tid}.md"
-    try:
-        with T.ticket_lock(path):
-            tkt = T.read_ticket(path)
-            if tkt.owner not in ("researcher", "engineer", "judge"):
-                return
-            if stale:
-                T.append_log(path, "watch", "Сторож (без LLM): в логе есть запись роли, а шаги на табло не менялись "
-                             f"> {NO_PLAN_MINUTES:.0f} мин. Обнови по факту: `python " + _PLAN_PY + " step " + tid +
-                             " <N> <run|done|todo>` (wait — только когда ждём владельца), затем продолжай работу.")
-            else:
-                T.append_log(path, "watch", "Сторож (без LLM): задача в работе дольше "
-                             f"{NO_PLAN_MINUTES:.0f} мин, а плана шагов на табло нет — табло не может показать процент. "
-                             "Запиши план: `python " + _PLAN_PY + " set " + tid + " ...` (3–6 шагов по-людски, "
-                             "справка — `plan.py --help`), затем продолжай работу.")
-            T.write_header_updates(path, {"next": tkt.owner}, stamp_updated=False)
-    except Exception as e:
-        print(f"[watch] no-plan: не разбудил {tid}: {type(e).__name__}: {e}", file=sys.stderr)
-
-
-def _remind_plan_waiting(tid: str) -> None:
-    """waiting + застывший план: не будим (запуск впустую) — напоминание в лог, следующий запуск роли обновит шаги."""
-    path = D.TICKETS_DIR / f"{tid}.md"
-    try:
-        T.append_log(path, "watch", "Сторож (без LLM): запись роли новее плана, а шаги на табло не менялись "
-                     f"> {NO_PLAN_MINUTES:.0f} мин. В следующем запуске обнови по факту: `python " + _PLAN_PY + " step "
-                     + tid + " <N> <run|done|todo>`.")
-    except Exception as e:
-        print(f"[watch] plan-stale-waiting: не записал {tid}: {type(e).__name__}: {e}", file=sys.stderr)
-
-
 def notify_findings(findings: list, ws: dict, now) -> list:
     """Возвращает находки, по которым реально написали (для тестов). Дедуп — (kind, key) с повтором раз в
     _repeat_hours(kind)."""
@@ -881,14 +790,7 @@ def notify_findings(findings: list, ws: dict, now) -> list:
         time_elapsed = last_ts is None or (now - T.parse_dt(last_ts)).total_seconds() >= (
             _repeat_hours(f.kind) * 3600)
         if time_elapsed:
-            if f.kind not in OWNER_ONLY_KINDS:  # план шагов — дело владельца тикета, действия CEO тут нет (TK-079 п.3)
-                D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
-            if f.kind == "no-plan":
-                _wake_for_plan(f.key, now)
-            elif f.kind == "plan-stale":
-                _wake_for_plan(f.key, now, stale=True)
-            elif f.kind == "plan-stale-waiting":
-                _remind_plan_waiting(f.key)
+            D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
             notified[marker] = {"ts": T.now_iso(now)}
             posted.append(f)
     # снятые находки — забыть, чтобы будущее повторение не ждало старого окна дедупа
