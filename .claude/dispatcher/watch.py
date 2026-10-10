@@ -418,14 +418,14 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
             continue
         spec = tkt.header["wait_for"].strip()
         parsed = T.parse_wait_for(spec)
-        if parsed is None and spec.startswith(("host:", "deck:")):  # TK-117 К1.1: форма host:/deck: не понята (напр. `host:calc:file:/x`) — диспетчер её не проверит, файл не разбудит никого
+        if parsed is None and spec.startswith("host:"):  # TK-117 К1.1: форма host: не понята (напр. `host:calc:file:/x`) — диспетчер её не проверит, файл не разбудит никого
             bad = ws.setdefault("bad_form", {})
             bad_seen.add(tkt.id)
             n = bad.get(tkt.id, {}).get("n", 0) + 1 if bad.get(tkt.id, {}).get("spec") == spec else 1
             bad[tkt.id] = {"spec": spec, "n": n}
             if n >= EMPTY_WAIT_STRIKES:
                 bad.pop(tkt.id, None)
-                _wake_owner_job(path, tkt, ws, spec, f"сторож: форма wait_for `{spec}` не понята (у host:/deck: путь только абсолютный, без `file:`) — цель никто не проверяет; "
+                _wake_owner_job(path, tkt, ws, spec, f"сторож: форма wait_for `{spec}` не понята (у host: путь только абсолютный, без `file:`) — цель никто не проверяет; "
                                 "поставь wait_for заново", now, key="bad_form_wakes")
             continue
         if parsed and parsed[0] == "job":
