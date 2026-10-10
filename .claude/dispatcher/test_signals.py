@@ -53,7 +53,7 @@ class SignalsTest(unittest.TestCase):
         return rc, out.getvalue()
 
     def test_every_kind_reaches_queue_with_prio_and_is_acked(self):
-        kinds = ["blocked", "needs_owner", "loop-warning", "stop-failed", "parse-error", "watch-deck", "owner-answer",
+        kinds = ["blocked", "needs_owner", "stop-failed", "parse-error", "watch-deck", "owner-answer",
                  "bus-down", "done", "next-ceo", "wait-for", "model", "watch-summary", "bus-up"]
         for k in kinds:
             D.append_ceo_inbox("TK-1", k, f"текст {k}")

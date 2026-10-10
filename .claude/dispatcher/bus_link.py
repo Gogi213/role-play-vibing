@@ -13,6 +13,9 @@ import busclient  # noqa: E402
 
 WAIT_S = 25
 SNAPSHOT_EVERY_S = float(os.environ.get("RPV_BUS_SNAPSHOT_S") or os.environ.get("ALPHA_BUS_SNAPSHOT_S", "300"))
+# Простой шины короче порога — переподключение, CEO не будим. 120 с — в разрыве между двумя группами простоев журнала
+# ceo-inbox (04–08.10, 35 случаев: 18 — до 63 с, 17 — от 122 с); решение Судьи TK-100 10.10.
+DOWN_NOTICE_S = float(os.environ.get("RPV_BUS_DOWN_NOTICE_S", "120"))
 
 
 class Listener(threading.Thread):
@@ -88,6 +91,8 @@ class Link:
         self.to_ack = set()
         self.ceo_line = ceo_line  # callable(kind, note) — сигнал CEO (шина, при её падении — запасной файл)
         self.down_since = None
+        self.down_why = ""
+        self.down_noted = False  # строка bus-down записана — только тогда bus-up не молчит
         self.last_snapshot = 0.0
         self.disp = Listener("dispatcher", self._on_disp, self._on_state)
         self.ceo_wake = ceo_wake  # callable(addr, seq) — строка будильника CEO; None — очередь ceo не слушаем
@@ -126,10 +131,11 @@ class Link:
     def _on_state(self, up, why):
         if not up and self.down_since is None:
             self.down_since = time.time()
-            self.ceo_line("bus-down", f"шина недоступна ({why}); диспетчер работает по таймеру и wait_for host:…")
+            self.down_why = why
         elif up and self.down_since is not None:
-            self.ceo_line("bus-up", f"шина снова доступна (простой {int(time.time() - self.down_since)} с)")
-            self.down_since = None
+            if self.down_noted:
+                self.ceo_line("bus-up", f"шина снова доступна (простой {int(time.time() - self.down_since)} с)")
+            self.down_since, self.down_noted = None, False
             self.last_snapshot = 0.0  # снимок блокеров сразу после возврата
             self.wake.set()
 
@@ -143,6 +149,11 @@ class Link:
             self.to_ack.update(seqs)
 
     def maybe_snapshot(self, tickets):
+        since = self.down_since  # шина лежит дольше порога — одна строка CEO (поток слушателя только запоминает)
+        if since is not None and not self.down_noted and time.time() - since >= DOWN_NOTICE_S:
+            self.down_noted = True
+            self.ceo_line("bus-down", f"шина недоступна {int(time.time() - since)} с ({self.down_why}); "
+                                      "диспетчер работает по таймеру и wait_for host:…")
         if time.time() - self.last_snapshot < SNAPSHOT_EVERY_S or self.disp.up is False:
             return
         try:

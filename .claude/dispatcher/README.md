@@ -43,7 +43,7 @@ needs_owner, stopped (остановлено CEO — не будит, пока C
 | `CLAUDE_BIN` | путь к `claude` (из PATH) |
 | `RPV_DISPATCH_INTERVAL` / `_MAX_PARALLEL` / `_TIMEOUT` | тик (15 с) / запусков сразу (3) / таймаут запуска (1200 с) |
 | `RPV_DISPATCH_MIN_GAP_S` / `_MAX_RUNS_PER_TICKET_HOUR` | пауза между запусками тикета (60 с) / запусков в час (6) |
-| `RPV_DISPATCH_MAX_SAME_STATUS_RUNS` / `_SAME_STATUS_WARN_RUNS` | запусков подряд с записью, но без смены статуса: на половине порога одна строка CEO, на пороге → `blocked` (12 и 0 = половина, назначено) |
+| `RPV_DISPATCH_MAX_SAME_STATUS_RUNS` | запусков подряд с записью, но без смены статуса: на пороге → `blocked` (12, назначено) |
 | `RPV_DISPATCH_MAX_REVIEW_RETURNS` | сколько раз ревьюер может вернуть работу; после предела тикет, снова пришедший на ревью, уходит CEO (`next: ceo`), ревьюера не будим (3, назначено) |
 | `RPV_DISPATCH_MAX_IDLE_RUNS` | запусков подряд без записи и без смены статуса → `blocked` (2, назначено) |
 | `RPV_DISPATCH_ROTATE_TOKENS` | контекст, после которого сессия роли начинается заново (120000) |

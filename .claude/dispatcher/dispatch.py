@@ -123,11 +123,9 @@ MAX_RUNS_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
 MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
 # Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Числа НАЗНАЧЕНЫ CEO 03.10,
 # не измерены: MAX_SAME_STATUS_RUNS (12) — роль пишет запись, а статус (in_progress; waiting при выполненном wait_for) не
-# меняется → на половине (SAME_STATUS_WARN_RUNS, 0 = MAX // 2 = 6) одна строка CEO «loop-warning», на MAX — тикет
-# blocked + строка CEO; MAX_IDLE_RUNS (2) — запуски без записи и без смены статуса (холостой ход) → blocked (первый
+# меняется → на MAX тикет blocked + строка CEO; MAX_IDLE_RUNS (2) — запуски без записи и без смены статуса (холостой ход) → blocked (первый
 # холостой — обычный один повтор, см. _finish_role_part).
 MAX_SAME_STATUS_RUNS = int(P.env("DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
-SAME_STATUS_WARN_RUNS = int(P.env("DISPATCH_SAME_STATUS_WARN_RUNS", "0"))
 MAX_IDLE_RUNS = int(P.env("DISPATCH_MAX_IDLE_RUNS", "2"))
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
 # После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher +
@@ -1795,14 +1793,8 @@ def _block_ticket(path: Path, tid: str, role: str, why: str, state: dict, now, l
     _reset_same_status(state, f"{tid}::{role}")
 
 
-def same_status_warn_at() -> int:
-    """С какого запуска подряд (запись есть, статус тот же) писать CEO предупреждение: половина порога блока."""
-    return SAME_STATUS_WARN_RUNS or max(1, MAX_SAME_STATUS_RUNS // 2)
-
-
 def _reset_same_status(state: dict, key: str) -> None:
     state.setdefault("same_status_runs", {}).pop(key, None)
-    state.setdefault("same_status_warned", {}).pop(key, None)
 
 
 def _same_status_loop(tkt: T.Ticket, logged: bool, status_changed: bool) -> bool:
@@ -1889,12 +1881,6 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
             sess["retries"] = 0
             save_state(state)
             return
-        warned = state.setdefault("same_status_warned", {})
-        if same_runs[key] >= same_status_warn_at() and key not in warned:   # на половине порога — одна строка CEO
-            warned[key] = same_runs[key]
-            append_ceo_inbox(tid, "loop-warning",
-                             f"{role}: {same_runs[key]} запусков подряд оставляют запись, а статус {tkt.status} не "
-                             f"меняется; на {MAX_SAME_STATUS_RUNS}-м тикет будет заблокирован", now)
     elif status_changed or tkt.status not in ("in_progress", "waiting"):
         _reset_same_status(state, key)
 
