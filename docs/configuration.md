@@ -43,7 +43,6 @@
 | `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст прошлого запуска, после которого роль начинает новую сессию |
 | `RPV_DISPATCH_WAIT_POLL_S` | `300` | период запасного ssh-опроса `wait_for host:…`, с |
 | `RPV_DISPATCH_WAIT_RECON_S` | `300` | период сверки `wait_for host:…` одним ssh на машину (с шиной), с |
-| `RPV_DISPATCH_BUS_DOWN_SSH_S` | `600` | через сколько секунд лежания шины включается аварийный ssh-опрос, с |
 | `RPV_WATCHED_ALIASES` | не задан | машины со сторожем (`calc,vps`): сверка, закрывшая условие без события с такой машины, даёт тревогу `recon-miss` |
 | `RPV_DISPATCH_DECK_CACHE_S` | `60` | кэш ssh-проверок `wait_for`, с |
 | `RPV_DISPATCH_ON_MET_TIMEOUT_S` | `120` | таймаут команды `on_met`, с |
