@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as _project  # noqa: E402
+import ticket as _ticket  # noqa: E402
 
 TZ = timezone(timedelta(hours=4))  # GMT+4
 
@@ -67,22 +66,7 @@ def read_json(path: Path):
 
 
 def write_json(path: Path, obj, retries: int = 20) -> None:
-    """tmp + os.replace; на Windows replace падает с PermissionError, пока файл кто-то держит открытым, — повторы."""
+    """Запись JSON целиком (`ticket.atomic_write_text`: tmp + os.replace с повторами на Windows)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
-        for i in range(retries):
-            try:
-                os.replace(tmp, path)
-                return
-            except PermissionError:
-                if i == retries - 1:
-                    raise
-                time.sleep(0.05)
-    finally:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
+    _ticket.atomic_write_text(path, json.dumps(obj, ensure_ascii=False, indent=1) + "\n", retries)
