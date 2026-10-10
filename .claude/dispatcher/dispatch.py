@@ -119,12 +119,7 @@ RUN_TIMEOUT = float(P.env("DISPATCH_TIMEOUT", str(20 * 60)))
 # они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
 # В-173 (03.10) — на тикет, владелец 03.10 («бюджет до конца убирай») — и потолок запуска; траты только считаются
 # (runs.log, state.json).
-# TK-171: в окне считаются запуски БЕЗ прогресса (нет новой записи роли и статус не сменён); запуск с прогрессом лимит
-# не тратит — исследователь делает шаг за 50–100 с, и 6 честных шагов стоили тикету остаток часа. Петлю с записями режет
-# MAX_SAME_STATUS_RUNS, холостую — MAX_IDLE_RUNS; потолок MAX_RUNS_HARD_PER_TICKET_HOUR (все запуски) — страховка.
-# Замер runs.log alpha (166 тикетов, окно 1 ч): пик ≤6 у 88, 7–12 у 58, 13–21 у 20 тикетов, максимум 21 (при лимите 20).
 MAX_RUNS_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
-MAX_RUNS_HARD_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_HARD_PER_TICKET_HOUR", "30"))
 MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
 # Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Числа НАЗНАЧЕНЫ CEO 03.10,
 # не измерены: MAX_SAME_STATUS_RUNS (12) — роль пишет запись, а статус (in_progress; waiting при выполненном wait_for) не
@@ -1157,24 +1152,12 @@ def _record_launch(state: dict, tid: str, now) -> None:
     state["launch_history"][tid] = [t for t in hist if T.parse_dt(t) > cutoff]
 
 
-def _record_progress(state: dict, tid: str, now) -> None:
-    """TK-171: запуск, закончившийся записью роли или сменой статуса, не считается в MAX_RUNS_PER_TICKET_HOUR."""
-    hist = state.setdefault("progress_history", {}).setdefault(tid, [])
-    hist.append(T.now_iso(now))
-    cutoff = now - timedelta(hours=2)
-    state["progress_history"][tid] = [t for t in hist if T.parse_dt(t) > cutoff]
-
-
 def _rate_limited(state: dict, tid: str, now) -> bool:
     """MAX_RUNS_PER_TICKET_HOUR / MIN_GAP_S — троттлинг решений (а)-(г); ретраи (д) их не проходят."""
     hist = [T.parse_dt(t) for t in state.get("launch_history", {}).get(tid, [])]
     if not hist:
         return False
-    recent = len([t for t in hist if (now - t) < timedelta(hours=1)])
-    if recent >= MAX_RUNS_HARD_PER_TICKET_HOUR:
-        return True
-    free = len([t for t in state.get("progress_history", {}).get(tid, []) if (now - T.parse_dt(t)) < timedelta(hours=1)])
-    if recent - min(free, recent) >= MAX_RUNS_PER_TICKET_HOUR:
+    if len([t for t in hist if (now - t) < timedelta(hours=1)]) >= MAX_RUNS_PER_TICKET_HOUR:
         return True
     return (now - max(hist)).total_seconds() < MIN_GAP_S
 
@@ -1898,8 +1881,6 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     logged = _role_logged(tkt, role, info)  # судья 27.09, п.7: таймаут сам по себе — не провал, если запись успела
     stuck_todo = role == tkt.owner and logged and tkt.status == "todo"  # отчиталась, но не увела статус с todo
     status_changed = tkt.status != info.get("status_at_launch")
-    if logged or status_changed:
-        _record_progress(state, tid, now)
     if role == tkt.reviewer and info.get("status_at_launch") == "in_review" and logged:
         # запуск ревьюера на ревью: вернул владельцу (todo/in_progress либо `--next` другой роли) — счётчик +1, иначе
         # (принял, заблокировал, передал CEO) ревью состоялось — серия кончилась

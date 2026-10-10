@@ -29,8 +29,7 @@
 | `RPV_DISPATCH_ROLE_PARALLEL` | пусто (по одному на роль) | предел запусков по ролям, `engineer:3,researcher:1`; на один тикет — всегда один запуск роли |
 | `RPV_DISPATCH_TIMEOUT` | `1200` | таймаут запуска роли, с |
 | `RPV_DISPATCH_MIN_GAP_S` | `60` | пауза между запусками одного тикета, с |
-| `RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR` | `6` | запусков тикета в час БЕЗ прогресса (запуск с новой записью роли или сменой статуса не считается) |
-| `RPV_DISPATCH_MAX_RUNS_HARD_PER_TICKET_HOUR` | `30` | потолок запусков тикета в час, считая и с прогрессом |
+| `RPV_DISPATCH_MAX_RUNS_PER_TICKET_HOUR` | `6` | запусков тикета в час |
 | `RPV_ROLE_MCP` | `all` | MCP-серверы ролей: `all` — как у обычного `claude`; `none` — ни одного (экономия памяти); `имя1,имя2` — только эти из `~/.claude.json` и `.mcp.json` проекта |
 | `RPV_DISPATCH_MAX_SAME_STATUS_RUNS` | `12` | запусков подряд с записью, но без смены статуса: на половине порога одна строка CEO, на пороге тикет становится `blocked` |
 | `RPV_DISPATCH_MAX_IDLE_RUNS` | `2` | запусков подряд без записи и без смены статуса → `blocked` |

@@ -3296,26 +3296,6 @@ class RateLimitTests(unittest.TestCase):
         far_later = self.now + timedelta(hours=2)
         self.assertFalse(D._rate_limited(self.state, "TK-1", far_later), "час прошёл — лимит снят")
 
-    def test_progress_runs_do_not_spend_hourly_limit(self):
-        """TK-171: запуски с записью/сменой статуса не тратят MAX_RUNS_PER_TICKET_HOUR; без прогресса — тратят."""
-        step = timedelta(seconds=D.MIN_GAP_S + 1)
-        n = D.MAX_RUNS_PER_TICKET_HOUR * 2
-        for i in range(n):
-            D._record_launch(self.state, "TK-1", self.now + i * step)
-            D._record_progress(self.state, "TK-1", self.now + i * step)
-        probe = self.now + n * step
-        self.assertFalse(D._rate_limited(self.state, "TK-1", probe), "честные шаги лимит не режут")
-        self.state["progress_history"]["TK-1"] = self.state["progress_history"]["TK-1"][:1]
-        self.assertTrue(D._rate_limited(self.state, "TK-1", probe), "запуски без прогресса — режутся")
-
-    def test_hard_cap_counts_all_runs(self):
-        step = timedelta(seconds=1)
-        with mock.patch.object(D, "MAX_RUNS_HARD_PER_TICKET_HOUR", 8), mock.patch.object(D, "MIN_GAP_S", 0):
-            for i in range(8):
-                D._record_launch(self.state, "TK-1", self.now + i * step)
-                D._record_progress(self.state, "TK-1", self.now + i * step)
-            self.assertTrue(D._rate_limited(self.state, "TK-1", self.now + 9 * step))
-
     def test_daily_cost_is_only_accounted_per_day(self):
         """Суточный учёт — по календарной дате; никакого «превышено» нет (В-149)."""
         D._add_cost(self.state, self.now, 12.5)
