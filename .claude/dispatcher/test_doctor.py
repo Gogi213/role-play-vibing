@@ -25,7 +25,7 @@ class DoctorTests(unittest.TestCase):
         (self.project / ".claude" / "tickets").mkdir()
         self.sd = self.project / ".claude" / "dispatcher"
         self.sd.mkdir()
-        self.env = mock.patch.dict(os.environ, {k: "" for k in ("RPV_BUS_URL", "ALPHA_BUS_URL")})
+        self.env = mock.patch.dict(os.environ, {k: "" for k in ("RPV_BUS_URL",)})
         self.env.start()
         self.addCleanup(self.env.stop)
 

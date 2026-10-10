@@ -609,7 +609,7 @@ print(json.dumps({"session_id": "sess-silent", "total_cost_usd": 0.0}))
 """
 
 # Пишет каждый вызов в calls.jsonl (tid, role, resumed session_id или None, prompt) — для проверки
-# SESSION_SCOPE (одна сессия на роль vs на задачу) и ротации по ALPHA_DISPATCH_ROTATE_TOKENS.
+# SESSION_SCOPE (одна сессия на роль vs на задачу) и ротации по RPV_DISPATCH_ROTATE_TOKENS.
 # Размер контекста ответа берёт из FAKE_CTX_TOKENS (по умолчанию 10).
 FAKE_BIN_RECORD = r"""
 import json, os, re, sys
@@ -712,7 +712,7 @@ class DispatchRunTests(unittest.TestCase):
                       ("TICKETS_DIR", "PROJECT_ROOT", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
                        "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
                        "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
-        D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль), независимо от ALPHA_DISPATCH_ROLE_PARALLEL в окружении
+        D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль), независимо от RPV_DISPATCH_ROLE_PARALLEL в окружении
         D.TICKETS_DIR = self.tickets_dir
         D.PROJECT_ROOT = self.base
         D.STATE_FILE = self.dispatcher_dir / "state.json"
@@ -1238,7 +1238,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(second.stem, D.RUNNING, "роль освободилась — вторая задача берётся")
 
     def test_role_parallel_limit_two_allows_second_ticket_not_third(self):
-        """ALPHA_DISPATCH_ROLE_PARALLEL=engineer:2 (CEO 05.10): две задачи роли идут параллельно, третья ждёт;
+        """RPV_DISPATCH_ROLE_PARALLEL=engineer:2 (CEO 05.10): две задачи роли идут параллельно, третья ждёт;
         на тот же тикет второй запуск роли не стартует никогда (даже при большом пределе)."""
         self.set_fake_bin(FAKE_BIN_SLOW_OK)
         D.MAX_PARALLEL = 5
@@ -1480,7 +1480,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_default_idle_limit_is_two_retry_once_then_block(self):
         if P.env("DISPATCH_MAX_IDLE_RUNS"):
-            self.skipTest("ALPHA_DISPATCH_MAX_IDLE_RUNS задан в окружении")
+            self.skipTest("RPV_DISPATCH_MAX_IDLE_RUNS задан в окружении")
         self.assertEqual(D.MAX_IDLE_RUNS, 2)
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Дважды холостой",
                                 now=dt("2026-09-27T12:00:00+04:00"))
@@ -2268,7 +2268,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
         """v2: умолчания — исследователь/инженер high, Судья xhigh; `effort:` в шапке тикета — приоритетнее."""
         if P.env("DISPATCH_EFFORT"):
-            self.skipTest("ALPHA_DISPATCH_EFFORT задан в окружении")
+            self.skipTest("RPV_DISPATCH_EFFORT задан в окружении")
         self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
         cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "xhigh"),
                  ("engineer", "low", "low"), ("researcher", "medium", "medium"), ("judge", "high", "high"),
@@ -3072,7 +3072,7 @@ class TicketsCliStopTests(unittest.TestCase):
         self.tickets_dir = self.base / "tickets"
         self._orig = (TK.TICKETS_DIR, D.STOP_DIR)
         TK.TICKETS_DIR, D.STOP_DIR = self.tickets_dir, self.base / "stop"
-        self._env = {k: os.environ.pop(k, None) for k in ("ALPHA_ROLE", "RPV_ROLE")}
+        self._env = {k: os.environ.pop(k, None) for k in ("RPV_ROLE",)}
 
     def tearDown(self):
         TK.TICKETS_DIR, D.STOP_DIR = self._orig
@@ -3109,10 +3109,10 @@ class TicketsCliStopTests(unittest.TestCase):
 
     def test_stop_is_for_ceo_only(self):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
-        os.environ["ALPHA_ROLE"] = "engineer"  # диспетчер ставит роль в окружение запуска роли
+        os.environ["RPV_ROLE"] = "engineer"  # диспетчер ставит роль в окружение запуска роли
         self.assertEqual(TK.main(["stop", path.stem, "--text", "x"]), 1)
         self.assertFalse(D.STOP_DIR.exists())
-        os.environ["ALPHA_ROLE"] = "ceo"
+        os.environ["RPV_ROLE"] = "ceo"
         self.assertEqual(TK.main(["stop", path.stem, "--text", "x"]), 0)
 
     def test_stop_next_accepts_only_roles_the_dispatcher_starts(self):
@@ -3403,7 +3403,7 @@ class MoneyControlsTests(unittest.TestCase):
     # --- п.1: модель/усилие ---
 
     def test_role_effort_mapping(self):
-        # v2 (02.10): исследователь/инженер — high, Судья — xhigh (тест в окружении без ALPHA_DISPATCH_EFFORT)
+        # v2 (02.10): исследователь/инженер — high, Судья — xhigh (тест в окружении без RPV_DISPATCH_EFFORT)
         if not P.env("DISPATCH_EFFORT"):
             self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
 
@@ -3618,8 +3618,8 @@ class DeckSshTests(unittest.TestCase):
     def setUp(self):
         D._WAIT_CACHE.clear()
         for a in ("CALC", "VPS", "DECK"):  # хосты — только из окружения, умолчаний нет
-            os.environ[f"ALPHA_{a}_HOST"] = f"user@{a.lower()}-test"
-            self.addCleanup(lambda a=a: os.environ.pop(f"ALPHA_{a}_HOST", None))
+            os.environ[f"RPV_{a}_HOST"] = f"user@{a.lower()}-test"
+            self.addCleanup(lambda a=a: os.environ.pop(f"RPV_{a}_HOST", None))
 
     def tearDown(self):
         D._WAIT_CACHE.clear()
@@ -3697,7 +3697,7 @@ class DeckSshTests(unittest.TestCase):
             captured["cmd"] = cmd
             return FakeResult()
 
-        env = {"ALPHA_DECK_HOST": "deck@test-host", "ALPHA_DECK_KEY": "/k/id", "ALPHA_DECK_KNOWN_HOSTS": "/k/known"}
+        env = {"RPV_DECK_HOST": "deck@test-host", "RPV_DECK_KEY": "/k/id", "RPV_DECK_KNOWN_HOSTS": "/k/known"}
         for var, val in env.items():
             os.environ[var] = val
             self.addCleanup(lambda v=var: os.environ.pop(v, None))
@@ -3720,7 +3720,7 @@ class DeckSshTests(unittest.TestCase):
         self.assertIn("~/rpv/queue/STATUS", cmd[-1])
 
     def test_without_deck_host_variable_the_check_is_off_and_ssh_not_called(self):
-        for var in ("ALPHA_DECK_KEY", "ALPHA_DECK_HOST", "ALPHA_DECK_KNOWN_HOSTS"):
+        for var in ("RPV_DECK_KEY", "RPV_DECK_HOST", "RPV_DECK_KNOWN_HOSTS"):
             os.environ.pop(var, None)
         calls = []
         orig_run = D.subprocess.run
@@ -3744,11 +3744,11 @@ class WaitForHostTests(unittest.TestCase):
         self._orig_run = D.subprocess.run
         D.subprocess.run = self._fake_run
         self._env = {k: os.environ.pop(k, None) for k in
-                     ("ALPHA_CALC_HOST", "ALPHA_VPS_HOST", "ALPHA_DECK_HOST", "ALPHA_DECK_KEY", "ALPHA_DECK_KNOWN_HOSTS")}
-        os.environ.update({"ALPHA_CALC_HOST": "root@203.0.113.10", "ALPHA_VPS_HOST": "root@203.0.113.20",
-                           "ALPHA_DECK_HOST": "deck@203.0.113.30",
-                           "ALPHA_DECK_KEY": "/home/user/.ssh/id_rsa",
-                           "ALPHA_DECK_KNOWN_HOSTS": "/home/user/.ssh/known_hosts"})
+                     ("RPV_CALC_HOST", "RPV_VPS_HOST", "RPV_DECK_HOST", "RPV_DECK_KEY", "RPV_DECK_KNOWN_HOSTS")}
+        os.environ.update({"RPV_CALC_HOST": "root@203.0.113.10", "RPV_VPS_HOST": "root@203.0.113.20",
+                           "RPV_DECK_HOST": "deck@203.0.113.30",
+                           "RPV_DECK_KEY": "/home/user/.ssh/id_rsa",
+                           "RPV_DECK_KNOWN_HOSTS": "/home/user/.ssh/known_hosts"})
 
     def tearDown(self):
         D.subprocess.run = self._orig_run
@@ -3818,7 +3818,7 @@ class WaitForHostTests(unittest.TestCase):
         self.assertEqual(err.getvalue(), "")  # «файла нет» — штатно, не сбой
 
     def test_host_env_override(self):
-        os.environ["ALPHA_CALC_HOST"] = "me@10.0.0.9"
+        os.environ["RPV_CALC_HOST"] = "me@10.0.0.9"
         self.met("host:calc:/x")
         self.assertEqual(self.cmds[0][-2], "me@10.0.0.9")
 
@@ -4016,7 +4016,7 @@ HOOKS_DIR = Path(__file__).resolve().parent.parent / "hooks"
 
 
 class RoleMemoryHookTests(unittest.TestCase):
-    """v1.1 (судья 27.09, п.4 «обязательно»): current_role() — сначала ALPHA_ROLE, как в
+    """v1.1 (судья 27.09, п.4 «обязательно»): current_role() — сначала RPV_ROLE, как в
     role_context.py, иначе (если launch_run не снял CLAUDE_CODE_HOST_SESSION_ID) все роли считаются
     за CEO — тревоги/inbox/«молчание» ломаются на всех."""
 
@@ -4024,31 +4024,31 @@ class RoleMemoryHookTests(unittest.TestCase):
         sys.path.insert(0, str(HOOKS_DIR))
         import role_memory as rm
         self.rm = rm
-        self._orig_alpha_role = os.environ.get("ALPHA_ROLE")
+        self._orig_alpha_role = os.environ.get("RPV_ROLE")
         self._orig_host_id = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")
 
     def tearDown(self):
-        for key, val in (("ALPHA_ROLE", self._orig_alpha_role), ("CLAUDE_CODE_HOST_SESSION_ID", self._orig_host_id)):
+        for key, val in (("RPV_ROLE", self._orig_alpha_role), ("CLAUDE_CODE_HOST_SESSION_ID", self._orig_host_id)):
             if val is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = val
 
     def test_alpha_role_wins_even_with_ceo_host_session_id_present(self):
-        os.environ["ALPHA_ROLE"] = "judge"
+        os.environ["RPV_ROLE"] = "judge"
         os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_ceo-host-id-fake"
         title, role = self.rm.current_role()
         self.assertEqual(role, "judge")
         self.assertIn("judge", title)
 
     def test_no_alpha_role_falls_back_to_host_session_lookup(self):
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         os.environ.pop("CLAUDE_CODE_HOST_SESSION_ID", None)
         # без host_id find_title() не находит ничего — (None, None), не падает
         self.assertEqual(self.rm.current_role(), (None, None))
 
     def test_unknown_alpha_role_value_falls_back(self):
-        os.environ["ALPHA_ROLE"] = "not-a-real-role"
+        os.environ["RPV_ROLE"] = "not-a-real-role"
         os.environ.pop("CLAUDE_CODE_HOST_SESSION_ID", None)
         self.assertEqual(self.rm.current_role(), (None, None))
 
@@ -4286,10 +4286,10 @@ class ProjectRootTests(unittest.TestCase):
             self.assertIn("/rpv-init", done.stderr, script)
         self.assertEqual(list(empty.iterdir()), [])
 
-    def test_env_prefers_rpv_then_alpha_then_default(self):
+    def test_env_reads_rpv_only_else_default(self):
         self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
         os.environ["ALPHA_DISPATCH_MAX_PARALLEL"] = "5"
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "5")
+        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
         os.environ["RPV_DISPATCH_MAX_PARALLEL"] = "7"
         self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "7")
 

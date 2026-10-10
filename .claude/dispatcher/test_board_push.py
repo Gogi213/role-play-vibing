@@ -120,7 +120,7 @@ class ExtrasTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self._project(d)
             os.environ.pop("RPV_BOARD", None)
-            os.environ.pop("ALPHA_BOARD", None)
+            os.environ.pop("RPV_BOARD", None)
             self.assertEqual(B.main(["--project", d]), 0)
             doc = json.loads((Path(d) / ".claude" / "pulse" / "status.json").read_text(encoding="utf-8"))
             self.assertEqual(sorted(doc), ["built_at", "view2"])

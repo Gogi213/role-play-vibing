@@ -25,8 +25,7 @@ os.environ["RPV_STATE_DIR"] = os.path.join(TMP, "state")
 os.environ["RPV_LOG_DIR"] = os.path.join(TMP, "log")
 os.environ["RPV_DISPATCHER_DIR"] = os.path.join(TMP, "disp")
 os.makedirs(os.environ["RPV_DISPATCHER_DIR"], exist_ok=True)
-for var in ("RPV_ROLE", "RPV_TICKET", "RPV_TICKET_ID", "ALPHA_ROLE", "ALPHA_TICKET", "ALPHA_TICKET_ID",
-            "ALPHA_STATE_DIR", "ALPHA_LOG_DIR", "ALPHA_DISPATCHER_DIR", "CLAUDE_CODE_HOST_SESSION_ID"):
+for var in ("RPV_ROLE", "RPV_TICKET", "RPV_TICKET_ID", "CLAUDE_CODE_HOST_SESSION_ID"):
     os.environ.pop(var, None)
 sys.path.insert(0, HERE)
 import role_context as rc  # noqa: E402
@@ -112,12 +111,12 @@ class SessionStart(unittest.TestCase):
 
 
 class RoleDetection(unittest.TestCase):
-    """Роль: RPV_ROLE, запасная ALPHA_ROLE, метка сессии (`/ceo`), последним — название сессии Desktop."""
+    """Роль: RPV_ROLE, метка сессии (`/ceo`), последним — название сессии Desktop."""
 
     def setUp(self):
-        for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+        for k in ("RPV_ROLE", "RPV_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
             os.environ.pop(k, None)
-        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "ALPHA_ROLE")])
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE",)])
         shutil.rmtree(rc.STATE_DIR, ignore_errors=True)
 
     def context(self, session_id, extra_env=None, source="startup"):
@@ -251,9 +250,9 @@ class Fit(unittest.TestCase):
 
 class Prompts(unittest.TestCase):
     def setUp(self):
-        for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+        for k in ("RPV_ROLE", "RPV_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
             os.environ.pop(k, None)
-        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET")])
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "RPV_TICKET")])
 
     def test_state_key_uses_role_and_ticket(self):
         os.environ["RPV_ROLE"] = "researcher"
@@ -348,9 +347,9 @@ class TicketScopedDigests(unittest.TestCase):
     взявшая новый тикет, не получает ссылку на конспект чужого."""
 
     def setUp(self):
-        for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+        for k in ("RPV_ROLE", "RPV_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
             os.environ.pop(k, None)
-        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET")])
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("RPV_ROLE", "RPV_TICKET")])
         self.role = "engineer"
         self.transcript = os.path.join(TMP, "ticket-turns.jsonl")
         rows = [{"type": "user", "timestamp": "2026-10-03T00:30:00Z", "message": {"content": "Тикет"}},
