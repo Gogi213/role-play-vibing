@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import types
 import tempfile
 import textwrap
 import time
@@ -4614,7 +4615,7 @@ class LimitAndWaitingTK070Test(unittest.TestCase):
 
 
 class WaitReconcileTest(unittest.TestCase):
-    """Сверка wait_for: один ssh на машину, регистрация пути у сторожа, тревога «пропуск», аварийный ssh при лежащей шине."""
+    """Сверка wait_for: один ssh на машину, регистрация пути у сторожа, тревога «пропуск»."""
 
     def setUp(self):
         D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
@@ -4622,6 +4623,7 @@ class WaitReconcileTest(unittest.TestCase):
         self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
         self._alarm, self.alarms = D.append_ceo_inbox, []
         self._link = D._LINK
+        D._LINK = types.SimpleNamespace(down_since=None)  # шина жива: пропуск события сверкой виден
         D.append_ceo_inbox = lambda *a, **k: self.alarms.append(a)
         D._ssh_cmd = lambda alias, cmd: ["ssh", alias, cmd]
         D.WAIT_ASYNC = True
@@ -4719,6 +4721,12 @@ class WaitReconcileTest(unittest.TestCase):
         D._reconcile()
         self.assertEqual(self.alarms, [])
 
+    def test_recon_script_keeps_tilde_unquoted(self):
+        script = D._recon_script([("calc", "path", "~/x.done"), ("calc", "path", "~/rpv/progress/a.json")])
+        self.assertIn("test -e ~/x.done", script)
+        self.assertIn("cat ~/rpv/progress/a.json", script)
+        self.assertNotIn("'~/", script)
+
     def test_reconcile_missing_file_stays_unmet(self):
         D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
         self._ssh(b"@@0\n@@reg\n@@rc 1\n")
@@ -4738,33 +4746,14 @@ class WaitReconcileTest(unittest.TestCase):
         D.DISPATCHER_DIR = Path(_tf.mkdtemp())
         try:
             self._ssh(b"")
-            D._LINK = None  # шина не настроена — аварийный путь
             D._host_probe("calc", "path", "/data/a.done")
             line = (D.DISPATCHER_DIR / D.SSH_CALLS_LOG_NAME).read_text(encoding="utf-8").splitlines()[0].split("\t")
-            self.assertEqual(line[1:], ["calc", "path", "/data/a.done", "аварийный"])
+            self.assertEqual(line[1:], ["calc", "path", "/data/a.done", "первая"])
         finally:
             D.DISPATCHER_DIR = old
 
-    def test_bus_down_long_threshold(self):
-        D._LINK = None
-        self.assertTrue(D._bus_down_long())  # шины нет — ssh-опрос как раньше
-
-        class L:
-            down_since = None
-        D._LINK = L()
-        self.assertFalse(D._bus_down_long())
-        D._LINK.down_since = time.time() - 5
-        self.assertFalse(D._bus_down_long())
-        D._LINK.down_since = time.time() - D.BUS_DOWN_SSH_S - 1
-        self.assertTrue(D._bus_down_long())
-
-    def test_needs_probe_only_first_or_emergency(self):
-        class L:
-            down_since = None
-        D._LINK = L()
+    def test_needs_probe_only_first(self):
         key = ("calc", "path", "/data/a.done")
         self.assertTrue(D._needs_probe(key))  # первая проверка нового условия
         D._WAIT_CACHE[key] = (time.time(), False)
-        self.assertFalse(D._needs_probe(key))  # шина жива — ssh не нужен
-        D._LINK.down_since = time.time() - D.BUS_DOWN_SSH_S - 1
-        self.assertTrue(D._needs_probe(key))  # шина лежит — аварийный опрос
+        self.assertFalse(D._needs_probe(key))  # дальше — события и сверка, не ssh

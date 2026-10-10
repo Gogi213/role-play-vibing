@@ -351,13 +351,10 @@ _EVENT_LOCK = threading.Lock()
 _WAIT_NEW = threading.Event()
 
 # Стандарт сигналов: штатно ssh не опрашивает — события сторожа машины закрывают wait_for; ssh — первая проверка нового
-# условия, сверка раз в WAIT_RECON_S и аварийный опрос, пока шина лежит дольше BUS_DOWN_SSH_S (RPV_DISPATCH_BUS_DOWN_SSH_S).
-# Шина не настроена (_LINK is None) — ssh-опрос как раньше.
-BUS_DOWN_SSH_S = float(P.env("DISPATCH_BUS_DOWN_SSH_S", "600"))
+# условия и сверка раз в WAIT_RECON_S (она же — единственный путь, пока шина лежит или не настроена, TK-100 №21).
 WAIT_RECON_S = float(P.env("DISPATCH_WAIT_RECON_S", "300"))  # сверка всех ждущих host:… одним ssh на машину
 WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "calc").split(",") if a.strip()}  # машины со сторожем: пропуск события там — тревога
 _LINK = None
-_SSH_ALERTED = False
 _RECON_MISS = set()  # ключи, по которым «пропуск» уже записан и тревога уже ушла
 _WL_REG = set()  # (алиас, путь), чья регистрация у сторожа подтверждена ответом машины
 _RECON_LAST = 0.0
@@ -442,33 +439,20 @@ def _drop_event(alias: str, what: str, arg: str) -> None:
         _EVENT_VERIFIED.discard(k)
 
 
-def _bus_down_long() -> bool:
-    """Аварийный путь: ssh-опрос ждущих условий — только когда шина недоступна дольше BUS_DOWN_SSH_S (или отключена)."""
-    if _LINK is None:
-        return True
-    since = _LINK.down_since
-    return since is not None and time.time() - since >= BUS_DOWN_SSH_S
-
-
 def _needs_probe(ckey) -> bool:
     cached = _WAIT_CACHE.get(ckey)
-    if cached is None or _bus_down_long():
-        return True  # первая проверка нового условия (заодно регистрация пути у сторожа) либо аварийный путь
+    if cached is None:
+        return True  # первая проверка нового условия (заодно регистрация пути у сторожа)
     ev_ts = _event_ts(*ckey)  # событие остановки юнита — одна проверка, что это не прежний экземпляр с тем же именем
     return (ckey[1] == "unit" and ev_ts is not None and cached[0] < ev_ts
             and (ckey[0], "unit", _unit_base(ckey[2])) not in _EVENT_VERIFIED)
 
 
 def _wait_poller() -> None:
-    """Штатно ssh не опрашивает: события шины (сторож машины) закрывают wait_for; здесь — первая проверка нового условия и
-    аварийный опрос ключей из _WAIT_WATCH с шагом WAIT_POLL_S, пока шина лежит дольше BUS_DOWN_SSH_S."""
-    global _SSH_ALERTED, _RECON_LAST
+    """Штатно ssh не опрашивает: события шины (сторож машины) закрывают wait_for; здесь — первая проверка нового условия
+    ключей из _WAIT_WATCH и сверка раз в WAIT_RECON_S."""
+    global _RECON_LAST
     while True:
-        if _bus_down_long() and _LINK is not None and not _SSH_ALERTED:
-            _SSH_ALERTED = True
-            _LINK.ceo_line("bus-down-ssh", f"шина лежит дольше {int(BUS_DOWN_SSH_S)} с — включён аварийный ssh-опрос wait_for")
-        elif not _bus_down_long():
-            _SSH_ALERTED = False
         for ckey in list(_WAIT_WATCH):
             if not _needs_probe(ckey):
                 continue
@@ -476,7 +460,7 @@ def _wait_poller() -> None:
                 _host_probe(*ckey)
             except Exception as e:
                 _wait_err(f"poller:{ckey}", f"{type(e).__name__}: {e}")
-        if _WAIT_WATCH and not _bus_down_long() and time.time() - _RECON_LAST >= WAIT_RECON_S:
+        if _WAIT_WATCH and time.time() - _RECON_LAST >= WAIT_RECON_S:
             _RECON_LAST = time.time()
             try:
                 _reconcile()
@@ -591,7 +575,7 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
                   f">/dev/null 2>&1 && echo @@WL; {remote}")
     label = f"host:{alias}:{'unit:' if what == 'unit' else ''}{arg}"
     result = False
-    _log_ssh_call(alias, what, arg, "аварийный" if _bus_down_long() else ("первая" if ckey not in _WAIT_CACHE else "событие-юнита"))
+    _log_ssh_call(alias, what, arg, "первая" if ckey not in _WAIT_CACHE else "событие-юнита")
     try:
         r = hide.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
         out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
@@ -627,7 +611,7 @@ def _recon_script(keys: list) -> str:
             continue
         if arg.startswith("/") and not _is_progress_json(arg):
             parts.append(f"{{ grep -qxF {q} {WATCH_LIST} 2>/dev/null || echo {q} >> {WATCH_LIST}; }} >/dev/null 2>&1 && echo @@reg")
-        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {q} 2>/dev/null; echo \"@@rc $?\"")
+        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {_remote_test_arg(arg)} 2>/dev/null; echo \"@@rc $?\"")
     return "; ".join(parts)
 
 
@@ -693,7 +677,7 @@ def _reconcile() -> None:
             else:
                 continue
             prev = _WAIT_CACHE.get(keys[i])
-            if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _event_ts(*keys[i]) is None
+            if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _LINK is not None and _LINK.down_since is None and _event_ts(*keys[i]) is None
                     and keys[i] not in _RECON_MISS):
                 _RECON_MISS.add(keys[i])  # запасной путь сработал, события не было — сторож не справился
                 _log_ssh_call(alias, what, arg, "пропуск")

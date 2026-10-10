@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.28 — 2026-10-10
+
+### Изменено (TK-100, №21 — без аварийного ssh-опроса wait_for)
+
+- Удалены `_bus_down_long`, `BUS_DOWN_SSH_S` (`RPV_DISPATCH_BUS_DOWN_SSH_S`), `_SSH_ALERTED` и сигнал `bus-down-ssh`: пока шина лежит или не настроена, ждущие `host:…` проверяет сверка раз в `RPV_DISPATCH_WAIT_RECON_S` (300 с, тот же период). Тревога «recon-miss» — только при живой шине.
+
 ## 1.8.27 — 2026-10-10
 
 ### Изменено (TK-100, №20 — одна атомарная запись)
