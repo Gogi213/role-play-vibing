@@ -1,7 +1,7 @@
 """SessionStart: возвращает сессии команды ролей её роль.
 
-Роль определяется по порядку: (1) переменная `RPV_ROLE`, запасная `ALPHA_ROLE` (запуск диспетчера `claude -p`, одна
-задача — один тикет, id тикета — `RPV_TICKET`/`ALPHA_TICKET`); (2) метка сессии — файл в
+Роль определяется по порядку: (1) переменная `RPV_ROLE` (запуск диспетчера `claude -p`, одна
+задача — один тикет, id тикета — `RPV_TICKET`); (2) метка сессии — файл в
 `<проект>/.claude/roles/.state/`, который ставит команда `/ceo` (по `session_id` события хука; в Claude Desktop ещё и по
 `CLAUDE_CODE_HOST_SESSION_ID` — переживает клир); (3) запасной путь — название сессии в метаданных Claude Desktop.
 
@@ -31,8 +31,8 @@ ROLE_NAMES = {"researcher": "Исследователь", "engineer": "Инже�
 
 
 def env(name, default=""):
-    """Переменная `RPV_<имя>`, запасная — `ALPHA_<имя>` (прежнее название)."""
-    return os.environ.get("RPV_" + name) or os.environ.get("ALPHA_" + name) or default
+    """Переменная `RPV_<имя>`."""
+    return os.environ.get("RPV_" + name) or default
 
 
 # Корень — проект, в котором идёт сессия (плагин лежит в своей папке): CLAUDE_PROJECT_DIR, иначе текущий каталог.
@@ -89,7 +89,7 @@ def find_title(host_id, cli_id):
 
 
 def env_role():
-    """Роль из `RPV_ROLE` / `ALPHA_ROLE` (запуск диспетчера) или None."""
+    """Роль из `RPV_ROLE` (запуск диспетчера) или None."""
     r = env("ROLE")
     return r if r in ROLE_NAMES else None
 

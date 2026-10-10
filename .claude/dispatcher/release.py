@@ -27,7 +27,7 @@ REPO = "Gogi213/role-play-vibing"
 STATE = Path.home() / ".claude" / "rpv-release.json"
 SEMVER = re.compile(r"\d+\.\d+\.\d+")
 INSTALLED = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
-SESSION_DROP = ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET", "HOST_SESSION")  # как supervise.SESSION_ENV + хост
+SESSION_DROP_EXTRA = ("HOST_SESSION",)  # к start.SESSION_ENV
 SESSION_DROP_PREFIX = ("CLAUDECODE", "CLAUDE_CODE_")  # метки сессии Claude; *_DISPATCH_*, ключи и прочие настройки служб остаются
 LOCK_STALE_S = 1800
 
@@ -268,9 +268,11 @@ def installed_dir(project: Path, registry: Path = INSTALLED) -> Path | None:
 
 def clean_env(env: dict | None = None) -> dict:
     """Окружение для перезапуска служб: без роли/тикета/сессии Claude — иначе supervise --install откажет (дыра (г) TK-090).
-    Настройки диспетчера (RPV_/ALPHA_ *_DISPATCH_*, лимиты) остаются: start._forward_env пробрасывает их службам."""
+    Настройки диспетчера (RPV_*_DISPATCH_*, лимиты) остаются: start._forward_env пробрасывает их службам."""
+    import start
+    drop = start.SESSION_ENV + SESSION_DROP_EXTRA
     return {k: v for k, v in (os.environ if env is None else env).items()
-            if k.upper() not in SESSION_DROP and not k.upper().startswith(SESSION_DROP_PREFIX)}
+            if k.upper() not in drop and not k.upper().startswith(SESSION_DROP_PREFIX)}
 
 
 def restart_services(project: Path, code_dir: Path | None, run=subprocess.run) -> bool:

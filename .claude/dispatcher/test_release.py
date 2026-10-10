@@ -216,16 +216,15 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertEqual((rc, self.journal()[-1]["result"]), (2, "rollback-failed"))
 
     def test_clean_env_drops_session_keeps_service_settings(self):
-        env = release.clean_env({"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "ALPHA_ROLE": "x", "ALPHA_TICKET": "y",
-                                 "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "HOST_SESSION": "1", "PATH": "p",
-                                 "ALPHA_DISPATCH_MAX_PARALLEL": "8", "ALPHA_DISPATCH_ROLE_PARALLEL": "engineer:6",
+        env = release.clean_env({"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "HOST_SESSION": "1", "PATH": "p",
+                                 "RPV_DISPATCH_MAX_PARALLEL": "8", "RPV_DISPATCH_ROLE_PARALLEL": "engineer:6",
                                  "RPV_DISPATCH_X": "1"})
-        self.assertEqual(env, {"PATH": "p", "ALPHA_DISPATCH_MAX_PARALLEL": "8", "ALPHA_DISPATCH_ROLE_PARALLEL": "engineer:6",
+        self.assertEqual(env, {"PATH": "p", "RPV_DISPATCH_MAX_PARALLEL": "8", "RPV_DISPATCH_ROLE_PARALLEL": "engineer:6",
                                "RPV_DISPATCH_X": "1"})
 
     def test_clean_env_matches_supervise_session_env(self):  # supervise отказывает ровно по SESSION_ENV — чистим их
         import supervise
-        self.assertTrue(set(supervise.SESSION_ENV) <= set(release.SESSION_DROP))
+        self.assertTrue(set(supervise.SESSION_ENV) <= set(__import__("start").SESSION_ENV + release.SESSION_DROP_EXTRA))
 
     def test_parallel_auto_serialized_by_lock(self):  # второй выпуск при живом первом — пометка, держатель доделает
         runs = []

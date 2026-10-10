@@ -125,9 +125,9 @@ class RoleDetection(unittest.TestCase):
                      extra_env or {})
         return json.loads(r.stdout.decode("utf-8"))["hookSpecificOutput"]["additionalContext"]
 
-    def test_rpv_role_wins_over_alpha_role_and_alpha_is_fallback(self):
+    def test_rpv_role_only_alpha_role_ignored(self):
         os.environ["ALPHA_ROLE"] = "judge"
-        self.assertEqual(rc.env_role(), "judge")
+        self.assertIsNone(rc.env_role())
         os.environ["RPV_ROLE"] = "engineer"
         self.assertEqual(rc.env_role(), "engineer")
         os.environ["RPV_ROLE"] = "nonsense"   # неизвестное значение — не роль, запасной путь не подменяет его

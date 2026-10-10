@@ -244,7 +244,7 @@ def cmd_result(args) -> int:
 
 
 def _caller_role() -> str:
-    """Роль вызывающей сессии: диспетчер ставит `RPV_ROLE` (и `ALPHA_ROLE`) запускам ролей; у CEO и владельца её нет."""
+    """Роль вызывающей сессии: диспетчер ставит `RPV_ROLE` запускам ролей; у CEO и владельца её нет."""
     return (D.P.env("ROLE", "") or "").strip().lower()
 
 

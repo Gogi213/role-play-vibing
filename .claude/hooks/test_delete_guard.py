@@ -1828,7 +1828,7 @@ class Lexer(unittest.TestCase):
 
 
 class EnvNames(unittest.TestCase):
-    """Переменные `RPV_*`, запасные `ALPHA_*` (прежние названия): RPV_ главнее."""
+    """Переменные `RPV_*`; прежние `ALPHA_*` не читаются (TK-100 №28)."""
 
     HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -1842,16 +1842,11 @@ class EnvNames(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
 
-    def test_alpha_names_still_read(self):
-        out = self.read({"ALPHA_GUARD_STAGE": "/dev/shm/s1", "ALPHA_GUARD_REMOTE_ROOTS": "/srv/a/", "ALPHA_ROLE": "judge",
-                         "ALPHA_GUARD_HOST_ROOTS": "h1=/x/", "ALPHA_GUARD_FORBIDDEN_HOSTS": "host-9.example"})
-        self.assertEqual(out, "/dev/shm/s1 ('/srv/a/',) ['h1'] judge True")
-
-    def test_rpv_names_win(self):
-        out = self.read({"RPV_GUARD_STAGE": "/dev/shm/new", "ALPHA_GUARD_STAGE": "/dev/shm/old",
-                         "RPV_GUARD_REMOTE_ROOTS": "/srv/new/", "ALPHA_GUARD_REMOTE_ROOTS": "/srv/old/",
-                         "RPV_ROLE": "engineer", "ALPHA_ROLE": "judge"})
+    def test_alpha_names_not_read(self):
+        out = self.read({"ALPHA_GUARD_STAGE": "/dev/shm/old", "ALPHA_GUARD_REMOTE_ROOTS": "/srv/old/", "ALPHA_ROLE": "judge",
+                         "RPV_GUARD_STAGE": "/dev/shm/new", "RPV_GUARD_REMOTE_ROOTS": "/srv/new/", "RPV_ROLE": "engineer"})
         self.assertEqual(out, "/dev/shm/new ('/srv/new/',) [] engineer False")
+        self.assertNotIn("/dev/shm/old", self.read({"ALPHA_GUARD_STAGE": "/dev/shm/old"}))
 
     def test_texts_name_rpv_variables_only(self):
         for text in (dg.REASON, dg.REASON_OVERWRITE, dg.REASON_IRREVERSIBLE):

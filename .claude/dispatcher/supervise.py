@@ -6,7 +6,7 @@ Popen), строка в `<проект>/.claude/dispatcher/supervise.log`. Са�
     python supervise.py --install [--project P]    поставить планировщик: Windows — Планировщик заданий,
                                                    Linux — systemd --user timer, macOS — launchd (раз в 5 мин)
     python supervise.py --uninstall [--project P]
-Окружение диспетчера (RPV_*, ALPHA_*, CLAUDE_*) при --install запоминается в supervise.env.json: планировщик его не наследует."""
+Окружение диспетчера (RPV_*, CLAUDE_*) при --install запоминается в supervise.env.json: планировщик его не наследует."""
 from __future__ import annotations
 
 import argparse
@@ -54,7 +54,7 @@ def _log(state_dir: Path, msg: str) -> None:
 
 
 # роль и тикет запуска — не свойство проекта: в снимок/настройки не попадают (TK-090 г)
-SESSION_ENV = ("RPV_ROLE", "RPV_TICKET", "ALPHA_ROLE", "ALPHA_TICKET")
+SESSION_ENV = S.SESSION_ENV
 
 
 def _forwarded(env: dict) -> dict:

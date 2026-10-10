@@ -197,11 +197,11 @@ class StartTests(unittest.TestCase):
                                r'>> "C:\my proj\.claude\dispatcher\watch.run.log" 2>&1"')
 
     def test_forward_env_carries_dispatcher_settings_but_no_secrets_or_unsafe_values(self):
-        extra = {"RPV_DISPATCH_MODEL": "m", "ALPHA_DISPATCH_X": "1", "CLAUDE_BIN": "/b/claude",
+        extra = {"RPV_DISPATCH_MODEL": "m", "RPV_DISPATCH_X": "1", "CLAUDE_BIN": "/b/claude",
                  "ANTHROPIC_API_KEY": "sk-secret", "RPV_BAD": 'a"b', "RPV_PCT": "50%"}
         with mock.patch.dict(os.environ, extra):
             env = S._forward_env()
-        self.assertEqual((env["RPV_DISPATCH_MODEL"], env["ALPHA_DISPATCH_X"], env["CLAUDE_BIN"]), ("m", "1", "/b/claude"))
+        self.assertEqual((env["RPV_DISPATCH_MODEL"], env["RPV_DISPATCH_X"], env["CLAUDE_BIN"]), ("m", "1", "/b/claude"))
         self.assertEqual((env["PYTHONUTF8"], env["PYTHONIOENCODING"]), ("1", "utf-8"))
         for absent in ("ANTHROPIC_API_KEY", "RPV_BAD", "RPV_PCT"):
             self.assertNotIn(absent, env)

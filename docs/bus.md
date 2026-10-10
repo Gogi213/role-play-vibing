@@ -12,7 +12,7 @@
 
 ## Настройка
 
-`RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Прежние `ALPHA_BUS_*` — запасные. Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
+`RPV_BUS_URL`, токен — `RPV_BUS_TOKEN` или `RPV_BUS_TOKEN_FILE` (запасной `~/.rpv-bus-token`), `RPV_BUS_DISABLE=1` — выключить, `RPV_BUS_SNAPSHOT_S` (300). Клиентам — только Python/utf-8 (curl на Windows шлёт кириллицу не в utf-8).
 
 Порог «не обработано»: у очереди `ceo` — 2 часа, у остальных — `--stale-after` шины (600 с). Сигналы к CEO при заданном `RPV_BUS_URL` идут через очередь `ceo` — [signals.md](signals.md).
 

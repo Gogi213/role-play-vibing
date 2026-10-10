@@ -1076,9 +1076,9 @@ class DispatchRunTests(unittest.TestCase):
         finally:
             D._popen = orig_popen
         self.assertNotIn("CLAUDE_CODE_HOST_SESSION_ID", captured_env)
-        self.assertEqual(captured_env.get("ALPHA_ROLE"), "researcher")
-        self.assertEqual(captured_env.get("ALPHA_TICKET"), path.stem)  # A7: хуки ведут состояние по тикету
-        self.assertEqual(captured_env.get("RPV_ROLE"), "researcher")   # новые имена; ALPHA_* — для хуков, что их читают
+        self.assertNotIn("ALPHA_ROLE", captured_env)
+        self.assertNotIn("ALPHA_TICKET", captured_env)
+        self.assertEqual(captured_env.get("RPV_ROLE"), "researcher")   # A7: хуки ведут состояние по тикету
         self.assertEqual(captured_env.get("RPV_TICKET"), path.stem)
         self.assertEqual(captured_env.get("RPV_PROJECT"), str(self.base))
         for info in list(D.RUNNING.values()):

@@ -13,7 +13,7 @@ DEFAULT_URL = ""  # шина выключена, пока не задан RPV_BU
 
 
 def _env(name, default=""):
-    return os.environ.get("RPV_BUS_" + name) or os.environ.get("ALPHA_BUS_" + name) or default
+    return os.environ.get("RPV_BUS_" + name) or default
 
 
 def config():
