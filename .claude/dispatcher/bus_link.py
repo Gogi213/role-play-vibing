@@ -129,15 +129,19 @@ class Link:
             print(f"[bus] будильник очереди ceo не записан: {type(ex).__name__}: {ex}", file=sys.stderr)
 
     def _on_state(self, up, why):
-        if not up and self.down_since is None:
-            self.down_since = time.time()
-            self.down_why = why
-        elif up and self.down_since is not None:
-            if self.down_noted:
-                self.ceo_line("bus-up", f"шина снова доступна (простой {int(time.time() - self.down_since)} с)")
+        with self.lock:  # состояние простоя трогают поток слушателя и цикл диспетчера (maybe_snapshot)
+            if not up and self.down_since is None:
+                self.down_since = time.time()
+                self.down_why = why
+                return
+            if not up or self.down_since is None:
+                return
+            noted, down_for = self.down_noted, int(time.time() - self.down_since)
             self.down_since, self.down_noted = None, False
-            self.last_snapshot = 0.0  # снимок блокеров сразу после возврата
-            self.wake.set()
+        if noted:
+            self.ceo_line("bus-up", f"шина снова доступна (простой {down_for} с)")
+        self.last_snapshot = 0.0  # снимок блокеров сразу после возврата
+        self.wake.set()
 
     def take_ack(self):
         with self.lock:
@@ -149,10 +153,12 @@ class Link:
             self.to_ack.update(seqs)
 
     def maybe_snapshot(self, tickets):
-        since = self.down_since  # шина лежит дольше порога — одна строка CEO (поток слушателя только запоминает)
-        if since is not None and not self.down_noted and time.time() - since >= DOWN_NOTICE_S:
-            self.down_noted = True
-            self.ceo_line("bus-down", f"шина недоступна {int(time.time() - since)} с ({self.down_why}); "
+        with self.lock:  # шина лежит дольше порога — одна строка CEO (поток слушателя только запоминает)
+            since, why = self.down_since, self.down_why
+            notice = since is not None and not self.down_noted and time.time() - since >= DOWN_NOTICE_S
+            self.down_noted = self.down_noted or notice
+        if notice:
+            self.ceo_line("bus-down", f"шина недоступна {int(time.time() - since)} с ({why}); "
                                       "диспетчер работает по таймеру и wait_for host:…")
         if time.time() - self.last_snapshot < SNAPSHOT_EVERY_S or self.disp.up is False:
             return
