@@ -826,9 +826,7 @@ def load_watch_state() -> dict:
 
 def save_watch_state(ws: dict) -> None:
     WATCH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = WATCH_STATE_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(ws, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(WATCH_STATE_FILE)
+    T.atomic_write_text(WATCH_STATE_FILE, json.dumps(ws, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 _PLAN_PY = str(Path(__file__).resolve().with_name("plan.py"))
@@ -902,10 +900,7 @@ def notify_findings(findings: list, ws: dict, now) -> list:
 
 def write_heartbeat(now, findings_count: int) -> None:
     WATCH_HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = WATCH_HEARTBEAT_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"ts": T.now_iso(now), "findings": findings_count}, ensure_ascii=False),
-                    encoding="utf-8")
-    tmp.replace(WATCH_HEARTBEAT_FILE)
+    T.atomic_write_text(WATCH_HEARTBEAT_FILE, json.dumps({"ts": T.now_iso(now), "findings": findings_count}, ensure_ascii=False))
 
 
 def run_once(now=None, probes=True) -> list:

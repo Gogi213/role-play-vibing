@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.27 — 2026-10-10
+
+### Изменено (TK-100, №20 — одна атомарная запись)
+
+- Шесть копий «tmp + replace» в `dispatcher/` (`pulsedata.write_json`, `board_push.write_status`, `watch` состояние и heartbeat, `lifewatch` состояния и владельцы) заменены на `ticket.atomic_write_text`: теперь и они повторяют `os.replace` на Windows при `PermissionError`, сбой не оставляет `.tmp`. Формат файлов прежний. Копии вне `dispatcher/` (board, bus, hooks) — отдельным срезом.
+
 ## 1.8.26 — 2026-10-10
 
 ### Исправлено (TK-140)

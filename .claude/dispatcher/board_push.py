@@ -15,7 +15,6 @@ RPV_BOARD — одна строка подключения из окна «+» (
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 import urllib.request
@@ -80,9 +79,7 @@ def _extras(view2: dict, pulse: Path, wait: bool = False) -> dict:
 def write_status(pulse: Path, view2: dict) -> None:
     """Кадр для TUI и MCP: `<pulse>/status.json` = {"view2": …, "built_at": …}, замена файла целиком (читатель не видит половину)."""
     pulse.mkdir(parents=True, exist_ok=True)
-    tmp = pulse / "status.json.tmp"
-    tmp.write_text(json.dumps({"view2": view2, "built_at": view2["time"]}, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, pulse / "status.json")
+    ticket.atomic_write_text(pulse / "status.json", json.dumps({"view2": view2, "built_at": view2["time"]}, ensure_ascii=False))
 
 
 def push(url: str, key: str, view2: dict, timeout: float = 10.0) -> int:
