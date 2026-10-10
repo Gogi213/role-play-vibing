@@ -637,6 +637,33 @@ def _parse_recon(out: str, n: int) -> dict:
     return res
 
 
+def _recon_result(alias: str, what: str, arg: str, v: dict):
+    """Ответ сверки по одному ключу → выполнено ли условие; None — ответ неясен, кэш не трогаем."""
+    if what == "unit":
+        state = (v["body"].strip().splitlines() or [""])[0]
+        if not state:
+            return None
+        result = state not in _UNIT_RUNNING
+        if not result:
+            _drop_event(alias, what, arg)
+        return result
+    if v["rc"] == 0:
+        progress = _progress_done(v["body"]) if arg.endswith(".json") else None
+        return True if progress is None else progress
+    return False if v["rc"] == 1 else None
+
+
+def _recon_note_miss(key, result: bool) -> None:
+    """Сверка закрыла условие, а события не было — на машине со сторожем тревога `recon-miss` (раз на ключ)."""
+    alias, what, arg = key
+    prev = _WAIT_CACHE.get(key)
+    if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _LINK is not None and _LINK.down_since is None
+            and _event_ts(*key) is None and key not in _RECON_MISS):
+        _RECON_MISS.add(key)  # запасной путь сработал, события не было — сторож не справился
+        _log_ssh_call(alias, what, arg, "пропуск")
+        append_ceo_inbox("*", "recon-miss", f"сверка закрыла host:{alias}:{'unit:' if what == 'unit' else ''}{arg} без события шины — проверить сторож машины")
+
+
 def _reconcile() -> None:
     """Страховка: раз в WAIT_RECON_S один ssh на машину проверяет ВСЕ ждущие host:… и повторяет регистрацию путей
     у сторожа, не подтверждённую ранее. Пропущенное событие или сорванная регистрация стоят не дороже одного шага сверки."""
@@ -662,26 +689,10 @@ def _reconcile() -> None:
             _, what, arg = keys[i]
             if v["reg"]:
                 _WL_REG.add((alias, arg))
-            if what == "unit":
-                state = (v["body"].strip().splitlines() or [""])[0]
-                if not state:
-                    continue
-                result = state not in _UNIT_RUNNING
-                if not result:
-                    _drop_event(alias, what, arg)
-            elif v["rc"] == 0:
-                progress = _progress_done(v["body"]) if arg.endswith(".json") else None
-                result = True if progress is None else progress
-            elif v["rc"] == 1:
-                result = False
-            else:
+            result = _recon_result(alias, what, arg, v)
+            if result is None:
                 continue
-            prev = _WAIT_CACHE.get(keys[i])
-            if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _LINK is not None and _LINK.down_since is None and _event_ts(*keys[i]) is None
-                    and keys[i] not in _RECON_MISS):
-                _RECON_MISS.add(keys[i])  # запасной путь сработал, события не было — сторож не справился
-                _log_ssh_call(alias, what, arg, "пропуск")
-                append_ceo_inbox("*", "recon-miss", f"сверка закрыла host:{alias}:{'unit:' if what == 'unit' else ''}{arg} без события шины — проверить сторож машины")
+            _recon_note_miss(keys[i], result)
             _WAIT_CACHE[keys[i]] = (now_ts, result)
 
 
