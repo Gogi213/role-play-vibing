@@ -62,7 +62,7 @@ _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?
 
 
 # --- wait_for: допустимые формы (одно место правды: диспетчер, tickets.py, проверка записи) --------------------
-# Алиасы машин для `host:<алиас>:...`; адрес ssh — из окружения (RPV_<АЛИАС>_HOST, прежнее ALPHA_<АЛИАС>_HOST), без умолчаний.
+# Алиасы машин для `host:<алиас>:...`; адрес ssh — из окружения (RPV_<АЛИАС>_HOST), без умолчаний.
 WAIT_FOR_HOSTS = ("calc", "vps", "deck")
 WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
                     "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "

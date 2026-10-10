@@ -62,9 +62,10 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 # Службу, которую запускает не этот процесс (WMI, systemd), окружение вызывающего не наследует: переносим настройки
-# диспетчера (RPV_*, ALPHA_*) и пути claude/проекта; секреты (ANTHROPIC_*, токены) — нет: командная строка видна другим.
-FORWARD_ENV_PREFIXES = ("RPV_", "ALPHA_")
+# диспетчера (RPV_*) и пути claude/проекта; секреты (ANTHROPIC_*, токены) — нет: командная строка видна другим.
+FORWARD_ENV_PREFIXES = ("RPV_",)
 FORWARD_ENV_NAMES = ("CLAUDE_BIN", "CLAUDE_PROJECT_DIR", "CLAUDE_CONFIG_DIR")
+SESSION_ENV = ("RPV_ROLE", "RPV_TICKET")  # метки сессии роли: службам и перезапуску служб их не передают
 
 # PowerShell: Win32_Process.Create с невидимым окном; команда и каталог — через окружение (RPV_START_CMD/RPV_START_CWD),
 # чтобы не экранировать их в тексте скрипта; печатает pid из ответа CIM, ненулевой ReturnValue — код выхода 2.

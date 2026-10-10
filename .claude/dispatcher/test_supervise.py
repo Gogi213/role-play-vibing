@@ -158,11 +158,10 @@ class InstallFilesTest(unittest.TestCase):
             sys.executable = real
 
     def test_env_snapshot_only_forwarded(self):
-        keep = {"RPV_TEST_X": "1", "RPV_DISPATCH_ROTATE_TOKENS": "150000", "ALPHA_DISPATCH_ROTATE_TOKENS": "1",
-                "RPV_CONTEXT_WARN_TOKENS": "2", "ALPHA_CONTEXT_WARN_TOKENS": "3", "RPV_DECK_KEY": "C:/k/id_rsa",
-                "ALPHA_DECK_KEY": "/k", "RPV_BUS_TOKEN_FILE": "/p/tok"}
-        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_BUS_TOKEN": "tok-SECRET", "ALPHA_BUS_TOKEN": "t2",
-                "RPV_X_API_KEY": "k", "ALPHA_DB_PASSWORD": "p"}
+        keep = {"RPV_TEST_X": "1", "RPV_DISPATCH_ROTATE_TOKENS": "150000",
+                "RPV_CONTEXT_WARN_TOKENS": "2", "RPV_DECK_KEY": "C:/k/id_rsa", "RPV_BUS_TOKEN_FILE": "/p/tok"}
+        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_BUS_TOKEN": "tok-SECRET",
+                "RPV_X_API_KEY": "k", "ALPHA_DISPATCH_X": "1"}
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**keep, **drop}):
             V.snapshot_env(Path(d))
             saved = json.loads((Path(d) / "supervise.env.json").read_text(encoding="utf-8"))
@@ -195,7 +194,7 @@ class InstallFilesTest(unittest.TestCase):
             self.assertTrue(all(n in V.BEATS for n in S.services()))
 
     def test_session_env_never_snapshotted_and_install_refused_from_role(self):  # TK-090 г
-        sess = {"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "ALPHA_ROLE": "engineer", "ALPHA_TICKET": "TK-1"}
+        sess = {"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1"}
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**sess, "RPV_OK": "1"}):
             V.snapshot_env(Path(d))
             saved = json.loads((Path(d) / "supervise.env.json").read_text(encoding="utf-8"))

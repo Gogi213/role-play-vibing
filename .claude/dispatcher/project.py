@@ -7,7 +7,7 @@
 (state.json, логи, pid, ceo-inbox, ceo-wake.log) пишется в `<проект>/.claude/dispatcher/`, тикеты читаются
 из `<проект>/.claude/tickets/`.
 
-Переменные: `RPV_<имя>`; при отсутствии берётся прежнее `ALPHA_<имя>` (совместимость).
+Переменные: `RPV_<имя>`.
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import os
 import sys
 from pathlib import Path
 
-ENV_PREFIXES = ("RPV_", "ALPHA_")  # новое имя первым, прежнее — запасное
 
 NOT_FOUND_HINT = ("проект не найден: от текущего каталога вверх нет каталога с `.claude/roles`. "
                   "Укажите `--project <путь>` (или RPV_PROJECT) либо выполните `/rpv-init` в корне проекта.")
@@ -35,12 +34,8 @@ def utf8_stdio() -> None:
 
 
 def env(name: str, default=None):
-    """Значение `RPV_<name>`, иначе `ALPHA_<name>`, иначе `default` (пустая строка — как «не задано»)."""
-    for prefix in ENV_PREFIXES:
-        value = os.environ.get(prefix + name)
-        if value:
-            return value
-    return default
+    """Значение `RPV_<name>`, иначе `default` (пустая строка — как «не задано»)."""
+    return os.environ.get("RPV_" + name) or default
 
 
 def project_arg(argv) -> str | None:

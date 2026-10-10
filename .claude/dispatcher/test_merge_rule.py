@@ -252,7 +252,7 @@ class MergeRuleTests(unittest.TestCase):
     def test_final_accept_on_landed_pr_closes_without_round(self):  # TK-090 а: pr→accept→влит→done→accept влитого→done
         T.write_header_updates(self.path, {"status": "in_review", "accepted": "", "pr": "7", "reviewer": "judge"}, now=NOW)
         os.environ.pop("RPV_ROLE", None)
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         acc = lambda: TK.cmd_accept(type("A", (), {"id": self.tid, "pr": 7, "sha": SHA, "text": ""})())
         T.append_log(self.path, "engineer", "[итог: pr] PR #7 — x", now=NOW)
         self.assertEqual(acc(), 0)
@@ -285,7 +285,7 @@ class MergeRuleTests(unittest.TestCase):
     def test_accept_writes_verdict(self):
         T.write_header_updates(self.path, {"accepted": ""}, now=NOW)
         os.environ.pop("RPV_ROLE", None)
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         args = type("A", (), {"id": self.tid, "pr": 7, "sha": SHA, "text": ""})()
         self.assertEqual(TK.cmd_accept(args), 0)
         t = self.tkt()
@@ -304,7 +304,7 @@ class MergeRuleTests(unittest.TestCase):
 
     def test_two_prs_one_ticket_keep_both_verdicts(self):
         os.environ.pop("RPV_ROLE", None)
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         sha9 = "9" * 40
         for pr, sha in ((7, SHA), (9, sha9)):
             self.assertEqual(TK.cmd_accept(type("A", (), {"id": self.tid, "pr": pr, "sha": sha, "text": ""})()), 0)
@@ -318,13 +318,13 @@ class MergeRuleTests(unittest.TestCase):
 
     def test_reaccept_same_pr_replaces_its_head(self):
         os.environ.pop("RPV_ROLE", None)
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         new = "c" * 40
         TK.cmd_accept(type("A", (), {"id": self.tid, "pr": 7, "sha": new, "text": ""})())
         self.assertEqual(self.tkt().header.get("accepted"), f"7@{new}")
 
     def test_accept_refuses_non_judge_and_bad_sha(self):
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         os.environ["RPV_ROLE"] = "judge"
         args = type("A", (), {"id": self.tid, "pr": 7, "sha": "zzz", "text": ""})()
         self.assertEqual(TK.cmd_accept(args), 1)

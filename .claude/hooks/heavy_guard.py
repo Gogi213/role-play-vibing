@@ -21,7 +21,7 @@ import os
 import re
 
 # Хост замка — только из окружения (`user@` не нужен, как у RPV_GUARD_HOST_ROOTS); пусто — замок выключен.
-HEAVY_HOST = (os.environ.get("RPV_GUARD_HEAVY_HOST") or os.environ.get("ALPHA_GUARD_HEAVY_HOST") or "").strip().lower()
+HEAVY_HOST = (os.environ.get("RPV_GUARD_HEAVY_HOST") or "").strip().lower()
 
 
 def _compile_allow(raw):

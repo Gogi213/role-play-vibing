@@ -53,7 +53,7 @@ class ResultTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def res(self, role, result, **kw):
-        os.environ.pop("ALPHA_ROLE", None)
+        os.environ.pop("RPV_ROLE", None)
         os.environ["RPV_ROLE"] = role
         a = dict(id=self.tid, result=result, why="потому что", pr=None, sha=None, path=None, form=None)
         a.update(kw)

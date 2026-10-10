@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.34 — 2026-10-10
+
+### Убрано (TK-100 №28)
+- Прежние имена `ALPHA_*` больше не читаются и не пробрасываются службам: `RPV_*` — единственные. Диспетчер не ставит `ALPHA_ROLE`/`ALPHA_TICKET` ролям. Перед обновлением переименуйте `ALPHA_*` в `RPV_*` в настройках установки (alpha: `vps-check.sh` уже читает `RPV_TICKET`, `supervise.env.json` — `ALPHA_DISPATCH_*` инертны).
+- Одна копия списка меток сессии: `start.SESSION_ENV` (его берут `supervise` и `release.clean_env`).
+
 ## 1.8.33 — 2026-10-10
 
 ### Исправлено (TK-100, замечание Судьи к #86)

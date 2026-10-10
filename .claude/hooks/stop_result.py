@@ -11,7 +11,7 @@ import sys
 
 
 def _env(name):
-    return os.environ.get("RPV_" + name) or os.environ.get("ALPHA_" + name) or ""
+    return os.environ.get("RPV_" + name) or ""
 
 
 def main():

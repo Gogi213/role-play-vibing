@@ -204,7 +204,7 @@ ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых ди
 # v2 (02.10): Судья тоже "ticket" — одна сессия на все задачи копила контекст чужих тикетов (аудит).
 # Предел запусков на роль действует всегда (_role_busy), а не только при "role"; по умолчанию 1, настраивается
 # RPV_DISPATCH_ROLE_PARALLEL; на один тикет — один запуск роли.
-# Переопределяемо через RPV_DISPATCH_SESSION_SCOPE=judge:role,engineer:ticket (прежнее имя — ALPHA_DISPATCH_…).
+# Переопределяемо через RPV_DISPATCH_SESSION_SCOPE=judge:role,engineer:ticket.
 SESSION_SCOPE = {"judge": "ticket", "researcher": "ticket", "engineer": "ticket"}
 if P.env("DISPATCH_SESSION_SCOPE"):
     for _pair in P.env("DISPATCH_SESSION_SCOPE").split(","):
@@ -478,7 +478,7 @@ def _wait_err(key: str, msg: str) -> None:
 
 
 def _ssh_cmd(alias: str, remote_cmd: str) -> list:
-    # Хост — только из окружения (RPV_CALC_HOST / RPV_VPS_HOST / RPV_DECK_HOST, прежние ALPHA_*); не задан — ошибка
+    # Хост — только из окружения (RPV_CALC_HOST / RPV_VPS_HOST / RPV_DECK_HOST); не задан — ошибка
     # (условие «не выполнено» + строка в dispatch.err.log). Ключ и known_hosts — RPV_DECK_KEY / RPV_DECK_KNOWN_HOSTS.
     host = P.env(f"{alias.upper()}_HOST")
     if not host:
@@ -1651,10 +1651,9 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     for _k in list(env):
         if "HOST_SESSION" in _k.upper():
             env.pop(_k, None)
-    # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету; обе пары имён — RPV_* новые,
-    # ALPHA_* для хуков, которые ещё читают прежние
-    env["RPV_ROLE"] = env["ALPHA_ROLE"] = role
-    env["RPV_TICKET"] = env["ALPHA_TICKET"] = tid
+    # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету
+    env["RPV_ROLE"] = role
+    env["RPV_TICKET"] = tid
     env["RPV_PROJECT"] = str(PROJECT_ROOT)  # tickets.py роли берёт проект отсюда (и из cwd запуска)
 
     out_fh = open(run_file, "w", encoding="utf-8")
@@ -2300,7 +2299,7 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
         return False
     chain[tid] = chain.get(tid, 0) + 1
     T.append_log(path, "dispatcher", f"запущен on_met: {argv}", now=now)
-    env = dict(os.environ, RPV_TICKET=tid, ALPHA_TICKET=tid)
+    env = dict(os.environ, RPV_TICKET=tid)
     t0 = time.time()
     out = err = b""
     code, status = None, "ok"

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bus"))
 import busclient  # noqa: E402
 
 WAIT_S = 25
-SNAPSHOT_EVERY_S = float(os.environ.get("RPV_BUS_SNAPSHOT_S") or os.environ.get("ALPHA_BUS_SNAPSHOT_S", "300"))
+SNAPSHOT_EVERY_S = float(os.environ.get("RPV_BUS_SNAPSHOT_S") or "300")
 # Простой шины короче порога — переподключение, CEO не будим. 120 с — в разрыве между двумя группами простоев журнала
 # ceo-inbox (04–08.10, 35 случаев: 18 — до 63 с, 17 — от 122 с); решение Судьи TK-100 10.10.
 DOWN_NOTICE_S = float(os.environ.get("RPV_BUS_DOWN_NOTICE_S", "120"))

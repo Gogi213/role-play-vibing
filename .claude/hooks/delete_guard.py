@@ -55,8 +55,8 @@ import heavy_guard  # noqa: E402
 
 
 def _env(name, default=""):
-    """Переменная `RPV_<имя>`, запасная — `ALPHA_<имя>` (прежнее название)."""
-    return os.environ.get("RPV_" + name) or os.environ.get("ALPHA_" + name) or default
+    """Переменная `RPV_<имя>`."""
+    return os.environ.get("RPV_" + name) or default
 
 
 def _env_list(name):
