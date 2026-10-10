@@ -25,7 +25,7 @@ python -m unittest discover -s <плагин>/.claude/dispatcher && python -m un
 для хуков, читающих прежние имена); в промпте — команда `tickets.py` с абсолютным путём из папки плагина (то же хук
 `role_context.py` вставляет в начало каждой сессии роли и CEO).
 
-Статусы: backlog, todo, in_progress, waiting (+ `wait_for: file:… | ticket:… | deck:…`), in_review, done, blocked,
+Статусы: backlog, todo, in_progress, waiting (+ `wait_for: file:… | ticket:… | host:…`), in_review, done, blocked,
 needs_owner, stopped (остановлено CEO — не будит, пока CEO не вернёт в `todo`). Будят: `todo`, `in_progress`, выполненный `wait_for` — владельца; `done`/`in_review` с `reviewer` —
 ревьюера; `--next` — названную роль один раз. Запуск без новой записи — один повтор, затем `blocked`. Траты считаются
 (`runs.log`, `tickets.py status`), ничего не ограничивают.

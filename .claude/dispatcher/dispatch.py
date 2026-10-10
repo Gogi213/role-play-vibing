@@ -507,7 +507,7 @@ def _progress_done(text: str):
 
 def _host_wait_met(alias: str, what: str, arg: str) -> bool:
     """`host:<алиас>:<путь>` — путь на машине существует (`.json` с done/total — done >= total); `host:<алиас>:unit:<имя>` —
-    юнит не работает (`systemctl is-active` ≠ active: задание закончилось или упало). `deck:<путь>` — то же с алиасом deck.
+    юнит не работает (`systemctl is-active` ≠ active: задание закончилось или упало).
     Судья 27.09 («можно потом»): без кэша ssh дёргается на каждый ждущий тикет каждые 15 с — результат на
     WAIT_CHECK_CACHE_S; ошибка ssh (код 255, таймаут) = «не выполнено» + строка в dispatch.err.log раз в 10 мин."""
     ckey = (alias, what, arg)

@@ -3,8 +3,7 @@
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
 (backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner|stopped), `reviewer` (опц.),
-`wait_for` (опц.: `file:<путь>` локально, `host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh
-(`deck:<путь>` — синоним `host:deck:<путь>`), `ticket:<ID>`; разбор — `parse_wait_for`),
+`wait_for` (опц.: `file:<путь>` локально, `host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh, `ticket:<ID>`; разбор — `parse_wait_for`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
 `updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
@@ -67,7 +66,7 @@ _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?
 WAIT_FOR_HOSTS = ("calc", "vps", "deck")
 WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
                     "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
-                    "systemctl is-active ≠ active) | deck:<путь> (= host:deck:<путь>) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
+                    "systemctl is-active ≠ active) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
                     "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<calc|vps|deck>:<id задания> (готово при done; "
                     "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD) | "
                     "at:<время ISO> (готово по наступлении времени; суточное наблюдение — сторож жизни его не трогает)")
@@ -98,7 +97,7 @@ def at_left_text(spec: str, now: datetime | None = None) -> str:
 
 
 def wait_needs_by(spec: str) -> bool:
-    """TK-117 (В-212): срок `--by` обязателен для ожиданий вычислений/файлов (host:, deck:, file:, job:); `at:` (само время),
+    """TK-117 (В-212): срок `--by` обязателен для ожиданий вычислений/файлов (host:, file:, job:); `at:` (само время),
     ticket:/ci:/merged:/ci-run: (их закрывают диспетчер и CI-сторож) — без срока."""
     p = parse_wait_for(spec)
     return bool(p) and p[0] in ("host", "file", "job")
@@ -167,9 +166,6 @@ def parse_wait_for(spec: str):
         alias, sep, jid = spec[len("job:"):].partition(":")
         jid = jid.strip()
         return ("job", alias, jid) if alias in WAIT_FOR_HOSTS and sep and _JOB_ID_RE.match(jid) else None
-    if spec.startswith("deck:"):
-        arg = spec[len("deck:"):].strip()
-        return ("host", "deck", "path", arg) if host_path_ok(arg) else None
     if spec.startswith("host:"):
         alias, sep, rest = spec[len("host:"):].partition(":")
         rest = rest.strip()
@@ -226,7 +222,7 @@ def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()
     if spec and parse_wait_for(spec) is None:
-        hint = " У host:/deck: путь только абсолютный (`/…` или `~/…`), без `file:` внутри." if spec.startswith(("host:", "deck:")) else ""
+        hint = " У host: путь только абсолютный (`/…` или `~/…`), без `file:` внутри." if spec.startswith("host:") else ""
         raise ValueError(f"wait_for не понят: {spec!r}.{hint} Допустимо: {WAIT_FOR_FORMATS}")
 
 

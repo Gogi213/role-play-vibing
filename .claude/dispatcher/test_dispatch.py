@@ -505,10 +505,10 @@ class DispatchDecisionTests(unittest.TestCase):
         self.assertIsNone(dec)
 
     def test_waiting_deck_condition_uses_check_wait_for(self):
-        text = ("---\nid: TK-5\nowner: engineer\nstatus: waiting\nwait_for: deck:/home/deck/done\n"
+        text = ("---\nid: TK-5\nowner: engineer\nstatus: waiting\nwait_for: host:deck:/home/deck/done\n"
                 "updated: 2026-09-27T11:00:00+04:00\n---\n\n## Лог\n")
         orig = D.check_wait_for
-        D.check_wait_for = lambda spec: spec == "deck:/home/deck/done"
+        D.check_wait_for = lambda spec: spec == "host:deck:/home/deck/done"
         try:
             dec = D.decide(self.ticket_from(text), self.state, self.now)
         finally:
@@ -3685,7 +3685,7 @@ class DeckSshTests(unittest.TestCase):
         orig = D._host_wait_met
         D._host_wait_met = fake_host_wait_met
         try:
-            self.assertTrue(D.check_wait_for("deck:~/rpv/queue/done/T-38.job"))
+            self.assertTrue(D.check_wait_for("host:deck:~/rpv/queue/done/T-38.job"))
         finally:
             D._host_wait_met = orig
         self.assertEqual(calls, [("deck", "path", "~/rpv/queue/done/T-38.job")])
@@ -3792,7 +3792,6 @@ class WaitForHostTests(unittest.TestCase):
         ok = {
             "file:data/x": ("file", "data/x"),
             "ticket:TK-044": ("ticket", "TK-044"),
-            "deck:~/rpv/q/done": ("host", "deck", "path", "~/rpv/q/done"),
             "host:deck:~/rpv/q/done": ("host", "deck", "path", "~/rpv/q/done"),
             "host:calc:/var/rpv/progress/tk044.json": ("host", "calc", "path", "/var/rpv/progress/tk044.json"),
             "host:vps:/opt/compute/done": ("host", "vps", "path", "/opt/compute/done"),
@@ -3804,14 +3803,14 @@ class WaitForHostTests(unittest.TestCase):
         bad = ["", "mention", "ceo — решение владельца", "прогон окон на сервере счёта (…) — готов, когда done=total",
                "file:", "ticket:", "ticket:TK 1", "deck:", "host:calc", "host:calc:", "host:calc:unit:",
                "host:calc:unit:a b", "host:nas:/x", "host:calc/x", "calc:/x",
-               "host:calc:file:/data/x.done", "host:calc:data/x", "deck:rel/path"]  # TK-117 К1.1: путь только абсолютный
+               "host:calc:file:/data/x.done", "host:calc:data/x", "deck:rel/path", "deck:~/rpv/q/done"]  # TK-117 К1.1: путь только абсолютный
         for spec in bad:
             self.assertIsNone(T.parse_wait_for(spec), spec)
 
     # --- путь на машине ---
     def test_host_path_exists_uses_alias_host_and_same_ssh_options(self):
         for spec, host in (("host:calc:/var/x/DONE", "root@203.0.113.10"), ("host:vps:/opt/x/DONE", "root@203.0.113.20"),
-                           ("host:deck:~/rpv/x", "deck@203.0.113.30"), ("deck:~/rpv/x", "deck@203.0.113.30")):
+                           ("host:deck:~/rpv/x", "deck@203.0.113.30")):
             self.cmds.clear()
             self.reply = (0, b"", b"")
             self.assertTrue(self.met(spec), spec)
@@ -3976,7 +3975,7 @@ class WaitForNoticeTests(unittest.TestCase):
         self.assertEqual(len(self.inbox()), 1)
 
     def test_no_notice_for_valid_forms_other_statuses_next_or_running(self):
-        for spec in ("host:calc:/var/rpv/progress/x.json", "host:vps:unit:u", "deck:~/x", "file:x", "ticket:TK-1"):
+        for spec in ("host:calc:/var/rpv/progress/x.json", "host:vps:unit:u", "host:deck:~/x", "file:x", "ticket:TK-1"):
             D.notify_wait_for_problem(self.tkt(spec), self.state, self.now)
         D.notify_wait_for_problem(self.tkt("мусор", status="in_progress"), self.state, self.now)
         D.notify_wait_for_problem(self.tkt("мусор", extra="next: judge\n"), self.state, self.now)

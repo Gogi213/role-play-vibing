@@ -483,7 +483,7 @@ def main(argv=None) -> int:
     p_wait = sub.add_parser("wait", help="status: waiting + wait_for (форма проверяется)")
     p_wait.add_argument("id")
     p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
-    p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/deck:/file:/job:")
+    p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_wait.add_argument("--on-met", default=None,
                         help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
     p_wait.set_defaults(func=cmd_wait)
