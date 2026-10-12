@@ -161,10 +161,11 @@ def main():
     ap.add_argument("--patterns", nargs="+", default=["rpv-*"])
     ap.add_argument("--exclude", nargs="*", default=["rpv-bus"])
     ap.add_argument("--progress-glob", default=os.path.expanduser("~/rpv/progress/*.json"))
+    ap.add_argument("--watch-file", default=os.path.expanduser("~/rpv/progress/watch.list"))
     ap.add_argument("--interval", type=float, default=3.0)
     ap.add_argument("--flush-every", type=float, default=FLUSH_EVERY)
     a = ap.parse_args()
-    w = Watcher(a.host, a.patterns, a.exclude, a.progress_glob)
+    w = Watcher(a.host, a.patterns, a.exclude, a.progress_glob, watch_file=a.watch_file)
     last_flush = 0.0
     while True:
         try:
