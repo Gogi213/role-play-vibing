@@ -240,12 +240,11 @@ def cmd_result(args) -> int:
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
-    routed = "blocked" if args.result == "ask-owner" and role != "judge" else args.result  # TK-218 п.6 (В-206)
-    upd = routes.route(role, routed, tkt.owner, tkt.header.get("reviewer", ""),
+    upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                        owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "")
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
-    print(f"{args.id}: итог {args.result}{' (развилка → Судье)' if routed != args.result else ''} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
+    print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
     return 0
 
 
