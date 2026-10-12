@@ -1,4 +1,6 @@
+import json
 import os
+import time
 import tempfile
 import unittest
 
@@ -80,6 +82,24 @@ class Outbox(unittest.TestCase):
                        "exit": "0", "invocation": "i1"}, "unit:calc:tk1-a.service:i1")  # повторная отправка того же id
         self.assertEqual(self.n_events(), 1)                                             # events.id UNIQUE
         self.assertFalse(os.path.exists(busclient.spool_path()))
+
+    def test_orphan_copy_of_dead_process_is_resent_once(self):
+        sp = busclient.spool_path()
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        ev = {"addr": "машина.calc.юнит.остановлен", "payload": {}, "id": "orph1"}
+        dead = sp + ".99999"
+        with open(dead, "w", encoding="utf-8") as f:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        self.up = True
+        self.assertTrue(busclient.flush_spool(1))
+        self.assertEqual(self.n_events(), 0)                                             # свежая копия — чужой досыл, не трогаем
+        old = time.time() - busclient.ORPHAN_AGE_S - 5
+        os.utime(dead, (old, old))
+        self.assertTrue(busclient.flush_spool(1))
+        self.assertEqual(self.n_events(), 1)
+        self.assertEqual(os.listdir(os.path.dirname(sp)), [])                            # копий нет
+        busclient.request("/event", ev)
+        self.assertEqual(self.n_events(), 1)
 
 
 class T(unittest.TestCase):
