@@ -204,12 +204,12 @@ def cmd_result(args) -> int:
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
     role = _caller_role()
+    tkt = T.read_ticket(path)
     err = routes.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
-                       form=args.form or "", root=PROJECT_ROOT)
+                       form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "")
     if err:
         print(f"result: {err}", file=sys.stderr)
         return 1
-    tkt = T.read_ticket(path)
     if args.result == "continue" and routes.continue_streak(tkt, role) >= routes.CONTINUE_MAX:
         print(f"result: continue уже {routes.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
               f"либо blocked", file=sys.stderr)
@@ -219,6 +219,9 @@ def cmd_result(args) -> int:
     on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
+    if role == "judge" and tkt.owner == "judge" and args.result in ("done", "accept") and not (args.pr or args.sha):
+        head, _ = routes.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
+        proof = f" закрыт по артефакту {args.path}@{head}"
     if args.result == "accept" and (args.pr or args.sha):
         rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
                                       "repo": getattr(args, "repo", None)})())
