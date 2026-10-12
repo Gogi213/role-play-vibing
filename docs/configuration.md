@@ -105,7 +105,7 @@
 | `RPV_BUS_URL` | не задан — шина выключена | адрес шины |
 | `RPV_BUS_TOKEN` | — | токен значением |
 | `RPV_BUS_TOKEN_FILE` | запасной `~/.rpv-bus-token` | токен файлом |
-| `RPV_BUS_SPOOL` | `<tmp>/rpv-bus-spool.jsonl` | очередь неотправленных событий |
+| `RPV_BUS_SPOOL` | `~/.rpv/outbox.jsonl` | очередь неотправленных событий |
 | `RPV_BUS_DOWN_NOTICE_S` | `120` | простой шины короче — CEO не будим (`bus-down`/`bus-up` только при простое дольше) |
 | `RPV_BUS_DISABLE` | — | `1` — выключить шину |
 | `RPV_BUS_SNAPSHOT_S` | `300` | период полного снимка блокеров, с |

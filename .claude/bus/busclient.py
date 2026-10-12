@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Клиент шины (TK-045). post() не бросает: при недоступности шины событие уходит в spool и дошлётся со следующим
-успешным вызовом (id события — ключ дедупа на шине). CLI: busclient.py send <адрес> [--payload JSON] [--id ID] [--strict]."""
+"""Клиент шины (TK-045). post() не бросает: при недоступности шины событие уходит в spool (~/.rpv/outbox.jsonl —
+переживает перезагрузку, TK-221) и дошлётся со следующим успешным вызовом или по таймеру сторожа (flush_spool; id события —
+ключ дедупа на шине). CLI: busclient.py send <адрес> [--payload JSON] [--id ID] [--strict]."""
 import argparse
 import json
 import os
 import sys
-import tempfile
 import urllib.request
 import uuid
 
@@ -33,7 +33,7 @@ def config():
 
 
 def spool_path():
-    return _env("SPOOL") or os.path.join(tempfile.gettempdir(), "rpv-bus-spool.jsonl")
+    return _env("SPOOL") or os.path.join(os.path.expanduser("~"), ".rpv", "outbox.jsonl")
 
 
 def request(path, body=None, timeout=5):
@@ -45,28 +45,31 @@ def request(path, body=None, timeout=5):
 
 
 def _spool(ev):
+    os.makedirs(os.path.dirname(spool_path()) or ".", exist_ok=True)
     with open(spool_path(), "a", encoding="utf-8") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
 
 def flush_spool(timeout=5):
+    """Досылает spool; True — spool пуст. Файл до конца досыла остаётся на диске (.pid-копия), падение процесса не теряет события."""
     sp = spool_path()
     tmp = f"{sp}.{os.getpid()}"
     try:
         os.replace(sp, tmp)
     except OSError:
-        return
+        return True
     with open(tmp, encoding="utf-8") as f:
         lines = [ln for ln in f.read().splitlines() if ln.strip()]
-    os.remove(tmp)
     for i, ln in enumerate(lines):
         try:
             request("/event", json.loads(ln), timeout)
         except Exception:
-            for rest in lines[i:]:
-                with open(sp, "a", encoding="utf-8") as f:
-                    f.write(rest + "\n")
-            return
+            with open(sp, "a", encoding="utf-8") as f:
+                f.writelines(rest + "\n" for rest in lines[i:])
+            os.remove(tmp)
+            return False
+    os.remove(tmp)
+    return True
 
 
 def post(addr, payload=None, eid=None, timeout=5, spool=True):

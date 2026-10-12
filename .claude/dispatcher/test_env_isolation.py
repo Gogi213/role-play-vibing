@@ -23,13 +23,13 @@ class EnvIsolation(unittest.TestCase):
 
     def test_spool_is_not_the_shared_live_file(self):
         self._need_conftest()
-        shared = os.path.join(tempfile.gettempdir(), "rpv-bus-spool.jsonl")
+        shared = os.path.join(os.path.expanduser("~"), ".rpv", "outbox.jsonl")
         self.assertNotEqual(os.path.abspath(busclient.spool_path()), os.path.abspath(shared),
-                            "spool тестов совпал с общим %TEMP%/rpv-bus-spool.jsonl живой установки")
+                            "spool тестов совпал с общим ~/.rpv/outbox.jsonl живой установки")
 
     def test_post_without_bus_does_not_touch_shared_spool(self):
         self._need_conftest()
-        shared = os.path.join(tempfile.gettempdir(), "rpv-bus-spool.jsonl")
+        shared = os.path.join(os.path.expanduser("~"), ".rpv", "outbox.jsonl")
         before = os.path.getsize(shared) if os.path.exists(shared) else None
         busclient.post("тест.изоляция", {"x": 1})
         after = os.path.getsize(shared) if os.path.exists(shared) else None

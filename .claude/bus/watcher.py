@@ -11,6 +11,7 @@ import time
 
 import busclient
 
+FLUSH_EVERY = 15.0  # TK-221: досыл spool по таймеру, не только со следующим успешным post
 RUNNING = ("active", "activating", "reloading")
 
 
@@ -161,11 +162,16 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=["rpv-bus"])
     ap.add_argument("--progress-glob", default=os.path.expanduser("~/rpv/progress/*.json"))
     ap.add_argument("--interval", type=float, default=3.0)
+    ap.add_argument("--flush-every", type=float, default=FLUSH_EVERY)
     a = ap.parse_args()
     w = Watcher(a.host, a.patterns, a.exclude, a.progress_glob)
+    last_flush = 0.0
     while True:
         try:
             w.run_once()
+            if time.monotonic() - last_flush >= a.flush_every:
+                last_flush = time.monotonic()
+                busclient.flush_spool(5)
         except Exception as e:
             print(f"[watcher] {type(e).__name__}: {e}", flush=True)
         time.sleep(a.interval)
