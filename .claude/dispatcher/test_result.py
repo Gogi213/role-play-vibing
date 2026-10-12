@@ -237,5 +237,33 @@ class ResultTests(unittest.TestCase):
         TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="заметка", next=None))())
         self.assertEqual(T.read_ticket(self.path).status, "blocked")
 
+    # --- TK-218
+    def test_ask_owner_method_goes_to_judge(self):
+        self.assertEqual(self.res("engineer", "ask-owner", method=True), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("blocked", "judge"))
+        T.write_header_updates(self.path, {"status": "in_progress", "next": ""}, now=NOW)
+        self.assertEqual(self.res("engineer", "ask-owner"), 0)  # без флага — прежний путь владельцу
+        self.assertEqual(self.tkt().status, "needs_owner")
+
+    def test_wait_refuses_already_met_file_unless_allowed(self):
+        (self.base / "old.done").write_text("x", encoding="utf-8")
+        a = dict(id=self.tid, spec=f"file:{(self.base / 'old.done').as_posix()}", on_met=None, by="23:59")
+        self.assertEqual(TK.cmd_wait(type("A", (), a)()), 1)
+        self.assertNotEqual(self.tkt().status, "waiting")
+        a["allow_met"] = True
+        self.assertEqual(TK.cmd_wait(type("A", (), a)()), 0)
+        self.assertEqual(self.tkt().status, "waiting")
+
+    def test_sched_marker_warning(self):
+        self.assertIn("alsched", T.sched_marker_warning("calc", "/data/x/gate.done"))
+        self.assertEqual(T.sched_marker_warning("calc", "/data/sched/rc/abc"), "")
+        self.assertEqual(T.sched_marker_warning("calc", "/data/x/out.json"), "")
+
+    def test_new_refuses_similar_recent_title(self):
+        self.assertTrue(T.similar_recent_ticket(D.TICKETS_DIR, "т", now=NOW))
+        self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "совсем другое про счёт", now=NOW), "")
+        self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "т", now=NOW + timedelta(hours=2)), "")
+
 if __name__ == "__main__":
     unittest.main()

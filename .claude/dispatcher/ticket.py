@@ -218,6 +218,41 @@ def file_wait_problem(spec: str) -> str:
     return ""
 
 
+def sched_marker_warning(alias: str, path: str) -> str:
+    """TK-218 п.3: для заданий alsched канон — код завершения `/data/sched/rc/<id>` (`job:<алиас>:<id>` / host-путь на него);
+    свой маркер (`done`, `*.done`) сообщает «дошёл до строки», а не «задание кончилось и с каким кодом». Пусто — путь годится."""
+    p = path.strip().replace("\\", "/")
+    base = p.rsplit("/", 1)[-1]
+    if "/sched/rc/" in p or not (base == "done" or base.endswith(".done")):
+        return ""
+    return (f"{alias}:{p} похоже на собственный маркер скрипта. Для задания alsched ждите код завершения: "
+            f"`job:{alias}:<id>` или `host:{alias}:/data/sched/rc/<id>` — маркер не отличит успех от падения до строки с touch")
+
+
+DUP_WINDOW_S = 3600
+DUP_RATIO = 0.8
+
+
+def similar_recent_ticket(tickets_dir, title: str, owner: str = "", now: datetime | None = None) -> str:
+    """TK-218 п.6: тикет с похожим заголовком (difflib ≥ DUP_RATIO, без регистра) и `updated` не старше часа — «ID: заголовок»;
+    пусто — дубля нет. Закрытые (done/stopped) не считаем: повтор после закрытия — новая работа."""
+    import difflib
+    now = now or datetime.now().astimezone()
+    want = " ".join((title or "").lower().split())
+    for path in list_tickets(tickets_dir):
+        try:
+            tkt = read_ticket(path)
+            upd = datetime.fromisoformat(str(tkt.header.get("updated") or ""))
+        except Exception:
+            continue
+        if tkt.status in ("done", "stopped") or (now - upd).total_seconds() > DUP_WINDOW_S:
+            continue
+        have = " ".join(str(tkt.header.get("title") or "").lower().split())
+        if want and difflib.SequenceMatcher(None, want, have).ratio() >= DUP_RATIO:
+            return f"{tkt.id}: {tkt.header.get('title')}"
+    return ""
+
+
 def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()

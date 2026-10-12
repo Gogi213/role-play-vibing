@@ -141,6 +141,10 @@ def cmd_new(args) -> int:
         print("--kind без --executor haiku не имеет смысла", file=sys.stderr)
         return 1
 
+    if not getattr(args, "force", False) and (dup := T.similar_recent_ticket(TICKETS_DIR, args.title, args.owner)):
+        print(f"new: похожий тикет за последний час уже есть — {dup}. Дубль? Допиши в него или создай с `--force`.",
+              file=sys.stderr)
+        return 1
     try:
         path = T.create_ticket(TICKETS_DIR, owner=args.owner, title=args.title, reviewer=reviewer,
                                 description=args.desc or "", wait_for=args.wait_for or "",
@@ -223,7 +227,8 @@ def cmd_result(args) -> int:
                 T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]} — {why}")
         return rc
     if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
-        rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None)})())
+        rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None),
+                                      "allow_met": getattr(args, "allow_met", False)})())
         if rc == 0:
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: wait]{proof} — {why}")
@@ -235,11 +240,14 @@ def cmd_result(args) -> int:
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
-    upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
+    routed = args.result
+    if args.result == "ask-owner" and getattr(args, "method", False) and role != "judge":
+        routed = "blocked"  # TK-218 п.6 (В-206): вопрос по методике/развилке решает Судья, не владелец
+    upd = routes.route(role, routed, tkt.owner, tkt.header.get("reviewer", ""),
                        owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "")
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
-    print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
+    print(f"{args.id}: итог {args.result}{' (методика → Судье)' if routed != args.result else ''} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
     return 0
 
 
@@ -343,6 +351,20 @@ def cmd_wait(args) -> int:
             print(f"wait: {e}", file=sys.stderr)
             return 1
     parsed = T.parse_wait_for(spec)
+    # TK-218 п.2: условие, уже выполненное при постановке, не ожидание — роль проснулась бы по старому файлу
+    # (маркер прошлого прогона). Осознанно ждать готовое — `--allow-met`.
+    if parsed and parsed[0] in ("file", "host", "ticket") and not getattr(args, "allow_met", False):
+        try:
+            met = D.check_wait_for(spec)
+        except Exception:  # нет ssh/алиаса в окружении — проверка недоступна, не мешаем
+            met = False
+        if met:
+            print(f"wait: {spec} уже выполнено на момент постановки (файл/тикет существует) — это маркер прошлого "
+                  f"прогона или чужой результат: ждать нечего. Удали старый маркер или возьми новый путь; "
+                  f"осознанно ждать готовое — `--allow-met`.", file=sys.stderr)
+            return 1
+    if parsed and parsed[0] == "host" and parsed[2] == "path" and (note := T.sched_marker_warning(parsed[1], parsed[3])):
+        print(f"wait: предупреждение — {note}", file=sys.stderr)
     if parsed and parsed[0] == "ticket":
         cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
         if cycle:
@@ -440,6 +462,7 @@ def main(argv=None) -> int:
                         help="усилие запусков по этому тикету; без поля — исследователь/инженер high, Судья xhigh")
     p_new.add_argument("--desc", default="")
     p_new.add_argument("--wait-for", dest="wait_for", default="")
+    p_new.add_argument("--force", action="store_true", help="создать, даже если за час есть тикет с похожим заголовком")
     p_new.add_argument("--backlog", action="store_true",
                         help="создать сразу в backlog (перенос из TASKS.md) — диспетчер её не трогает до `start`")
     p_new.add_argument("--executor", choices=["haiku"], default=None,
@@ -473,6 +496,9 @@ def main(argv=None) -> int:
     p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
     p_result.add_argument("--form", default=None, help="wait: форма wait_for")
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
+    p_result.add_argument("--method", action="store_true",
+                          help="ask-owner: вопрос по методике/развилке — уходит Судье (В-206), а не владельцу")
+    p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
     p_result.set_defaults(func=cmd_result)
 
@@ -481,6 +507,8 @@ def main(argv=None) -> int:
     p_start.set_defaults(func=cmd_start)
 
     p_wait = sub.add_parser("wait", help="status: waiting + wait_for (форма проверяется)")
+    p_wait.add_argument("--allow-met", dest="allow_met", action="store_true",
+                        help="ждать условие, уже выполненное при постановке (по умолчанию отказ)")
     p_wait.add_argument("id")
     p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
     p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
