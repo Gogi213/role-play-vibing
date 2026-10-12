@@ -2,6 +2,11 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.39 — 2026-10-12
+
+### Добавлено (TK-224, хвост TK-221)
+- Сторож машины: аргумент `--watch-file` (список файлов-маркеров; по умолчанию `~/rpv/progress/watch.list`). Вместе с `--patterns`, `--exclude`, `--progress-glob` и `RPV_BUS_URL`/`RPV_BUS_TOKEN_FILE` все настройки машины живут в юните — файл `watcher.py` на машине равен файлу выпуска, форк не нужен.
+
 ## 1.8.38 — 2026-10-12
 
 ### Исправлено (TK-221, TK-217 п.(а))

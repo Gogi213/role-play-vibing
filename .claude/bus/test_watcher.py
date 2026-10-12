@@ -36,6 +36,37 @@ class FileMarkers(unittest.TestCase):
         self.assertEqual(w.run_once(), [])
 
 
+class Params(unittest.TestCase):
+    """TK-224: пути и паттерны машины задаются аргументами юнита, без форка файла."""
+    def test_main_passes_unit_settings(self):
+        import sys
+        seen = {}
+
+        class Stop(Exception):
+            pass
+
+        class FakeWatcher:
+            def __init__(self, host, patterns, exclude, pg, **kw):
+                seen.update(host=host, patterns=patterns, exclude=exclude, pg=pg, **kw)
+
+            def run_once(self):
+                raise Stop
+
+        argv, orig = sys.argv, W.Watcher
+        sys.argv = ["watcher.py", "--host", "calc", "--patterns", "tk*", "alpha-*", "--exclude", "alpha-bus",
+                    "--progress-glob", "/data/progress/*.json", "--watch-file", "/data/progress/watch.list"]
+        W.Watcher = FakeWatcher
+        orig_sleep, W.time.sleep = W.time.sleep, lambda s: (_ for _ in ()).throw(Stop())
+        try:
+            with self.assertRaises(Stop):
+                W.main()
+        finally:
+            sys.argv, W.Watcher, W.time.sleep = argv, orig, orig_sleep
+        self.assertEqual(seen["watch_file"], "/data/progress/watch.list")
+        self.assertEqual(seen["patterns"], ["tk*", "alpha-*"])
+        self.assertEqual(seen["pg"], "/data/progress/*.json")
+
+
 class Outbox(unittest.TestCase):
     """TK-221: шина лежит в момент события — оно в постоянном spool, уходит по таймеру сторожа после возврата, без дублей."""
 
