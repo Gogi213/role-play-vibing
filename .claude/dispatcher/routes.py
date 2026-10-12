@@ -32,13 +32,16 @@ HINT = {
 
 
 def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = "", form: str = "",
-          root: Path = Path(".")) -> str:
+          root: Path = Path("."), owner: str = "") -> str:
     """Пустая строка — команда годна; иначе — что исправить (текст отказа в сессии роли)."""
     if result not in RESULTS:
         return f"неизвестный итог {result!r}; допустимо: {', '.join(RESULTS)}"
     who, need = RULES[result]
     if not role and result == "done":
         role = "ceo"
+    formal = role == "judge" and (owner or "").strip() == "judge" and (result == "done" or (result == "accept" and not (pr or sha)))
+    if formal:  # TK-225 (В-229 п.4): тикет Судьи закрывается только по артефакту в git, не вручную
+        who = who | {"judge"}
     if role not in who:
         return f"итог {result} — не для роли {role or '(не роль)'}; вправе: {', '.join(sorted(who))}"
     why = (why or "").strip()
@@ -57,6 +60,9 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
         except (OSError, ValueError):
             return False
 
+    if formal:
+        _, err = tracked_at_head(root, path)
+        return err
     if "|" in need:  # Судья: работа в PR (голова) либо без PR (артефакт проверки)
         pr_form = need.partition("|")[0]
         if pr or sha:
@@ -78,6 +84,28 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
         if T.parse_wait_for(form.strip()) is None:
             return f"wait: форма не понята. Допустимо: {T.WAIT_FOR_FORMATS}"
     return ""
+
+
+def tracked_at_head(root: Path, path: str) -> tuple[str, str]:
+    """(sha HEAD, "") если path — файл проекта, tracked в git на HEAD и не изменён в рабочем дереве; иначе ("", отказ)."""
+    import subprocess
+    hint = "итог по тикету Судьи требует --path <файл, закоммиченный в git (tracked на HEAD, без правок в рабочем дереве)>"
+    try:
+        base = Path(root).resolve()
+        f = (Path(path) if Path(path).is_absolute() else base / path).resolve()
+        if not (path or "").strip() or f == base or not f.is_file() or not f.is_relative_to(base):
+            return "", hint
+        rel = f.relative_to(base).as_posix()
+
+        def git(*a):
+            return subprocess.run(["git", "-C", str(base), *a], capture_output=True, text=True, timeout=30)
+        if git("ls-files", "--error-unmatch", "--", rel).returncode or git("cat-file", "-e", f"HEAD:{rel}").returncode:
+            return "", f"{hint}: {rel} не в git на HEAD"
+        if git("diff", "--quiet", "HEAD", "--", rel).returncode:
+            return "", f"{hint}: {rel} изменён в рабочем дереве — закоммить"
+        return git("rev-parse", "--short", "HEAD").stdout.strip(), ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return "", hint
 
 
 def T_author_is(author: str, role: str) -> bool:
@@ -120,6 +148,8 @@ def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: st
         return {"status": "done", "next": ""}
     if result == "pr":
         return {"status": "in_review", "next": rev or "judge"}
+    if result == "accept" and owner == "judge" and role == "judge":  # TK-225: тикет Судьи — проверка уже по артефакту
+        return {"status": "done", "next": ""}
     if result == "accept":  # без PR; с PR — cmd_accept. Закрываем, только если владелец сдавал done; иначе проверка
         if owner_last == "done":  # шага — владелец продолжает
             return {"status": "done", "next": ""}

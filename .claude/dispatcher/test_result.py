@@ -182,6 +182,43 @@ class ResultTests(unittest.TestCase):
         self.refused("judge", "continue")                         # continue не для Судьи
         self.refused("", "done")                                  # CEO: done требует --path
 
+    # --- TK-225: формальное закрытие тикета Судьи по артефакту в git
+    def _git(self, *a):
+        import subprocess
+        subprocess.run(["git", "-C", str(self.base), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True,
+                       capture_output=True)
+
+    def test_judge_owned_ticket_closes_only_by_tracked_clean_artifact(self):
+        T.write_header_updates(self.path, {"owner": "judge", "reviewer": ""}, now=NOW)
+        self._git("init", "-q")
+        (self.base / "art.md").write_text("x", encoding="utf-8")
+        (self.base / "wip.md").write_text("x", encoding="utf-8")
+        self._git("add", "art.md")
+        self._git("commit", "-qm", "a")
+        self.refused("judge", "done")                      # нет пути
+        self.refused("judge", "done", path="wip.md")       # не tracked
+        (self.base / "art.md").write_text("y", encoding="utf-8")
+        self.refused("judge", "done", path="art.md")       # изменён в рабочем дереве
+        self.refused("judge", "accept", path="wip.md")
+        self._git("commit", "-qam", "b")
+        self.assertEqual(self.res("judge", "done", path="art.md"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("done", ""))
+        self.assertRegex(t.log[-1].text, r"закрыт по артефакту art\.md@[0-9a-f]{7,}")
+
+    def test_judge_owned_accept_by_artifact_closes_not_loops(self):
+        T.write_header_updates(self.path, {"owner": "judge", "reviewer": "", "status": "in_progress"}, now=NOW)
+        self._git("init", "-q")
+        (self.base / "art.md").write_text("x", encoding="utf-8")
+        self._git("add", "art.md")
+        self._git("commit", "-qm", "a")
+        self.assertEqual(self.res("judge", "accept", path="art.md"), 0)
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("done", ""))
+
+    def test_judge_done_on_other_owner_ticket_still_refused(self):
+        (self.base / "art.md").write_text("x", encoding="utf-8")
+        self.refused("judge", "done", path="art.md")
+
     # --- TK-090: закрытие CEO, done после принятых PR, continue
     def test_ceo_closes_ticket_with_done(self):
         (self.base / "out.md").write_text("x", encoding="utf-8")
