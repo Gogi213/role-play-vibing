@@ -70,7 +70,8 @@ python <плагин>/.claude/dispatcher/supervise.py --uninstall [--project <п
 | `accept` | Судья | `--pr N --sha H [--repo <владелец/репо>]` (репо — --repo или RPV_CI_REPO, без догадки по cwd; PR и голова сверяются у GitHub, нет — отказ) либо `--path <артефакт проверки>` (без PR) | PR: `accepted:` (список), `waiting` + `wait_for: merged:<репо>#N`, вливает merge_rule, после влития владелец будится (done или следующий шаг), Судья — нет; если PR уже влит, все PR тикета влиты и последний итог владельца — done: сразу `done`, без ожидания; без PR: `done`, если последний итог владельца — done, иначе `in_progress` + next владелец (проверка перед необратимым шагом) |
 | `return` | Судья | `--sha H` либо `--path <артефакт проверки>` | `in_progress`, next — владелец |
 | `blocked` | любая | — | `blocked`, next — CEO |
-| `ask-owner` | любая | — | `needs_owner`, next — CEO |
+| `ask-owner` | не Судья | — | `blocked`, next — Судья (В-206) |
+| `ask-owner` | Судья | — | `needs_owner`, next — CEO |
 | `wait` | любая | `--form` (годная форма wait_for) | `waiting` + `wait_for` |
 | `continue` | исследователь, инженер | — | `in_progress`, next — та же роль (следующий запуск; длинная работа кусками), не более 5 подряд |
 
