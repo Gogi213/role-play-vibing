@@ -356,7 +356,7 @@ WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "calc").split(","
 _LINK = None
 # TK-217: детектор «диспетчер слеп» — недоступность машины с ожиданиями/шины дольше порога → тревога вне calc (вердикт Судьи 12.10)
 BLIND = blind.Tracker(float(P.env("BLIND_ALERT_S", str(blind.ALERT_S))), float(P.env("BLIND_REPEAT_S", str(blind.REPEAT_S))))
-WAIT_RECON_BLIND_S = 60.0  # пока цель недоступна — сверка раз в минуту, чтобы после возврата связи проснуться ≤ 60 с
+WAIT_RECON_BLIND_S = 30.0  # пока цель недоступна — сверка раз в 30 с (+ссылка таймаут 20 с), чтобы после возврата связи проснуться ≤ 60 с (стенд 12.10: 45 с таймаут + 60 с период дали 150 с)
 _RECON_MISS = set()  # ключи, по которым «пропуск» уже записан и тревога уже ушла
 _WL_REG = set()  # (алиас, путь), чья регистрация у сторожа подтверждена ответом машины
 _RECON_LAST = 0.0
@@ -686,7 +686,7 @@ def _reconcile() -> None:
 def _reconcile_alias(alias: str, keys: list) -> None:
     _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
     try:
-        r = hide.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=45)
+        r = hide.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=20 if BLIND.any_down() else 45)
     except Exception as e:
         _blind_note(alias, False)
         _wait_err(f"reconcile:{alias}", f"ssh: {type(e).__name__}: {e}")
