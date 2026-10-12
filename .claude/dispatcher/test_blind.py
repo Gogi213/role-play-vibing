@@ -50,3 +50,23 @@ def test_flap_keeps_original_since():
     t.record("ssh:calc", False, 0)
     t.record("ssh:calc", False, 200)
     assert t.evaluate(300, {"ssh:calc"}) == [("alert", "ssh:calc", 300)]
+
+
+def test_alert_file_removed_when_target_leaves_active(tmp_path, monkeypatch):
+    import time
+    import dispatch as D
+    monkeypatch.setattr(D, "DISPATCHER_DIR", tmp_path)
+    monkeypatch.setattr(D, "CEO_INBOX", tmp_path / "ceo-inbox.md")
+    monkeypatch.setattr(D, "CEO_WAKE_LOG", tmp_path / "ceo-wake.log")
+    monkeypatch.setattr(D, "TICKETS_DIR", tmp_path / "tickets")
+    monkeypatch.setattr(D, "_blind_sound", lambda: None)
+    monkeypatch.setattr(D, "BLIND", blind.Tracker(alert_s=300, repeat_s=1800))
+    monkeypatch.setattr(D, "_WAIT_WATCH", {("calc", "host", "x"): 1})
+    D.BLIND.record("ssh:calc", False, time.time() - 400)
+    D._blind_tick(None)
+    f = tmp_path / "ALERT-BLIND.txt"
+    assert f.exists() and "ssh:calc" in f.read_text(encoding="utf-8")
+    assert "blind" in (tmp_path / "ceo-wake.log").read_text(encoding="utf-8")
+    monkeypatch.setattr(D, "_WAIT_WATCH", {})  # ожидание снято -> acts пуст, файл обязан уйти
+    D._blind_tick(None)
+    assert not f.exists()

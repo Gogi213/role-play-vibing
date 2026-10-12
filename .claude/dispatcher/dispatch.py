@@ -735,20 +735,17 @@ def _blind_tick(link) -> None:
         BLIND.record("bus", bool(link.disp.up), now)
     active = {f"ssh:{k[0]}" for k in list(_WAIT_WATCH)} | ({"bus"} if link is not None else set())
     acts = BLIND.evaluate(now, active)
-    if not acts:
-        return
     for act, tgt, secs in acts:
         text = (f"диспетчер слеп: {tgt} недоступна {secs} с" if act != "recovered"
                 else f"зрение вернулось: {tgt} снова отвечает (простой {secs} с)")
         try:
-            with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-                fh.write(f"{T.now_iso()}\tblind\t{act}\t{text}\n")
+            _ceo_file_write("*", "blind", text, fallback=True)  # стандарт сигналов; шину не трогает (она может быть целью)
         except OSError:
             pass
         if act == "recovered":
             _RECON_LAST = 0.0  # сверка сразу
             _WAIT_NEW.set()
-    down = BLIND.alerted_targets()
+    down = BLIND.alerted_targets()  # файл синхронен набору каждый тик: цель ушла из active — файл снимается
     path = DISPATCHER_DIR / "ALERT-BLIND.txt"
     try:
         if down:
