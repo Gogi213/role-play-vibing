@@ -4767,6 +4767,52 @@ class WaitReconcileTest(unittest.TestCase):
         D._reconcile()
         self.assertNotIn(("calc", "path", "/data/a.done"), D._WAIT_CACHE)
 
+    def test_blind_tick_alert_per_machine_and_recovery(self):
+        """TK-217: ssh 255 к calc дольше порога → ALERT-BLIND.txt с именем машины и строка в ceo-wake.log; возврат — «зрение
+        вернулось», файл снят, сверка запрошена сразу. vps без ожиданий не тревожит."""
+        import tempfile as _tf
+        old = (D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR)
+        tmp = Path(_tf.mkdtemp())
+        D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.TICKETS_DIR = tmp, tmp / "ceo-wake.log", tmp / "tickets"
+        D.TICKETS_DIR.mkdir()
+        D.BLIND = D.blind.Tracker(alert_s=300, repeat_s=1800)
+        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        try:
+            D.BLIND.record("ssh:calc", False, time.time() - 400)
+            D.BLIND.record("ssh:vps", False, time.time() - 400)
+            D.hide.run  # noqa: B018 — звук в тесте не нужен
+            orig, D._blind_sound = D._blind_sound, lambda: None
+            D._blind_tick(None)
+            D._blind_sound = orig
+            alert = (tmp / "ALERT-BLIND.txt").read_text(encoding="utf-8")
+            self.assertIn("ssh:calc", alert)
+            self.assertNotIn("ssh:vps", alert)
+            self.assertIn("диспетчер слеп: ssh:calc", D.CEO_WAKE_LOG.read_text(encoding="utf-8"))
+            D._RECON_LAST = time.time()
+            D.BLIND.record("ssh:calc", True, time.time())
+            D._blind_tick(None)
+            self.assertFalse((tmp / "ALERT-BLIND.txt").exists())
+            self.assertIn("зрение вернулось: ssh:calc", D.CEO_WAKE_LOG.read_text(encoding="utf-8"))
+            self.assertEqual(D._RECON_LAST, 0.0)
+        finally:
+            D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
+            D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR = old
+
+    def test_reconcile_ssh_255_feeds_blind_tracker(self):
+        old = D.BLIND
+        D.BLIND = D.blind.Tracker()
+        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        try:
+            self._ssh(b"", rc=255)
+            D._reconcile()
+            self.assertTrue(D.BLIND.any_down())
+            self._ssh(b"@@0\n@@reg\n@@rc 1\n")
+            D._reconcile()
+            self.assertFalse(D.BLIND.any_down())
+        finally:
+            D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
+            D.BLIND = old
+
     def test_ssh_calls_are_logged_with_reason(self):
         import tempfile as _tf
         old = D.DISPATCHER_DIR
