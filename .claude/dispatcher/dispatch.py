@@ -35,6 +35,7 @@ import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import bus_link  # noqa: E402
+import blind  # noqa: E402
 import downtime  # noqa: E402
 import haiku_aux as HA  # noqa: E402
 
@@ -353,6 +354,9 @@ _WAIT_NEW = threading.Event()
 WAIT_RECON_S = float(P.env("DISPATCH_WAIT_RECON_S", "300"))  # сверка всех ждущих host:… одним ssh на машину
 WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "calc").split(",") if a.strip()}  # машины со сторожем: пропуск события там — тревога
 _LINK = None
+# TK-217: детектор «диспетчер слеп» — недоступность машины с ожиданиями/шины дольше порога → тревога вне calc (вердикт Судьи 12.10)
+BLIND = blind.Tracker(float(P.env("BLIND_ALERT_S", str(blind.ALERT_S))), float(P.env("BLIND_REPEAT_S", str(blind.REPEAT_S))))
+WAIT_RECON_BLIND_S = 30.0  # пока цель недоступна — сверка раз в 30 с (+ссылка таймаут 20 с), чтобы после возврата связи проснуться ≤ 60 с (стенд 12.10: 45 с таймаут + 60 с период дали 150 с)
 _RECON_MISS = set()  # ключи, по которым «пропуск» уже записан и тревога уже ушла
 _WL_REG = set()  # (алиас, путь), чья регистрация у сторожа подтверждена ответом машины
 _RECON_LAST = 0.0
@@ -458,13 +462,13 @@ def _wait_poller() -> None:
                 _host_probe(*ckey)
             except Exception as e:
                 _wait_err(f"poller:{ckey}", f"{type(e).__name__}: {e}")
-        if _WAIT_WATCH and time.time() - _RECON_LAST >= WAIT_RECON_S:
+        if _WAIT_WATCH and time.time() - _RECON_LAST >= (WAIT_RECON_BLIND_S if BLIND.any_down() else WAIT_RECON_S):
             _RECON_LAST = time.time()
             try:
                 _reconcile()
             except Exception as e:
                 _wait_err("reconcile", f"{type(e).__name__}: {e}")
-        _WAIT_NEW.wait(min(WAIT_POLL_S, WAIT_RECON_S))
+        _WAIT_NEW.wait(min(WAIT_POLL_S, WAIT_RECON_BLIND_S if BLIND.any_down() else WAIT_RECON_S))
         _WAIT_NEW.clear()
 
 
@@ -576,6 +580,7 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
     _log_ssh_call(alias, what, arg, "первая" if ckey not in _WAIT_CACHE else "событие-юнита")
     try:
         r = hide.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
+        _blind_note(alias, r.returncode != 255)
         out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
         if out.startswith("@@WL\n") or out.strip() == "@@WL":
             _WL_REG.add((alias, arg))
@@ -594,6 +599,7 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
         elif r.returncode != 1:  # 1 — файла нет (штатно); остальное (255…) — сбой ssh/хоста
             _wait_err(label, f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
     except Exception as e:
+        _blind_note(alias, False)
         _wait_err(label, f"ssh: {type(e).__name__}: {e}")
     _WAIT_CACHE[ckey] = (now_ts, result)
     return result
@@ -664,34 +670,94 @@ def _recon_note_miss(key, result: bool) -> None:
 
 def _reconcile() -> None:
     """Страховка: раз в WAIT_RECON_S один ssh на машину проверяет ВСЕ ждущие host:… и повторяет регистрацию путей
-    у сторожа, не подтверждённую ранее. Пропущенное событие или сорванная регистрация стоят не дороже одного шага сверки."""
+    у сторожа, не подтверждённую ранее. Пропущенное событие или сорванная регистрация стоят не дороже одного шага сверки.
+    Машины — параллельно (TK-217: таймаут одной не задерживает другую, иначе 60-секундная сверка при слепоте не держится)."""
     by_alias = {}
     for k in list(_WAIT_WATCH):
         by_alias.setdefault(k[0], []).append(k)
-    for alias, keys in by_alias.items():
-        keys.sort()
-        _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
+    threads = [threading.Thread(target=_reconcile_alias, args=(alias, sorted(keys)), daemon=True)
+               for alias, keys in by_alias.items()]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(60)
+
+
+def _reconcile_alias(alias: str, keys: list) -> None:
+    _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
+    try:
+        r = hide.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=20 if BLIND.any_down() else 45)
+    except Exception as e:
+        _blind_note(alias, False)
+        _wait_err(f"reconcile:{alias}", f"ssh: {type(e).__name__}: {e}")
+        return
+    out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
+    if r.returncode == 255 or not out.strip():
+        _blind_note(alias, False)
+        _wait_err(f"reconcile:{alias}", f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
+        return
+    _blind_note(alias, True)
+    now_ts = time.time()
+    for i, v in _parse_recon(out, len(keys)).items():
+        if v["rc"] is None:
+            continue
+        _, what, arg = keys[i]
+        if v["reg"]:
+            _WL_REG.add((alias, arg))
+        result = _recon_result(alias, what, arg, v)
+        if result is None:
+            continue
+        _recon_note_miss(keys[i], result)
+        _WAIT_CACHE[keys[i]] = (now_ts, result)
+
+
+# --- слепота (TK-217) --------------------------------------------------------------------------
+
+def _blind_note(alias: str, ok: bool) -> None:
+    BLIND.record(f"ssh:{alias}", ok, time.time())
+
+
+def _blind_sound() -> None:
+    try:
+        import winsound
+        for _ in range(3):
+            winsound.Beep(1000, 400)
+    except Exception:
+        pass  # не Windows/нет звука — остаются файл и ceo-wake.log
+
+
+def _blind_tick(link) -> None:
+    """Раз в тик: состояние шины → трекер; тревога по каждой цели отдельно (ALERT-BLIND.txt + звук + ceo-wake.log).
+    Канал не использует ни calc, ни шину. Возврат цели — строка «зрение вернулось» и немедленная сверка."""
+    global _RECON_LAST
+    now = time.time()
+    if link is not None and link.disp.up is not None:
+        BLIND.record("bus", bool(link.disp.up), now)
+    active = {f"ssh:{k[0]}" for k in list(_WAIT_WATCH)} | ({"bus"} if link is not None else set())
+    acts = BLIND.evaluate(now, active)
+    for act, tgt, secs in acts:
+        text = (f"диспетчер слеп: {tgt} недоступна {secs} с" if act != "recovered"
+                else f"зрение вернулось: {tgt} снова отвечает (простой {secs} с)")
         try:
-            r = hide.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=45)
-        except Exception as e:
-            _wait_err(f"reconcile:{alias}", f"ssh: {type(e).__name__}: {e}")
-            continue
-        out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
-        if r.returncode == 255 or not out.strip():
-            _wait_err(f"reconcile:{alias}", f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
-            continue
-        now_ts = time.time()
-        for i, v in _parse_recon(out, len(keys)).items():
-            if v["rc"] is None:
-                continue
-            _, what, arg = keys[i]
-            if v["reg"]:
-                _WL_REG.add((alias, arg))
-            result = _recon_result(alias, what, arg, v)
-            if result is None:
-                continue
-            _recon_note_miss(keys[i], result)
-            _WAIT_CACHE[keys[i]] = (now_ts, result)
+            _ceo_file_write("*", "blind", text, fallback=True)  # стандарт сигналов; шину не трогает (она может быть целью)
+        except OSError:
+            pass
+        if act == "recovered":
+            _RECON_LAST = 0.0  # сверка сразу
+            _WAIT_NEW.set()
+    down = BLIND.alerted_targets()  # файл синхронен набору каждый тик: цель ушла из active — файл снимается
+    path = DISPATCHER_DIR / "ALERT-BLIND.txt"
+    try:
+        if down:
+            lines = [f"{t}: недоступна с {T.now_iso(datetime.fromtimestamp(since).astimezone())}" for t, since in sorted(down.items())]
+            waits = ", ".join(sorted(t.id for t in map(T.read_ticket, T.list_tickets(TICKETS_DIR)) if t.status == "waiting"))
+            path.write_text("ДИСПЕТЧЕР СЛЕП (TK-217)\n" + "\n".join(lines) + f"\nждут (waiting): {waits or '—'}\n", encoding="utf-8")
+        elif path.exists():
+            path.unlink()
+    except OSError:
+        pass
+    if any(a in ("alert", "repeat") for a, _, _ in acts):
+        threading.Thread(target=_blind_sound, daemon=True, name="blind-sound").start()
 
 
 def _ssh_stderr(r) -> str:
@@ -2724,6 +2790,7 @@ def main(argv=None) -> int:
         acks = link.take_ack() if link else set()  # события, полученные ДО этого тика — подтверждаем после него
         try:
             tick()
+            _blind_tick(link)
             if link:
                 if not bus_link.ack("dispatcher", acks):
                     link.give_back(acks)  # ack не дошёл — повтор на следующем тике (TK-055)
