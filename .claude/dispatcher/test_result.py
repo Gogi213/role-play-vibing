@@ -146,7 +146,7 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", "judge"))
         self.assertEqual(self.res("judge", "blocked"), 0)  # Судья сам встал — Судье некуда, ждёт владельца
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", ""))
-        self.assertEqual(self.res("engineer", "ask-owner"), 0)
+        self.assertEqual(self.res("judge", "ask-owner"), 0)
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_sets_waiting_with_form(self):
@@ -238,13 +238,15 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(T.read_ticket(self.path).status, "blocked")
 
     # --- TK-218
-    def test_ask_owner_method_goes_to_judge(self):
-        self.assertEqual(self.res("engineer", "ask-owner", method=True), 0)
-        t = self.tkt()
-        self.assertEqual((t.status, t.header.get("next")), ("blocked", "judge"))
-        T.write_header_updates(self.path, {"status": "in_progress", "next": ""}, now=NOW)
-        self.assertEqual(self.res("engineer", "ask-owner"), 0)  # без флага — прежний путь владельцу
-        self.assertEqual(self.tkt().status, "needs_owner")
+    def test_ask_owner_non_judge_goes_to_judge_judge_to_owner(self):
+        for role in ("engineer", "researcher"):
+            T.write_header_updates(self.path, {"status": "in_progress", "next": ""}, now=NOW)
+            self.assertEqual(self.res(role, "ask-owner"), 0)
+            t = self.tkt()
+            self.assertEqual((t.status, t.header.get("next")), ("blocked", "judge"))
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        self.assertEqual(self.res("judge", "ask-owner"), 0)
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_refuses_already_met_file_unless_allowed(self):
         (self.base / "old.done").write_text("x", encoding="utf-8")

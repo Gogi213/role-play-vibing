@@ -141,7 +141,7 @@ def cmd_new(args) -> int:
         print("--kind без --executor haiku не имеет смысла", file=sys.stderr)
         return 1
 
-    if not getattr(args, "force", False) and (dup := T.similar_recent_ticket(TICKETS_DIR, args.title, args.owner)):
+    if not getattr(args, "force", False) and (dup := T.similar_recent_ticket(TICKETS_DIR, args.title)):
         print(f"new: похожий тикет за последний час уже есть — {dup}. Дубль? Допиши в него или создай с `--force`.",
               file=sys.stderr)
         return 1
@@ -240,14 +240,12 @@ def cmd_result(args) -> int:
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
-    routed = args.result
-    if args.result == "ask-owner" and getattr(args, "method", False) and role != "judge":
-        routed = "blocked"  # TK-218 п.6 (В-206): вопрос по методике/развилке решает Судья, не владелец
+    routed = "blocked" if args.result == "ask-owner" and role != "judge" else args.result  # TK-218 п.6 (В-206)
     upd = routes.route(role, routed, tkt.owner, tkt.header.get("reviewer", ""),
                        owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "")
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
-    print(f"{args.id}: итог {args.result}{' (методика → Судье)' if routed != args.result else ''} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
+    print(f"{args.id}: итог {args.result}{' (развилка → Судье)' if routed != args.result else ''} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
     return 0
 
 
@@ -496,8 +494,6 @@ def main(argv=None) -> int:
     p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
     p_result.add_argument("--form", default=None, help="wait: форма wait_for")
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
-    p_result.add_argument("--method", action="store_true",
-                          help="ask-owner: вопрос по методике/развилке — уходит Судье (В-206), а не владельцу")
     p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
     p_result.set_defaults(func=cmd_result)

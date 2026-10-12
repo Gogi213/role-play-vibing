@@ -128,6 +128,8 @@ def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: st
         return {"status": "in_progress", "next": owner}
     if result == "blocked":  # TK-094: задача встала → Судье (методика, развилки, гейты); Судья сам встал → владельцу
         return {"status": "blocked", "next": "" if role == "judge" else "judge"}
-    if result == "ask-owner":  # TK-094: только о содержании исследования; строка «ждёт вас», CEO не будится
+    if result == "ask-owner":  # TK-218 (В-206): не-Судья → Судье (методика, развилки), без флага; Судья → владельцу
+        if role != "judge":    # (вопрос о содержании исследования); строка «ждёт вас», CEO не будится
+            return {"status": "blocked", "next": "judge"}
         return {"status": "needs_owner", "next": ""}
     return {}  # wait: статус waiting + wait_for ставит cmd_wait

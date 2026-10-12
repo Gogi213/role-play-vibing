@@ -233,7 +233,7 @@ DUP_WINDOW_S = 3600
 DUP_RATIO = 0.8
 
 
-def similar_recent_ticket(tickets_dir, title: str, owner: str = "", now: datetime | None = None) -> str:
+def similar_recent_ticket(tickets_dir, title: str, now: datetime | None = None) -> str:
     """TK-218 п.6: тикет с похожим заголовком (difflib ≥ DUP_RATIO, без регистра) и `updated` не старше часа — «ID: заголовок»;
     пусто — дубля нет. Закрытые (done/stopped) не считаем: повтор после закрытия — новая работа."""
     import difflib
