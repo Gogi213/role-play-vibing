@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Клиент шины (TK-045). post() не бросает: при недоступности шины событие уходит в spool и дошлётся со следующим
-успешным вызовом (id события — ключ дедупа на шине). CLI: busclient.py send <адрес> [--payload JSON] [--id ID] [--strict]."""
+"""Клиент шины (TK-045). post() не бросает: при недоступности шины событие уходит в spool (~/.rpv/outbox.jsonl —
+переживает перезагрузку, TK-221) и дошлётся со следующим успешным вызовом или по таймеру сторожа (flush_spool; id события —
+ключ дедупа на шине). CLI: busclient.py send <адрес> [--payload JSON] [--id ID] [--strict]."""
 import argparse
+import glob
 import json
 import os
 import sys
-import tempfile
+import time
 import urllib.request
 import uuid
 
+ORPHAN_AGE_S = 60  # TK-221: копия досыла старше — её процесс упал
 DEFAULT_URL = ""  # шина выключена, пока не задан RPV_BUS_URL (README, «Шина событий»)
 
 
@@ -33,7 +36,7 @@ def config():
 
 
 def spool_path():
-    return _env("SPOOL") or os.path.join(tempfile.gettempdir(), "rpv-bus-spool.jsonl")
+    return _env("SPOOL") or os.path.join(os.path.expanduser("~"), ".rpv", "outbox.jsonl")
 
 
 def request(path, body=None, timeout=5):
@@ -45,28 +48,54 @@ def request(path, body=None, timeout=5):
 
 
 def _spool(ev):
+    os.makedirs(os.path.dirname(spool_path()) or ".", exist_ok=True)
     with open(spool_path(), "a", encoding="utf-8") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
 
+def _orphans(sp, tmp):
+    """Копии spool.<pid> упавших посреди досыла процессов: старше ORPHAN_AGE_S (живой досыл укладывается в секунды)."""
+    out = []
+    for p in glob.glob(glob.escape(sp) + ".*"):
+        try:
+            if p != tmp and time.time() - os.stat(p).st_mtime > ORPHAN_AGE_S:
+                out.append(p)
+        except OSError:
+            pass
+    return out
+
+
 def flush_spool(timeout=5):
+    """Досылает spool и осиротевшие копии; True — всё ушло. Файл до конца досыла остаётся на диске (.pid-копия),
+    упавший процесс не теряет события: копию подберёт следующий досыл (дубль на шине отсекает id)."""
     sp = spool_path()
     tmp = f"{sp}.{os.getpid()}"
-    try:
-        os.replace(sp, tmp)
-    except OSError:
-        return
-    with open(tmp, encoding="utf-8") as f:
-        lines = [ln for ln in f.read().splitlines() if ln.strip()]
-    os.remove(tmp)
+    done, lines = [], []
+    for src in [sp] + _orphans(sp, tmp):
+        dst = tmp if src == sp else src
+        try:
+            if src == sp:
+                os.replace(sp, tmp)
+            with open(dst, encoding="utf-8") as f:
+                lines += [ln for ln in f.read().splitlines() if ln.strip()]
+            done.append(dst)
+        except OSError:
+            pass
     for i, ln in enumerate(lines):
         try:
             request("/event", json.loads(ln), timeout)
         except Exception:
-            for rest in lines[i:]:
-                with open(sp, "a", encoding="utf-8") as f:
-                    f.write(rest + "\n")
-            return
+            with open(sp, "a", encoding="utf-8") as f:
+                f.writelines(rest + "\n" for rest in lines[i:])
+            break
+    else:
+        i = None
+    for p in done:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    return i is None
 
 
 def post(addr, payload=None, eid=None, timeout=5, spool=True):
@@ -81,8 +110,8 @@ def post(addr, payload=None, eid=None, timeout=5, spool=True):
         if spool:
             try:
                 _spool(ev)
-            except OSError:
-                pass
+            except OSError as e2:
+                print(f"[bus] {addr}: spool не записан ({e2}) — событие потеряно", file=sys.stderr)
         return None
     flush_spool(timeout)
     return res
