@@ -67,3 +67,25 @@ class Warm(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WarmLog(unittest.TestCase):
+    def test_usage_line_in_runs_log(self):
+        log = Path(_SANDBOX) / "runs.log"
+        with mock.patch.object(D, "RUNS_LOG", log):
+            D._warm_log("TK-1", "engineer", '{"usage":{"input_tokens":3,"output_tokens":5,'
+                        '"cache_read_input_tokens":90000,"cache_creation_input_tokens":40}}')
+        line = log.read_text(encoding="utf-8")
+        self.assertIn("kind=warm", line)
+        self.assertIn("cr_tok=90000 cw_tok=40", line)
+        self.assertTrue(line.endswith("\n") and line.count("\n") == 1)
+
+    def test_no_second_ping_while_warming(self):
+        alive = mock.Mock()
+        alive.is_alive.return_value = True
+        D.WARMING["TK-1"] = alive
+        try:
+            n = Warm().run_warm(_tkt(), Warm().state())[0]
+        finally:
+            D.WARMING.clear()
+        self.assertEqual(n, 0)

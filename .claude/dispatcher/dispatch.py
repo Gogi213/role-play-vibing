@@ -2651,10 +2651,24 @@ WARM_PROMPT = "Подогрев кэша диспетчером: ответь о
 WARMING: dict = {}  # tid -> Thread идущего подогрева
 
 
-def _warm_ping(cmd: list, env: dict) -> None:
+def _warm_log(tid: str, role: str, out: str) -> None:
+    """Строка kind=warm в runs.log: токены ping (in/cache-read/cache-write/out) — для сверки экономии."""
     try:
-        _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-               **hide.hidden_console()).wait(timeout=300)
+        u = (json.loads(out).get("usage") or {})
+    except Exception:
+        u = {}
+    with open(RUNS_LOG, "a", encoding="utf-8") as fh:
+        fh.write(f"{T.now_iso()} {tid} {role} kind=warm in_tok={u.get('input_tokens', '-')} "
+                 f"out_tok={u.get('output_tokens', '-')} cr_tok={u.get('cache_read_input_tokens', '-')} "
+                 f"cw_tok={u.get('cache_creation_input_tokens', '-')}\n")
+
+
+def _warm_ping(cmd: list, env: dict, tid: str = "-", role: str = "-") -> None:
+    try:
+        pr = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, **hide.hidden_console())
+        out, _ = pr.communicate(timeout=300)
+        _warm_log(tid, role, out or "")
     except Exception as e:
         print(f"[dispatch] подогрев: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -2693,7 +2707,7 @@ def warm_waiting_sessions(state: dict, now) -> int:
                    "--model", model, "--effort", effort] + role_mcp_args(f"warm-{tid}") + ["--resume", sid]
             env = {k: v for k, v in os.environ.items() if "HOST_SESSION" not in k.upper()}
             env.update(RPV_ROLE=role, RPV_TICKET=tid, RPV_PROJECT=str(PROJECT_ROOT), RPV_WARM="1")
-            th = threading.Thread(target=_warm_ping, args=(cmd, env), daemon=True)
+            th = threading.Thread(target=_warm_ping, args=(cmd, env, tid, role), daemon=True)
             WARMING[tid] = th
             th.start()
             warm[tid] = {"ts": T.now_iso(now), "n": int(entry.get("n", 0)) + 1}
@@ -2781,6 +2795,8 @@ def tick(now=None) -> int:
             break
         if tid in RUNNING or path.stem in RUNNING:
             continue  # на один тикет — один запуск роли (RUNNING по stem файла; tkt.id из шапки мог разойтись с ним)
+        if tid in WARMING and WARMING[tid].is_alive():
+            continue  # TK-226: идёт подогрев кэша этой сессии — два --resume параллельно нельзя, следующий тик
         if _role_busy(decision.role):
             continue  # у роли уже предел запусков (на любых задачах) — ждёт следующего тика
         if _rate_limited(state, tid, now):
