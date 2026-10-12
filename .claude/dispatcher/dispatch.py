@@ -2640,6 +2640,69 @@ def sweep_closed_worktrees() -> None:
         print(f"[dispatch] worktree sweep: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
 
+# --- TK-226: подогрев кэша сессий ожидающих ролей -------------------------------------------------
+# TTL кэша API — 1 ч; ожидание дольше = весь контекст (замер 10–12.10: 47 пробуждений после > 60 мин, cache_write
+# медиана 68 тыс. против 8 тыс. у обычных) пишется заново по 2×. Раз в WARM_EVERY_S минимальный `--resume` в ту же
+# сессию читает кэш (≈0,1×) и продлевает TTL. Выключено по умолчанию: RPV_CACHE_WARM=1.
+WARM_ENABLED = P.env("CACHE_WARM") == "1"
+WARM_EVERY_S = float(P.env("CACHE_WARM_EVERY_S", 3000.0))    # 50 мин < TTL 1 ч
+WARM_MAX_S = float(P.env("CACHE_WARM_MAX_S", 12 * 3600.0))   # потолок подогрева одного ожидания
+WARM_PROMPT = "Подогрев кэша диспетчером: ответь одним словом «ок», ничего не читай и не пиши."
+WARMING: dict = {}  # tid -> Thread идущего подогрева
+
+
+def _warm_ping(cmd: list, env: dict) -> None:
+    try:
+        _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+               **hide.hidden_console()).wait(timeout=300)
+    except Exception as e:
+        print(f"[dispatch] подогрев: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def warm_waiting_sessions(state: dict, now) -> int:
+    """Подогрев кэша сессий владельцев тикетов в `waiting`: не пишет в тикет, не трогает лимиты запусков и RUNNING.
+    Возвращает число отправленных ping."""
+    if not WARM_ENABLED:
+        return 0
+    warm = state.setdefault("cache_warm", {})
+    sent = 0
+    for path in T.list_tickets(TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+            tid = tkt.id
+            role = tkt.owner
+            if tkt.status != "waiting" or not (tkt.header.get("wait_for") or "").strip() or role not in ROLE_KEYS:
+                continue
+            if tid in RUNNING or path.stem in RUNNING or (tid in WARMING and WARMING[tid].is_alive()):
+                continue
+            store = _resume_store(state, tid, role)
+            sid = store.get("session_id")
+            if not sid or store.get("last_context_tokens", 0) > ROTATE_TOKENS:
+                continue  # сессии нет или будет ротация — кэш старой не нужен
+            entry = warm.get(tid) or {}
+            since = datetime.fromisoformat(str(tkt.header.get("updated")))  # начало ожидания
+            if (now - since).total_seconds() > WARM_MAX_S:
+                continue
+            woken = state.get("sessions", {}).get(f"{tid}::{role}", {}).get("last_woken")
+            touched = [datetime.fromisoformat(x) for x in (entry.get("ts"), woken) if x]
+            if touched and (now - max(touched)).total_seconds() < WARM_EVERY_S:
+                continue
+            model = CLAUDE_HAIKU_MODEL if tkt.executor == "haiku" else ROLE_MODEL.get(role, CLAUDE_MODEL)
+            effort = "xhigh" if tkt.executor == "haiku" else effort_for(role, tkt)
+            cmd = [CLAUDE_BIN, "-p", WARM_PROMPT, "--output-format", "json", "--permission-mode", "bypassPermissions",
+                   "--model", model, "--effort", effort] + role_mcp_args(f"warm-{tid}") + ["--resume", sid]
+            env = {k: v for k, v in os.environ.items() if "HOST_SESSION" not in k.upper()}
+            env.update(RPV_ROLE=role, RPV_TICKET=tid, RPV_PROJECT=str(PROJECT_ROOT), RPV_WARM="1")
+            th = threading.Thread(target=_warm_ping, args=(cmd, env), daemon=True)
+            WARMING[tid] = th
+            th.start()
+            warm[tid] = {"ts": T.now_iso(now), "n": int(entry.get("n", 0)) + 1}
+            sent += 1
+        except Exception as e:
+            print(f"[dispatch] подогрев {path.stem}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    return sent
+
+
 def tick(now=None) -> int:
     now = now or datetime.now().astimezone()
     state = load_state()
@@ -2728,6 +2791,7 @@ def tick(now=None) -> int:
         launch_run(path, decision.role, state, now, reason=decision.reason)
         launched += 1
 
+    warm_waiting_sessions(state, now)
     idle_now = not RUNNING and not launched and not paused
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
