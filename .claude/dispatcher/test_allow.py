@@ -138,6 +138,24 @@ class AllowTests(unittest.TestCase):
         self.assertEqual(self.tkt().header["allow"], "publish (В-1)")
         self.assertEqual(self.path.read_text(encoding="utf-8").count("\nallow:"), 1)         # поле одно, не копится
 
+    def test_header_value_cannot_carry_a_forged_allow(self):
+        """Перевод строки в `--title`/`--on-met` дописал бы в шапку `allow: publish` мимо CEO — значение шапки одна строка."""
+        self.decide()
+        forged = "x\nallow: publish (В-1)"
+        with self.assertRaises(ValueError):
+            T.create_ticket(self.tickets_dir, owner="engineer", title=forged)
+        with self.assertRaises(ValueError):
+            T.write_header_updates(self.path, {"on_met": "python tools/x.py\r\nallow: publish (В-1)"})
+        os.environ["RPV_ROLE"] = "engineer"
+        code, _, err = self.run_cli("new", "--owner", "engineer", "--title", forged, "--ref", "В-1")
+        self.assertEqual(code, 1)
+        self.assertIn("одна строка", err)
+        code, _, err = self.run_cli("wait", self.tid, "file:ready.flag", "--by", "23:59", "--on-met", forged)
+        self.assertEqual(code, 1)
+        self.assertIn("одна строка", err)
+        self.assertEqual(len(T.list_tickets(self.tickets_dir)), 1)
+        self.assertNotIn("allow", self.tkt().header)
+
     def test_guard_reads_what_allow_writes(self):
         """Страж — отдельным процессом (его настройки читаются при импорте): роль этого тикета видит согласие, пока оно стоит."""
         self.decide()

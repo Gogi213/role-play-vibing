@@ -254,6 +254,14 @@ def similar_recent_ticket(tickets_dir, title: str, now: datetime | None = None) 
     return ""
 
 
+def check_header_values(values) -> None:
+    """Значение поля шапки — одна строка: перевод строки в `--title`/`--on-met` дописал бы в шапку чужое поле (`allow: publish`
+    — согласие владельца, которое ставит только CEO). ValueError — до записи."""
+    for v in values:
+        if "\n" in str(v) or "\r" in str(v):
+            raise ValueError("значение поля шапки тикета — одна строка (без перевода строки)")
+
+
 def check_wait_for_format(spec: str) -> None:
     """Пустой `wait_for` (снять ожидание) допустим; непустой неизвестной формы — ValueError с подсказкой форм."""
     spec = (spec or "").strip()
@@ -571,6 +579,7 @@ def read_ticket(path) -> Ticket:
 def write_header_updates(path, updates: dict, now: datetime = None, stamp_updated: bool = True) -> None:
     """Точечно правит строки шапки (значения `updates`), тело файла не трогает. Под блокировкой тикета, запись атомарная."""
     path = Path(path)
+    check_header_values(updates.values())
     if "wait_for" in updates:
         check_wait_for_format(updates["wait_for"])  # неизвестная форма — отказ до записи (иначе тикет ждёт вечно)
     with ticket_lock(path):
@@ -632,6 +641,7 @@ def create_ticket(tickets_dir, owner: str, title: str, reviewer: str = None,
                    description: str = "", wait_for: str = "", now: datetime = None,
                    prefix: str = "TK-", status: str = "todo", executor: str = None,
                    kind: str = None, effort: str = None) -> Path:
+    check_header_values((title, reviewer, executor, kind, effort, wait_for))
     check_wait_for_format(wait_for)
     tickets_dir = Path(tickets_dir)
     tickets_dir.mkdir(parents=True, exist_ok=True)
