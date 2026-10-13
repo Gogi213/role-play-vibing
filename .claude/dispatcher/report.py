@@ -449,6 +449,32 @@ def m_plugin(p: Period) -> str:
     return f"новых версий: {len(new)}" + (f" ({', '.join(n for _, n in new)})" if new else "") + f"; сейчас {PLUGIN_ROOT.name}"
 
 
+def m_overseer(p: Period) -> str:
+    """CP14, критерии 1 и 11. Находки Надзирателя, ушедшие CEO за период (правило «дорого» и находки Haiku, кроме
+    повторов в пределах суток), и цена его вызовов — механика — из `overseer.log`."""
+    lines = _read_lines(_dispatcher_dir(p.root) / "overseer.log")
+    if lines is None:
+        return _nodata("Надзиратель не работал: overseer.log нет")
+    looks, cost, kinds = 0, 0.0, Counter()
+    for ln in lines:
+        try:
+            j = json.loads(ln)
+        except ValueError:
+            continue
+        if not isinstance(j, dict) or not p.inside(_ts(j.get("ts"))):
+            continue
+        cost += float(j.get("cost") or 0.0)
+        if j.get("outcome") == "cost":
+            kinds["дорого"] += 1
+            continue
+        looks += 1
+        if j.get("outcome") == "accepted" and not j.get("suppressed"):
+            kinds[j.get("kind") or "?"] += 1
+    found = sum(kinds.values())
+    return (f"находок CEO {found}" + (f" ({', '.join(f'{k} {v}' for k, v in kinds.most_common())})" if found else "")
+            + f", взглядов {looks}, ${cost:.2f}")
+
+
 # (что, мера, норма) — по строке сообщения; порядок — как в README
 MEASURES = (
     ("Время от цели до принятого результата", m_goal_time, "падает от цели к цели"),
@@ -461,6 +487,7 @@ MEASURES = (
     ("Задания на машинах", m_jobs, "потерь 0"),
     ("Столкновения параллельной работы", m_conflicts, "около 0"),
     ("Правки плагина за неделю", m_plugin, "около 0"),
+    ("Надзиратель", m_overseer, "находки — по делу, цена — центы в день"),
 )
 
 

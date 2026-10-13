@@ -167,7 +167,8 @@ class ResultsTests(ReportCase):
             self.ticket(f"TK-{n:03d}", title=f"Результат {n}", ref=f"G-{n:03d}", updated=at(14, 9), log=[(at(14, 9), "judge", JUDGE_OK)])
         text, _ = R.build(self.period())
         self.assertLessEqual(len(text.splitlines()), R.MAX_LINES)
-        self.assertIn("…и ещё 5", text)
+        room = R.MAX_LINES - (5 + len(R.MEASURES))  # шапка, две пустые строки, два заголовка частей
+        self.assertIn(f"…и ещё {14 - room + 1}", text)
 
 
 class MeasureTests(ReportCase):

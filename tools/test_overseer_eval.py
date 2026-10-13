@@ -31,7 +31,7 @@ def E(h, m, role="engineer", text="текст", day=8):
 
 class NoClaude(unittest.TestCase):
     def setUp(self):
-        p = mock.patch.object(ov.subprocess, "run", side_effect=AssertionError("тест вызвал настоящий claude"))
+        p = mock.patch.object(ov.core.subprocess, "run", side_effect=AssertionError("тест вызвал настоящий claude"))
         p.start()
         self.addCleanup(p.stop)
 
@@ -278,10 +278,10 @@ class AgentTests(NoClaude):
         self.assertIn('{"verdict":"тихо"}', d["prompt"])
 
     def test_claude_bin_follows_env(self):
-        with mock.patch.dict(ov.os.environ, {"CLAUDE_BIN": "/нет/такого/claude"}):
+        with mock.patch.dict(ov.core.os.environ, {"CLAUDE_BIN": "/нет/такого/claude"}):
             self.assertEqual(ov.claude_bin(), "/нет/такого/claude")
-        with mock.patch.dict(ov.os.environ, {}, clear=False):
-            ov.os.environ.pop("CLAUDE_BIN", None)
+        with mock.patch.dict(ov.core.os.environ, {}, clear=False):
+            ov.core.os.environ.pop("CLAUDE_BIN", None)
             self.assertTrue(ov.claude_bin())
 
 
@@ -378,7 +378,7 @@ class FakeProject(NoClaude):
         with mock.patch.object(ov, "call_overseer", fake), redirect_stdout(io.StringIO()):
             ov.cmd_run(self.args(out))
         self.assertEqual({r["outcome"] for r in ov.read_rows(out)}, {"accepted", "rejected"})  # в окне 1 записи с цитатой ещё нет
-        with mock.patch.object(ov, "MIN_QUOTE", 100), redirect_stdout(io.StringIO()):
+        with mock.patch.object(ov.core, "MIN_QUOTE", 100), redirect_stdout(io.StringIO()):
             ov.cmd_regrade(self.args(out))
         rows = ov.read_rows(out)
         self.assertEqual(len(rows), 4)

@@ -2479,6 +2479,33 @@ def _daily_report(state: dict, now) -> None:
         _REPORT_PROC = _popen(cmd, cwd=str(PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
 
 
+OVERSEER_EVERY_S = 15 * 60.0  # CP14: Надзиратель — не чаще раза в 15 мин и только если тикеты менялись
+_OVERSEER_PROC = None  # процесс Надзирателя (overseer.py): короткоживущий, тик его не ждёт
+
+
+def _overseer(state: dict, now) -> None:
+    """CP14 (критерии 1, 3, 4, 10): раз в OVERSEER_EVERY_S, если с прошлого взгляда менялся хоть один тикет, — один взгляд
+    Надзирателя отдельным процессом (`overseer.py`: правило «дорого» и Haiku по новым записям; находки — строкой CEO).
+    Первый тик только ставит метку `overseer_at`; прошлый взгляд ещё идёт — ждём его."""
+    global _OVERSEER_PROC
+    if _OVERSEER_PROC is not None and _OVERSEER_PROC.poll() is None:
+        return
+    last = state.get("overseer_at")
+    if not last:
+        state["overseer_at"] = T.now_iso(now)
+        return
+    if (now - T.parse_dt(last)).total_seconds() < OVERSEER_EVERY_S:
+        return
+    changed = max((f.stat().st_mtime for f in TICKETS_DIR.glob("TK-*.md")), default=0.0)
+    if changed <= T.parse_dt(last).timestamp():
+        return
+    state["overseer_at"] = T.now_iso(now)
+    cmd = [sys.executable, str(CODE_DIR / "overseer.py"), "--project", str(PROJECT_ROOT)]
+    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+    with open(DISPATCHER_DIR / "overseer.run.log", "a", encoding="utf-8") as log:
+        _OVERSEER_PROC = _popen(cmd, cwd=str(PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
+
+
 def _account_downtime(state: dict, now, **flags) -> None:
     try:
         downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)  # минуты простоя — в отчёт (CP10)
@@ -2603,6 +2630,10 @@ def tick(now=None) -> int:
         _daily_report(state, now)
     except Exception as e:  # отчёт не должен ронять тик
         print(f"[dispatch] отчёт: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _overseer(state, now)
+    except Exception as e:  # Надзиратель не должен ронять тик
+        print(f"[dispatch] надзиратель: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
     return launched
