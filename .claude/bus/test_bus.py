@@ -42,7 +42,6 @@ class Core(unittest.TestCase):
         self.bus.post("задача.TK-1.задание.ход")
         self.assertEqual(self.addrs("ceo"), ["задача.TK-1.задание.упало"])
         self.assertEqual(self.addrs("dispatcher"), ["задача.TK-1.задание.упало"])
-        self.assertEqual(self.addrs("board"), [])
 
     def test_unrouted_is_journaled_only(self):
         r = self.bus.post("что.то.левое")

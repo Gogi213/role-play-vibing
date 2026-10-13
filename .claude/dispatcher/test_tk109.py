@@ -1,7 +1,6 @@
-"""Тесты TK-109 (В-209, критик-2 часть А): merge_rule пп.1/2/14, tick п.15, ответ с табло п.16, доказательство done п.3."""
+"""Тесты TK-109 (В-209, критик-2 часть А): merge_rule пп.1/2/14, tick п.15, доказательство done п.3."""
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import tempfile
@@ -93,36 +92,6 @@ class ProofTests(unittest.TestCase):  # п.3
             for bad in (".", "/", str(root), "docs", "", str(Path(o) / "b.md"), "../x", "нет.md"):
                 self.assertTrue(chk(bad), bad)
             self.assertEqual(chk("a.md"), "")
-
-
-class AnswerRetryTests(unittest.TestCase):  # п.16
-    def test_comment_timeout_keeps_answer_and_retries_once(self):
-        import ask
-        with tempfile.TemporaryDirectory() as d:
-            qdir = Path(d) / ".claude" / "pulse" / "questions"  # ask берёт корень проекта как parents[2]
-            qdir.mkdir(parents=True)
-            q = {"id": "q-TK-9-1", "process": "TK-9", "from": "engineer", "from_role": "engineer", "text": "?",
-                 "options": [{"key": "a", "label": "да", "effect": ""}], "since": "x", "answered_at": None}
-            (qdir / "q-TK-9-1.json").write_text(json.dumps(q), encoding="utf-8")
-            calls = []
-
-            def fake(cmd, **kw):
-                calls.append(cmd)
-                if len(calls) == 1:
-                    raise subprocess.TimeoutExpired(cmd, 15)
-                return subprocess.CompletedProcess(cmd, 0, "", "")
-            with mock.patch.object(ask.P, "questions_dir", return_value=qdir), mock.patch.object(ask.hide, "run", fake), \
-                    mock.patch.object(ask.D if hasattr(ask, "D") else D, "append_ceo_inbox", lambda *a, **k: None), \
-                    mock.patch.object(D, "TICKETS_DIR", qdir):
-                ok, _, warns = ask.answer_question("q-TK-9-1", "a")
-                self.assertTrue(ok)
-                self.assertTrue(warns)
-                self.assertEqual(ask.flush_pending(), 1)  # тик диспетчера досылает; новый ответ не нужен
-                self.assertEqual(len(calls), 2)
-                self.assertNotIn("log_pending", json.loads((qdir / "q-TK-9-1.json").read_text(encoding="utf-8")))
-                ok, _, _ = ask.answer_question("q-TK-9-1", "a")
-                self.assertFalse(ok)
-                self.assertEqual(len(calls), 2)
 
 
 class TickIsolationTests(Base):  # п.15 (песочница тикетов — из MergeRuleTests.setUp)

@@ -70,7 +70,7 @@ def reason(jid: str, tail: str) -> str:
     return out.splitlines()[0][:300] if out else ""
 
 
-# --- сопоставление «задание → тикет» (одно на сторож и табло) -------------------------------------------------
+# --- сопоставление «задание → тикет» (одно на сторож) ----------------------------------------------------------
 OWNERS_NAME = "job-owners.json"
 
 
@@ -95,7 +95,7 @@ def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
 
 
 def save_owners(dispatcher_dir, owners: dict) -> None:
-    """`{алиас: [задания]}` — это читает и табло проекта (кто хозяин юнита)."""
+    """`{алиас: [задания]}` — снимок «кто хозяин юнита» в `job-owners.json`."""
     p = Path(dispatcher_dir) / OWNERS_NAME
     T.atomic_write_text(p, json.dumps(owners, ensure_ascii=False, sort_keys=True))
 

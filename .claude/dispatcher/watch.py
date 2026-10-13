@@ -8,7 +8,7 @@ WATCH_DEDUP_REPEAT_HOURS, пока проблема не снята (п.2г). П
 v2 (02.10): orphan по закрытым (done/cancelled) тикетам молчат, по открытым повторяются не чаще раза в сутки.
 v3 (03.10, В-173): проверки трат (суточный/часовой расход, бюджет тикета) удалены — лимитов денег нет.
 v4 (TK-100 №6/№26): блок «вторая машина» (ALERT-*/HOLD/очередь/заморозка по ssh) и check_dispatcher_alive удалены —
-«диспетчер жив» остаётся у supervise и doctor; тревоги хоста — адаптер RPV_HOST_ALERTS_CMD.
+«диспетчер жив» остаётся у supervise и doctor.
 
 Запуск из папки плагина (проект — --project <путь>, иначе RPV_PROJECT / CLAUDE_PROJECT_DIR / ближайший каталог
 вверх с .claude/roles):
@@ -22,7 +22,6 @@ import json
 import os
 import re
 import socket
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -395,7 +394,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         import ci_watch
         run_probe = ci_watch.run_state
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, D._ssh_cmd))
-    owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет» (и для табло)
+    owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет»
     link = None  # связь ПК проверяется лениво, раз за проход
     for path in T.list_tickets(D.TICKETS_DIR):
         try:
@@ -727,29 +726,10 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
     return acted
 
 
-def check_host_alerts(run=hide.run) -> int:
-    """№17 аудита: адаптер проекта `RPV_HOST_ALERTS_CMD` печатает новые тревоги хоста по строке на тревогу; каждая
-    строка — «ждёт вас» на Диспетчерской (ask.new_notice, тот же непринятый текст не дублируется). Нет настройки — молчим.
-    Команда сама отвечает за «только новое»: принятая строка при повторной печати встанет снова. Возвращает число строк."""
-    cmd = os.environ.get("RPV_HOST_ALERTS_CMD", "").strip()
-    if not cmd:
-        return 0
-    import ask
-    try:
-        r = run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return 0
-    lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
-    for ln in lines:
-        ask.new_notice(D.PROJECT_ROOT, "host", ln[:300])
-    return len(lines)
-
-
 def collect_findings(now, alive_waits=()) -> list:
     findings = []
     findings += check_blocked_and_needs_owner(now)
     findings += check_orphan_tickets(now, alive_waits)
-    check_host_alerts()
     return findings
 
 

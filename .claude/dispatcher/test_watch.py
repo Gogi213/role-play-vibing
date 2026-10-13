@@ -286,17 +286,17 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_probe_progress_json_in_flight_is_producer_not_met(self):
         import subprocess as sp
-        orig, orig_ssh = W.subprocess.run, W.D._ssh_cmd
+        orig, orig_ssh = sp.run, W.D._ssh_cmd
         try:
             W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]  # хост из среды на раннере не задан
-            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
+            sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "producer")
-            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
+            sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "met")
-            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
+            sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.mark"), "met")
         finally:
-            W.subprocess.run, W.D._ssh_cmd = orig, orig_ssh
+            sp.run, W.D._ssh_cmd = orig, orig_ssh
 
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch
@@ -482,7 +482,7 @@ class TriageWaitsTests(WatchSandbox):
             self.assertEqual(lifewatch.reason("j1", "OSError"), "")
         self.assertEqual(lifewatch.reason("j1", "  "), "")
 
-    # --- общее сопоставление «задание → тикет» (сторож и табло) ---
+    # --- общее сопоставление «задание → тикет» ---
     def _owned(self, tid, state, jid="j1"):
         return lambda alias: [{"id": jid, "ticket": tid, "unit": "tk0s-x-" + jid, "state": state}]
 
@@ -913,23 +913,6 @@ class WatchLogTests(WatchSandbox):
             D.notify_wait_for_problem(T.read_ticket(p), state, self.now)
         self.assertEqual(inbox.call_count, 1)
         self.assertIn("posix-путь на Windows", inbox.call_args[0][2])
-
-
-class HostAlertsAdapterTests(WatchSandbox):
-    """№17: RPV_HOST_ALERTS_CMD → строки «ждёт вас» через ask.new_notice."""
-
-    def test_lines_become_notices_without_duplicates(self):
-        root = Path(self.tmp.name) / "proj"
-        out = types.SimpleNamespace(stdout="диск 95 %\n\nсвязь пропала\n")
-        with mock.patch.dict(os.environ, {"RPV_HOST_ALERTS_CMD": "x"}), mock.patch.object(W.D, "PROJECT_ROOT", root):
-            self.assertEqual(W.check_host_alerts(run=lambda *a, **k: out), 2)
-            W.check_host_alerts(run=lambda *a, **k: out)
-        qs = sorted((root / ".claude" / "pulse" / "questions").glob("q-host-*.json"))
-        self.assertEqual(len(qs), 2)
-
-    def test_no_setting_is_silent(self):
-        with mock.patch.dict(os.environ, {"RPV_HOST_ALERTS_CMD": ""}):
-            self.assertEqual(W.check_host_alerts(run=lambda *a, **k: 1 / 0), 0)
 
 
 if __name__ == "__main__":

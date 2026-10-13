@@ -4,7 +4,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 import tempfile
 import unittest
 from unittest import mock
@@ -154,7 +153,7 @@ class ReleaseTests(unittest.TestCase):
 
 
 class AutoReleaseTests(unittest.TestCase):
-    """TK-094: автовыпуск — update, службы заново, проверка; провал → откат + сигнал владельцу."""
+    """TK-094: автовыпуск — update, службы заново, проверка; провал → откат + запись в журнал."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -171,22 +170,6 @@ class AutoReleaseTests(unittest.TestCase):
         f = self.proj / ".claude" / "dispatcher" / "release-journal.jsonl"
         return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
 
-    def notices(self):
-        qs = sorted((self.proj / ".claude" / "pulse" / "questions").glob("q-release-*.json"))
-        return [json.loads(p.read_text(encoding="utf-8")) for p in qs]
-
-    def test_notice_visible_on_dispatcher_and_answerable(self):  # сигнал выпуска виден на Диспетчерской, снимается ответом
-        self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
-        import view2, ask
-        qs = self.notices()
-        v = view2.make({}, {}, qs, time.time())
-        self.assertIn("rolled-back", v["questions"][0]["text"])
-        qdir = self.proj / ".claude" / "pulse" / "questions"
-        with mock.patch.object(ask.P, "questions_dir", return_value=qdir):
-            ok, msg, _ = ask.answer_question(qs[0]["id"], "a")
-        self.assertTrue(ok)
-        self.assertFalse(view2.make({}, {}, self.notices(), time.time())["questions"])
-
     def auto(self, versions, alive, **kw):
         restarts = []
         fake = FakeClaude(versions, **kw)
@@ -197,20 +180,17 @@ class AutoReleaseTests(unittest.TestCase):
     def test_ok_restarts_services_and_journals(self):
         rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=True)
         self.assertEqual((rc, len(restarts), [j["result"] for j in self.journal()]), (0, 1, ["ok"]))
-        self.assertEqual(self.notices(), [])
 
-    def test_same_version_is_not_silent(self):  # влит PR без bump: службы не трогаем, но журнал и «ждёт вас»
+    def test_same_version_is_not_silent(self):  # влит PR без bump: службы не трогаем, но пишем в журнал
         rc, fake, restarts = self.auto(["1.8.3"], alive=True)
         self.assertEqual((rc, restarts, [j["result"] for j in self.journal()]), (0, [], ["no-bump"]))
-        self.assertIn("no-bump", self.notices()[0]["text"])
 
-    def test_failed_check_rolls_back_and_tells_owner(self):
+    def test_failed_check_rolls_back(self):
         rc, fake, restarts = self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
         self.assertEqual(rc, 2)  # проверка не прошла и после отката (verify всегда False)
         self.assertIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.8.3"], fake.calls)
         self.assertEqual(len(restarts), 2)  # службы подняты заново и после отката
         self.assertEqual(self.journal()[-1]["result"], "rolled-back")
-        self.assertIn("rolled-back", self.notices()[0]["text"])
 
     def test_rollback_failure_is_reported(self):
         rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=False, tags=())  # тега прошлой версии нет
