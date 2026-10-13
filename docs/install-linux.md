@@ -59,6 +59,6 @@ loginctl enable-linger "$USER"           # менеджер пользовате
 
 Вывод `start.py` — `journalctl --user -u rpv-autostart`; убрать автозапуск — `systemctl --user disable --now rpv-autostart.service` (службы `rpv-*` остановите отдельно).
 
-## Сервер шины и Диспетчерская
+## Сервер шины
 
-Сервер шины событий (необязательно, только Linux) — [bus.md](bus.md#установка-сервера-шины); сервер Диспетчерской с юнитом `rpv-board` — [dashboard.md](dashboard.md#поднять-свою).
+Сервер шины событий (необязательно, только Linux) — [bus.md](bus.md#установка-сервера-шины).
