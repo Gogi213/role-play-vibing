@@ -402,6 +402,32 @@ class ResultTests(unittest.TestCase):
         made = max(D.TICKETS_DIR.glob("TK-*.md"))
         self.assertIn("Ссылка на задачу владельца: В-229", made.read_text(encoding="utf-8"))
 
+    def test_new_ref_checked_against_owner_registry(self):
+        """V2-2: есть реестр владельца — номер В-N/G-NNN в --ref обязан в нём быть; цель — открытой."""
+        import contextlib
+        import io
+        import registry as R
+
+        def new(ref):
+            a = dict(owner="engineer", title=f"Дело {ref}", reviewer=None, effort=None, desc="", wait_for="",
+                     force=True, backlog=False, executor=None, kind=None, ref=ref)
+            with contextlib.redirect_stderr(io.StringIO()):
+                return TK.cmd_new(type("A", (), a)())
+        root = TK.PROJECT_ROOT
+        self.assertEqual(new("G-001"), 1, "целей нет — G-001 не ссылка")
+        self.assertEqual(new("В-3"), 0, "реестра решений нет — номер ведётся в другом месте, как раньше")
+        with contextlib.redirect_stdout(io.StringIO()):
+            R.main(["--project", str(root), "decide", "--quote", "слово владельца", "--gist", "g"])
+            R.main(["--project", str(root), "goal", "--title", "т", "--quote", "сделай так"])
+        self.assertEqual(new("В-1"), 0)
+        self.assertEqual(new("В-1 п.2"), 0)
+        self.assertEqual(new("В-3"), 1, "реестр есть — В-3 в нём нет")
+        self.assertEqual(new("G-001"), 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            R.main(["--project", str(root), "accept-goal", "G-001"])
+        self.assertEqual(new("G-001"), 1, "принятая цель — не ссылка для новой работы")
+        self.assertEqual(new("«цитата владельца целиком»"), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

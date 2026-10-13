@@ -44,7 +44,7 @@
    /plugin install role-play-vibing@role-play-vibing
    ```
 
-2. В корне своего проекта выполните `/rpv-init` — команда создаст `.claude/roles` (уставы из шаблонов), `.claude/tickets` и строки в `.gitignore`. Существующие файлы не перезаписываются.
+2. В корне своего проекта выполните `/rpv-init` — команда создаст `.claude/roles` (уставы из шаблонов), `.claude/tickets`, реестр владельца (`.claude/decisions.md` с подключением в `CLAUDE.md`, `.claude/goals/`) и строки в `.gitignore`. Существующие файлы не перезаписываются.
 3. В основной сессии выполните `/ceo` — сессия получит роль CEO: с ней говорит владелец, она заводит тикеты.
 4. Выполните `/rpv-start` — диспетчер и сторож запустятся в фоне; команда напечатает pid, пути логов (`<проект>/.claude/dispatcher/dispatch.run.log`, `watch.run.log`) и «отвязан: да/нет». Уже запущенные службы (pid-замок) команда останавливает и запускает заново: так подхватывается обновлённый плагин.
 5. Поставьте задачу CEO и проверьте, что всё живо: `/rpv-doctor`.
@@ -119,7 +119,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 
 | команда | назначение |
 |---|---|
-| `/rpv-init` | Подготовить проект: `.claude/roles` из шаблонов плагина, `notes/`, `tickets/`, строки в `.gitignore`; существующее не перезаписывает |
+| `/rpv-init` | Подготовить проект: `.claude/roles` из шаблонов плагина, `notes/`, `tickets/`, реестр владельца (`decisions.md` + `@` в `CLAUDE.md`, `goals/`), строки в `.gitignore`; существующее не перезаписывает |
 | `/ceo` | Пометить сессию как CEO (метку читают хуки; роль держится и после `/clear` в Desktop) |
 | `/rpv-start` | Запустить или перезапустить диспетчер и сторож в фоне; при заданном `RPV_BOARD` — ещё и отправку сводки на табло |
 | `/rpv-doctor` | Здоровье команды одной таблицей: диспетчер, сторож, присмотр ОС, шина, очередь, ошибки за сутки; только читает |
@@ -129,6 +129,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | скрипт | назначение |
 |---|---|
 | `dispatcher/tickets.py` | тикеты: `new`, `comment`, `start`, `stop` (только CEO), `wait`, `status`; `inbox [--peek]` — очередь сигналов CEO |
+| `dispatcher/registry.py` | реестр владельца: `decide` (решение В-N), `goal` / `accept-goal` / `drop-goal` (цель G-NNN), `show`, `list`; пишет только CEO (помощник `secretary`), роли — только читают |
 | `dispatcher/supervise.py` | присмотр ОС за диспетчером и сторожем: `--install` / `--uninstall` |
 | `dispatcher/release.py` | выпуск, обновление, откат: `bump`, `update`, `rollback`, `check` |
 | `dispatcher/board_push.py` | сводка команды на табло и в `.claude/pulse/status.json` |

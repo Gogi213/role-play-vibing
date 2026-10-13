@@ -39,6 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -47,6 +48,7 @@ import ticket as T  # noqa: E402
 TICKETS_DIR = D.TICKETS_DIR
 REF_MIN = 5  # знаков в цитате --ref; решение «В-<число>» (REF_DECISION) проходит любой длины, «да»/пусто — нет
 REF_DECISION = re.compile(r"^В-\d+")
+REF_REGISTRY = re.compile(r"^(В-\d+|G-\d{3,})\b")  # номер реестра владельца: есть реестр — номер обязан в нём быть
 PROJECT_ROOT = D.PROJECT_ROOT
 
 
@@ -127,6 +129,15 @@ def cmd_new(args) -> int:
     if len(ref) < REF_MIN and not REF_DECISION.match(ref):
         print(f"new: нужна --ref «ссылка на задачу владельца»: его цитата (≥ {REF_MIN} знаков) или решение В-##. "
               f"Работы, которую владелец не заказывал, не заводим", file=sys.stderr)
+        return 1
+    # V2-2: номер реестра владельца (В-N, G-NNN) — только существующий; цель — только открытая. Решения без
+    # реестра (.claude/decisions.md нет — номера ведутся в другом месте проекта) проходят как раньше
+    num = REF_REGISTRY.match(ref)
+    if num and (num.group(1).startswith("G-") or registry_mod.decisions_file(PROJECT_ROOT).exists()) \
+            and not registry_mod.ref_exists(PROJECT_ROOT, num.group(1)):
+        print(f"new: --ref {num.group(1)} — такого {'открытой цели' if num.group(1).startswith('G-') else 'решения'} "
+              f"в реестре владельца нет (`registry.py list`). Сначала запись словами владельца — `registry.py "
+              f"decide|goal`", file=sys.stderr)
         return 1
     # V2-1: Судья проверяет каждый результат — ревьюер по умолчанию judge. Без него: механическая задача Haiku
     # (приёмка кодом) и тикет самого Судьи (себя он не проверяет). Снять Судью с обычной задачи может только владелец
