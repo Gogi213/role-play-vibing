@@ -1319,6 +1319,30 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("Начинаем новую сессию", calls[1]["prompt"])
         self.assertIn(".claude/roles/notes/judge.md", calls[1]["prompt"])
 
+    def _second_wake_call(self, scope):
+        """Тикет уже будился (в state — сессия с малым контекстом); возвращает вызов claude при новом пробуждении."""
+        D.SESSION_SCOPE["engineer"] = scope
+        self.set_fake_bin(FAKE_BIN_RECORD)
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Пробуждение")
+        state = D.load_state()
+        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old", "last_context_tokens": 10}}
+        D.save_state(state)
+        D.tick()
+        self.wait_running()
+        return json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+    def test_run_scope_is_default_and_starts_new_session_each_wake(self):
+        """TK-232 п.1: по умолчанию каждое пробуждение — новая сессия (без --resume), даже при малом контексте."""
+        self.assertEqual(set(self._orig_scope.values()), {"run"})
+        call = self._second_wake_call("run")
+        self.assertIsNone(call["resumed"])
+        self.assertIn("каждое пробуждение — новая сессия", call["prompt"])
+        self.assertIn(".claude/roles/notes/engineer.md", call["prompt"])
+
+    def test_ticket_scope_still_resumes_small_context(self):
+        """Область "ticket" (настройка) прежняя: малый контекст — продолжаем сессию через --resume."""
+        self.assertEqual(self._second_wake_call("ticket")["resumed"], "old")
+
     def test_multiturn_run_does_not_rotate_on_summed_usage(self):
         """CEO 27.09: usage — сумма по ходам запуска. Многоходовой прогон с большой суммой, но
         нормальным контекстом последнего хода, НЕ должен рвать долгую сессию (раньше рвал — баг)."""
@@ -2429,7 +2453,7 @@ class DispatchRunTests(unittest.TestCase):
             if P.env(var):
                 self.skipTest(f"{var} задан в окружении")
         self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT, D.ROTATE_TOKENS), (3, 1200.0, 120000))
-        self.assertEqual(set(D.SESSION_SCOPE.values()), {"ticket"})
+        self.assertEqual(set(D.SESSION_SCOPE.values()), {"run"})
 
     def test_no_money_limit_machinery_left(self):
         """В-173 (на тикет), В-149 (в час/в сутки), 03.10 («бюджет до конца убирай»): денежных ограничений в
