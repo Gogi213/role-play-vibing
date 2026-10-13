@@ -448,10 +448,11 @@ class ResultTests(unittest.TestCase):
         self._registry_with_decision()
         self.refused("judge", "accept", path="review.md")
         self.refused("judge", "accept", path="review.md", decisions="В-9")
-        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="В-1"), 0)
+        self.refused("judge", "accept", path="review.md", decisions="В-1")  # CP9: и таблица чисел
+        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="В-1", numbers="-"), 0)
         self.assertIn("решения: сверено В-1", self.tkt().log[-1].text)
         T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
-        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-"), 0)
+        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-"), 0)
         self.assertIn("решения: связанных нет", self.tkt().log[-1].text)
 
     def test_accept_pr_needs_decisions_ack_on_both_entry_points(self):
@@ -464,8 +465,34 @@ class ResultTests(unittest.TestCase):
             rc = TK.cmd_accept(type("A", (), dict(id=self.tid, pr=7, sha=SHA, text="", repo="o/r", decisions=None))())
         self.assertEqual(rc, 1)
         self.assertIn("--decisions", err.getvalue())
-        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, decisions="В-1"), 0)
+        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, decisions="В-1", numbers="-"), 0)
         self.assertIn("решения: сверено В-1", self.tkt().log[-1].text)
+
+    def test_accept_numbers_must_be_in_their_sources(self):
+        """CP9: в V2-проекте приёмка — с таблицей «число · файл»; число, которого нет в источнике, — отказ."""
+        self._registry_with_decision()
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        (self.base / "docs").mkdir()
+        (self.base / "docs" / "sieve.md").write_text("годна 12\nне годна 287\nΔSR 0,072\n", encoding="utf-8")
+
+        def table(name, rows):
+            (self.base / name).write_text("| число | откуда |\n|---|---|\n" + "".join(f"| {a} | {b} |\n" for a, b in rows),
+                                          encoding="utf-8")
+            return name
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self.refused("judge", "accept", path="out.md", decisions="-")
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers="нет-файла.md")
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("t0.md", []))
+        self.refused("judge", "accept", path="out.md", decisions="-",
+                     numbers=table("t1.md", [("годна 14", "docs/sieve.md")]))          # 14 «из головы»
+        self.refused("judge", "accept", path="out.md", decisions="-",
+                     numbers=table("t2.md", [("287", "`docs/sieve.md:30`")]))          # не в названной строке ±2
+        self.refused("judge", "accept", path="out.md", decisions="-",
+                     numbers=table("t3.md", [("12", "docs/нет.md")]))                   # источника нет
+        ok = table("t4.md", [("годна 12", "docs/sieve.md"), ("0.072", "docs/sieve.md:3"), ("287", "docs/sieve.md")])
+        self.assertEqual(self.res("judge", "accept", path="out.md", decisions="-", numbers=ok), 0)
+        self.assertIn("числа: сверено 3 (t4.md)", self.tkt().log[-1].text)
 
     def test_due_records_first_and_current_deadline_ceo_only(self):
         import contextlib

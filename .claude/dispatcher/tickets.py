@@ -281,16 +281,19 @@ def cmd_result(args) -> int:
     ack = ""
     if args.result == "accept":
         err, ack = _decisions_ack(args)
-        if err:
-            print(f"result: {err}", file=sys.stderr)
+        nerr, nack = _numbers_ack(args, args.id)
+        if err or nerr:
+            print(f"result: {err or nerr}", file=sys.stderr)
             return 1
+        ack += nack
         proof += ack
     if args.result == "accept" and not (args.pr or args.sha) and _regression(args.id, "result"):
         return 1  # приёмка в PR проходит ту же проверку в cmd_accept
     if args.result == "accept" and (args.pr or args.sha):
         rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
                                       "repo": getattr(args, "repo", None),
-                                      "decisions": getattr(args, "decisions", None)})())
+                                      "decisions": getattr(args, "decisions", None),
+                                      "numbers": getattr(args, "numbers", None)})())
         if rc == 0:  # запись итога — иначе строгий Stop (RPV_STOP_STRICT) не видит сдачи шага и блокирует Судью
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
@@ -338,6 +341,61 @@ def _decisions_ack(args) -> tuple[str, str]:
     if missing:
         return f"--decisions: {', '.join(missing)} — таких решений в реестре нет (`registry.py list`)", ""
     return "", f" решения: сверено {', '.join(refs)}"
+
+
+NUMBER = re.compile(r"[-+−]?\d+(?:[.,]\d+)?")
+NUMBER_ROW = re.compile(r"^\s*\|([^|]+)\|([^|]+)\|")
+
+
+def _numbers_ack(args, tid: str) -> tuple[str, str]:
+    """CP9 (критерий 4): приёмка Судьи в V2-проекте — с таблицей ключевых чисел сдачи `| число | файл[:строка] |`
+    (`--numbers <файл>`) или `--numbers -` (чисел нет). Каждое число обязано быть в своём источнике (в строке ±2, если
+    она названа) — иначе оно «из головы», отказ. Пути — от worktree тикета, если он есть, иначе от корня проекта."""
+    if not registry_mod.decisions_file(PROJECT_ROOT).exists():
+        return "", ""
+    raw = (getattr(args, "numbers", None) or "").strip()
+    if raw in ("-", "—"):
+        return "", " числа: нет"
+    if not raw:
+        return ("приёмка — с таблицей ключевых чисел: --numbers <файл с таблицей «| число | файл[:строка] |»> или "
+                "--numbers - (чисел в сдаче нет); число без источника владельцу не уходит"), ""
+    root = PROJECT_ROOT.resolve()
+    wt = root / ".claude" / "worktrees" / tid
+
+    def find(rel: str):
+        for base in ((wt, root) if wt.is_dir() else (root,)):
+            f = (Path(rel) if Path(rel).is_absolute() else base / rel).resolve()
+            if f.is_file() and (f.is_relative_to(root)):
+                return f
+        return None
+
+    table = find(raw)
+    if not table:
+        return f"--numbers {raw}: файла нет в проекте", ""
+    rows = []
+    for ln in table.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = NUMBER_ROW.match(ln)
+        num = NUMBER.search(m.group(1)) if m else None
+        if num:
+            rows.append((num.group(0).replace("−", "-"), m.group(2).strip().strip("`").strip()))
+    if not rows:
+        return f"--numbers {raw}: нет строк таблицы «| число | файл[:строка] |»", ""
+    bad = []
+    for num, src in rows:
+        at = re.fullmatch(r"(.+?):(\d+)", src)
+        f = find(at.group(1) if at else src)
+        if not f:
+            bad.append(f"{num} — источника {src} нет")
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        if at:
+            lines, n = text.splitlines(), int(at.group(2))
+            text = "\n".join(lines[max(n - 3, 0):n + 2])
+        if not any(v in text for v in {num, num.replace(",", "."), num.replace(".", ",")}):
+            bad.append(f"{num} — нет в {src}")
+    if bad:
+        return "числа не сходятся с источником (число «из головы» владельцу не уходит): " + "; ".join(bad[:8]), ""
+    return "", f" числа: сверено {len(rows)} ({raw})"
 
 
 def _set_due(path: Path, due, said: str = "") -> None:
@@ -397,9 +455,11 @@ def cmd_accept(args) -> int:
         print(f"accept: {err}", file=sys.stderr)
         return 1
     derr, ack = _decisions_ack(args)
-    if derr:
-        print(f"accept: {derr}", file=sys.stderr)
+    nerr, nack = _numbers_ack(args, args.id)
+    if derr or nerr:
+        print(f"accept: {derr or nerr}", file=sys.stderr)
         return 1
+    ack += nack
     if _regression(args.id, "accept"):
         return 1
     tkt = T.read_ticket(path)
@@ -650,6 +710,7 @@ def main(argv=None) -> int:
     p_accept.add_argument("--text", default="")
     p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе RPV_CI_REPO)")
     p_accept.add_argument("--decisions", default=None, help="решения владельца, с которыми сверено: В-N[,В-M] или - (связанных нет)")
+    p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл[:строка] |» или - (чисел нет)")
     p_accept.set_defaults(func=cmd_accept)
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
@@ -667,6 +728,8 @@ def main(argv=None) -> int:
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
     p_result.add_argument("--decisions", default=None,
                           help="accept: решения владельца, с которыми сверена сдача: В-N[,В-M] или - (связанных нет)")
+    p_result.add_argument("--numbers", default=None,
+                          help="accept: файл с таблицей ключевых чисел «| число | файл[:строка] |» или - (чисел нет)")
     p_result.set_defaults(func=cmd_result)
 
     p_start = sub.add_parser("start")
