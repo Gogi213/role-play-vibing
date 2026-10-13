@@ -39,8 +39,8 @@
 | `RPV_DISPATCH_ROLE_MODEL` | Судья — `claude-opus-5-5`, остальные — `RPV_DISPATCH_MODEL` | модель по ролям, `judge:…,engineer:…` или одно значение на все роли |
 | `RPV_DISPATCH_EFFORT` | Судья `xhigh`, Инженер и Исследователь `high` | усилие по ролям, `judge:xhigh,engineer:high` или одно значение на все; поле `effort` тикета перекрывает |
 | `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-5-5` | модель для механических задач (`executor: haiku`); усилие у них всегда `xhigh` |
-| `RPV_DISPATCH_SESSION_SCOPE` | `judge:ticket,researcher:ticket,engineer:ticket` | область сессии роли: `ticket` — своя сессия на тикет, `role` — одна долгая сессия на все тикеты |
-| `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст прошлого запуска, после которого роль начинает новую сессию |
+| `RPV_DISPATCH_SESSION_SCOPE` | `judge:run,researcher:run,engineer:run` | область сессии роли: `run` — новая сессия на каждое пробуждение, `ticket` — своя сессия на тикет (`--resume`), `role` — одна долгая сессия на все тикеты |
+| `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст прошлого запуска, после которого роль начинает новую сессию (область `ticket`/`role`) |
 | `RPV_DISPATCH_WAIT_POLL_S` | `300` | предел ожидания потока `wait-poller` между шагами (не ssh-период; ssh — сверка `RPV_DISPATCH_WAIT_RECON_S`), с |
 | `RPV_DISPATCH_WAIT_RECON_S` | `300` | период сверки `wait_for host:…` одним ssh на машину (с шиной), с |
 | `RPV_BLIND_ALERT_S` | `300` | TK-217: цель (ssh к машине с ожиданиями, шина) недоступна дольше — тревога по этой цели: `ALERT-BLIND.txt`, звук на ПК, строка `ceo-wake.log` (вердикт Судьи 12.10), с |
