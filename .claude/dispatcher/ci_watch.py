@@ -105,7 +105,7 @@ def wake(path, tkt, who: str, text: str, repo: str = "", pr_number: int = 0) -> 
 
 
 def bus_emit(pr_number: int, sha: str, state: str, red: list, who: str, tid: str) -> None:
-    """Событие `ci.<PR>.<sha7>` в шину (журнал для табло/аудита); шины нет или лежит — молча, тикет уже записан."""
+    """Событие `ci.<PR>.<sha7>` в шину (журнал для аудита); шины нет или лежит — молча, тикет уже записан."""
     try:
         import busclient
         busclient.post(f"ci.{pr_number}.{sha[:7]}", {"state": state, "red": red, "woke": who, "ticket": tid}, timeout=3)

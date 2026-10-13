@@ -921,19 +921,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=5), state))
         self.assertFalse(D.CEO_INBOX.exists() and "ждёт-ceo" in D.CEO_INBOX.read_text(encoding="utf-8"))
 
-    def test_open_owner_question_is_a_move_answer_ends_it(self):
-        t0 = dt("2026-10-06T12:00:00+04:00")
-        p = self.mk("engineer", "waiting", now=t0)
-        tid = T.read_ticket(p).id
-        qdir = self.tickets_dir.parent / "pulse" / "questions"
-        qdir.mkdir(parents=True, exist_ok=True)
-        qf = qdir / f"q-{tid}-1.json"
-        qf.write_text(json.dumps({"id": f"q-{tid}-1", "process": tid, "answered_at": None}), encoding="utf-8")
-        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=11), {}))
-        self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), {}, t0 + timedelta(minutes=30)).status, "waiting")
-        qf.write_text(json.dumps({"id": f"q-{tid}-1", "process": tid, "answered_at": "2026-10-06T12:20:00+04:00"}), encoding="utf-8")
-        self.assertIsNotNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=31), {}))
-
     def test_done_and_blocked_are_not_violations(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         for st in ("done", "blocked", "needs_owner", "stopped"):
@@ -3106,7 +3093,7 @@ class RoleMcpTests(unittest.TestCase):
         home.mkdir()
         proj.mkdir()
         (home / ".claude.json").write_text(json.dumps({
-            "mcpServers": {"figma": {"type": "http", "url": "https://f"}, "pulse": {"command": "p"}},
+            "mcpServers": {"figma": {"type": "http", "url": "https://f"}, "playwright": {"command": "p"}},
             "projects": {str(proj): {"mcpServers": {"local": {"command": "l"}}}}}), encoding="utf-8")
         (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {"xcodebuildmcp": {"command": "x"}}}), encoding="utf-8")
         self.runs = self.tmp / "runs"
@@ -3135,7 +3122,7 @@ class RoleMcpTests(unittest.TestCase):
         args = self._args("figma, xcodebuildmcp,local,ghost")
         self.assertEqual(args[:2], ["--strict-mcp-config", "--mcp-config"])
         cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
-        self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # pulse не просили, ghost нет
+        self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # playwright не просили, ghost нет
 
 class RateLimitTests(unittest.TestCase):
     """v1.1, чистые функции — без процессов и без сети."""
@@ -4160,10 +4147,10 @@ class ProjectRootTests(unittest.TestCase):
 
     def test_cli_hints_use_sys_executable(self):  # TK-110 В-1
         with mock.patch("shutil.which", return_value="/usr/bin/python"):
-            self.assertTrue(D.tickets_cli().startswith("python ") and D.plan_cli().startswith("python "))
+            self.assertTrue(D.tickets_cli().startswith("python "))
         with mock.patch("shutil.which", return_value=None):
-            for cli in (D.tickets_cli(), D.plan_cli()):
-                self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
+            cli = D.tickets_cli()
+            self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
 
     def test_tickets_cli_from_subfolder_creates_ticket_in_project_root(self):
         proj = self.make_project(self.proj / "work")

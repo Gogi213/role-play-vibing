@@ -11,7 +11,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import hide  # noqa: E402
 
-SERVICE_MODULES = ["dispatch", "watch", "start", "doctor", "ci_watch", "lifewatch", "ask", "worktree_hygiene"]
+SERVICE_MODULES = ["dispatch", "watch", "start", "doctor", "ci_watch", "lifewatch", "worktree_hygiene"]
 
 
 class HideTests(unittest.TestCase):
@@ -42,8 +42,7 @@ class HideTests(unittest.TestCase):
             self.assertNotIn("run=subprocess.run", src, m)
 
     def test_every_runner_default_is_hidden(self):
-        for rel in ["dispatcher/haiku_aux.py", "board/machines.py", "board/plainify.py", "dispatcher/board_push.py",
-                    "dispatcher/ticket.py"]:
+        for rel in ["dispatcher/haiku_aux.py", "dispatcher/ticket.py"]:
             src = (HERE.parent / rel).read_text(encoding="utf-8")
             self.assertNotRegex(src, r"(runner|run)=subprocess\.run", rel)
             self.assertIsNone(re.search(r"return subprocess\.run\(\w+, capture_output", src), rel)

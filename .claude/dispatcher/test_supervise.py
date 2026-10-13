@@ -60,7 +60,7 @@ class SuperviseTest(unittest.TestCase):
             S.is_ours_state = lambda pid, script: pid > 0   # оба «живы»
             try:
                 out = V.run_once(project, now.timestamp(), stop=lambda p, s, unit=None: stopped.append(s) or 1,
-                                 spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+                                 spawn=lambda script, proj, log: spawned.append(script.name) or _Started(7))
             finally:
                 S.is_ours_state = real
             self.assertEqual(out, {"dispatch": "ok", "watch": "restart"})
@@ -73,7 +73,7 @@ class SuperviseTest(unittest.TestCase):
             (project / ".claude" / "dispatcher").mkdir(parents=True)
             spawned = []
             out = V.run_once(project, stop=lambda p, s, unit=None: 0,
-                             spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+                             spawn=lambda script, proj, log: spawned.append(script.name) or _Started(7))
             self.assertEqual(out, {"dispatch": "start", "watch": "start"})
             self.assertEqual(spawned, ["dispatch.py", "watch.py"])
 
@@ -84,7 +84,7 @@ class SuperviseTest(unittest.TestCase):
             (project / ".claude" / "dispatcher").mkdir(parents=True)
             spawned = []
             kw = dict(stop=lambda p, s, unit=None: 0,
-                      spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+                      spawn=lambda script, proj, log: spawned.append(script.name) or _Started(7))
             with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
                 out = V.run_once(project, **kw)
             self.assertEqual(out, {"dispatch": "start", "watch": "start", "ci_watch": "start"})

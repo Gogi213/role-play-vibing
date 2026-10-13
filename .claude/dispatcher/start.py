@@ -41,8 +41,6 @@ import hide  # noqa: E402
 
 CODE_DIR = Path(__file__).resolve().parent
 SERVICES = ("dispatch", "watch")   # порядок запуска: сначала диспетчер, потом сторож, который за ним следит
-BOARD_SERVICE = "board_push"       # третья служба — отправка на веб-табло; стартует, только если задан RPV_BOARD
-BOARD_ARGS = ("--loop", "5")
 
 
 # необязательные службы под присмотром (TK-090 Д-1): включаются настройкой — один список для start.py (выпуск версии
@@ -51,7 +49,7 @@ OPTIONAL = (("ci_watch", lambda: bool(P.env("CI_REPO"))),)          # автов
 
 
 def services() -> tuple:
-    return SERVICES + ((BOARD_SERVICE,) if P.env("BOARD") else ()) + tuple(n for n, on in OPTIONAL if on())
+    return SERVICES + tuple(n for n, on in OPTIONAL if on())
 LOCK_IMAGE = "py"                  # подстрока имени образа процесса, как в dispatch.acquire_instance_lock
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом
@@ -388,14 +386,14 @@ def _python() -> str:
     return str(exe.with_name("python.exe")) if exe.name.lower() == "pythonw.exe" else sys.executable
 
 
-def spawn(script: Path, project: Path, log: Path, extra: tuple = ()) -> Started:
+def spawn(script: Path, project: Path, log: Path) -> Started:
     """Фоновый процесс `python -u script --project <проект>`, отвязанный от этой сессии (Windows — WMI, Linux — юнит
     systemd, иначе Popen; не получилось — запасной путь Popen); вывод — в `log` (дописывается)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
         out.write(f"\n=== {datetime.now().astimezone().isoformat(timespec='seconds')} старт {script.name} ===\n"
                   .encode("utf-8"))
-    cmd = [_python(), "-u", str(script), "--project", str(project), *extra]
+    cmd = [_python(), "-u", str(script), "--project", str(project)]
     how = _launcher()
     try:
         if how == "wmi":
@@ -449,8 +447,7 @@ def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) ->
             restarted = stop_running(state_dir / f"{name}.pid", f"{name}.py",
                                      unit=unit_name(name, project) if use_systemd else None, project=project)
             log = state_dir / f"{name}.run.log"
-            procs.append((name, spawn(code_dir / f"{name}.py", project, log, BOARD_ARGS if name == BOARD_SERVICE else ()),
-                          log, restarted))
+            procs.append((name, spawn(code_dir / f"{name}.py", project, log), log, restarted))
     time.sleep(settle)
     rows = []
     for name, p, log, restarted in procs:

@@ -65,16 +65,10 @@ def tearDownModule():
 
 
 class StartTests(unittest.TestCase):
-    def test_board_service_only_with_rpv_board(self):
-        old = os.environ.pop("RPV_BOARD", None)
-        try:
-            self.assertEqual(S.services(), S.SERVICES)
-            os.environ["RPV_BOARD"] = "http://x/#k"
-            self.assertEqual(S.services(), S.SERVICES + ("board_push",))
-        finally:
-            os.environ.pop("RPV_BOARD", None)
-            if old is not None:
-                os.environ["RPV_BOARD"] = old
+    def test_optional_service_only_with_setting(self):
+        self.assertEqual(S.services(), S.SERVICES)
+        with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
+            self.assertEqual(S.services(), S.SERVICES + ("ci_watch",))
 
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)   # Popen-объекты фоновых процессов не ждём — они живут дальше

@@ -80,7 +80,3 @@ for s in dispatch watch; do launchctl bootstrap "gui/$(id -u)" "$HOME/Library/La
 Проверить: `launchctl print "gui/$(id -u)/local.rpv.dispatch"` и `tail <проект>/.claude/dispatcher/dispatch.run.log`. Перезапуск (например, после обновления плагина): `launchctl kickstart -k "gui/$(id -u)/local.rpv.dispatch"`. Остановка и снятие с автозапуска: `launchctl bootout "gui/$(id -u)/local.rpv.dispatch"` (то же для `watch`) и удалить plist. Старый синтаксис: `launchctl load -w <plist>` / `launchctl unload -w <plist>`.
 
 С LaunchAgent не пользуйтесь `/rpv-start`: он остановит процесс по pid-файлу, `launchd` тут же поднимет его снова (`KeepAlive`), `start.py` запустит ещё один — один из двух выйдет по pid-замку. Если после перезагрузки в логе «уже запущен (pid …)», а диспетчера нет, — удалите `dispatch.pid` / `watch.pid` (причина — в разделе «Переживает ли» выше). Секрет, нужный службе (`ANTHROPIC_API_KEY` при входе по ключу), добавляйте в `EnvironmentVariables` только в своём plist (`chmod 600`), не в репозиторий.
-
-## Веб-табло
-
-Сервер Диспетчерской на macOS — LaunchAgent с `python3 /путь/server.py` (по образцу выше) и теми же переменными в `EnvironmentVariables`: [dashboard.md](dashboard.md).

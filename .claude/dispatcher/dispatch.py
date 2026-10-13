@@ -227,9 +227,7 @@ PROMPT_TEMPLATE = (
     "blocked (задача встала) и ask-owner (развилка, вопрос) уходят Судье; владельцу вопрос о содержании "
     "исследования (какие гипотезы, гиперпараметры, метрики, что хотим увидеть) переадресует Судья; CEO не будят. "
     "`{tickets_cli} comment {tid} --author {role} --text \"...\"` — только промежуточная заметка без смены "
-    "хода. @упоминания в тексте никого не будят. "
-    "Табло: нет плана шагов — в начале работы `{plan_cli} set {tid} --title \"...\" --step \"название|кто|где|для чего\" ...` "
-    "(3–6 шагов по-людски, `{plan_cli} --help`); в конце запуска — `{plan_cli} step {tid} <N> <run|done|todo>` по факту."
+    "хода. @упоминания в тексте никого не будят."
 )
 
 RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, out_fh, err_fh, reason}
@@ -1612,7 +1610,7 @@ def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
 def role_mcp_args(run_stem: str) -> list[str]:
     """TK-171: MCP-серверы роли по `RPV_ROLE_MCP`. Не задана/`all` — флагов нет, роль видит всё, что видит обычный
     `claude` (поведение до 1.8.26); `none` — `--strict-mcp-config` без конфига, ни одного сервера (TK-140: свой
-    Playwright/pulse на каждый запуск ≈ 600 МБ); список имён через запятую — временный json только с этими серверами
+    Playwright на каждый запуск ≈ 600 МБ); список имён через запятую — временный json только с этими серверами
     (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
     `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
     mode = (P.env("ROLE_MCP", "all") or "all").strip()
@@ -1651,14 +1649,9 @@ def tickets_cli() -> str:
     return _py() + shlex.quote((CODE_DIR / "tickets.py").as_posix())
 
 
-def plan_cli() -> str:
-    """plan.py из папки плагина (шаги ролей для веб-табло): проект роль берёт из RPV_PROJECT, как и tickets.py."""
-    return _py() + shlex.quote((CODE_DIR / "plan.py").as_posix())
-
-
 def build_prompt(role: str, tid: str, extra_note: str = None) -> str:
     prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(RUN_TIMEOUT // 60),
-                                    tickets_cli=tickets_cli(), plan_cli=plan_cli())
+                                    tickets_cli=tickets_cli())
     if extra_note:
         prompt += " " + extra_note
     return prompt
@@ -2431,19 +2424,6 @@ def _waits_without_condition(tkt: T.Ticket, now) -> bool:
         return False
 
 
-def _open_owner_question(tid: str) -> bool:
-    """Есть вопрос владельцу (ask.py) по этому тикету без ответа — ожидание ответа и есть ход."""
-    qdir = TICKETS_DIR.parent / "pulse" / "questions"
-    for p in qdir.glob(f"q-{tid}-*.json"):
-        try:
-            q = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(q, dict) and q.get("process") == tid and not q.get("answered_at"):
-            return True
-    return False
-
-
 def _drop_ceo_handoff(state: dict, tid: str) -> None:
     (state.get("ceo_handoffs") or {}).pop(tid, None)
     (state.get("ceo_handoff_reminded") or {}).pop(tid, None)
@@ -2491,7 +2471,7 @@ def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
 
 
 def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | None":
-    """TK-076 п.6: у открытого тикета есть ход — роль запущена / next / годный wait_for / вопрос владельцу. Здесь —
+    """TK-076 п.6: у открытого тикета есть ход — роль запущена / next / годный wait_for / передача CEO. Здесь —
     тикет, которого decide() не будит, а хода нет дольше INVARIANT_GRACE_S (от `updated`): причина или None."""
     if tkt.next_role or tkt.status not in ("waiting", "in_review"):
         return None
@@ -2502,8 +2482,6 @@ def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | N
         if (now - max([last] + stamps)).total_seconds() <= INVARIANT_GRACE_S:
             return None
     except Exception:
-        return None
-    if _open_owner_question(tkt.id):
         return None
     if state is not None and _ceo_handoff_pending(tkt, state, now):
         return None
@@ -2616,11 +2594,6 @@ def tick(now=None) -> int:
     save_state(state)
 
     sweep_closed_worktrees()
-    try:  # TK-109 п.16: недошедшие записи ответов владельца с табло
-        import ask
-        ask.flush_pending()
-    except Exception as e:
-        print(f"[dispatch] досылка ответов: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     unblock_limit_victims(now)
     paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
