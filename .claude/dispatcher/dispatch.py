@@ -38,6 +38,7 @@ import bus_link  # noqa: E402
 import blind  # noqa: E402
 import downtime  # noqa: E402
 import notify  # noqa: E402
+import report as REPORT  # noqa: E402
 import haiku_aux as HA  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
@@ -2590,6 +2591,32 @@ def _stall_alarm(state: dict, now, stalled: list) -> None:
     state["stall"] = st
 
 
+REPORT_AT = P.env("REPORT_AT", "10:00")  # CP10: местное время ежедневного отчёта владельцу, ЧЧ:ММ
+_REPORT_PROC = None  # процесс отчёта (report.py): короткоживущий, тик его не ждёт
+
+
+def _daily_report(state: dict, now) -> None:
+    """CP10 (критерии 2, 9): раз в сутки в REPORT_AT — отчёт владельцу отдельным коротким процессом (`report.py`): медленный
+    `claude -p` тик не держит. Метка `last_report_at` в state.json ставится до запуска: упавший отчёт не повторяется каждый
+    тик. Диспетчер стоял в REPORT_AT — отчёт уходит на первом тике после и один раз. Первый тик проекта только ставит метку:
+    отчёта за время, когда диспетчера не было, не бывает."""
+    global _REPORT_PROC
+    if _REPORT_PROC is not None and _REPORT_PROC.poll() is None:
+        return
+    last = state.get("last_report_at")
+    if not last:
+        state["last_report_at"] = T.now_iso(now)
+        return
+    if not REPORT.due(last, now, REPORT_AT):
+        return
+    state["last_report_at"] = T.now_iso(now)
+    cmd = [sys.executable, str(CODE_DIR / "report.py"), "--project", str(PROJECT_ROOT), "--since", last,
+           "--until", T.now_iso(now)]
+    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+    with open(DISPATCHER_DIR / "report.log", "a", encoding="utf-8") as log:
+        _REPORT_PROC = _popen(cmd, cwd=str(PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
+
+
 def _account_downtime(state: dict, now, **flags) -> None:
     try:
         downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)  # минуты простоя — в отчёт (CP10)
@@ -2713,6 +2740,10 @@ def tick(now=None) -> int:
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
+    try:
+        _daily_report(state, now)
+    except Exception as e:  # отчёт не должен ронять тик
+        print(f"[dispatch] отчёт: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
     return launched
