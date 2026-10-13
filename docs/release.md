@@ -1,30 +1,17 @@
-# Выпуск, обновление, откат
+# Выпуск плагина
 
-Все четыре действия — один скрипт `release.py` из папки плагина:
-
-```
-python .claude/dispatcher/release.py bump X.Y.Z [--push]
-python .claude/dispatcher/release.py update
-python .claude/dispatcher/release.py rollback [X.Y.Z]
-python .claude/dispatcher/release.py check
-```
-
-| команда | что делает |
-|---|---|
-| `bump X.Y.Z [--push]` | версия в `plugin.json` и `marketplace.json`; раздел в `CHANGELOG.md` обязателен; коммит и тег `vX.Y.Z` (`--push` — и отправить) |
-| `update` | обновить установленный плагин до последнего выпуска (печатает версию до и после; прежняя запоминается) |
-| `rollback [X.Y.Z]` | вернуть прошлую версию одной командой: маркетплейс с тегом `vX.Y.Z`; без аргумента — версия, записанная перед последним `update` |
-| `check` | версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают (то же проверяет тест в CI) |
-
-После `update` и `rollback` — перезапустить Claude Code.
-
-## Как устроен откат
-
-Тег проверяется на GitHub до любых изменений: нет тега — ничего не тронуто. Маркетплейс прибивается к `owner/repo#vX.Y.Z`; при сбое возвращается прежний. `update` снимает прибивку к тегу и возвращает маркетплейс на `main`.
+Выпуск — ручной: его делает владелец или мейнтейнер плагина. Автовыпуска нет: слияние PR в репозиторий плагина ничего не ставит, не перезапускает и не откатывает — инструмент не правит и не выпускает сам себя.
 
 ## Как выпустить версию
 
 1. Допишите раздел в [`CHANGELOG.md`](../CHANGELOG.md) — самым верхним, формат Keep a Changelog: заголовок `## X.Y.Z — ГГГГ-ММ-ДД` (`release.py` ищет версию в начале заголовка) и подразделы `### Добавлено` / `### Изменено` / `### Исправлено`.
-2. `python .claude/dispatcher/release.py bump X.Y.Z --push`.
+2. `python .claude/dispatcher/release.py bump X.Y.Z` — версия в `plugin.json` и `marketplace.json`, проверка записи в `CHANGELOG.md`, коммит «Выпуск X.Y.Z» и тег `vX.Y.Z` (локально, ничего не отправляется).
+3. Отправьте руками: `git push origin HEAD vX.Y.Z` (или в п. 2 добавьте `--push`). Это публикация — необратимая, поэтому только по решению владельца.
 
-`bump` сам проверяет согласованность версий после правки файлов; отдельно `check` удобен перед слиянием (его же проверяет тест в [CI](../README.md#разработка-и-тесты)).
+`python .claude/dispatcher/release.py check` проверяет, что версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают; то же проверяет тест в [CI](../README.md#разработка-и-тесты).
+
+## Как обновиться пользователю
+
+Штатно, средствами Claude Code: меню `/plugin` или `claude plugin marketplace update role-play-vibing`, затем `claude plugin update role-play-vibing@role-play-vibing`. После обновления перезапустите Claude Code и службы проекта (`/rpv-start` останавливает работающие и запускает заново уже из новой версии).
+
+Нужна прежняя версия — переподключите маркетплейс на её тег и поставьте плагин заново: `/plugin marketplace remove role-play-vibing`, `/plugin marketplace add Gogi213/role-play-vibing#vX.Y.Z`, `/plugin install role-play-vibing@role-play-vibing`.

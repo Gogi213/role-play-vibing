@@ -33,7 +33,7 @@
 - **Диспетчерская** — веб-табло: ход всех команд, шаги и вопросы владельцу, машины, лента событий; на компьютере и с телефона. Свою можно поднять самому; [подробнее](docs/dashboard.md).
 - **Надёжность** — присмотр ОС за диспетчером и сторожем, счётчик простоя с SLO и тревогой, инвариант «у открытого тикета есть ход», прогон на выносливость; [подробнее](docs/reliability.md).
 - **`/rpv-doctor`** — здоровье команды одной таблицей.
-- **Выпуск, обновление, откат** — `release.py` меняет версию и тег, обновляет установленный плагин и возвращает прошлую версию одной командой; [подробнее](docs/release.md).
+- **Выпуск плагина** — вручную: `release.py bump` меняет версию и ставит тег, `release.py check` сверяет версии; автовыпуска нет, пользователи обновляются штатно через `/plugin`; [подробнее](docs/release.md).
 
 ## Быстрый старт
 
@@ -134,7 +134,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | `dispatcher/registry.py` | реестр владельца: `decide` (решение В-N), `goal` / `accept-goal` / `drop-goal` (цель G-NNN), `show`, `list`; пишет только CEO (помощник `secretary`), роли — только читают |
 | `dispatcher/errors.py` | реестр ошибок `.claude/errors/E-NNN.md`: `add`, `fix E-N --check "<команда>"` (исправленной ошибка становится, только когда проверка — тест или скрипт из git — зелёная), `run`, `show`, `list`; ставят и закрывают любые роли; проверки всех исправленных гоняет приёмка Судьи (`result … accept`, `accept`) |
 | `dispatcher/supervise.py` | присмотр ОС за диспетчером и сторожем: `--install` / `--uninstall` |
-| `dispatcher/release.py` | выпуск, обновление, откат: `bump`, `update`, `rollback`, `check` |
+| `dispatcher/release.py` | выпуск плагина вручную: `bump` (версия, коммит, тег), `check` |
 | `dispatcher/board_push.py` | сводка команды на табло и в `.claude/pulse/status.json` |
 | `bus/busclient.py` | отправка события в шину: `send <адрес>` |
 
@@ -223,5 +223,5 @@ docs/                подробные инструкции
 | [docs/signals.md](docs/signals.md) | стандарт сигналов CEO: очередь с приоритетом, `tickets.py inbox`, запасной путь |
 | [docs/dashboard.md](docs/dashboard.md) | веб-табло и Диспетчерская |
 | [docs/reliability.md](docs/reliability.md) | присмотр ОС, счётчик простоя, инвариант хода |
-| [docs/release.md](docs/release.md) | выпуск, обновление, откат |
+| [docs/release.md](docs/release.md) | выпуск плагина вручную, обновление через `/plugin` |
 | [CHANGELOG.md](CHANGELOG.md) | история версий |

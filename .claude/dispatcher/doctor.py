@@ -194,8 +194,7 @@ def check_copies(project: Path, name: str, procs=None) -> tuple | None:
 
 
 def run_checks(project: Path, now: float | None = None, installed=scheduler_installed, bus_request=None,
-               alive_only: bool = False, procs=None) -> list:
-    """alive_only — проверка выпуска: накопленный за сутки простой (check_idle) к исправности новой версии не относится."""
+               procs=None) -> list:
     now = time.time() if now is None else now
     sd = project / ".claude" / "dispatcher"
     names = S.services()
@@ -203,8 +202,7 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
     rows = [check_service(n, sd, now) for n in names]
     rows += [c for c in (check_copies(project, n, procs) for n in names) if c]
     rows += [check_supervise(project, sd, now, installed), check_bus(bus_request, _state_bus_url(sd))]
-    if not alive_only:
-        rows.append(check_idle(sd, now, float(P.env("IDLE_SLO_MIN", "10"))))
+    rows.append(check_idle(sd, now, float(P.env("IDLE_SLO_MIN", "10"))))
     rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
 
@@ -219,14 +217,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project")
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--alive", action="store_true", help="проверка выпуска: без накопленного простоя за сутки")
     a, _ = ap.parse_known_args(argv)
     try:
         project = P.resolve_project(["--project", a.project] if a.project else [])
     except P.ProjectNotFound:
         print(P.NOT_FOUND_HINT, file=sys.stderr)
         return 2
-    rows = run_checks(Path(project), alive_only=a.alive)
+    rows = run_checks(Path(project))
     print(json.dumps([dict(zip(("check", "status", "detail"), r)) for r in rows], ensure_ascii=False, indent=1)
           if a.json else render(rows))
     return 1 if any(r[1] == FAIL for r in rows) else 0
