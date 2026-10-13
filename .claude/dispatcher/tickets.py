@@ -17,6 +17,8 @@
     tickets.py wait TK-001 host:calc:<путь>/<job>.json [--on-met "python tools/x.py арг"]  # status: waiting + wait_for
     tickets.py stop TK-001 --text "..." [--next engineer]       # только CEO: снять роль
     tickets.py due TK-001 --by 18:00 [--said "к шести"]          # только CEO: срок, названный владельцу (due / due_first)
+    tickets.py allow TK-001 publish --ref В-12                  # только CEO: согласие владельца на публикацию по тикету
+    tickets.py allow TK-001 --revoke                            # только CEO: снять согласие
     tickets.py status                                           # потрачено по задачам
 
 Приёмка Судьи (`result … accept`, `accept`) сначала гоняет проверки всех исправленных ошибок (`errors.py`; в worktree
@@ -30,6 +32,11 @@
 диспетчеру снять запущенную роль всем деревом процессов и дать новую постановку (подробно — README диспетчера, «Остановка
 роли»). С `--next` тикет станет `todo` + `next: <роль>` и роль стартует сразу; без — `status: stopped`: диспетчер не будит,
 пока CEO не переведёт в `todo` (`start`).
+
+`allow <ID> publish --ref В-N` — только CEO (из сессии роли — отказ): пишет в шапку `allow: publish (В-N)` и запись `ceo` в лог.
+`--ref` — решение владельца, уже занесённое в реестр (`registry.py decide`): слово владельца сначала в реестр, потом согласие.
+Пока поля нет, страж (`delete_guard.py`) закрывает запуску роли по этому тикету публикации: выпуск и слияние PR (`gh release`,
+`gh pr merge`), `git push` в main/master и теги, публикацию пакетов и образов. `--revoke` снимает согласие.
 
 Лимитов денег на тикет нет (В-173, 03.10): `status` показывает только потрачено (учёт из state.json).
 """
@@ -520,6 +527,44 @@ def cmd_stop(args) -> int:
     return 0
 
 
+def cmd_allow(args) -> int:
+    """CEO: согласие владельца на публикацию по тикету (CP2, критерий 14). Поле шапки `allow: publish (В-N)` читает страж
+    (`delete_guard.publish_consent`): без него запуску роли закрыты выпуск, слияние PR, пуш в main/master и теги, публикация
+    пакетов. Основание — решение владельца из реестра, занесённое ДО согласия; `--revoke` снимает поле."""
+    role = _caller_role()
+    if role and role != "ceo":
+        print(f"allow — только CEO; эта сессия — роль {role}. Нужна публикация — `result <ID> ask-owner --why-owner необратимое`",
+              file=sys.stderr)
+        return 1
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    if args.revoke:
+        with T.ticket_lock(path):
+            if not T.read_ticket(path).header.get("allow"):
+                print(f"{args.id}: согласия на публикацию не было — снимать нечего")
+                return 0
+            T.write_header_updates(path, {"allow": ""}, stamp_updated=False)
+            T.append_log(path, "ceo", "согласие на публикацию снято")
+        print(f"{args.id}: согласие на публикацию снято")
+        return 0
+    ref = (args.ref or "").strip()
+    if not args.what:
+        print("allow: нужно слово `publish` — `allow <ID> publish --ref В-N`", file=sys.stderr)
+        return 1
+    if not re.fullmatch(r"В-\d+", ref) or not registry_mod.ref_exists(PROJECT_ROOT, ref):
+        print(f"allow: --ref {ref or '(пусто)'} — нужно решение владельца В-N, уже занесённое в реестр (`registry.py list`). "
+              f"Сначала слово владельца дословно — `registry.py decide`, потом согласие", file=sys.stderr)
+        return 1
+    with T.ticket_lock(path):
+        T.write_header_updates(path, {"allow": f"publish ({ref})"}, stamp_updated=False)
+        T.append_log(path, "ceo", f"согласие владельца на публикацию по этому тикету ({ref}): выпуск, слияние PR, пуш в "
+                     f"основную ветку и теги, публикация пакетов")
+    print(f"{args.id}: allow: publish ({ref})")
+    return 0
+
+
 def cmd_status(args) -> int:
     state = D.load_state()
     rows = []
@@ -650,6 +695,13 @@ def main(argv=None) -> int:
     p_stop.add_argument("--next", choices=["researcher", "engineer", "judge"], default=None,
                         help="роль, которая стартует сразу (тикет станет todo); без --next — status: stopped, не будить")
     p_stop.set_defaults(func=cmd_stop)
+
+    p_allow = sub.add_parser("allow", help="только CEO: согласие владельца на публикацию по тикету (или --revoke)")
+    p_allow.add_argument("id")
+    p_allow.add_argument("what", nargs="?", choices=["publish"], help="что разрешено: публикации (выпуск, слияние PR, пуш в main, пакеты)")
+    p_allow.add_argument("--ref", default="", help="решение владельца В-N из реестра (`registry.py decide`)")
+    p_allow.add_argument("--revoke", action="store_true", help="снять согласие")
+    p_allow.set_defaults(func=cmd_allow)
 
     p_inbox = sub.add_parser("inbox", help="CEO: прочитать и подтвердить очередь «ceo» шины (срочное первым)")
     p_inbox.add_argument("--peek", action="store_true", help="только показать, без ack")

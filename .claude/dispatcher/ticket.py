@@ -6,7 +6,8 @@
 `wait_for` (опц.: `file:<путь>` локально, `host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh, `ticket:<ID>`; разбор — `parse_wait_for`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
-`updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
+`allow` (опц., CP2: `publish (В-N)` — согласие владельца на публикации по тикету; ставит `tickets.py allow` (только CEO), читает
+страж `delete_guard.py`, диспетчер не читает), `updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
 не трогает (`dispatch.decide()`), в `todo` переводит `tickets.py start <ID>`. `stopped` — роль остановлена CEO
 (`tickets.py stop` без `--next`): диспетчер не будит, сторож не считает сиротой; в `todo` — тем же `start`.
 
