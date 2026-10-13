@@ -128,8 +128,7 @@ Enter / кнопка «Ок» отвечает им (`ask.py answer <id> <defaul
 
 Сервер — `server.py` (HTTP на стандартной библиотеке Python, служба `rpv-board`, порт 8787); адрес с секретом
 `http://<хост>:8787/<токен>/` (токен — `RPV_BOARD_TOKEN_FILE`, по умолчанию `/etc/rpv-board/token`, иначе `<RPV_BOARD_DATA>/token`;
-данные — `RPV_BOARD_DATA`, по умолчанию `~/rpv-board`). Файлы — `.claude/board/`: `server.py`, `bridge.py` (встроенная команда `home`
-через ssh-мост, обычным командам не нужен), `dispetcher.html` — страница на `phosphor.css` / `phosphor.js`, `rpv-board.service`.
+данные — `RPV_BOARD_DATA`, по умолчанию `~/rpv-board`). Файлы — `.claude/board/`: `server.py`, `dispetcher.html` — страница на `phosphor.css` / `phosphor.js`, `rpv-board.service`.
 Маршруты под токеном: `GET /` и `GET /dispetcher` — «Диспетчерская», `GET /phosphor.css`, `GET /phosphor.js`, `GET /status.json`
 (`teams[]` с `view2` + `built_at` + `age_s` и верхний `view2` встроенной команды), `POST /ingest` (заголовок `X-Board-Key`, тело
 `{"view2": …, "built_at": …}`), `POST /teams {"name"}` (создать команду; ключ показывается один раз, хранится его sha256; ≤ 20 команд),

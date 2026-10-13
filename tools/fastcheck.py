@@ -15,15 +15,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = ["-m", "pytest", ".claude", "-q", "-p", "no:cacheprovider"]
-# endurance — по часам ~3 мин на раунд: отдельным процессом рядом с основным, иначе они одни держат круг (TK-095)
-MAIN = BASE + ["-n", "auto", "-m", "not endurance", "--durations=15"]
-ENDU = BASE + ["-n", "4", "-m", "endurance"]
+MAIN = BASE + ["-n", "auto", "--durations=15"]
 
 
 def local():
     t = time.time()
-    ps = [subprocess.Popen([sys.executable] + a, cwd=ROOT) for a in (MAIN, ENDU)]
-    rc = max(p.wait() for p in ps)
+    rc = subprocess.run([sys.executable] + MAIN, cwd=ROOT).returncode
     return rc, time.time() - t
 
 
@@ -41,9 +38,7 @@ def calc(a):
 cat > {d}/run.sh <<'EOS'
 cd {d}
 mkdir -p {d}/bin && ln -sf $(command -v python3) {d}/bin/python; export PATH={d}/bin:$PATH   # тесты зовут `python`
-python3 -m pytest .claude -q -p no:cacheprovider -n {a.cores} -m "not endurance" --durations=15 &
-python3 -m pytest .claude -q -p no:cacheprovider -n 4 -m endurance &
-r=0; for j in $(jobs -p); do wait $j || r=1; done; exit $r
+python3 -m pytest .claude -q -p no:cacheprovider -n {a.cores} --durations=15
 EOS
 id=$(python3 /data/sched/alsched.py submit --cls prod --name rpv-fastcheck --max-runtime 600 --cores {a.cores} --mem {a.mem} -- bash {d}/run.sh | tail -n 1) || exit 125
 echo "job $id"
