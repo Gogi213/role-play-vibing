@@ -4681,6 +4681,12 @@ class WaitReconcileTest(unittest.TestCase):
         self.assertIn("cat ", calls[0])
         self.assertIn(D.WATCH_LIST, calls[1])
 
+    def test_progress_dir_msys_prefix_stripped(self):
+        """TK-228: Git Bash подменяет env `/data/progress` на `C:/Program Files/Git/data/progress` — watch.list на машине должен остаться `/data/progress/watch.list`."""
+        self.assertEqual(D._unmsys("C:/Program Files/Git/data/progress"), "/data/progress")
+        self.assertEqual(D._unmsys("/data/progress"), "/data/progress")
+        self.assertEqual(D._unmsys("~/rpv/progress"), "~/rpv/progress")
+
     def test_progress_json_in_default_dir_is_not_registered(self):
         """Каталог хода по умолчанию плагина (~/rpv/progress): файл хода не попадает в watch.list — иначе «файл появился» закрыл бы ожидание на старте."""
         self.assertTrue(D.PROGRESS_DIR.startswith("~/"))

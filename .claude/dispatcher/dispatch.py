@@ -340,7 +340,13 @@ _UNIT_RUNNING = ("active", "activating", "reloading", "deactivating", "refreshin
 # TK-055: wait_for host:… закрывается событием сторожа машины (.claude/bus/watcher.py); ssh — редкая подстраховка в потоке.
 WAIT_ASYNC = False  # True ставит main() для боевого цикла; тесты и --once — синхронный путь как раньше
 WAIT_POLL_S = float(P.env("DISPATCH_WAIT_POLL_S", "300"))
-PROGRESS_DIR = P.env("PROGRESS_DIR", "~/rpv/progress")  # каталог файлов хода заданий на машинах (RPV_PROGRESS_DIR)
+def _unmsys(path: str) -> str:
+    """Git Bash на Windows превращает env `/data/progress` в `C:/Program Files/Git/data/progress` (TK-228): путь машины — не локальный, префикс снимаем."""
+    m = re.match(r"^[A-Za-z]:[/\\](?:Program Files[/\\]Git|msys64|Git)[/\\](.*)$", path, re.I)
+    return "/" + m.group(1).replace("\\", "/") if m else path
+
+
+PROGRESS_DIR = _unmsys(P.env("PROGRESS_DIR", "~/rpv/progress"))  # каталог файлов хода заданий на машинах (RPV_PROGRESS_DIR)
 WATCH_LIST = PROGRESS_DIR + "/watch.list"  # пути, которые сторож машины проверяет сам (по строке на путь)
 _WAIT_WATCH = set()  # ключи (алиас, what, арг), которые ждут тикеты — их опрашивает _wait_poller
 _EVENT_MET = {}      # (алиас, "unit"|"path", арг) -> time.time() прихода события
