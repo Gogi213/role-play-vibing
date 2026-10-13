@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import tempfile
 import unittest
@@ -254,7 +255,7 @@ class AutoReleaseTests(unittest.TestCase):
         """TK-232 п.6: проект закрепил версию — автовыпуск не обновляет."""
         pin = release.pin_file(self.proj)
         pin.parent.mkdir(parents=True, exist_ok=True)
-        pin.write_text("1.8.42", encoding="utf-8")
+        pin.write_text("", encoding="utf-8")   # содержимое не читается: закрепление = «никаких обновлений»
         runs = []
         self.assertEqual(release.run_auto_locked(self.proj, lambda q: runs.append(1) or 0, idle=lambda *a: True), 0)
         self.assertEqual(runs, [])
@@ -288,7 +289,12 @@ class AutoReleaseTests(unittest.TestCase):
     def test_active_runs_counts_live_pids_only(self):
         d = self.proj / ".claude" / "dispatcher"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "state.json").write_text(json.dumps({"active_runs": {"TK-1": {"pid": os.getpid(), "pstart": __import__("dispatch")._proc_start(os.getpid())}, "TK-2": {"pid": 0}}}), encoding="utf-8")
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()   # завершённый подпроцесс: ненулевой мёртвый pid (застрявшая запись упавшего запуска)
+        runs = {"TK-1": {"pid": os.getpid(), "pstart": __import__("dispatch")._proc_start(os.getpid())},
+                "TK-2": {"pid": 0}, "TK-3": {"pid": proc.pid}, "TK-4": {"pid": proc.pid, "pstart": "чужой-старт"},
+                "TK-5": {"pid": os.getpid(), "pstart": "чужой-старт"}}
+        (d / "state.json").write_text(json.dumps({"active_runs": runs}), encoding="utf-8")
         self.assertEqual(release.active_runs(self.proj), 1)
 
     def test_installed_dir_prefers_project_scope(self):
