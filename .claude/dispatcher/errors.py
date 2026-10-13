@@ -15,6 +15,8 @@
     python -m unittest <путь или модуль, в git> [-v|-q|-f|-b]
 Файлы: `<проект>/.claude/errors/E-NNN.md` (шапка `id/title/ticket/found/status/check/fixed/fixed_sha/timeout` +
 `## Что случилось`). Номер — следующий после наибольшего. Время — `ГГГГ-ММ-ДД ЧЧ:ММ` (местное). Повторный `fix` заменяет проверку.
+Отказ приёмки из-за упавшей проверки (регресс) дописывает строку в `<проект>/.claude/dispatcher/regressions.log`: время, тикет,
+упавшие ошибки через запятую (поля — через табуляцию); её читает ежедневный отчёт (`report.py`, критерий 7).
 """
 from __future__ import annotations
 
@@ -210,6 +212,19 @@ def run_all(root: Path, cwd=None, timeout: float | None = None, report=None) -> 
     return bad
 
 
+def _log_refusal(root: Path, tid: str, bad: list) -> None:
+    """Отказ приёмки из-за регресса — строка «время · тикет · упавшие ошибки» в regressions.log (мера критерия 7: должно
+    быть 0). Сбой записи приёмку не ломает."""
+    try:
+        d = root / ".claude" / "dispatcher"
+        d.mkdir(parents=True, exist_ok=True)
+        with (d / "regressions.log").open("a", encoding="utf-8") as f:
+            f.write("\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), tid or "-",
+                               ",".join(eid for eid, _, _ in bad))) + "\n")
+    except OSError:
+        pass
+
+
 def gate(root: Path, tid: str = "") -> str:
     """Приёмка Судьи: пусто — проверки всех исправленных ошибок зелёные (или их нет), принимать можно; иначе текст отказа.
     Идут в worktree тикета `.claude/worktrees/<ID>`, если он есть, иначе в корне проекта."""
@@ -218,6 +233,7 @@ def gate(root: Path, tid: str = "") -> str:
     bad = run_all(root, cwd)
     if not bad:
         return ""
+    _log_refusal(root, tid, bad)
     lines = [f"{eid} «{title}»: " + note.replace("\n", "\n    ") for eid, title, note in bad[:SHOWN]]
     if len(bad) > SHOWN:
         lines.append(f"…и ещё упавших: {len(bad) - SHOWN}")
