@@ -30,6 +30,8 @@ INSTALLED = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
 SESSION_DROP_EXTRA = ("HOST_SESSION",)  # к start.SESSION_ENV
 SESSION_DROP_PREFIX = ("CLAUDECODE", "CLAUDE_CODE_")  # метки сессии Claude; *_DISPATCH_*, ключи и прочие настройки служб остаются
 LOCK_STALE_S = 1800
+WAIT_IDLE_S = 4 * 3600  # потолок ожидания тишины перед выпуском
+WAIT_STEP_S = 30.0
 
 
 def read_versions(root: Path = ROOT) -> dict:
@@ -392,8 +394,42 @@ def _lock_acquire(lock: Path, now=time.time) -> bool:
     return False
 
 
-def run_auto_locked(project: Path, run_one=autorelease) -> int:
-    """Тело процесса `auto`: замок; занят — пометка «ещё один выпуск» (доделает держатель после текущего)."""
+def pin_file(project: Path) -> Path:
+    """Закрепление версии проектом (TK-232): файл есть — автовыпуск ничего не обновляет; снять — удалить файл."""
+    return project / ".claude" / "release-pin"
+
+
+def active_runs(project: Path) -> int:
+    """Сколько запусков ролей идёт: живые pid из state.json["active_runs"] диспетчера."""
+    import dispatch
+    try:
+        runs = json.loads((project / ".claude" / "dispatcher" / "state.json").read_text(encoding="utf-8")).get("active_runs", {})
+    except (OSError, ValueError):
+        return 0
+    return sum(1 for r in runs.values() if r.get("pid") and dispatch._pid_alive(r["pid"], start=r.get("pstart")))
+
+
+def wait_idle(project: Path, lock: Path, count=active_runs, sleep=time.sleep, now=time.time) -> bool:
+    """Ждать, пока не останется идущих запусков ролей: перезапуск служб рвёт их работу. Замок обновляется, чтобы не
+    протухнуть. Не дождались за RPV_RELEASE_WAIT_S (умолчание 4 ч) — False, выпуск идёт принудительно (не голодать)."""
+    deadline = now() + float(os.environ.get("RPV_RELEASE_WAIT_S", WAIT_IDLE_S))
+    while count(project):
+        if now() >= deadline:
+            return False
+        sleep(WAIT_STEP_S)
+        try:
+            os.utime(lock)
+        except OSError:
+            pass
+    return True
+
+
+def run_auto_locked(project: Path, run_one=autorelease, idle=wait_idle) -> int:
+    """Тело процесса `auto`: замок; занят — пометка «ещё один выпуск» (доделает держатель после текущего).
+    Закреплённая версия — выпуска нет; идут запуски ролей — ждём тишины."""
+    if pin_file(project).exists():
+        print("[release] auto: версия закреплена проектом (.claude/release-pin) — выпуска нет")
+        return 0
     lock, pending = _auto_paths(project)
     if not _lock_acquire(lock):
         pending.touch()
@@ -402,6 +438,8 @@ def run_auto_locked(project: Path, run_one=autorelease) -> int:
     rc = 0
     try:
         while True:
+            if not idle(project, lock):
+                _journal(project, {"result": "forced", "detail": "запуски ролей не кончились за срок — выпуск принудительно"})
             pending.unlink(missing_ok=True)
             rc = max(rc, run_one(project))
             if not pending.exists():
@@ -412,6 +450,7 @@ def run_auto_locked(project: Path, run_one=autorelease) -> int:
 
 def spawn_auto(project: Path, popen=subprocess.Popen) -> bool:
     """Автовыпуск отдельным процессом, отвязанным от диспетчера (start.py остановит самого диспетчера). RPV_AUTORELEASE=0 — выкл.
+    Закрепление версии — файл .claude/release-pin; выпуск ждёт, пока нет идущих запусков ролей.
     Несколько влитых за проход PR дают несколько процессов — их сводит замок (run_auto_locked)."""
     if os.environ.get("RPV_AUTORELEASE", "1") == "0":
         return False

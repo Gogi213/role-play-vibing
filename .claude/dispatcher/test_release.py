@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import tempfile
 import unittest
@@ -249,6 +250,52 @@ class AutoReleaseTests(unittest.TestCase):
         old = lock.stat().st_mtime - release.LOCK_STALE_S - 1
         os.utime(lock, (old, old))
         self.assertTrue(release._lock_acquire(lock))
+
+    def test_pin_file_blocks_autorelease(self):
+        """TK-232 п.6: проект закрепил версию — автовыпуск не обновляет."""
+        pin = release.pin_file(self.proj)
+        pin.parent.mkdir(parents=True, exist_ok=True)
+        pin.write_text("", encoding="utf-8")   # содержимое не читается: закрепление = «никаких обновлений»
+        runs = []
+        self.assertEqual(release.run_auto_locked(self.proj, lambda q: runs.append(1) or 0, idle=lambda *a: True), 0)
+        self.assertEqual(runs, [])
+
+    def test_waits_for_idle_before_release(self):
+        """TK-232 п.6: пока идут запуски ролей, выпуск ждёт; тишина — выпускает."""
+        counts, naps = [2, 1, 0], []
+        lock, _ = release._auto_paths(self.proj)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.touch()
+        self.assertTrue(release.wait_idle(self.proj, lock, count=lambda p: counts.pop(0), sleep=naps.append))
+        self.assertEqual(len(naps), 2)
+
+    def test_wait_idle_gives_up_after_limit(self):
+        """Тишина не наступила за срок — False (выпуск принудительный), не вечное ожидание."""
+        lock, _ = release._auto_paths(self.proj)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.touch()
+        t = [0.0]
+        with mock.patch.dict(os.environ, {"RPV_RELEASE_WAIT_S": "100"}):
+            self.assertFalse(release.wait_idle(self.proj, lock, count=lambda p: 1,
+                                               sleep=lambda s: t.__setitem__(0, t[0] + 60), now=lambda: t[0]))
+
+    def test_auto_release_runs_after_wait_and_journals_forced(self):
+        runs = []
+        self.assertEqual(release.run_auto_locked(self.proj, lambda q: runs.append(1) or 0, idle=lambda *a: False), 0)
+        self.assertEqual(runs, [1])
+        rec = json.loads((self.proj / ".claude" / "dispatcher" / "release-journal.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(rec["result"], "forced")
+
+    def test_active_runs_counts_live_pids_only(self):
+        d = self.proj / ".claude" / "dispatcher"
+        d.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()   # завершённый подпроцесс: ненулевой мёртвый pid (застрявшая запись упавшего запуска)
+        runs = {"TK-1": {"pid": os.getpid(), "pstart": __import__("dispatch")._proc_start(os.getpid())},
+                "TK-2": {"pid": 0}, "TK-3": {"pid": proc.pid}, "TK-4": {"pid": proc.pid, "pstart": "чужой-старт"},
+                "TK-5": {"pid": os.getpid(), "pstart": "чужой-старт"}}
+        (d / "state.json").write_text(json.dumps({"active_runs": runs}), encoding="utf-8")
+        self.assertEqual(release.active_runs(self.proj), 1)
 
     def test_installed_dir_prefers_project_scope(self):
         self.assertEqual(release.installed_dir(self.proj, self.reg), self.proj / "plug")
