@@ -49,8 +49,8 @@ jobs:
           check bad "SERVICE_RESULT=exit-code EXIT_STATUS=3" -- /bin/sh -c 'exit 3'
   e2e:
     # CP11 (критерий 17): чистый проект → /rpv-init → цель → роли под диспетчером → результат, принятый Судьёй; время и
-    # цена. Настоящие запуски claude стоят денег (Windows 14.10: ~$0.5 за прогон) — только ручной запуск CI и только
-    # при секрете ANTHROPIC_API_KEY; нет секрета — шаг пропускается. Windows — на машине владельца.
+    # цена. Claude — по подписке владельца: секрет CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token` на его машине). Только
+    # ручной запуск CI; нет секрета — шаг пропускается. Windows — на машине владельца.
     name: чистый проект (${{ matrix.os }})
     if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
@@ -60,7 +60,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -68,7 +68,7 @@ jobs:
           python-version: "3.12"
       - name: замер
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "::notice::нет секрета ANTHROPIC_API_KEY — замер пропущен"; exit 0; fi
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::notice::нет секрета CLAUDE_CODE_OAUTH_TOKEN — замер пропущен"; exit 0; fi
           npm install -g @anthropic-ai/claude-code
           git config --global user.name e2e
           git config --global user.email e2e@example.invalid
