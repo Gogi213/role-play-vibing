@@ -2,13 +2,15 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
-## 1.8.47 — 2026-10-13
+## 1.8.48 — 2026-10-13
 
 ### Удалено (TK-236, вычитание шаг 1)
 - Прогон на выносливость: `endurance.py`, `test_endurance.py`, workflow `endurance`, метка `endurance` в `conftest.py`; CI и `tools/fastcheck.py` гоняют один набор тестов.
 - `board/bridge.py` — «необязательный мост» встроенной команды `home` (сервер табло читает `status.json` как раньше).
 - Области сессии `ticket` и `role`: `RPV_DISPATCH_SESSION_SCOPE`, `RPV_DISPATCH_ROTATE_TOKENS`, `role_sessions` в состоянии диспетчера; бабочка (новая сессия на пробуждение) — единственный режим. `--resume` остаётся только у повтора после таймаута в том же запуске. Ключи в окружении проекта (`RPV_DISPATCH_ROTATE_TOKENS=1` в alpha) становятся пустыми — вреда нет.
 - `last_context_tokens` в `ticket_sessions` и `_context_tokens_for_store`: читателем была только ротация токенов; `ctx_last` в runs.log считается отдельно (`_context_tokens_last`).
+
+## 1.8.47 — 2026-10-13
 
 ### Изменено (TK-233, План 4а п.2–4)
 - `tickets.py new` требует `--ref` (цитата владельца ≥ 5 знаков или «В-<число>» любой длины); без неё отказ, ссылка пишется первой строкой описания.
