@@ -12,7 +12,7 @@
 python <плагин>/.claude/dispatcher/start.py [--project <проект>]    # диспетчер + сторож в фоне, уже запущенные перезапускает (/rpv-start)
 python <плагин>/.claude/dispatcher/dispatch.py --project <проект>   # диспетчер, боевой цикл (--once — один тик; --help — справка)
 python <плагин>/.claude/dispatcher/watch.py --project <проект>      # сторож: сироты, blocked (--once — один цикл)
-python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." [--reviewer judge] [--effort high]
+python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." --ref "<цитата владельца или В-##>" [--reviewer judge] [--effort high]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> comment TK-001 --author engineer --text "..." [--next judge|ceo]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> start TK-001 | status
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> stop TK-001 --text "<новая постановка>" [--next judge]   # только CEO
@@ -44,7 +44,7 @@ needs_owner, stopped (остановлено CEO — не будит, пока C
 | `RPV_DISPATCH_INTERVAL` / `_MAX_PARALLEL` / `_TIMEOUT` | тик (15 с) / запусков сразу (3) / таймаут запуска (1200 с) |
 | `RPV_DISPATCH_MIN_GAP_S` / `_MAX_RUNS_PER_TICKET_HOUR` | пауза между запусками тикета (60 с) / запусков в час (6) |
 | `RPV_DISPATCH_MAX_SAME_STATUS_RUNS` | запусков подряд с записью, но без смены статуса: на пороге → `blocked` (12, назначено) |
-| `RPV_DISPATCH_MAX_REVIEW_RETURNS` | сколько раз ревьюер может вернуть работу; после предела тикет, снова пришедший на ревью, уходит CEO (`next: ceo`), ревьюера не будим (3, назначено) |
+| `RPV_DISPATCH_MAX_REVIEW_RETURNS` | сколько раз ревьюер может вернуть работу; после предела тикет, снова пришедший на ревью, закрывается «не сделано» с остатком (последний возврат ревьюера) в логе, ревьюера не будим (2, назначено) |
 | `RPV_DISPATCH_MAX_IDLE_RUNS` | запусков подряд без записи и без смены статуса → `blocked` (2, назначено) |
 | `RPV_DISPATCH_MODEL` / `_ROLE_MODEL` / `_EFFORT` | модель и усилие ролей, `роль:значение,…` |
 | `RPV_WATCH_INTERVAL` / `_ORPHAN_HOURS` | цикл сторожа (120 с) / порог сирот (2 ч) |

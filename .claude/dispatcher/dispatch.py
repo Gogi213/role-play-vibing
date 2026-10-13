@@ -129,9 +129,10 @@ MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
 MAX_SAME_STATUS_RUNS = int(P.env("DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
 MAX_IDLE_RUNS = int(P.env("DISPATCH_MAX_IDLE_RUNS", "2"))
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
-# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher +
-# `next: ceo` (одна строка CEO). Число НАЗНАЧЕНО CEO 03.10, не измерено.
-MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "3"))
+# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher, тикет
+# закрыт «не сделано» с остатком (последний возврат ревьюера) в логе — не blocked и не вопрос владельцу (TK-233, 13.10:
+# потолок ремонта 2; был 3 и needs_owner). Число НАЗНАЧЕНО владельцем 13.10, не измерено.
+MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "2"))
 # Остановка роли CEO (`tickets.py stop`): после снятия дерева процессов ждём смерти процесса не дольше STOP_VERIFY_S
 # секунд (число НАЗНАЧЕНО, не измерено: taskkill/killpg возвращаются сразу, 10 с — запас на очередь ОС); не умер —
 # строка CEO `stop-failed`, заявка остаётся до следующего тика.
@@ -876,7 +877,7 @@ def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
 
 def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
     """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
-    ревьюера не будим; запись dispatcher, статус needs_owner (строка «ждёт вас» на Диспетчерской, CEO не будится). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
+    ревьюера не будим; запись dispatcher с остатком, статус done («не сделано»). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
     не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
     if tkt.status not in ("done", "in_review") or tkt.reviewer not in ROLE_KEYS:
         return tkt
@@ -886,11 +887,12 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     last_author = tkt.log[-1].author if tkt.log else ""
     if not T.author_is(last_author, tkt.owner):
         return tkt
+    rest = next((e.text.strip() for e in reversed(tkt.log) if T.author_is(e.author, tkt.reviewer)), "")
     T.append_log(path, "dispatcher",
-                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (спор ревью, не вопрос об исследовании) — на новый круг не будим. Решение за владельцем: "
-                 f"ещё один круг (`tickets.py comment {tkt.id} --author ceo --text \"...\" --next {tkt.reviewer}`) "
-                 "либо принять/закрыть самому.", now=now)
-    T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)
+                 f"Не сделано: ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (потолок ремонта) — тикет закрыт "
+                 f"без нового круга. Остаток (последний возврат ревьюера): {rest[:1500] or '(записи ревьюера нет)'}. "
+                 f"Взять остаток — новый тикет со ссылкой на задачу владельца (`new --ref`).", now=now)
+    T.write_header_updates(path, {"status": "done", "next": ""}, now=now)
     return T.read_ticket(path)
 
 
@@ -1155,7 +1157,7 @@ def _context_tokens_last(result: dict) -> int:
     завышает контекст в разы, рвя ротацию раньше времени (CEO 27.09, живой прогон: ctx_sum=333 886
     при реальном контексте хода ~52 тыс.). usage.iterations[-1] — контекст последнего хода; нет
     iterations (аудит 03.10) — последний ход из транскрипта сессии; нет и его — запасная оценка
-    ctx_sum // num_turns (среднее по ходам, занижена: см. _context_tokens_for_store)."""
+    ctx_sum // num_turns (среднее по ходам, занижена)."""
     usage = result.get("usage") or {}
     iterations = usage.get("iterations")
     if isinstance(iterations, list) and iterations:
@@ -1169,25 +1171,6 @@ def _context_tokens_last(result: dict) -> int:
     except (TypeError, ValueError):
         num_turns = 1
     return total // num_turns
-
-
-def _context_tokens_for_store(result: dict, previous: int, session_id=None) -> int:
-    """Что записать в `last_context_tokens` сессии после запуска (аудит 03.10): нет JSON (таймаут/убит) или usage
-    пуст (ответ-ошибка) — НЕ обнулять; аудит-2: если id сессии известен (`session_id` — та, что продолжал запуск, либо
-    из JSON), последний ход берётся из её транскрипта (убитая сессия успела записать ходы), а не старое число;
-    транскрипта нет — остаётся последнее известное. Есть ход (iterations/транскрипт) — он; иначе запасная
-    оценка-среднее, но не ниже известного (контекст сессии без сжатия только растёт)."""
-    usage = (result or {}).get("usage") or {}
-    if not _tokens_of(usage):
-        last = _transcript_last_turn_tokens(session_id or (result or {}).get("session_id"))
-        return last if last else previous
-    iterations = usage.get("iterations")
-    if isinstance(iterations, list) and iterations and _tokens_of(iterations[-1]):
-        return _tokens_of(iterations[-1])
-    last = _transcript_last_turn_tokens(result.get("session_id"))
-    if last:
-        return last
-    return max(previous, _context_tokens_last(result))
 
 
 def _role_busy(role: str) -> bool:
@@ -1905,15 +1888,11 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     role = info["role"]
     key = f"{tid}::{role}"
     sess = state.setdefault("sessions", {}).setdefault(key, {})  # retries — всегда на (задачу, роль)
-    store = _resume_store(state, tid, role)  
-    sid_used = result.get("session_id") or store.get("session_id")  # сессия этого запуска (убит — id прежней, --resume)
+    store = _resume_store(state, tid, role)
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
     elif timed_out and info.get("session_id") and not store.get("session_id") and             next(CLAUDE_PROJECTS_DIR.glob(f"*/{info['session_id']}.jsonl"), None) is not None:
         store["session_id"] = info["session_id"]  # убитая новая сессия: транскрипт есть — повтор продолжит её, не с нуля
-        sid_used = info["session_id"]
-    # контекст последнего хода; нет JSON/usage (таймаут, ответ-ошибка) — прежнее значение, не ноль
-    store["last_context_tokens"] = _context_tokens_for_store(result, store.get("last_context_tokens", 0), sid_used)
 
     path = TICKETS_DIR / f"{tid}.md"
     if not path.exists():
@@ -2253,7 +2232,6 @@ def _reset_loop_state(state: dict, tid: str) -> None:
         store = state.get("ticket_sessions", {}).get(key)
         if store:
             store.pop("session_id", None)
-            store.pop("last_context_tokens", None)
     state.get("launch_history", {}).pop(tid, None)
 
 
