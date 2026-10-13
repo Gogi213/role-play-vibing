@@ -149,7 +149,6 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | `RPV_DISPATCH_MODEL` | `claude-sonnet-5-5` | модель ролей |
 | `RPV_DISPATCH_ROLE_MODEL` | Судья — `claude-opus-5-5`, остальные — `RPV_DISPATCH_MODEL` | модель по ролям, `judge:…,engineer:…` или одно значение на все |
 | `RPV_DISPATCH_EFFORT` | Судья `xhigh`, Инженер и Исследователь `high` | усилие по ролям; в тикете перекрывается полем `effort` |
-| `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст, после которого сессия роли начинается заново |
 | `RPV_WATCH_INTERVAL` | `120` | цикл сторожа, с |
 | `RPV_WATCH_ORPHAN_HOURS` | `2` | через сколько часов без записи тикет считается сиротой |
 | `RPV_IDLE_SLO_MIN` | `10` | допустимый простой, минут в сутки |

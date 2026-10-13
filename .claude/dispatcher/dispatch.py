@@ -200,24 +200,9 @@ HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
-# Область сессии на роль (владелец 27.09): "run" (по умолчанию, TK-232) — новая сессия на каждое пробуждение,
-# память между запусками — блокнот роли и лог тикета; "ticket" — сессия на (задача, роль), --resume в пределах
-# задачи (с ротацией по ROTATE_TOKENS); "role" — одна долгая сессия роли на ВСЕ задачи.
-# Предел запусков на роль действует всегда (_role_busy), а не только при "role"; по умолчанию 1, настраивается
-# RPV_DISPATCH_ROLE_PARALLEL; на один тикет — один запуск роли.
-# Переопределяемо через RPV_DISPATCH_SESSION_SCOPE=judge:role,engineer:ticket.
-SESSION_SCOPE = {"judge": "run", "researcher": "run", "engineer": "run"}
-if P.env("DISPATCH_SESSION_SCOPE"):
-    for _pair in P.env("DISPATCH_SESSION_SCOPE").split(","):
-        _role, _, _scope = _pair.partition(":")
-        if _role and _scope:
-            SESSION_SCOPE[_role.strip()] = _scope.strip()
-
-# Ротация долгой сессии: если контекст прошлого запуска (input + cache_read + cache_creation, по usage
-# из JSON-вывода claude) превысил это число токенов — следующий запуск роли начинает новую сессию (без
-# --resume) и получает в промпте напоминание перечитать блокнот и прежние решения по нужной задаче.
-# v2: 250 000 → 120 000 — при окне Sonnet 200 тыс. прежний порог не срабатывал (TK-025: одна сессия $36).
-ROTATE_TOKENS = int(P.env("DISPATCH_ROTATE_TOKENS", "120000"))
+# Сессия: каждое пробуждение роли — новая (бабочка); память между запусками — блокнот роли и лог тикета.
+# --resume — только повтор после таймаута в том же запуске (TK-056 п.3′). Предел запусков на роль — _role_busy
+# (RPV_DISPATCH_ROLE_PARALLEL, по умолчанию 1); на один тикет — один запуск роли.
 # транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
 # `usage.iterations` (см. _context_tokens_last)
 CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
@@ -1113,12 +1098,10 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
     return None
 
 
-# --- область сессии (SESSION_SCOPE) ------------------------------------------------------------
+# --- сессия запуска ----------------------------------------------------------------------------
 
 def _resume_store(state: dict, tid: str, role: str) -> dict:
-    """session_id/токены контекста: при scope="role" — общие на роль, при "ticket" — на (задача, роль)."""
-    if SESSION_SCOPE.get(role, "ticket") == "role":
-        return state.setdefault("role_sessions", {}).setdefault(role, {})
+    """session_id/токены контекста на (задача, роль) — для повтора после таймаута."""
     return state.setdefault("ticket_sessions", {}).setdefault(f"{tid}::{role}", {})
 
 
@@ -1714,14 +1697,11 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         # прошлый запуск этого тикета оборван CEO (`tickets.py stop`): сессия НОВАЯ (без --resume), в промпте — пометка
         sid = None
         extra_note = " ".join(x for x in (extra_note, STOP_NOTE) if x)
-    run_scope = SESSION_SCOPE.get(role) == "run" and not attempt  # повтор после таймаута — тот же запуск, --resume
-    if sid and (run_scope or store.get("last_context_tokens", 0) > ROTATE_TOKENS):
-        # область «запуск»: каждое пробуждение — новая сессия; иначе ротация — контекст прошлой слишком большой
+    if sid and not attempt:
+        # каждое пробуждение — новая сессия; --resume только у повтора после таймаута (attempt > 0)
         sid = None
-        why = "каждое пробуждение — новая сессия" if run_scope else f"контекст прошлой превысил {ROTATE_TOKENS} токенов"
-        rotate_note = (f"Начинаем новую сессию ({why}): "
-                        f"прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
-                        f"docs/research/reviews/ по нужной задаче.")
+        rotate_note = (f"Начинаем новую сессию: прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
+                       f"docs/research/reviews/ по нужной задаче.")
         extra_note = " ".join(x for x in (extra_note, rotate_note) if x)
 
     if reason == "next":
@@ -1799,7 +1779,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
     }
     # last_woken — приоритет очереди запусков внутри роли (кто дольше не запускался — тот первый, см. tick);
-    # всегда на (задачу, роль), не зависит от SESSION_SCOPE
+    # всегда на (задачу, роль)
     sess_entry = state.setdefault("sessions", {}).setdefault(f"{tid}::{role}", {})
     sess_entry["last_woken"] = T.now_iso(now)
     _record_launch(state, tid, now)
@@ -1925,7 +1905,7 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     role = info["role"]
     key = f"{tid}::{role}"
     sess = state.setdefault("sessions", {}).setdefault(key, {})  # retries — всегда на (задачу, роль)
-    store = _resume_store(state, tid, role)  # session_id/токены — по SESSION_SCOPE[role]
+    store = _resume_store(state, tid, role)  
     sid_used = result.get("session_id") or store.get("session_id")  # сессия этого запуска (убит — id прежней, --resume)
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
