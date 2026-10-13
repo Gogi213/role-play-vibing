@@ -111,6 +111,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 - Числа владельцу — после Судьи; оценка ≠ замер.
 - Передача работы — только `--next`.
 - Удаление — только внутри проекта.
+- Ошибка исправлена, только когда к ней приложена проверка; приёмка Судьи гоняет проверки всех исправленных ошибок кодом.
 - Судью не снимает CEO: он единственный кросс-аудитор и валидатор качества; снять его может только владелец прямой цитатой.
 
 Полный устав — [`templates/roles/README.md`](templates/roles/README.md) (`/rpv-init` копирует его в `.claude/roles/README.md` проекта).
@@ -119,7 +120,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 
 | команда | назначение |
 |---|---|
-| `/rpv-init` | Подготовить проект: `.claude/roles` из шаблонов плагина, `notes/`, `tickets/`, реестр владельца (`decisions.md` + `@` в `CLAUDE.md`, `goals/`), строки в `.gitignore`; существующее не перезаписывает |
+| `/rpv-init` | Подготовить проект: `.claude/roles` из шаблонов плагина, `notes/`, `tickets/`, реестр владельца (`decisions.md` + `@` в `CLAUDE.md`, `goals/`), реестр ошибок `errors/`, строки в `.gitignore`; существующее не перезаписывает |
 | `/ceo` | Пометить сессию как CEO (метку читают хуки; роль держится и после `/clear` в Desktop) |
 | `/rpv-start` | Запустить или перезапустить диспетчер и сторож в фоне; при заданном `RPV_BOARD` — ещё и отправку сводки на табло |
 | `/rpv-doctor` | Здоровье команды одной таблицей: диспетчер, сторож, присмотр ОС, шина, очередь, ошибки за сутки; только читает |
@@ -130,6 +131,7 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 |---|---|
 | `dispatcher/tickets.py` | тикеты: `new`, `comment`, `start`, `stop` (только CEO), `wait`, `status`; `inbox [--peek]` — очередь сигналов CEO |
 | `dispatcher/registry.py` | реестр владельца: `decide` (решение В-N), `goal` / `accept-goal` / `drop-goal` (цель G-NNN), `show`, `list`; пишет только CEO (помощник `secretary`), роли — только читают |
+| `dispatcher/errors.py` | реестр ошибок `.claude/errors/E-NNN.md`: `add`, `fix E-N --check "<команда>"` (исправленной ошибка становится, только когда проверка — тест или скрипт из git — зелёная), `run`, `show`, `list`; ставят и закрывают любые роли; проверки всех исправленных гоняет приёмка Судьи (`result … accept`, `accept`) |
 | `dispatcher/supervise.py` | присмотр ОС за диспетчером и сторожем: `--install` / `--uninstall` |
 | `dispatcher/release.py` | выпуск, обновление, откат: `bump`, `update`, `rollback`, `check` |
 | `dispatcher/board_push.py` | сводка команды на табло и в `.claude/pulse/status.json` |

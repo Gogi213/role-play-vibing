@@ -1,5 +1,5 @@
 ---
-description: Подготовить проект к команде ролей — .claude/roles из шаблонов плагина, notes/, tickets/, реестр владельца (decisions.md, goals/), строки в .gitignore
+description: Подготовить проект к команде ролей — .claude/roles из шаблонов плагина, notes/, tickets/, реестр владельца (decisions.md, goals/), реестр ошибок errors/, строки в .gitignore
 allowed-tools: Bash
 disable-model-invocation: true
 ---
@@ -9,9 +9,9 @@ disable-model-invocation: true
 ```
 T="${CLAUDE_PLUGIN_ROOT}/templates/roles"
 [ -d "$T" ] || { echo "нет шаблонов: $T"; exit 1; }
-mkdir -p .claude/roles/notes .claude/tickets .claude/goals
+mkdir -p .claude/roles/notes .claude/tickets .claude/goals .claude/errors
 for f in "$T"/*.md; do b=$(basename "$f"); if [ -e ".claude/roles/$b" ]; then echo "есть, пропущен: .claude/roles/$b"; else cp "$f" ".claude/roles/$b" && echo "создан: .claude/roles/$b"; fi; done
-for k in .claude/roles/notes .claude/tickets .claude/goals; do [ -e "$k/.gitkeep" ] || : > "$k/.gitkeep"; done
+for k in .claude/roles/notes .claude/tickets .claude/goals .claude/errors; do [ -e "$k/.gitkeep" ] || : > "$k/.gitkeep"; done
 if [ -e .claude/decisions.md ]; then echo "есть, пропущен: .claude/decisions.md"; else printf '# Решения владельца\n' > .claude/decisions.md && echo "создан: .claude/decisions.md"; fi
 touch CLAUDE.md
 if grep -qxF "@.claude/decisions.md" CLAUDE.md; then echo "CLAUDE.md уже подключает .claude/decisions.md"; else [ -n "$(tail -c1 CLAUDE.md)" ] && echo >> CLAUDE.md; printf '\n@.claude/decisions.md\n' >> CLAUDE.md && echo "CLAUDE.md +@.claude/decisions.md"; fi

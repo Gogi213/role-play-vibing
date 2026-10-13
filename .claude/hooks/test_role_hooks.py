@@ -81,6 +81,17 @@ class SessionStart(unittest.TestCase):
                 self.assertEqual(os.path.normpath(project), os.path.normpath(PROJECT))
                 self.assertNotIn("python .claude/dispatcher/tickets.py", text)
 
+    def test_startup_gives_errors_command_to_every_role(self):  # V2-3: ошибка исправлена, только когда приложена проверка
+        for role in ("researcher", "engineer", "judge", "ceo"):
+            text, _ = start_text(role, "startup")
+            m = re.search(r'(python|"[^"]+") "([^"]+errors\.py)" --project "([^"]+)" add ', text)
+            self.assertIsNotNone(m, (role, text))
+            self.assertEqual(os.path.normpath(m.group(2)),
+                             os.path.normpath(os.path.join(PLUGIN, ".claude", "dispatcher", "errors.py")))
+            self.assertTrue(os.path.isfile(m.group(2)), m.group(2))
+            self.assertIn("fix E-N --check", text)
+            self.assertLessEqual(len(text), rc.LIMIT, role)
+
     def test_resume_and_compact_are_short(self):
         for role in ("researcher", "judge"):
             for source in ("resume", "compact"):
