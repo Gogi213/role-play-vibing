@@ -2,6 +2,15 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.15.0 — 2026-10-14
+
+### Удалено (CP3, табло)
+- Веб-табло («Диспетчерская») убрано целиком: `.claude/board/` (сервер, страница, машины, `plainify`, MCP `pulse_answer`/`pulse_status`, юнит `rpv-board`), `dispatcher/board_push.py`, `view2.py`, `pulsedata.py`, `plan.py`, `ask.py`, `docs/dashboard.md`. Вопросы владельцу идут только статусом тикета `needs_owner` → CEO. Ход работы владельцу — ежедневным сообщением в Telegram (CP10).
+- `/rpv-start` больше не запускает третью службу `board_push`; переменные `RPV_BOARD*`, `RPV_MACHINES`, `RPV_PC`, `RPV_PLAIN*` не читаются.
+- Из промпта роли убрано правило плана шагов (`plan.py set/step`); диспетчер больше не читает `.claude/pulse/questions` и не досылает ответы с табло.
+- Сторож не опрашивает адаптер `RPV_HOST_ALERTS_CMD`: его строки шли только на табло.
+- Хвосты у пользователя: MCP табло в `~/.claude.json` (если регистрировался), `.claude/pulse/`, `board_push.pid`/`.run.log` в проекте — не используются, удалить вручную.
+
 ## 1.14.0 — 2026-10-13
 
 ### Удалено (CP4, автовыпуск плагина)
