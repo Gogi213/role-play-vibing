@@ -137,7 +137,7 @@ def task_name(project: Path) -> str:
 
 
 def _secret_name(k: str) -> bool:
-    """Секрет — по окончанию имени (…_TOKEN, …_API_KEY); пороги (…_TOKENS) и пути (…_DECK_KEY, …_FILE) — нет."""
+    """Секрет — по окончанию имени (…_TOKEN, …_API_KEY); пороги (…_TOKENS) и пути (…_KEY_FILE, …_FILE) — нет."""
     u = k.upper()
     return u.endswith(("_TOKEN", "_SECRET", "_PASSWORD", "_PASS", "_API_KEY", "_ACCESS_KEY", "_SECRET_KEY", "_PRIVATE_KEY"))
 

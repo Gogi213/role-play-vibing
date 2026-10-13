@@ -64,74 +64,26 @@ REF_REGISTRY = re.compile(r"^(В-\d+|G-\d{3,})\b")  # номер реестра 
 PROJECT_ROOT = D.PROJECT_ROOT
 
 
-def bus_emit(tid: str, kind: str, payload: dict) -> None:
-    """Событие на шину (TK-045): шина не настроена или недоступна — команда не ломается (busclient.post не бросает)."""
-    if not D._bus_configured():
-        return
-    import busclient
-    busclient.post(f"задача.{tid}.{kind}", payload, timeout=3)
-
-
-def _ceo_fallback_unread(peek: bool, all_lines: bool = False) -> list[str]:
-    """Строки файла ceo-inbox.md новее отметки `.ceo-inbox-fallback-seen`: при шине — только помеченные «[запасной путь]»,
-    без шины (all_lines) — все. Отметку двигает чтение без --peek."""
+def cmd_inbox(args) -> int:
+    """Очередь CEO: новые строки ceo-inbox.md с прошлого чтения (отметка `.ceo-inbox-fallback-seen` — имя осталось от шины);
+    `--peek` отметку не двигает."""
     inbox, seen_f = D.CEO_INBOX, D.CEO_INBOX.parent / ".ceo-inbox-fallback-seen"
     try:
         lines = inbox.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return []
+        lines = []
     try:
         seen = int(seen_f.read_text(encoding="utf-8").strip() or 0)
     except (OSError, ValueError):
         seen = 0
     if seen > len(lines):
         seen = 0
-    new = [ln for ln in lines[seen:] if all_lines or "[запасной путь]" in ln]
-    if not peek and len(lines) != seen:
+    for ln in lines[seen:]:
+        print(ln)
+    if len(lines) == seen:
+        print("очередь CEO пуста (новых строк в ceo-inbox.md нет)")
+    elif not args.peek:
         seen_f.write_text(str(len(lines)), encoding="utf-8")
-    return new
-
-
-def cmd_inbox(args) -> int:
-    """Очередь CEO (В-192): читает `ceo` пачкой, срочное (prio=urgent) первым, подтверждает; запасной файл — отдельно.
-    Шина не настроена — печатает новые строки ceo-inbox.md."""
-    if not D._bus_configured():
-        new = _ceo_fallback_unread(args.peek, all_lines=True)
-        for ln in new:
-            print(ln)
-        if not new:
-            print("очередь CEO пуста (шина не настроена; сигналы — в ceo-inbox.md)")
-        return 0
-    import busclient
-    events, down = [], None
-    try:
-        while True:
-            batch = busclient.request("/q/ceo?after=0&wait=0", timeout=5)["events"]
-            fresh = [e for e in batch if e["seq"] not in {x["seq"] for x in events}]
-            if not fresh:
-                break
-            events += fresh
-            if args.peek:
-                break
-            if not busclient.request("/ack", {"recipient": "ceo", "seqs": [e["seq"] for e in fresh]}, timeout=5).get("acked"):
-                break
-    except Exception as e:
-        down = f"{type(e).__name__}: {e}"
-    events.sort(key=lambda e: ((e.get("payload") or {}).get("prio") != "urgent", e["seq"]))
-    for e in events:
-        pl = e.get("payload") or {}
-        tid = e["addr"].split(".")[1] if e["addr"].startswith("задача.") else e["addr"]
-        print(f"[{'СРОЧНО' if pl.get('prio') == 'urgent' else 'обычное'}] #{e['seq']} {tid} {pl.get('kind', e['addr'])}: "
-              f"{pl.get('note', pl) if pl.get('note') is not None else pl}")
-    fb = _ceo_fallback_unread(args.peek)
-    for ln in fb:
-        print(f"[запасной путь] {ln}")
-    if down:
-        print(f"шина недоступна ({down}): очередь не прочитана; сигналы за это время — в файле ceo-inbox.md (строки "
-              f"«[запасной путь]» выше)")
-        return 1
-    if not events and not fb:
-        print("очередь CEO пуста")
     return 0
 
 
@@ -226,14 +178,6 @@ def cmd_comment(args) -> int:
             if nxt in ("researcher", "engineer", "judge") and T.read_ticket(path).status == "blocked":
                 T.write_header_updates(path, {"status": "in_progress"}, stamp_updated=False)
         moved = T.compact_log(path)
-    payload = {"author": args.author, "next": nxt or ""}
-    if args.text.lstrip().upper().startswith("ВОПРОС ВЛАДЕЛЬЦУ"):
-        kind = "вопрос_владельцу"
-        payload.update(kind="owner-question", note=D._first_line(args.text), prio="urgent")
-    else:
-        # next: ceo — сигнал CEO даёт диспетчер (handle_next_ceo, с дедупом); второй путь здесь был бы дублем
-        kind = "статус" if not nxt else "сдано"
-    bus_emit(args.id, kind, payload)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
           + (f"; next проставлен автоматически (запись Судьи без --next → владелец тикета: {nxt})" if auto_next else "")
           + (f"; в архив перенесено записей: {moved}" if moved else ""))
@@ -315,7 +259,6 @@ def cmd_result(args) -> int:
     upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                        owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
-    bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
     print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
     return 0
 
@@ -473,7 +416,6 @@ def cmd_accept(args) -> int:
             acc.pop(int(args.pr), None)
             T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "done", "wait_for": "",
                                          "on_met": "", "next": ""})
-        bus_emit(args.id, "статус", {"accepted": f"{args.pr}@{args.sha}", "status": "done"})
         print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} (влит) → status: done")
         return 0
     with T.ticket_lock(path):
@@ -484,7 +426,6 @@ def cmd_accept(args) -> int:
         # ждём влития: после merged диспетчер разбудит владельца (done или следующий шаг); Судью повторно не будим
         T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "waiting",
                                      "wait_for": f"merged:{slug}#{args.pr}", "on_met": "", "next": ""})
-    bus_emit(args.id, "статус", {"accepted": f"{args.pr}@{args.sha}"})
     print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} → status: waiting, wait_for: merged:{slug}#{args.pr}")
     return 0
 
@@ -559,7 +500,6 @@ def cmd_wait(args) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
-    bus_emit(args.id, "статус", {"status": "waiting", "wait_for": spec})
     print(f"{args.id}: status: waiting, wait_for: {spec}" + (f", срок {upd['wait_by']}" if by else ""))
     return 0
 
@@ -764,8 +704,8 @@ def main(argv=None) -> int:
     p_allow.add_argument("--revoke", action="store_true", help="снять согласие")
     p_allow.set_defaults(func=cmd_allow)
 
-    p_inbox = sub.add_parser("inbox", help="CEO: прочитать и подтвердить очередь «ceo» шины (срочное первым)")
-    p_inbox.add_argument("--peek", action="store_true", help="только показать, без ack")
+    p_inbox = sub.add_parser("inbox", help="CEO: новые строки ceo-inbox.md с прошлого чтения")
+    p_inbox.add_argument("--peek", action="store_true", help="только показать, не считать прочитанным")
     p_inbox.set_defaults(func=cmd_inbox)
 
     p_status = sub.add_parser("status")

@@ -34,11 +34,9 @@ import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
-import bus_link  # noqa: E402
 import blind  # noqa: E402
 import downtime  # noqa: E402
 import notify  # noqa: E402
-import haiku_aux as HA  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -217,7 +215,7 @@ PROMPT_TEMPLATE = (
     "лежат в .claude/tickets/archive/{tid}-log.md — grep только при необходимости). Лимит этого запуска — "
     "{timeout_min} мин. Не запускай в сессии фоновых помощников и фоновых задач; долгая работа — фоновый процесс "
     "на машине (systemd-run) + status: waiting + wait_for (`{tickets_cli} wait {tid} "
-    "host:<алиас>:<путь к файлу хода>.json --by ЧЧ:ММ` (срок обязателен, GMT+4); формы: host:calc|vps|deck:<путь | unit:имя>, file:<путь>, ticket:<ID>), и выйди, "
+    "host:<ssh-алиас>:<путь к файлу итога задания> --by ЧЧ:ММ` (срок обязателен, GMT+4); формы: host:<ssh-алиас>:<путь | unit:имя>, file:<путь>, ticket:<ID>), и выйди, "
     "не жди в сессии. Трать минимум: "
     "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
     "результатом. Сделай следующий шаг и сдай итог командой "
@@ -317,137 +315,33 @@ def _remote_test_arg(remote_path: str) -> str:
 
 
 _WAIT_CACHE = {}  # (алиас, "path"|"unit", арг) -> (time.time() отметка, результат) — см. _host_wait_met
-WAIT_CHECK_CACHE_S = float(P.env("DISPATCH_DECK_CACHE_S", "60"))
+_WAIT_RC = {}     # (алиас, "path", арг) -> текст файла итога задания (`*.rc`, tools/jobrun.sh), когда путь появился — см. wait_rc
+WAIT_CHECK_CACHE_S = 60.0  # синхронный путь (--once, тесты): ssh-проверка одного условия не чаще раза в столько секунд
 WAIT_ERR_EVERY_S = 600.0  # ошибка ssh по одному условию — строка в dispatch.err.log не чаще раза в 10 мин
 _WAIT_ERR_LAST = {}  # ключ условия -> time.time() последней строки
 _UNIT_RUNNING = ("active", "activating", "reloading", "deactivating", "refreshing")
 
-# TK-055: wait_for host:… закрывается событием сторожа машины (.claude/bus/watcher.py); ssh — редкая подстраховка в потоке.
-WAIT_ASYNC = False  # True ставит main() для боевого цикла; тесты и --once — синхронный путь как раньше
+# Ожидание `host:<алиас>:…` — ssh к алиасу из ~/.ssh/config (любая машина, плагин своих настроек машин не держит). Боевой цикл
+# (WAIT_ASYNC) ssh в тике не трогает: первую проверку нового условия и сверку всех ждущих раз в WAIT_RECON_S (один ssh на
+# машину) делает поток _wait_poller, поэтому конец задания виден не позже периода сверки.
+WAIT_ASYNC = False  # True ставит main() для боевого цикла; тесты и --once — синхронный путь
 WAIT_POLL_S = float(P.env("DISPATCH_WAIT_POLL_S", "300"))
-def _unmsys(path: str) -> str:
-    """Git Bash на Windows превращает env `/data/progress` в `C:/Program Files/Git/data/progress` (TK-228): путь машины — не локальный, префикс снимаем."""
-    m = re.match(r"^[A-Za-z]:[/\\](?:Program Files[/\\]Git|msys64|Git)[/\\](.*)$", path, re.I)
-    return "/" + m.group(1).replace("\\", "/") if m else path
-
-
-PROGRESS_DIR = _unmsys(P.env("PROGRESS_DIR", "~/rpv/progress"))  # каталог файлов хода заданий на машинах (RPV_PROGRESS_DIR)
-WATCH_LIST = PROGRESS_DIR + "/watch.list"  # пути, которые сторож машины проверяет сам (по строке на путь)
 _WAIT_WATCH = set()  # ключи (алиас, what, арг), которые ждут тикеты — их опрашивает _wait_poller
-_EVENT_MET = {}      # (алиас, "unit"|"path", арг) -> time.time() прихода события
-_UNIT_START = {}     # (алиас, "unit", имя) -> InvocationID последнего запуска по событию «юнит.запущен»
-_EVENT_VERIFIED = set()  # ключи, чьё «остановлен» несёт InvocationID того же запуска: ssh-проверка не нужна
-_EVENT_LOCK = threading.Lock()
 _WAIT_NEW = threading.Event()
-
-# Стандарт сигналов: штатно ssh не опрашивает — события сторожа машины закрывают wait_for; ssh — первая проверка нового
-# условия и сверка раз в WAIT_RECON_S (она же — единственный путь, пока шина лежит или не настроена, TK-100 №21).
 WAIT_RECON_S = float(P.env("DISPATCH_WAIT_RECON_S", "300"))  # сверка всех ждущих host:… одним ssh на машину
-WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "").split(",") if a.strip()}  # машины со сторожем (умолчания нет): пропуск события там — тревога
-_LINK = None
-# TK-217: детектор «диспетчер слеп» — недоступность машины с ожиданиями/шины дольше порога → тревога вне этой машины (вердикт Судьи 12.10)
+WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "").split(",") if a.strip()}  # машины, где сторож гоняет адаптеры заданий (RPV_JOB_OWNERS_CMD, RPV_STRAY_CMD); умолчания нет
+# TK-217: детектор «диспетчер слеп» — недоступность машины с ожиданиями дольше порога → тревога вне этой машины (вердикт Судьи 12.10)
 BLIND = blind.Tracker(float(P.env("BLIND_ALERT_S", str(blind.ALERT_S))), float(P.env("BLIND_REPEAT_S", str(blind.REPEAT_S))))
 WAIT_RECON_BLIND_S = 30.0  # пока цель недоступна — сверка раз в 30 с (+ссылка таймаут 20 с), чтобы после возврата связи проснуться ≤ 60 с (стенд 12.10: 45 с таймаут + 60 с период дали 150 с)
-_RECON_MISS = set()  # ключи, по которым «пропуск» уже записан и тревога уже ушла
-_WL_REG = set()  # (алиас, путь), чья регистрация у сторожа подтверждена ответом машины
 _RECON_LAST = 0.0
 
 
-def _unit_base(name: str) -> str:
-    return name[:-8] if name.endswith(".service") else name
-
-
-def record_wait_event(ev: dict) -> None:
-    """Событие шины → «условие wait_for выполнено»: машина.<алиас>.юнит.остановлен|упал, задача.*.задание.готово,
-    машина.<алиас>.файл.появился (payload.path). Вызывается из потока слушателя шины."""
-    addr, pl = ev.get("addr", ""), ev.get("payload") or {}
-    if not isinstance(pl, dict):
-        return
-    parts = addr.split(".")
-    host = pl.get("host") or (parts[1] if len(parts) > 1 else "")
-    keys = []
-    if addr.startswith("машина.") and addr.endswith(".юнит.запущен") and pl.get("unit") and pl.get("invocation"):
-        k = (host, "unit", _unit_base(str(pl["unit"])))
-        with _EVENT_LOCK:  # новый запуск: прежнее «остановлен» этого имени недействительно
-            _UNIT_START[k] = str(pl["invocation"])
-            _EVENT_MET.pop(k, None)
-            _EVENT_VERIFIED.discard(k)
-        return
-    if addr.startswith("машина.") and addr.endswith((".юнит.остановлен", ".юнит.упал")) and pl.get("unit"):
-        k = (host, "unit", _unit_base(str(pl["unit"])))
-        inv, began = str(pl.get("invocation") or ""), _UNIT_START.get(k)
-        if inv and began and inv != began:
-            return  # остановка не последнего запуска (старый экземпляр с тем же именем) — игнорируем
-        if inv and began == inv:
-            with _EVENT_LOCK:
-                _EVENT_VERIFIED.add(k)
-        keys.append(k)
-        if addr.endswith(".юнит.упал") and P.env("HAIKU_DIAG") != "0":
-            threading.Thread(target=_diagnose_failed_unit, args=(host, str(pl["unit"])), daemon=True).start()
-    elif addr.startswith("машина.") and addr.endswith(".файл.появился") and pl.get("path"):
-        keys.append((host, "path", str(pl["path"])))
-    elif addr.startswith("задача.") and addr.endswith(".задание.готово") and pl.get("job"):
-        keys.append((host, "path", f"{PROGRESS_DIR}/{pl['job']}.json"))
-    with _EVENT_LOCK:
-        for k in keys:
-            _EVENT_MET[k] = time.time()
-
-
-def _diagnose_failed_unit(host: str, unit: str) -> None:
-    """TK-087 п.1: упал юнит → Haiku читает хвост journalctl и пишет причину в тикеты, ждущие этот юнит. Сбой — тихо."""
-    try:
-        base = _unit_base(unit)
-        paths = []
-        for path in T.list_tickets(TICKETS_DIR):
-            parsed = T.parse_wait_for(T.read_ticket(path).wait_for)
-            if parsed and parsed[:3] == ("host", host, "unit") and _unit_base(parsed[3]) == base:
-                paths.append(path)
-        if not paths:
-            return
-        r = hide.run(_ssh_cmd(host, f"journalctl -u {shlex.quote(base)} -n 80 --no-pager 2>&1 | tail -c 8000"),
-                           capture_output=True, timeout=30)
-        diag = HA.diagnose(unit, (r.stdout or b"").decode("utf-8", "replace"))
-        for path in paths if diag else []:
-            T.append_log(path, "haiku", f"диагноз упавшего юнита {unit} на {host} (Haiku, по journalctl):\n{diag}")
-    except Exception as e:  # noqa: BLE001 — рутина не должна ронять слушатель шины
-        print(f"[dispatch] haiku-diag {host}/{unit}: {e}", file=sys.stderr, flush=True)
-
-
-def _event_met(alias: str, what: str, arg: str) -> bool:
-    key = (alias, what, _unit_base(arg) if what == "unit" else arg)
-    with _EVENT_LOCK:
-        return key in _EVENT_MET
-
-
-def _event_ts(alias: str, what: str, arg: str):
-    key = (alias, what, _unit_base(arg) if what == "unit" else arg)
-    with _EVENT_LOCK:
-        return _EVENT_MET.get(key)
-
-
-def _drop_event(alias: str, what: str, arg: str) -> None:
-    with _EVENT_LOCK:
-        k = (alias, what, _unit_base(arg) if what == "unit" else arg)
-        _EVENT_MET.pop(k, None)
-        _EVENT_VERIFIED.discard(k)
-
-
-def _needs_probe(ckey) -> bool:
-    cached = _WAIT_CACHE.get(ckey)
-    if cached is None:
-        return True  # первая проверка нового условия (заодно регистрация пути у сторожа)
-    ev_ts = _event_ts(*ckey)  # событие остановки юнита — одна проверка, что это не прежний экземпляр с тем же именем
-    return (ckey[1] == "unit" and ev_ts is not None and cached[0] < ev_ts
-            and (ckey[0], "unit", _unit_base(ckey[2])) not in _EVENT_VERIFIED)
-
-
 def _wait_poller() -> None:
-    """Штатно ssh не опрашивает: события шины (сторож машины) закрывают wait_for; здесь — первая проверка нового условия
-    ключей из _WAIT_WATCH и сверка раз в WAIT_RECON_S."""
+    """Боевой цикл: ssh вне тика — первая проверка нового условия из _WAIT_WATCH и сверка раз в WAIT_RECON_S."""
     global _RECON_LAST
     while True:
         for ckey in list(_WAIT_WATCH):
-            if not _needs_probe(ckey):
+            if ckey in _WAIT_CACHE:
                 continue
             try:
                 _host_probe(*ckey)
@@ -473,15 +367,11 @@ def _wait_err(key: str, msg: str) -> None:
 
 
 def _ssh_cmd(alias: str, remote_cmd: str) -> list:
-    # Хост — только из окружения (RPV_CALC_HOST / RPV_VPS_HOST / RPV_DECK_HOST); не задан — ошибка
-    # (условие «не выполнено» + строка в dispatch.err.log). Ключ и known_hosts — RPV_DECK_KEY / RPV_DECK_KNOWN_HOSTS.
-    host = P.env(f"{alias.upper()}_HOST")
-    if not host:
-        raise RuntimeError(f"хост алиаса {alias!r} не задан: RPV_{alias.upper()}_HOST")
-    key = P.env("DECK_KEY")
-    known_hosts = P.env("DECK_KNOWN_HOSTS")
-    return (["ssh"] + (["-i", key] if key else []) + (["-o", f"UserKnownHostsFile={known_hosts}"] if known_hosts else [])
-            + ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, remote_cmd])
+    """ssh к алиасу из ~/.ssh/config: пользователь, ключ, known_hosts, прыжковый хост — там же. Алиас — только вида ssh-имени
+    (ticket.host_alias_ok): имя с дефисом впереди ssh принял бы за свою опцию."""
+    if not T.host_alias_ok(alias):
+        raise RuntimeError(f"алиас ssh {alias!r} не годится (буквы, цифры, . _ -; не с дефиса)")
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", alias, remote_cmd]
 
 
 def _progress_done(text: str):
@@ -498,28 +388,28 @@ def _progress_done(text: str):
     return total > 0 and done >= total
 
 
+def _reads_body(arg: str) -> bool:
+    """Содержимое пути нужно диспетчеру: файл хода (`.json`) и файл итога задания (`.rc`) читаются, прочее — `test -e`."""
+    return arg.endswith((".json", ".rc"))
+
+
+def _path_met(key: tuple, body: str) -> bool:
+    """Путь по ssh есть и прочитан: файл хода — готов при done >= total; файл итога `.rc` — готов всегда, а текст запоминается
+    (wait_rc) — роль увидит, чем кончилось задание; прочий путь — достаточно того, что он есть."""
+    if key[2].endswith(".rc"):
+        _WAIT_RC[key] = " ".join(body.split())[:300]
+        return True
+    progress = _progress_done(body) if key[2].endswith(".json") else None
+    return True if progress is None else progress
+
+
 def _host_wait_met(alias: str, what: str, arg: str) -> bool:
-    """`host:<алиас>:<путь>` — путь на машине существует (`.json` с done/total — done >= total); `host:<алиас>:unit:<имя>` —
-    юнит не работает (`systemctl is-active` ≠ active: задание закончилось или упало).
+    """`host:<алиас>:<путь>` — путь на машине существует (`.json` с done/total — done >= total; `.rc` — файл итога jobrun.sh);
+    `host:<алиас>:unit:<имя>` — юнит не работает (`systemctl is-active` ≠ active: задание закончилось или упало).
     Судья 27.09 («можно потом»): без кэша ssh дёргается на каждый ждущий тикет каждые 15 с — результат на
     WAIT_CHECK_CACHE_S; ошибка ssh (код 255, таймаут) = «не выполнено» + строка в dispatch.err.log раз в 10 мин."""
     ckey = (alias, what, arg)
-    ev_ts = _event_ts(alias, what, arg)
-    if ev_ts is not None:
-        if what != "unit" or (alias, what, _unit_base(arg)) in _EVENT_VERIFIED:
-            return True  # путь, либо остановка того же InvocationID, что и запуск: ssh не нужен (TK-072)
-        # событие юнита может быть от прежнего экземпляра с тем же именем: засчитываем, только если проверка
-        # ПОСЛЕ прихода события видела юнит не работающим (работает — _host_probe сбросит событие)
-        cached = _WAIT_CACHE.get(ckey)
-        if not (cached and cached[0] >= ev_ts):
-            if WAIT_ASYNC:
-                _WAIT_WATCH.add(ckey)
-                _WAIT_NEW.set()
-                return False
-            _host_probe(alias, what, arg)
-            cached = _WAIT_CACHE.get(ckey)
-        return bool(cached and cached[1] and _event_met(alias, what, arg))
-    if WAIT_ASYNC:  # основной поток ssh не трогает: проверку делает _wait_poller редким шагом (TK-055)
+    if WAIT_ASYNC:  # основной поток ssh не трогает: проверку делает _wait_poller (TK-055)
         if ckey not in _WAIT_WATCH:
             _WAIT_WATCH.add(ckey)
             _WAIT_NEW.set()  # первую проверку нового условия поток делает сразу, не через WAIT_POLL_S
@@ -531,62 +421,29 @@ def _host_wait_met(alias: str, what: str, arg: str) -> bool:
     return _host_probe(alias, what, arg)
 
 
-SSH_CALLS_LOG_NAME = "ssh-calls.log"  # строка на ssh-вызов диспетчера: мерка «сутки без ssh-опроса»
-
-
-def _log_ssh_call(alias: str, what: str, arg: str, reason: str) -> None:
-    try:
-        with open(DISPATCHER_DIR / SSH_CALLS_LOG_NAME, "a", encoding="utf-8") as f:
-            f.write("\t".join((T.now_iso(), alias, what, arg, reason)) + "\n")
-    except OSError:
-        pass
-
-
-def _is_progress_json(arg: str) -> bool:
-    """Файл хода (`<RPV_PROGRESS_DIR>/<job>.json`, done/total) сторож ведёт сам; прочие пути, в т.ч. .json вне каталога, регистрируются.
-    `~` в PROGRESS_DIR — домашний каталог машины: сравниваем по хвосту пути."""
-    if not arg.endswith(".json"):
-        return False
-    d = arg.rsplit("/", 1)[0]
-    pd = PROGRESS_DIR.rstrip("/")
-    return d == pd or (pd.startswith("~/") and d.endswith(pd[1:]))
-
-
 def _host_probe(alias: str, what: str, arg: str) -> bool:
     ckey = (alias, what, arg)
     now_ts = time.time()
     if what == "unit":
         remote = f"systemctl is-active {shlex.quote(arg)}"
-    elif arg.endswith(".json"):
+    elif _reads_body(arg):
         remote = f"cat {_remote_test_arg(arg)}"
     else:
         remote = f"test -e {_remote_test_arg(arg)}"
-    if what == "path" and WAIT_ASYNC and arg.startswith("/") and not _is_progress_json(arg):
-        # заодно регистрируем путь в списке сторожа машины: дальше появление файла придёт событием без ssh;
-        # «@@WL» в ответе = регистрация подтверждена (нет — повторит сверка _reconcile)
-        remote = (f"{{ grep -qxF {shlex.quote(arg)} {WATCH_LIST} 2>/dev/null || echo {shlex.quote(arg)} >> {WATCH_LIST}; }} "
-                  f">/dev/null 2>&1 && echo @@WL; {remote}")
     label = f"host:{alias}:{'unit:' if what == 'unit' else ''}{arg}"
     result = False
-    _log_ssh_call(alias, what, arg, "первая" if ckey not in _WAIT_CACHE else "событие-юнита")
     try:
         r = hide.run(_ssh_cmd(alias, remote), capture_output=True, timeout=15)
         _blind_note(alias, r.returncode != 255)
         out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace")
-        if out.startswith("@@WL\n") or out.strip() == "@@WL":
-            _WL_REG.add((alias, arg))
-            out = out[len("@@WL"):].lstrip("\r\n")
         if what == "unit":
             state = (out.strip().splitlines() or [""])[0]
             if r.returncode == 255 or not state:
                 _wait_err(label, f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
             else:
                 result = state not in _UNIT_RUNNING
-                if not result:  # юнит работает — «остановлен» от прежнего экземпляра с этим именем недействительно
-                    _drop_event(alias, what, arg)
         elif r.returncode == 0:
-            progress = _progress_done(out) if arg.endswith(".json") else None
-            result = True if progress is None else progress
+            result = _path_met(ckey, out)
         elif r.returncode != 1:  # 1 — файла нет (штатно); остальное (255…) — сбой ssh/хоста
             _wait_err(label, f"ssh: код {r.returncode}, {_ssh_stderr(r)}")
     except Exception as e:
@@ -599,27 +456,22 @@ def _host_probe(alias: str, what: str, arg: str) -> bool:
 def _recon_script(keys: list) -> str:
     parts = []
     for i, (alias, what, arg) in enumerate(keys):
-        q = shlex.quote(arg)
         parts.append(f"echo @@{i}")
         if what == "unit":
-            parts.append(f"systemctl is-active {q} 2>&1 | head -1; echo '@@rc 0'")
-            continue
-        if arg.startswith("/") and not _is_progress_json(arg):
-            parts.append(f"{{ grep -qxF {q} {WATCH_LIST} 2>/dev/null || echo {q} >> {WATCH_LIST}; }} >/dev/null 2>&1 && echo @@reg")
-        parts.append(f"{'cat' if arg.endswith('.json') else 'test -e'} {_remote_test_arg(arg)} 2>/dev/null; echo \"@@rc $?\"")
+            parts.append(f"systemctl is-active {shlex.quote(arg)} 2>&1 | head -1; echo '@@rc 0'")
+        else:
+            parts.append(f"{'cat' if _reads_body(arg) else 'test -e'} {_remote_test_arg(arg)} 2>/dev/null; echo \"@@rc $?\"")
     return "; ".join(parts)
 
 
 def _parse_recon(out: str, n: int) -> dict:
-    """Ответ _recon_script → {i: {"reg": bool, "rc": int|None, "body": str}}."""
+    """Ответ _recon_script → {i: {"rc": int|None, "body": str}}."""
     res, cur = {}, None
     for line in out.splitlines():
         line = line.rstrip("\r")
         if line.startswith("@@") and line[2:].isdigit() and int(line[2:]) < n:
             cur = int(line[2:])
-            res[cur] = {"reg": False, "rc": None, "body": []}
-        elif cur is not None and line == "@@reg":
-            res[cur]["reg"] = True
+            res[cur] = {"rc": None, "body": []}
         elif cur is not None and line.startswith("@@rc "):
             try:
                 res[cur]["rc"] = int(line[5:])
@@ -636,33 +488,15 @@ def _recon_result(alias: str, what: str, arg: str, v: dict):
     """Ответ сверки по одному ключу → выполнено ли условие; None — ответ неясен, кэш не трогаем."""
     if what == "unit":
         state = (v["body"].strip().splitlines() or [""])[0]
-        if not state:
-            return None
-        result = state not in _UNIT_RUNNING
-        if not result:
-            _drop_event(alias, what, arg)
-        return result
+        return state not in _UNIT_RUNNING if state else None
     if v["rc"] == 0:
-        progress = _progress_done(v["body"]) if arg.endswith(".json") else None
-        return True if progress is None else progress
+        return _path_met((alias, what, arg), v["body"])
     return False if v["rc"] == 1 else None
 
 
-def _recon_note_miss(key, result: bool) -> None:
-    """Сверка закрыла условие, а события не было — на машине со сторожем тревога `recon-miss` (раз на ключ)."""
-    alias, what, arg = key
-    prev = _WAIT_CACHE.get(key)
-    if (result and not (prev and prev[1]) and alias in WATCHED_ALIASES and _LINK is not None and _LINK.down_since is None
-            and _event_ts(*key) is None and key not in _RECON_MISS):
-        _RECON_MISS.add(key)  # запасной путь сработал, события не было — сторож не справился
-        _log_ssh_call(alias, what, arg, "пропуск")
-        append_ceo_inbox("*", "recon-miss", f"сверка закрыла host:{alias}:{'unit:' if what == 'unit' else ''}{arg} без события шины — проверить сторож машины")
-
-
 def _reconcile() -> None:
-    """Страховка: раз в WAIT_RECON_S один ssh на машину проверяет ВСЕ ждущие host:… и повторяет регистрацию путей
-    у сторожа, не подтверждённую ранее. Пропущенное событие или сорванная регистрация стоят не дороже одного шага сверки.
-    Машины — параллельно (TK-217: таймаут одной не задерживает другую, иначе 60-секундная сверка при слепоте не держится)."""
+    """Раз в WAIT_RECON_S один ssh на машину проверяет ВСЕ ждущие host:…: пропущенный конец задания стоит не дороже одного шага
+    сверки. Машины — параллельно (TK-217: таймаут одной не задерживает другую, иначе 60-секундная сверка при слепоте не держится)."""
     by_alias = {}
     for k in list(_WAIT_WATCH):
         by_alias.setdefault(k[0], []).append(k)
@@ -675,7 +509,6 @@ def _reconcile() -> None:
 
 
 def _reconcile_alias(alias: str, keys: list) -> None:
-    _log_ssh_call(alias, "сверка", f"{len(keys)} ключей", "сверка")
     try:
         r = hide.run(_ssh_cmd(alias, _recon_script(keys)), capture_output=True, timeout=20 if BLIND.any_down() else 45)
     except Exception as e:
@@ -693,13 +526,68 @@ def _reconcile_alias(alias: str, keys: list) -> None:
         if v["rc"] is None:
             continue
         _, what, arg = keys[i]
-        if v["reg"]:
-            _WL_REG.add((alias, arg))
         result = _recon_result(alias, what, arg, v)
         if result is None:
             continue
-        _recon_note_miss(keys[i], result)
         _WAIT_CACHE[keys[i]] = (now_ts, result)
+
+
+# --- итоги ожиданий внешних заданий (CP6, критерий 12) ----------------------------------------------
+
+JOBS_LOG_NAME = "jobs.jsonl"  # строка на исход ожидания: {"ts", "ticket", "wait_for", "outcome": "met"|"overdue", "rc": текст файла итога | null}
+
+
+def wait_rc(spec: str) -> str:
+    """Текст файла итога задания (`host:<алиас>:<путь>.rc`), если диспетчер его прочитал; иначе пусто."""
+    parsed = T.parse_wait_for(spec)
+    if not parsed or parsed[0] != "host" or parsed[2] != "path":
+        return ""
+    return _WAIT_RC.get((parsed[1], "path", parsed[3]), "")
+
+
+def _rc_failed(rc: str) -> bool:
+    """Файл итога (`SERVICE_RESULT=… EXIT_STATUS=…`) говорит о неудаче: результат не success или код не 0. Чужой вид текста — нет."""
+    kv = dict(re.findall(r"(\w+)=(\S*)", rc))
+    return kv.get("SERVICE_RESULT", "success") != "success" or kv.get("EXIT_STATUS", "0") not in ("0", "")
+
+
+def record_job_outcome(tid: str, spec: str, outcome: str, rc: str = "", now=None) -> bool:
+    """Строка в jobs.jsonl на исход ожидания внешнего задания (ежедневный отчёт считает по ней «кончилось / потеряно»):
+    `met` — условие закрылось, владелец будится; `overdue` — срок `--by` вышел (+15 мин), сторож разбудил владельца.
+    Одна строка на (тикет, wait_for, исход): True — записано сейчас, False — такая уже есть."""
+    path = DISPATCHER_DIR / JOBS_LOG_NAME
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if (row.get("ticket"), row.get("wait_for"), row.get("outcome")) == (tid, spec, outcome):
+                return False
+    except OSError:
+        pass
+    row = {"ts": T.now_iso(now), "ticket": tid, "wait_for": spec, "outcome": outcome, "rc": rc or None}
+    try:
+        DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as e:  # счёт не должен ронять тик
+        print(f"[dispatch] {JOBS_LOG_NAME}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    return True
+
+
+def note_wait_met(path: Path, tkt: T.Ticket, now) -> T.Ticket:
+    """waiting с условием внешнего задания (host:, file:, job:) закрылось: исход `met` в jobs.jsonl и, если машина отдала файл
+    итога, запись в лог тикета — роль, проснувшись, видит, чем кончилось задание. Свежий тикет, если запись добавлена."""
+    spec = (tkt.header.get("wait_for") or "").strip()
+    if not T.wait_needs_by(spec) or not check_wait_for(spec):
+        return tkt
+    rc = wait_rc(spec)
+    if not record_job_outcome(tkt.id, spec, "met", rc, now) or not rc:
+        return tkt
+    T.append_log(path, "dispatcher", f"ожидание `{spec}` закончилось; итог задания: {rc}"
+                 + (" — задание НЕ успешно, разберись до продолжения" if _rc_failed(rc) else ""), now=now)
+    return T.read_ticket(path)
 
 
 # --- слепота (TK-217) --------------------------------------------------------------------------
@@ -717,14 +605,12 @@ def _blind_sound() -> None:
         pass  # не Windows/нет звука — остаются файл и ceo-wake.log
 
 
-def _blind_tick(link) -> None:
-    """Раз в тик: состояние шины → трекер; тревога по каждой цели отдельно (ALERT-BLIND.txt + звук + ceo-wake.log).
-    Канал не использует ни машины с ожиданиями, ни шину. Возврат цели — строка «зрение вернулось» и немедленная сверка."""
+def _blind_tick() -> None:
+    """Раз в тик: тревога по каждой цели отдельно (ALERT-BLIND.txt + звук + ceo-wake.log). Канал не использует ни одна из машин
+    с ожиданиями. Возврат цели — строка «зрение вернулось» и немедленная сверка."""
     global _RECON_LAST
     now = time.time()
-    if link is not None and link.disp.up is not None:
-        BLIND.record("bus", bool(link.disp.up), now)
-    active = {f"ssh:{k[0]}" for k in list(_WAIT_WATCH)} | ({"bus"} if link is not None else set())
+    active = {f"ssh:{k[0]}" for k in list(_WAIT_WATCH)}
     acts = BLIND.evaluate(now, active)
     for act, tgt, secs in acts:
         text = (f"диспетчер слеп: {tgt} недоступна {secs} с" if act != "recovered"
@@ -754,45 +640,18 @@ def _ssh_stderr(r) -> str:
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
 
-# Стандарт сигналов (В-192): при настроенной шине единственный путь сигнала к CEO — событие `задача.<ID|общее>.к_ceo`
-# в очередь `ceo` с приоритетом (urgent — читать первым); CEO читает её `tickets.py inbox`. Файлы ceo-inbox.md и
-# ceo-wake.log при шине — ТОЛЬКО запасной путь, когда шина не приняла событие (строка помечена «[запасной путь]»);
-# без шины (RPV_BUS_URL не задан) файлы — основной путь, как раньше. Неизвестный вид — urgent (безопасная сторона).
-NORMAL_KINDS = {"done", "next-ceo", "wait-for", "model", "watch-summary", "summary", "bus-up", "работа-идёт"}
-
-
-def signal_prio(kind: str) -> str:
-    return "normal" if kind in NORMAL_KINDS else "urgent"
-
-
-def _ceo_file_write(tid: str, kind: str, note: str, now=None, fallback: bool = False, wake_only: bool = False) -> None:
+# Сигнал CEO — строка в ceo-inbox.md (детали; читает `tickets.py inbox`) и короткая копия в ceo-wake.log (на нём Monitor CEO).
+def _ceo_file_write(tid: str, kind: str, note: str, now=None) -> None:
     CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-    if not wake_only:
-        with open(CEO_INBOX, "a", encoding="utf-8") as fh:
-            fh.write(f"- {T.now_iso(now)} {tid} [{kind}]{' [запасной путь]' if fallback else ''} {note}\n")
-    # ceo-wake.log — короткая (время, задача, причина) копия для Monitor CEO; детали — в ceo-inbox.md или в очереди шины
+    with open(CEO_INBOX, "a", encoding="utf-8") as fh:
+        fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
     with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso(now)} {tid} {kind}{' (очередь шины: tickets.py inbox)' if wake_only else ''}\n")
-
-
-def ceo_queue_wake(addr: str, seq: int) -> None:
-    """Будильник на событие очереди ceo, пришедшее мимо append_ceo_inbox (вопрос владельцу, падение юнита, тревога простоя)."""
-    CEO_WAKE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso()} {addr} #{seq} (очередь шины: tickets.py inbox){chr(10)}")
-
-
-def _bus_configured() -> bool:
-    try:
-        import busclient
-        return not os.environ.get("RPV_BUS_DISABLE") and bool(busclient.config()[0])
-    except Exception:
-        return False
+        fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
 
 
 # CP5 (критерий 8): механика CEO не будит — строка в mechanics.log. Владельцу и CEO — одна тревога «работа стоит»
 # (_stall_alarm): её считают по тому, стоит ли готовая работа, а не по виду поломки
-MECH_KINDS = {"blind", "idle-slo", "нет-хода", "цикл-ожиданий", "recon-miss", "stop-failed", "parse-error"}
+MECH_KINDS = {"blind", "idle-slo", "нет-хода", "цикл-ожиданий", "stop-failed", "parse-error"}
 
 
 def _mech_log(tid: str, kind: str, note: str, now=None) -> None:
@@ -805,21 +664,11 @@ def _mech_log(tid: str, kind: str, note: str, now=None) -> None:
 
 
 def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
-    """Сигнал CEO: шина (очередь `ceo`, ack на стороне CEO); шина не настроена — файл; не приняла — запасной файл.
-    Вид механики (MECH_KINDS) — только в mechanics.log."""
+    """Сигнал CEO: строка в ceo-inbox.md + копия в ceo-wake.log. Вид механики (MECH_KINDS) — только в mechanics.log."""
     if kind in MECH_KINDS:
         _mech_log(tid, kind, note, now)
         return
-    if not _bus_configured():
-        _ceo_file_write(tid, kind, note, now)
-        return
-    import busclient
-    addr = f"задача.{'общее' if tid == '*' else tid}.к_ceo"
-    payload = {"kind": kind, "note": note, "prio": signal_prio(kind), "ts": T.now_iso(now)}
-    if busclient.post(addr, payload, timeout=3, spool=False) is None:
-        _ceo_file_write(tid, kind, note, now, fallback=True)
-        return
-    _ceo_file_write(tid, kind, note, now, wake_only=True)  # будильник Monitor CEO; детали — в очереди (`tickets.py inbox`)
+    _ceo_file_write(tid, kind, note, now)
 
 
 # --- таблица правил «вид сигнала → будить / сводка» (судья TK-002 п.3, взамен привратника TypeSafe) --
@@ -2593,11 +2442,6 @@ def _stall_alarm(state: dict, now, stalled: list) -> None:
 def _account_downtime(state: dict, now, **flags) -> None:
     try:
         downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)  # минуты простоя — в отчёт (CP10)
-        try:
-            import busclient
-            state["bus_url"] = "" if os.environ.get("RPV_BUS_DISABLE") else busclient.config()[0]
-        except Exception:
-            state["bus_url"] = ""
     except Exception as e:  # счётчик не должен ронять тик
         print(f"[dispatch] downtime: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -2655,6 +2499,8 @@ def tick(now=None) -> int:
             tid = tkt.id
             if tid in RUNNING:
                 continue
+            if tkt.status == "waiting" and not tkt.next_role:
+                tkt = note_wait_met(path, tkt, now)  # CP6: задание кончилось — исход в jobs.jsonl, итог (.rc) — в лог тикета
             if (tkt.status == "waiting" and not tkt.next_role and (tkt.header.get("on_met") or "").strip()
                     and check_wait_for(tkt.header.get("wait_for", ""))):
                 try:
@@ -2718,22 +2564,6 @@ def tick(now=None) -> int:
     return launched
 
 
-def _start_bus_link():
-    """Шина событий: включена, только если задан RPV_BUS_URL (и нет RPV_BUS_DISABLE); любая ошибка — работаем по таймеру."""
-    try:
-        import busclient
-        if os.environ.get("RPV_BUS_DISABLE") or not busclient.config()[0]:
-            return None
-        link = bus_link.Link(lambda kind, note: append_ceo_inbox(
-            kind.split(".")[1] if kind.startswith("задача.") else "bus", kind, note), on_event=record_wait_event,
-            ceo_wake=ceo_queue_wake if os.environ.get("RPV_CEO_WAKE") == "1" else None)  # TK-094: CEO-будильник по запросу
-        link.start()
-        return link
-    except Exception as e:
-        print(f"[dispatch] шина не запущена: {type(e).__name__}: {e}", file=sys.stderr)
-        return None
-
-
 USAGE = """Диспетчер задач (v2, 02.10). Запускается из папки плагина; проект — --project <путь>, иначе RPV_PROJECT /
 CLAUDE_PROJECT_DIR, иначе ближайший каталог вверх с .claude/roles. Состояние — <проект>/.claude/dispatcher/.
   python <плагин>/.claude/dispatcher/dispatch.py --project <проект>          # цикл раз в RPV_DISPATCH_INTERVAL (15 с) — БОЕВОЙ
@@ -2762,29 +2592,16 @@ def main(argv=None) -> int:
         return 0
     print(f"[dispatch] v2 loop every {POLL_INTERVAL}s, MAX_PARALLEL={MAX_PARALLEL}, run timeout "
           f"{RUN_TIMEOUT / 60:.0f} min, CLAUDE_BIN={CLAUDE_BIN}")
-    link = _start_bus_link()
-    global WAIT_ASYNC, _LINK
-    _LINK = link
+    global WAIT_ASYNC
     WAIT_ASYNC = True
     threading.Thread(target=_wait_poller, daemon=True, name="wait-poller").start()
     while True:
-        acks = link.take_ack() if link else set()  # события, полученные ДО этого тика — подтверждаем после него
         try:
             tick()
-            _blind_tick(link)
-            if link:
-                if not bus_link.ack("dispatcher", acks):
-                    link.give_back(acks)  # ack не дошёл — повтор на следующем тике (TK-055)
-                link.maybe_snapshot([T.read_ticket(p) for p in T.list_tickets(TICKETS_DIR)])
+            _blind_tick()
         except Exception as e:
             print(f"[dispatch] tick error: {type(e).__name__}: {e}", file=sys.stderr)
-            if link:
-                link.give_back(acks)  # тик упал — события не подтверждены, следующий тик подтвердит
-        if link:
-            link.wake.wait(POLL_INTERVAL)
-            link.wake.clear()
-        else:
-            time.sleep(POLL_INTERVAL)
+        time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@ from pathlib import Path
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
-os.environ["RPV_BUS_DISABLE"] = "1"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
@@ -157,21 +156,6 @@ class CiWatchTests(unittest.TestCase):
         def boom(p):
             raise RuntimeError("gh")
         self.assertFalse(C.ci_done(REPO, 7, gh=boom))
-
-    def test_event_posted_to_bus_once(self):
-        import busclient
-        posted = []
-        orig = busclient.post
-        busclient.post = lambda addr, payload=None, **k: posted.append((addr, payload))
-        try:
-            self.runs = [{"name": "a", "status": "completed", "conclusion": "failure"}]
-            self.run_ci()
-            self.run_ci()
-        finally:
-            busclient.post = orig
-        self.assertEqual(len(posted), 1)
-        self.assertEqual(posted[0][0], f"ci.7.{self.sha[:7]}")
-        self.assertEqual((posted[0][1]["state"], posted[0][1]["red"]), ("failure", ["a"]))
 
     def test_pr_header_field_binds_ticket(self):
         T.write_header_updates(self.path, {"pr": "7"}, now=NOW)

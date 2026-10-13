@@ -50,7 +50,7 @@ needs_owner, stopped (остановлено CEO — не будит, пока C
 | `RPV_DISPATCH_MAX_IDLE_RUNS` | запусков подряд без записи и без смены статуса → `blocked` (2, назначено) |
 | `RPV_DISPATCH_MODEL` / `_ROLE_MODEL` / `_EFFORT` | модель и усилие ролей, `роль:значение,…` |
 | `RPV_WATCH_INTERVAL` / `_ORPHAN_HOURS` | цикл сторожа (120 с) / порог сирот (2 ч) |
-| `RPV_DECK_HOST` (+ `_KEY`, `_KNOWN_HOSTS`, `_ROOT`) | хост для `wait_for` `host:deck:…` (ключ и known_hosts); сторож вторую машину не опрашивает |
+| `RPV_DISPATCH_WAIT_RECON_S` | период сверки `wait_for host:<ssh-алиас>:…` одним ssh на машину (300 с); хосты, ключи и known_hosts — в `~/.ssh/config`, своих переменных нет |
 | `RPV_GUARD_REMOTE_ROOTS` / `_STAGE` / `_FORBIDDEN_HOSTS` | страж удаления: где можно удалять на любых удалённых машинах / стадия / закрытые хосты (через запятую; нет — нигде) |
 
 `git reset --hard` и `git clean -f` страж пропускает только в каталоге вне основного дерева, заданном явным путём (scratchpad, корни из переменных выше, `/tmp/<подкаталог>`, связанный worktree); `git push --force` — никогда; публикации (выпуск, слияние PR, пуш в main/master и теги, пакеты) запуску роли — только с `allow: publish` в тикете (выше). Перезапись файлов в автопамяти проекта (`~/.claude/projects/<проект>/memory/`) разрешена.

@@ -3,7 +3,7 @@
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
 (backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner|stopped), `reviewer` (опц.),
-`wait_for` (опц.: `file:<путь>` локально, `host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh, `ticket:<ID>`; разбор — `parse_wait_for`),
+`wait_for` (опц.: `file:<путь>` локально, `host:<ssh-алиас>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh, `ticket:<ID>`; разбор — `parse_wait_for`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
 `allow` (опц., CP2: `publish (В-N)` — согласие владельца на публикации по тикету; ставит `tickets.py allow` (только CEO), читает
@@ -63,14 +63,14 @@ _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?
 
 
 # --- wait_for: допустимые формы (одно место правды: диспетчер, tickets.py, проверка записи) --------------------
-# Алиасы машин для `host:<алиас>:...`; адрес ssh — из окружения (RPV_<АЛИАС>_HOST), без умолчаний.
-WAIT_FOR_HOSTS = ("calc", "vps", "deck")
-WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
-                    "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
+# Алиас машины в `host:<алиас>:...` — любое ssh-имя; адрес, пользователь и ключ берёт сам ssh из ~/.ssh/config.
+WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<ssh-алиас>:<путь> (…/job.json с done/total — готово при "
+                    "done>=total; …/<unit>.rc — файл итога tools/jobrun.sh; иначе файл существует) | host:<ssh-алиас>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
-                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<calc|vps|deck>:<id задания> (готово при done; "
+                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<ssh-алиас>:<id задания> (готово при done; "
                     "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD) | "
                     "at:<время ISO> (готово по наступлении времени; суточное наблюдение — сторож жизни его не трогает)")
+_HOST_ALIAS_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")  # не с дефиса: ssh принял бы имя за свою опцию
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 _TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -135,6 +135,11 @@ def by_left_text(tkt, now: datetime | None = None) -> str:
     return f"срок {when} (через {span(mins)})" if mins >= 0 else f"срок {when} прошёл {span(-mins)} назад"
 
 
+def host_alias_ok(alias: str) -> bool:
+    """Алиас машины в `host:`/`job:` — только форма ssh-имени; есть ли такой алиас в ~/.ssh/config, видно по первому ssh."""
+    return bool(_HOST_ALIAS_RE.fullmatch(alias or ""))
+
+
 def host_path_ok(arg: str) -> bool:
     """Путь на машине — только абсолютный (`/…` или `~/…`): `host:calc:file:/x` и относительный путь молча
     ждали бы вечно (TK-117, К1.1). Одна проверка для `wait`, диспетчера и сторожа (все идут через parse_wait_for)."""
@@ -166,11 +171,11 @@ def parse_wait_for(spec: str):
     if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, RPV_JOB_STATE_CMD)
         alias, sep, jid = spec[len("job:"):].partition(":")
         jid = jid.strip()
-        return ("job", alias, jid) if alias in WAIT_FOR_HOSTS and sep and _JOB_ID_RE.match(jid) else None
+        return ("job", alias, jid) if host_alias_ok(alias) and sep and _JOB_ID_RE.match(jid) else None
     if spec.startswith("host:"):
         alias, sep, rest = spec[len("host:"):].partition(":")
         rest = rest.strip()
-        if alias not in WAIT_FOR_HOSTS or not sep or not rest:
+        if not host_alias_ok(alias) or not sep or not rest:
             return None
         if rest.startswith("unit:"):
             unit = rest[len("unit:"):].strip()

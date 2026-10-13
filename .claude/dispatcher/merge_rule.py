@@ -2,7 +2,7 @@
 голове (`tickets.py accept`) + CI зелёный на ней (ci-state.json) + GitHub считает PR сливаемым. Голова сменилась после
 вердикта — не вливает. Конфликт — запись и `next` владельцу тикета (не CEO), один раз на голову. База не main (цепочка):
 пока родительский PR открыт — ждёт; родитель влит — переключает базу на main. После слияния — проверка `merged`, запись
-в тикет и событие в шину. Защиту main не ставим (В-193): `sha` в запросе слияния защищает от гонки со сменой головы."""
+в тикет. Защиту main не ставим (В-193): `sha` в запросе слияния защищает от гонки со сменой головы."""
 from __future__ import annotations
 
 import re
@@ -63,14 +63,12 @@ def _drop_accepted(tkt, pr_number: int) -> None:
             T.write_header_updates(tkt.path, {"accepted": format_accepted(acc)}, stamp_updated=False)
 
 
-def _note(tkt, text: str, wake_owner: bool = False, bus=None) -> None:
+def _note(tkt, text: str, wake_owner: bool = False) -> None:
     if wake_owner:
         C.wake(tkt.path, tkt, tkt.owner, text)
     else:
         with T.ticket_lock(tkt.path):
             T.append_log(tkt.path, "merge", text)
-    if bus:
-        bus(tkt.id, "статус", {"merge": text[:120]})
 
 
 def _note_not_found(repo: str, number: int) -> None:
@@ -121,7 +119,7 @@ def check_pr(repo: str, number: int, sha: str, gh=C.gh_api) -> str:
     return ""
 
 
-def _gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception, bus) -> str:
+def _gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception) -> str:
     """Сбой GitHub на принятом PR. Временный (5xx, сеть) — повтор на след. тике, владельцу — после ERR_LIMIT подряд;
     прочий (отказ слияния, 4xx) — владельцу сразу. Одна запись на голову. Возвращает пометку для отчёта или ''."""
     ent = st.get(key) or {}
@@ -133,12 +131,12 @@ def _gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception, bus) -
         return ""
     n = key.rsplit("#", 1)[1]
     note = f"PR #{n}: {what} не удалось на {sha[:7]}: {e}" + (f" ({errs} раз подряд)" if errs > 1 else "")
-    _note(tkt, note, wake_owner=True, bus=bus)
+    _note(tkt, note, wake_owner=True)
     st[key] = {"failed": sha}
     return f"{what}: сбой → владельцу"
 
 
-def _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out, bus) -> None:
+def _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out) -> None:
     """Послеслияние: проверка merged, запись в тикет, снятие accepted."""
     key = f"{repo}#{n}"
     try:
@@ -146,18 +144,18 @@ def _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out, bus) -> N
     except Exception:                                         # PUT прошёл, а проверка упала (сбой, таймаут gh) — верим ответу PUT
         confirmed = bool((merged_resp or {}).get("merged"))
     if confirmed:
-        _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).", bus=bus)
+        _note(tkt, f"PR #{n} влит в {default} на голове {sha[:7]} (проверено: merged).")
         _drop_accepted(tkt, n)
         st[key] = {"merged": sha}
         out.append((n, "влит"))
     else:
         _note(tkt, f"PR #{n}: запрос слияния принят, но merged=false на {sha[:7]} — проверь вручную.",
-              wake_owner=True, bus=bus)
+              wake_owner=True)
         st[key] = {"failed": sha}
         out.append((n, "не подтверждено → владельцу"))
 
 
-def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
+def merge_once(repo: str, gh=C.gh_api) -> list:
     """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
     st, out = _load(), []
     tickets = []
@@ -185,7 +183,7 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
         elif d2.get("merged"):
             st.pop(key)
             swept.add(n)
-            _after_merge(gh, repo, n, psha, default, ptkt, {"merged": True, "sha": d2.get("merge_commit_sha")}, st, out, bus)
+            _after_merge(gh, repo, n, psha, default, ptkt, {"merged": True, "sha": d2.get("merge_commit_sha")}, st, out)
     for pr in prs:
         n, sha = pr["number"], pr["head"]["sha"]
         if n in swept:
@@ -205,7 +203,7 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
             try:
                 gh(f"repos/{repo}/pulls/{n}", method="PATCH", base=default)
             except Exception as e:                            # TK-109 п.2: сбой одного PR не обрывает проход
-                r = _gh_error(st, key, sha, tkt, "смена базы", e, bus)
+                r = _gh_error(st, key, sha, tkt, "смена базы", e)
                 if r:
                     out.append((n, r))
                 continue
@@ -214,7 +212,7 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
         try:
             detail = gh(f"repos/{repo}/pulls/{n}")
         except Exception as e:
-            r = _gh_error(st, key, sha, tkt, "запрос состояния PR", e, bus)
+            r = _gh_error(st, key, sha, tkt, "запрос состояния PR", e)
             if r:
                 out.append((n, r))
             continue
@@ -223,7 +221,7 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
         if detail.get("mergeable") is False:                  # конфликт сообщаем сразу: CI на конфликтной голове не нужен
             if (st.get(key) or {}).get("conflict") != sha:
                 _note(tkt, f"PR #{n} принят на {sha[:7]}, но конфликтует с {default}: слей {default} в ветку и запушь "
-                           f"(CI и вердикт на новой голове — заново).", wake_owner=True, bus=bus)
+                           f"(CI и вердикт на новой голове — заново).", wake_owner=True)
                 st[key] = {"conflict": sha}
                 out.append((n, "конфликт → владельцу"))
             continue
@@ -239,12 +237,12 @@ def merge_once(repo: str, gh=C.gh_api, bus=None) -> list:
                 st[key] = {"put_pending": sha, "tid": tkt.id}   # не знаем — досмотр вне списка open на следующих проходах
                 continue
             if not d2.get("merged"):
-                r = _gh_error(st, key, sha, tkt, "слияние", e, bus)
+                r = _gh_error(st, key, sha, tkt, "слияние", e)
                 if r:
                     out.append((n, r))
                 continue
             merged_resp = {"merged": True, "sha": d2.get("merge_commit_sha")}
         st.pop(key, None)
-        _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out, bus)
+        _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out)
     _save(st)
     return out

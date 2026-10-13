@@ -3,6 +3,7 @@ __pycache__/
 state.json
 state.json.tmp
 runs.log
+jobs.jsonl
 ceo-inbox.md
 ceo-wake.log
 .ceo-inbox-seen

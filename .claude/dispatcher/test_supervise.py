@@ -115,14 +115,14 @@ class SuperviseTest(unittest.TestCase):
             sd.mkdir(parents=True)
             (sd / "supervise.env.json").write_text(json.dumps({"RPV_X_OLD": "1", "RPV_Y": "old"}), encoding="utf-8")
             (sd.parent / "settings.json").write_text(json.dumps(
-                {"env": {"RPV_Y": "new", "RPV_CI_REPO": "o/r", "RPV_BUS_TOKEN": "s", "PATH": "x"}}), encoding="utf-8")
+                {"env": {"RPV_Y": "new", "RPV_CI_REPO": "o/r", "RPV_TG_TOKEN": "s", "PATH": "x"}}), encoding="utf-8")
             with mock.patch.dict(os.environ, {}, clear=False):
-                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO", "RPV_BUS_TOKEN"):
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO", "RPV_TG_TOKEN"):
                     os.environ.pop(k, None)
                 V.load_env(sd)
                 self.assertEqual((os.environ["RPV_X_OLD"], os.environ["RPV_Y"], os.environ["RPV_CI_REPO"]),
                                  ("1", "new", "o/r"))
-                self.assertNotIn("RPV_BUS_TOKEN", os.environ)
+                self.assertNotIn("RPV_TG_TOKEN", os.environ)
                 for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO"):
                     os.environ.pop(k, None)
 
@@ -178,8 +178,8 @@ class InstallFilesTest(unittest.TestCase):
 
     def test_env_snapshot_only_forwarded(self):
         keep = {"RPV_TEST_X": "1", "RPV_DISPATCH_ROTATE_TOKENS": "150000",
-                "RPV_CONTEXT_WARN_TOKENS": "2", "RPV_DECK_KEY": "C:/k/id_rsa", "RPV_BUS_TOKEN_FILE": "/p/tok"}
-        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_BUS_TOKEN": "tok-SECRET",
+                "RPV_CONTEXT_WARN_TOKENS": "2", "RPV_X_KEY_FILE": "C:/k/id_rsa", "RPV_TG_TOKEN_FILE": "/p/tok"}
+        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_TG_TOKEN": "tok-SECRET",
                 "RPV_X_API_KEY": "k", "ALPHA_DISPATCH_X": "1"}
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**keep, **drop}):
             V.snapshot_env(Path(d))

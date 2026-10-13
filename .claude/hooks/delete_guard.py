@@ -2206,12 +2206,12 @@ def check_file(path, cwd, trace=None):
         return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
 
 
-CEO_SIGNAL_NAMES = ("ceo-inbox.md", "ceo-wake.log")   # В-192: сигналы CEO — только через шину; файлы пишет dispatch.append_ceo_inbox
+CEO_SIGNAL_NAMES = ("ceo-inbox.md", "ceo-wake.log")   # сигналы CEO пишет только код диспетчера (dispatch.append_ceo_inbox)
 CEO_SIGNAL_WRITE = re.compile(r"(>|\btee\b|\bsed\b[^|;&]*\s-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b|\bdd\b|\binstall\b|"
                               r"Set-Content|Add-Content|Out-File|Clear-Content|Remove-Item|Move-Item|Copy-Item|\.write|open\()", re.I)
 CEO_SIGNAL_TEXT = re.compile(r"""--(?:text|why)(?:=|\s+)("(?:[^"\\]|\\.)*"|'[^']*')""", re.S)
-REASON_CEO_SIGNAL = ("Сигналы команды идут только через шину: ceo-inbox.md/ceo-wake.log пишет лишь dispatch.append_ceo_inbox "
-                     "(запасной путь). Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; очередь читает `tickets.py inbox` (README «Стандарт сигналов»).")
+REASON_CEO_SIGNAL = ("Сигналы команды пишет только диспетчер: ceo-inbox.md/ceo-wake.log — это dispatch.append_ceo_inbox. "
+                     "Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; новые строки читает `tickets.py inbox` (docs/signals.md).")
 
 
 def ceo_signal_write(tool, ti):

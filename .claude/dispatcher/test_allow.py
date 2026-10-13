@@ -18,7 +18,6 @@ from unittest import mock
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
-os.environ["RPV_BUS_DISABLE"] = "1"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))

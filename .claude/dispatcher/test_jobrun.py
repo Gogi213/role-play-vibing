@@ -8,8 +8,10 @@ import shutil
 import subprocess
 import tempfile
 import time
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "jobrun.sh"
 
@@ -142,6 +144,27 @@ class JobrunTests(unittest.TestCase):
         r = self.jobrun("lbl", "--", "true", env=env)
         self.assertEqual(r.returncode, 1)
         self.assertIn("systemd-run: отказ", r.stderr)
+
+    def test_dispatcher_sees_the_result_through_a_loopback_ssh(self):
+        """Вся цепочка без сети: jobrun.sh пишет файл итога, «ssh» (удалённая команда в локальном bash) отдаёт его сверке диспетчера."""
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import dispatch as D
+        _, rc = self.run_job("sleep 1.5; exit 3")
+        remote = rc.as_posix()
+        if re.match(r"[A-Za-z]:/", remote):  # Git Bash: C:/x → /c/x, путь на «машине» обязан быть абсолютным (/…)
+            remote = "/" + remote[0].lower() + remote[2:]
+        key = ("loop", "path", remote)
+        spec = f"host:loop:{remote}"
+        D._WAIT_WATCH.add(key)
+        self.addCleanup(lambda: (D._WAIT_WATCH.discard(key), D._WAIT_CACHE.pop(key, None), D._WAIT_RC.pop(key, None)))
+        with mock.patch.object(D, "_ssh_cmd", lambda alias, cmd: [BASH, "-c", cmd]), mock.patch.object(D, "BLIND", D.blind.Tracker()):
+            D._reconcile()
+            self.assertFalse(D._WAIT_CACHE[key][1], "задание идёт — итога нет, сверка условие не закрывает")
+            self.wait_rc(rc)
+            D._reconcile()
+        self.assertTrue(D._WAIT_CACHE[key][1])
+        self.assertEqual(D.wait_rc(spec), "SERVICE_RESULT=exit-code EXIT_STATUS=3")
+        self.assertTrue(D._rc_failed(D.wait_rc(spec)))
 
 
 if __name__ == "__main__":
