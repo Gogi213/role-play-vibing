@@ -2,6 +2,11 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.42 — 2026-10-13
+
+### Исправлено (TK-228)
+- `RPV_PROGRESS_DIR=/data/progress`, пробросанный из Git Bash, превращался в `C:/Program Files/Git/data/progress`: регистрация путей ожиданий `host:…` писала в несуществующий `watch.list` (молча, `2>/dev/null`), сторож машины не видел новых путей, закрывала только сверка (`recon-miss`). Диспетчер снимает MSYS-префикс (`_unmsys`).
+
 ## 1.8.41 — 2026-10-13
 
 ### Добавлено (TK-226)
