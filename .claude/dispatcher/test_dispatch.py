@@ -3231,6 +3231,21 @@ class RoleMcpTests(unittest.TestCase):
         cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
         self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # playwright не просили, ghost нет
 
+class PluginDirTests(unittest.TestCase):
+    """CP11: RPV_PLUGIN_DIR → `--plugin-dir` у запуска роли; не задана — флага нет."""
+
+    def _args(self, value):
+        with mock.patch.dict(os.environ, {"RPV_PLUGIN_DIR": value}):
+            return D.plugin_dir_args()
+
+    def test_unset_or_blank_has_no_flag(self):
+        self.assertEqual(self._args(""), [])
+        self.assertEqual(self._args("  "), [])
+
+    def test_set_passes_dir(self):
+        self.assertEqual(self._args("/src/rpv"), ["--plugin-dir", "/src/rpv"])
+
+
 class RateLimitTests(unittest.TestCase):
     """v1.1, чистые функции — без процессов и без сети."""
 
@@ -3244,6 +3259,17 @@ class RateLimitTests(unittest.TestCase):
         self.assertTrue(D._rate_limited(self.state, "TK-1", soon))
         later = self.now + timedelta(seconds=D.MIN_GAP_S + 1)
         self.assertFalse(D._rate_limited(self.state, "TK-1", later))
+
+    def test_min_gap_only_between_runs_of_same_role(self):
+        """CP11: Инженер сдал — Судья идёт на ближайшем тике; тот же Инженер снова — после паузы; часовой предел — на все роли."""
+        D._record_launch(self.state, "TK-1", self.now, "engineer")
+        soon = self.now + timedelta(seconds=10)
+        self.assertFalse(D._rate_limited(self.state, "TK-1", soon, "judge"))
+        self.assertTrue(D._rate_limited(self.state, "TK-1", soon, "engineer"))
+        step = timedelta(seconds=1)
+        for i in range(1, D.MAX_RUNS_PER_TICKET_HOUR):
+            D._record_launch(self.state, "TK-1", self.now + i * step, ("judge", "engineer")[i % 2])
+        self.assertTrue(D._rate_limited(self.state, "TK-1", self.now + timedelta(minutes=5), "judge"))
 
     def test_other_ticket_not_affected(self):
         D._record_launch(self.state, "TK-1", self.now)

@@ -1047,20 +1047,26 @@ def _role_busy(role: str) -> bool:
 
 # --- защита от петли и перерасхода (v1.1) --------------------------------------------------
 
-def _record_launch(state: dict, tid: str, now) -> None:
+def _record_launch(state: dict, tid: str, now, role: str = "") -> None:
+    state.setdefault("launch_role", {})[tid] = role  # MIN_GAP_S — только между запусками одной роли
     hist = state.setdefault("launch_history", {}).setdefault(tid, [])
     hist.append(T.now_iso(now))
     cutoff = now - timedelta(hours=2)  # храним немного с запасом сверх окна MAX_RUNS_PER_TICKET_HOUR
     state["launch_history"][tid] = [t for t in hist if T.parse_dt(t) > cutoff]
 
 
-def _rate_limited(state: dict, tid: str, now) -> bool:
-    """MAX_RUNS_PER_TICKET_HOUR / MIN_GAP_S — троттлинг решений (а)-(г); ретраи (д) их не проходят."""
+def _rate_limited(state: dict, tid: str, now, role: str = "") -> bool:
+    """MAX_RUNS_PER_TICKET_HOUR / MIN_GAP_S — троттлинг решений (а)-(г); ретраи (д) их не проходят. CP11: пауза
+    MIN_GAP_S — между запусками ОДНОЙ роли; передача другой роли (Инженер сдал → Судья) идёт на ближайшем тике
+    (на чистом проекте пауза съедала ~40 с из 135); часовой предел считает все роли."""
     hist = [T.parse_dt(t) for t in state.get("launch_history", {}).get(tid, [])]
     if not hist:
         return False
     if len([t for t in hist if (now - t) < timedelta(hours=1)]) >= MAX_RUNS_PER_TICKET_HOUR:
         return True
+    last_role = state.get("launch_role", {}).get(tid, "")
+    if role and last_role and role != last_role:
+        return False
     return (now - max(hist)).total_seconds() < MIN_GAP_S
 
 
@@ -1497,6 +1503,14 @@ def role_mcp_args(run_stem: str) -> list[str]:
     return ["--strict-mcp-config", "--mcp-config", str(cfg)]
 
 
+def plugin_dir_args() -> list[str]:
+    """CP11: `RPV_PLUGIN_DIR` — роли идут с плагином из этой папки (`claude --plugin-dir`, перекрывает установленный
+    плагин того же имени). Нужна проверке рабочей копии на чистом проекте (`tools/e2e_clean_project.py`); не задана —
+    флага нет, роли видят установленный плагин."""
+    d = (P.env("PLUGIN_DIR", "") or "").strip()
+    return ["--plugin-dir", d] if d else []
+
+
 def effort_for(role: str, tkt=None) -> str:
     """v2: усилие запуска — поле `effort:` тикета, иначе умолчание роли (ROLE_EFFORT: исследователь/инженер
     high, Судья xhigh; env RPV_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
@@ -1570,7 +1584,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     if executor == "haiku":
         effort = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", effort] + role_mcp_args(run_file.stem)  # RPV_ROLE_MCP: all|none|имена (TK-171)
+           "--model", model, "--effort", effort] + role_mcp_args(run_file.stem) + plugin_dir_args()
     if sid:
         cmd += ["--resume", sid]
     else:
@@ -1624,7 +1638,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     # всегда на (задачу, роль)
     sess_entry = state.setdefault("sessions", {}).setdefault(f"{tid}::{role}", {})
     sess_entry["last_woken"] = T.now_iso(now)
-    _record_launch(state, tid, now)
+    _record_launch(state, tid, now, role)
     # зеркало в state.json (pid, задача, роль, старт) — переживает перезапуск диспетчера (recover_active_runs)
     save_state(state)
 
@@ -2092,6 +2106,7 @@ def _reset_loop_state(state: dict, tid: str) -> None:
         if store:
             store.pop("session_id", None)
     state.get("launch_history", {}).pop(tid, None)
+    state.get("launch_role", {}).pop(tid, None)
 
 
 def _apply_stop(path: Path, tid: str, req: dict, info, state: dict, now) -> None:
@@ -2568,7 +2583,7 @@ def tick(now=None) -> int:
             continue  # на один тикет — один запуск роли (RUNNING по stem файла; tkt.id из шапки мог разойтись с ним)
         if _role_busy(decision.role):
             continue  # у роли уже предел запусков (на любых задачах) — ждёт следующего тика
-        if _rate_limited(state, tid, now):
+        if _rate_limited(state, tid, now, decision.role):
             throttled += 1
             continue  # MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — пауза, не ошибка; попробуем следующим тиком
         if decision.header_updates:

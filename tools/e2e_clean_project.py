@@ -3,7 +3,7 @@
 тикет → роли под диспетчером → приёмка Судьи. Меряет время «цель → принятый результат» и цену запусков. Тратит деньги
 (настоящие `claude -p`: Инженер и Судья), поэтому не тест pytest — запуск руками.
 
-    python tools/e2e_clean_project.py [--timeout-min 40] [--keep]
+    python tools/e2e_clean_project.py [--timeout-min 10] [--keep]
 
 Роли идут с кодом плагина из этой рабочей копии (`RPV_PLUGIN_DIR` → `claude --plugin-dir`), установленный плагин и его
 проекты не затрагиваются. Итог — таблица в stdout и `<проект>/e2e-result.json`; каталог проекта печатается (`--keep` —
@@ -33,6 +33,20 @@ def sh(cmd, cwd, **kw):
     return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
 
 
+def find_bash() -> str:
+    """На Windows `bash` из System32 — заглушка WSL; `/rpv-init` идёт в Git Bash, как у Claude Code."""
+    cands = [shutil.which("bash")]
+    if os.name == "nt":
+        git = shutil.which("git")
+        roots = [Path(git).resolve().parent.parent] if git else []
+        roots += [Path(b) / "Git" for b in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")) if b]
+        cands = [str(r / "bin" / "bash.exe") for r in roots] + cands
+    for c in cands:
+        if c and os.path.isfile(c) and "system32" not in c.lower():
+            return c
+    raise SystemExit("не найден bash (на Windows нужен Git Bash)")
+
+
 def init_script() -> str:
     """Bash-блок из commands/rpv-init.md — проверяется сама команда, а не её пересказ."""
     text = (ROOT / "commands" / "rpv-init.md").read_text(encoding="utf-8")
@@ -50,9 +64,14 @@ def ticket_state(proj: Path, tid: str) -> tuple[str, str]:
     return (st.group(1) if st else ""), (results[-1] if results else "")
 
 
+def run_jsons(runs_dir: Path) -> list[Path]:
+    """Итоги запусков ролей `runs/<время>-<тикет>-<роль>.json` (без конфигов MCP)."""
+    return sorted(f for f in runs_dir.glob("*.json") if not f.name.endswith(".mcp.json")) if runs_dir.exists() else []
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--timeout-min", type=float, default=40)
+    ap.add_argument("--timeout-min", type=float, default=10)  # потолок на зависание, не ожидаемое время
     ap.add_argument("--keep", action="store_true")
     a = ap.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
@@ -67,7 +86,7 @@ def main(argv=None) -> int:
         (proj / "README.md").write_text("# e2e\n", encoding="utf-8")
         sh(["git", "add", "-A"], proj)
         sh(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-qm", "init"], proj)
-        r = sh(["bash", "-c", init_script()], proj)
+        r = sh([find_bash(), "-c", init_script()], proj)
         marks["init_s"] = round(time.time() - t0, 1)
         out["init_out"] = r.stdout.strip().splitlines()[-3:]
         if r.returncode:
@@ -92,6 +111,10 @@ def main(argv=None) -> int:
             status, last = ticket_state(proj, tid)
             if status in ("done", "blocked", "needs_owner", "stopped"):
                 break
+        runs_dir = proj / ".claude" / "dispatcher" / "runs"
+        settle = time.time() + 120  # запуск, сдавший итог, ещё пишет свой json — без него цена неполная
+        while time.time() < settle and any(f.stat().st_size == 0 for f in run_jsons(runs_dir)):
+            time.sleep(2)
         disp.terminate()
         try:
             disp.wait(timeout=30)
@@ -100,11 +123,16 @@ def main(argv=None) -> int:
         marks["end_s"] = round(time.time() - t0, 1)
         accepted = status == "done" and "accept" in (proj / ".claude" / "tickets" / f"{tid}.md").read_text(encoding="utf-8")
         hello = sh([py, "hello.py"], proj).stdout.strip() if (proj / "hello.py").exists() else ""
-        runs = (proj / ".claude" / "dispatcher" / "runs.log")
-        lines = runs.read_text(encoding="utf-8").splitlines() if runs.exists() else []
-        cost = sum(float(m.group(1)) for ln in lines if (m := re.search(r"cost_usd=([\d.]+)", ln)))
+        per_run = {}
+        for f in run_jsons(runs_dir):
+            try:
+                d = json.loads(f.read_text(encoding="utf-8") or "{}")
+            except ValueError:
+                d = {}
+            per_run[f.stem] = {"cost_usd": round(float(d.get("total_cost_usd") or 0), 3),
+                               "seconds": round((d.get("duration_ms") or 0) / 1000, 1)}
         out.update(ticket=tid, status=status, last_result=last, accepted_by_judge=accepted, hello_output=hello,
-                   runs=len(lines), cost_usd=round(cost, 3), roles=sorted({ln.split()[2] for ln in lines if len(ln.split()) > 2}),
+                   runs=per_run, cost_usd=round(sum(r["cost_usd"] for r in per_run.values()), 3),
                    seconds=marks, ok=bool(accepted and "привет" in hello),
                    at=datetime.now().astimezone().isoformat(timespec="seconds"))
         (proj / "e2e-result.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
