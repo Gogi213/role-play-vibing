@@ -235,5 +235,46 @@ class DispatcherHookTests(unittest.TestCase):
         self.assertEqual(len(self.spawned), 1, "тикеты не менялись — не зовём")
 
 
+class OwnerQuestionTests(unittest.TestCase):
+    """Критерии 5, 9: вопрос Судьи владельцу — одно сообщение в Telegram на вопрос, повод и текст; отвечают CEO."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="rpv-owner-q-"))
+        self.addCleanup(shutil.rmtree, self.root, True)
+        (self.root / ".claude" / "tickets").mkdir(parents=True)
+        saved = (D.TICKETS_DIR, D.DISPATCHER_DIR)
+        self.addCleanup(lambda: (setattr(D, "TICKETS_DIR", saved[0]), setattr(D, "DISPATCHER_DIR", saved[1])))
+        D.TICKETS_DIR, D.DISPATCHER_DIR = self.root / ".claude" / "tickets", self.root / ".claude" / "dispatcher"
+        self.sent = []
+        p = mock.patch.object(D.notify, "send", lambda text, **kw: self.sent.append(text))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def write(self, status, entries):
+        (D.TICKETS_DIR / "TK-300.md").write_text(ticket_text("TK-300", status, entries), encoding="utf-8")
+
+    def test_one_message_per_question(self):
+        ask = (T0, "judge", "[итог: ask-owner] повод: деньги — сервер на месяц $40: брать?")
+        self.write("needs_owner", [ask])
+        state = {}
+        D._owner_questions(state, T0)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("Вопрос вам (деньги)", self.sent[0])
+        self.assertIn("сервер на месяц $40: брать?", self.sent[0])
+        self.assertIn("Ответьте CEO", self.sent[0])
+        D._owner_questions(state, T0 + timedelta(seconds=15))
+        self.assertEqual(len(self.sent), 1, "тот же вопрос — один раз")
+        self.write("needs_owner", [ask, (T0 + timedelta(hours=1), "judge", "[итог: ask-owner] повод: направление — A или B?")])
+        D._owner_questions(state, T0 + timedelta(hours=1))
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("(направление)", self.sent[1])
+
+    def test_no_message_without_question_to_owner(self):
+        self.write("in_progress", [(T0, "judge", "[итог: ask-owner] повод: деньги — вопрос")])
+        self.write("blocked", [(T0, "engineer", "[итог: ask-owner] вопрос Судье")])
+        D._owner_questions({}, T0)
+        self.assertEqual(self.sent, [])
+
+
 if __name__ == "__main__":
     unittest.main()

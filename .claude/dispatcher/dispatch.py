@@ -2479,6 +2479,31 @@ def _daily_report(state: dict, now) -> None:
         _REPORT_PROC = _popen(cmd, cwd=str(PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
 
 
+OWNER_ASK = re.compile(r"^\[итог:\s*ask-owner\]")
+
+
+def _owner_questions(state: dict, now) -> None:
+    """Критерии 5 и 9: вопрос Судьи владельцу (тикет `needs_owner`) — сразу одним сообщением в Telegram, а не только строкой
+    CEO: сессии CEO может не быть. Повод и сам вопрос; отвечают CEO. Один раз на вопрос (тикет и время записи вопроса)."""
+    sent = state.setdefault("owner_asked", {})
+    for path in T.list_tickets(TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        if tkt.status != "needs_owner":
+            continue
+        q = next((e for e in reversed(tkt.log) if T.author_is(e.author, "judge") and OWNER_ASK.match(e.text.strip())), None)
+        if q is None or sent.get(tkt.id) == q.ts_raw:
+            continue
+        why = re.search(r"повод: ([\w-]+)", q.text)
+        body = re.sub(r"^\[итог:\s*ask-owner\]\s*(?:повод: [\w-]+)?\s*[—-]?\s*", "", q.text.strip())
+        title = " ".join((tkt.header.get("title") or tkt.id).split())[:80]
+        notify.send(f"Вопрос вам ({why.group(1) if why else 'без повода'}): «{title}» — {' '.join(body.split())[:400]} "
+                    f"Ответьте CEO.", log_dir=DISPATCHER_DIR)
+        sent[tkt.id] = q.ts_raw
+
+
 OVERSEER_EVERY_S = 15 * 60.0  # CP14: Надзиратель — не чаще раза в 15 мин и только если тикеты менялись
 _OVERSEER_PROC = None  # процесс Надзирателя (overseer.py): короткоживущий, тик его не ждёт
 
@@ -2634,6 +2659,10 @@ def tick(now=None) -> int:
         _overseer(state, now)
     except Exception as e:  # Надзиратель не должен ронять тик
         print(f"[dispatch] надзиратель: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _owner_questions(state, now)
+    except Exception as e:  # вопрос владельцу не должен ронять тик
+        print(f"[dispatch] вопрос владельцу: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
     return launched
