@@ -1006,9 +1006,9 @@ def baseline_done_notified(state: dict) -> None:
 
 
 def notify_done(tkt: T.Ticket, state: dict, now) -> None:
-    """v2 (02.10): `done` — одна строка CEO, когда работа реально закончена: ревьюера нет (теперь норма —
-    `tickets.py new` не ставит reviewer по умолчанию) либо ревью уже состоялось. Если ждёт ревью — молчим,
-    строка придёт после вердикта. Дедуп по (задача, `updated`)."""
+    """v2 (02.10): `done` — одна строка CEO, когда работа реально закончена: ревьюера нет (V2-1: механическая задача
+    Haiku, тикет Судьи или закрыл CEO) либо ревью уже состоялось. Если ждёт ревью — молчим, строка придёт после
+    вердикта. Дедуп по (задача, `updated`)."""
     if tkt.status != "done" or _review_pending(tkt, state):
         return
     notified = state.setdefault("ceo_done_notified", {})

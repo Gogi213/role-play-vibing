@@ -1799,7 +1799,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("parse-error"), 2)
 
     def test_done_without_reviewer_signals_ceo_one_line(self):
-        """v2: done без reviewer (теперь норма) — ровно одна строка CEO «done»; дедуп по `updated`."""
+        """v2: done без reviewer (V2-1: Haiku-задача, тикет Судьи, закрыл CEO) — ровно одна строка CEO «done»; дедуп по `updated`."""
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Без ревью",
                                 now=dt("2026-09-27T12:00:00+04:00"))
         T.write_header_updates(path, {"status": "waiting"}, now=dt("2026-09-27T12:00:10+04:00"))
@@ -2795,19 +2795,30 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertEqual(len(tickets), 1)
         self.assertEqual(T.read_ticket(tickets[0]).status, "backlog")
 
-    def test_new_has_no_default_reviewer(self):
-        """v2 (02.10): ревьюера по умолчанию нет — Судья только по явному `--reviewer judge`."""
+    def test_new_default_reviewer_is_judge(self):
+        """V2-1: Судья проверяет каждый результат — `new` ставит `reviewer: judge` без всякого флага."""
         TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "А"])
         TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Б"])
         tickets = {t.header["owner"]: t for t in (T.read_ticket(p) for p in T.list_tickets(self.tickets_dir))}
-        self.assertEqual(tickets["researcher"].reviewer, "")
-        self.assertEqual(tickets["engineer"].reviewer, "")
+        self.assertEqual(tickets["researcher"].reviewer, "judge")
+        self.assertEqual(tickets["engineer"].reviewer, "judge")
 
-    def test_new_no_reviewer_flag_is_accepted_noop(self):
-        rc = TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Без ревью", "--no-reviewer"])
+    def test_new_no_reviewer_flag_is_refused_without_haiku(self):
+        """Судью снимает только владелец: `--no-reviewer` на обычной задаче — отказ до создания файла."""
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Без ревью", "--no-reviewer"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--no-reviewer не принимается", err.getvalue())
+        self.assertEqual(T.list_tickets(self.tickets_dir), [])
+
+    def test_new_no_reviewer_flag_with_haiku_is_noop(self):
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Механическая", "--no-reviewer",
+                      "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 0)
-        tkt = T.read_ticket(T.list_tickets(self.tickets_dir)[0])
-        self.assertEqual(tkt.reviewer, "")
+        self.assertEqual(T.read_ticket(T.list_tickets(self.tickets_dir)[0]).reviewer, "")
 
     def test_new_explicit_reviewer_judge_is_written(self):
         TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "С Судьёй", "--reviewer", "judge"])
@@ -2888,11 +2899,12 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertEqual(T.list_tickets(self.tickets_dir), [])
 
     def test_new_haiku_without_reviewer_flag_is_allowed_but_explicit_judge_is_refused(self):
-        """v2: ревьюера по умолчанию нет, так что `--executor haiku` проходит без `--no-reviewer`; явный
+        """V2-1: у Haiku-задачи ревьюера по умолчанию нет, `--executor haiku` проходит без `--no-reviewer`; явный
         `--reviewer judge` с haiku по-прежнему запрещён (условие г судьи TK-002)."""
         rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Механическая без флага",
                       "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 0)
+        self.assertEqual(T.read_ticket(T.list_tickets(self.tickets_dir)[0]).reviewer, "")
         rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Обход", "--reviewer", "judge",
                       "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 1)

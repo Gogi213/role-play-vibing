@@ -12,7 +12,7 @@
 python <плагин>/.claude/dispatcher/start.py [--project <проект>]    # диспетчер + сторож в фоне, уже запущенные перезапускает (/rpv-start)
 python <плагин>/.claude/dispatcher/dispatch.py --project <проект>   # диспетчер, боевой цикл (--once — один тик; --help — справка)
 python <плагин>/.claude/dispatcher/watch.py --project <проект>      # сторож: сироты, blocked (--once — один цикл)
-python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." --ref "<цитата владельца или В-##>" [--reviewer judge] [--effort high]
+python <плагин>/.claude/dispatcher/tickets.py --project <проект> new --owner engineer --title "..." --ref "<цитата владельца или В-##>" [--effort high]   # ревьюер — Судья по умолчанию; Haiku-задача (--executor haiku --kind …) — без него
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> comment TK-001 --author engineer --text "..." [--next judge|ceo]
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> start TK-001 | status
 python <плагин>/.claude/dispatcher/tickets.py --project <проект> stop TK-001 --text "<новая постановка>" [--next judge]   # только CEO
@@ -27,7 +27,7 @@ python -m unittest discover -s <плагин>/.claude/dispatcher && python -m un
 
 Статусы: backlog, todo, in_progress, waiting (+ `wait_for: file:… | ticket:… | host:…`), in_review, done, blocked,
 needs_owner, stopped (остановлено CEO — не будит, пока CEO не вернёт в `todo`). Будят: `todo`, `in_progress`, выполненный `wait_for` — владельца; `done`/`in_review` с `reviewer` —
-ревьюера; `--next` — названную роль один раз. Запуск без новой записи — один повтор, затем `blocked`. Траты считаются
+ревьюера (Судья — на каждом тикете по умолчанию; `done` тикета без ревьюера в шапке уходит Судье и дописывает `reviewer: judge`, кроме `executor: haiku`); `--next` — названную роль один раз. Запуск без новой записи — один повтор, затем `blocked`. Траты считаются
 (`runs.log`, `tickets.py status`), ничего не ограничивают.
 
 Остановка роли — `tickets.py stop TK-NN --text "<новая постановка>" [--next <роль>]` (только CEO; из сессии роли, где стоит `RPV_ROLE`, отказ): заявка `<проект>/.claude/dispatcher/stop/<ID>.json`; на ближайшем тике диспетчер снимает запущенную роль этого тикета ВСЕМ деревом процессов (Windows — `taskkill /T /F /PID`, иначе — `killpg` группы: роль запускается с `start_new_session=True`) и проверяет, что процесс умер (не умер — строка CEO `[stop-failed]`, заявка остаётся).

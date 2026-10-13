@@ -5,12 +5,11 @@
 каталоги не создаются. Тикеты — `<проект>/.claude/tickets/`. Ниже `tickets.py` — это
 `python <плагин>/.claude/dispatcher/tickets.py [--project <проект>]`.
 
-    tickets.py new --owner researcher --title "..." [--desc "..."]  # ревьюера нет (v2)
-    tickets.py new --owner engineer --title "..." --reviewer judge  # Судья — только явно
+    tickets.py new --owner researcher --title "..." [--desc "..."]  # ревьюер — Судья по умолчанию (проверяет каждый done)
     tickets.py new --owner engineer --title "..." --effort medium   # low|medium|high|xhigh
     tickets.py new --owner researcher --title "..." --backlog   # перенос из TASKS.md
     tickets.py new --owner engineer --title "..." --executor haiku --kind file-move
-        # белый список kind; --reviewer judge и owner:researcher с haiku — отказ
+        # белый список kind; ревьюера у Haiku-задачи нет, --reviewer judge и owner:researcher с haiku — отказ
     tickets.py result TK-001 done --path <файл> --why "..."      # итог роли: done|pr|accept|return|blocked|ask-owner|wait|continue; следующую роль ставит маршрут
     tickets.py comment TK-001 --author researcher --text "..."  # промежуточная заметка без смены хода
     tickets.py accept TK-001 --pr 7 --sha <голова>              # только Судья: принято на этой голове → вливает merge_rule
@@ -129,9 +128,13 @@ def cmd_new(args) -> int:
         print(f"new: нужна --ref «ссылка на задачу владельца»: его цитата (≥ {REF_MIN} знаков) или решение В-##. "
               f"Работы, которую владелец не заказывал, не заводим", file=sys.stderr)
         return 1
-    # v2 (02.10): ревьюера по умолчанию НЕТ — Судья только по явному `--reviewer judge` (исследования с
-    # выводом и необратимое); `--no-reviewer` принимается как no-op (совместимость со старыми командами)
-    reviewer = args.reviewer
+    # V2-1: Судья проверяет каждый результат — ревьюер по умолчанию judge. Без него: механическая задача Haiku
+    # (приёмка кодом) и тикет самого Судьи (себя он не проверяет). Снять Судью с обычной задачи может только владелец
+    if getattr(args, "no_reviewer", False) and args.executor != "haiku":
+        print("new: --no-reviewer не принимается — Судья проверяет каждый результат, снять его может только владелец. "
+              "Механическая задача без Судьи — `--executor haiku --kind …` (приёмка кодом)", file=sys.stderr)
+        return 1
+    reviewer = args.reviewer or ("" if args.owner == "judge" else routes_mod.default_reviewer(args.executor))
 
     if args.executor == "haiku":
         # судья TK-002 п.5г: обход проверки Судьи запрещён — отказ до создания файла, не постфактум
@@ -256,7 +259,7 @@ def cmd_result(args) -> int:
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
     upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
-                       owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "")
+                       owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
     bus_emit(args.id, "сдано", {"author": role, "result": args.result, "next": upd.get("next", "")})
     print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
@@ -467,9 +470,9 @@ def main(argv=None) -> int:
     p_new.add_argument("--owner", required=True, choices=["researcher", "engineer", "judge"])
     p_new.add_argument("--title", required=True)
     p_new.add_argument("--reviewer", choices=["researcher", "engineer", "judge"],
-                        help="ревьюер; по умолчанию его нет (Судья — только явно: --reviewer judge)")
+                        help="ревьюер; по умолчанию Судья (у Haiku-задач и тикетов Судьи — никого)")
     p_new.add_argument("--no-reviewer", action="store_true",
-                        help="no-op (v2: ревьюера по умолчанию нет); оставлено для совместимости")
+                        help="только с --executor haiku (там и так без Судьи); иначе отказ — Судью снимает владелец")
     p_new.add_argument("--effort", choices=list(T.VALID_EFFORTS), default=None,
                         help="усилие запусков по этому тикету; без поля — исследователь/инженер high, Судья xhigh")
     p_new.add_argument("--ref", default="", help="обязательно: ссылка на задачу владельца — его цитата или решение В-##")
@@ -509,7 +512,7 @@ def main(argv=None) -> int:
     p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
     p_result.add_argument("--form", default=None, help="wait: форма wait_for")
     p_result.add_argument("--why-owner", dest="why_owner", default=None, choices=list(routes_mod.OWNER_REASONS),
-                          help="ask-owner Судьи: повод вопроса владельцу (деньги|видимое|необратимое|бизнес-правило)")
+                          help="ask-owner Судьи: повод вопроса владельцу (деньги|направление|необратимое|бизнес-правило)")
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")

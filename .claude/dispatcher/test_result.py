@@ -71,13 +71,62 @@ class ResultTests(unittest.TestCase):
         self.res("engineer", "pr", pr=9, sha=SHA)
         self.assertEqual(self.tkt().header.get("pr"), "7, 9")
 
-    def test_done_with_reviewer_goes_to_reviewer_else_closes(self):
+    def test_done_goes_to_judge_by_default_closes_only_haiku_and_ceo(self):  # V2-1: Судья проверяет каждый done
         (self.base / "out.md").write_text("x", encoding="utf-8")
         self.assertEqual(self.res("engineer", "done", path="out.md"), 0)
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("in_review", "judge"))
-        T.write_header_updates(self.path, {"reviewer": "", "next": ""}, now=NOW)
+        T.write_header_updates(self.path, {"reviewer": "", "next": "", "executor": "haiku"}, now=NOW)  # механическая задача
         self.assertEqual(self.res("engineer", "done", path="out.md"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next"), t.reviewer), ("done", "", ""))
+        T.write_header_updates(self.path, {"status": "in_progress", "executor": ""}, now=NOW)
+        self.assertEqual(self.res("", "done", path="out.md"), 0)  # CEO закрывает сам
         self.assertEqual(self.tkt().status, "done")
+
+    def test_done_on_old_ticket_without_reviewer_goes_to_judge_and_writes_reviewer(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        for role in ("researcher", "engineer"):
+            T.write_header_updates(self.path, {"reviewer": "", "next": "", "status": "in_progress", "owner": role}, now=NOW)
+            self.assertEqual(self.res(role, "done", path="out.md"), 0)
+            t = self.tkt()
+            self.assertEqual((t.status, t.header.get("next"), t.reviewer), ("in_review", "judge", "judge"))
+        # ревьюер, поставленный явно (не Судья), не перетирается
+        T.write_header_updates(self.path, {"reviewer": "engineer", "next": "", "status": "in_progress", "owner": "researcher"}, now=NOW)
+        self.assertEqual(self.res("researcher", "done", path="out.md"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next"), t.reviewer), ("in_review", "engineer", "engineer"))
+
+    def test_ticket_from_new_goes_through_judge_on_done(self):  # сквозной: new → done исполнителя → Судья, без флагов
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.assertEqual(TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Сквозной тикет", "--force"]), 0)
+        self.path = max(D.TICKETS_DIR.glob("TK-*.md"))
+        self.tid = self.path.stem
+        self.assertEqual(self.tkt().reviewer, "judge")
+        self.assertEqual(self.res("researcher", "done", path="out.md"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next"), t.reviewer), ("in_review", "judge", "judge"))
+        d = D.decide(t, {}, NOW)
+        self.assertEqual((d.role, d.reason), ("judge", "next"))
+
+    def test_pr_on_old_ticket_without_reviewer_writes_judge_except_haiku(self):
+        T.write_header_updates(self.path, {"reviewer": ""}, now=NOW)
+        self.assertEqual(self.res("engineer", "pr", pr=7, sha=SHA), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next"), t.reviewer), ("in_review", "judge", "judge"))
+        T.write_header_updates(self.path, {"reviewer": "", "executor": "haiku"}, now=NOW)  # PR всё равно к Судье, но шапку не трогаем
+        self.assertEqual(self.res("engineer", "pr", pr=9, sha=SHA), 0)
+        t = self.tkt()
+        self.assertEqual((t.header.get("next"), t.reviewer), ("judge", ""))
+
+    def test_route_default_reviewer_is_pure(self):
+        self.assertEqual(R.route("engineer", "done", "engineer"),
+                         {"status": "in_review", "next": "judge", "reviewer": "judge"})
+        self.assertEqual(R.route("engineer", "done", "engineer", "judge"), {"status": "in_review", "next": "judge"})
+        self.assertEqual(R.route("engineer", "done", "engineer", executor="haiku"), {"status": "done", "next": ""})
+        self.assertEqual(R.route("judge", "done", "judge"), {"status": "done", "next": ""})
+        self.assertEqual(R.route("ceo", "done", "engineer"), {"status": "done", "next": ""})
+        self.assertEqual(R.default_reviewer(), "judge")
+        self.assertEqual(R.default_reviewer("haiku"), "")
 
     def test_accept_writes_verdict_list(self):
         self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA), 0)
@@ -313,6 +362,24 @@ class ResultTests(unittest.TestCase):
         for why in R.OWNER_REASONS:
             self.assertEqual(R.check("judge", "ask-owner", "x", why_owner=why), "")
         self.assertIn("повод: деньги", (self.res("judge", "ask-owner", why_owner="деньги"), self.tkt().log[-1].text)[1])
+
+    def test_owner_reasons_are_money_direction_irreversible_business_rule(self):  # V2-1: «направление» вместо «видимого»
+        self.assertEqual(R.OWNER_REASONS, ("деньги", "направление", "необратимое", "бизнес-правило"))
+        self.assertEqual(R.check("judge", "ask-owner", "x", why_owner="направление"), "")
+        self.assertIn("деньги|направление|необратимое|бизнес-правило", R.check("judge", "ask-owner", "x", why_owner="видимое"))
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        self.assertEqual(self.res("judge", "ask-owner", why_owner="видимое"), 1)
+        self.assertEqual(self.tkt().status, "in_review", "отказ ничего не пишет")
+        self.assertEqual(self.res("judge", "ask-owner", why_owner="направление"), 0)
+        self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
+        self.assertIn("повод: направление", self.tkt().log[-1].text)
+
+    def test_cli_why_owner_choices_reject_visible(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                TK.main(["result", self.tid, "ask-owner", "--why", "x", "--why-owner", "видимое"])
 
     def test_non_judge_ask_owner_still_routes_to_judge_without_reason(self):
         self.assertEqual(self.res("engineer", "ask-owner"), 0)
