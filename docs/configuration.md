@@ -40,16 +40,14 @@
 | `RPV_DISPATCH_EFFORT` | Судья `xhigh`, Инженер и Исследователь `high` | усилие по ролям, `judge:xhigh,engineer:high` или одно значение на все; поле `effort` тикета перекрывает |
 | `RPV_DISPATCH_HAIKU_MODEL` | `claude-haiku-5-5` | модель для механических задач (`executor: haiku`); усилие у них всегда `xhigh` |
 | `RPV_DISPATCH_WAIT_POLL_S` | `300` | предел ожидания потока `wait-poller` между шагами (не ssh-период; ssh — сверка `RPV_DISPATCH_WAIT_RECON_S`), с |
-| `RPV_DISPATCH_WAIT_RECON_S` | `300` | период сверки `wait_for host:…` одним ssh на машину (с шиной), с |
-| `RPV_BLIND_ALERT_S` | `300` | TK-217: цель (ssh к машине с ожиданиями, шина) недоступна дольше — тревога по этой цели: `ALERT-BLIND.txt`, звук на ПК, строка `ceo-wake.log` (вердикт Судьи 12.10), с |
+| `RPV_DISPATCH_WAIT_RECON_S` | `300` | период сверки `wait_for host:…` одним ssh на машину, с; конец задания виден диспетчеру не позже этого периода |
+| `RPV_BLIND_ALERT_S` | `300` | TK-217: цель (ssh к машине с ожиданиями) недоступна дольше — тревога по этой цели: `ALERT-BLIND.txt`, звук на ПК, строка `ceo-wake.log` (вердикт Судьи 12.10), с |
 | `RPV_BLIND_REPEAT_S` | `1800` | повтор тревоги «слеп», пока цель недоступна, с |
-| `RPV_WATCHED_ALIASES` | не задан | машины со сторожем (`calc,vps`): сверка, закрывшая условие без события с такой машины, даёт тревогу `recon-miss` |
-| `RPV_DISPATCH_DECK_CACHE_S` | `60` | кэш ssh-проверок `wait_for`, с |
+| `RPV_WATCHED_ALIASES` | не задан | алиасы машин через запятую (`calc,vps`), где сторож гоняет адаптеры проекта `RPV_JOB_OWNERS_CMD` и `RPV_STRAY_CMD`; не задан — их никто не опрашивает |
 | `RPV_DISPATCH_ON_MET_TIMEOUT_S` | `120` | таймаут команды `on_met`, с |
 | `RPV_DISPATCH_SUMMARY_HOURS` | `1` | как часто копящиеся некритичные сигналы уходят CEO одной строкой, ч |
 | `RPV_DISPATCH_INVARIANT_GRACE_S` | `600` | через сколько секунд открытый тикет без хода считается нарушением инварианта |
 | `RPV_TICKET_LOCK_TIMEOUT` | `120` | сколько ждать блокировки тикета, с (диспетчер, `tickets.py` и роли пишут один файл) |
-| `RPV_PROGRESS_DIR` | `~/rpv/progress` | каталог файлов хода заданий на машинах |
 | `RPV_IDLE_SLO_MIN` | `10` | допустимый простой, минут в сутки ([reliability.md](reliability.md#счётчик-простоя)) |
 
 ## Сторож (`RPV_WATCH_*`)
@@ -69,18 +67,16 @@
 | `RPV_JOB_STATE_CMD` | не задано | адаптер формы `wait_for: job:<алиас>:<id>`: команда с `{id}`, выполняется по ssh на машине алиаса; 1-я строка вывода `running\|queued\|done\|failed\|missing`, далее хвост лога. Не задан — форма не проверяется, сторож пишет «не проверить» после `RPV_WATCH_SSH_FAIL_STRIKES` циклов. Падение (`failed`) будит владельца тикета сразу (оно однозначно); `missing` — после `RPV_WATCH_DEAD_WAIT_STRIKES` циклов подряд (≈ 2 × `RPV_WATCH_INTERVAL` = 4 мин: задание могло ещё не записаться). Причину по хвосту лога одной строкой пишет Haiku (`haiku_aux`), если он есть |
 | `RPV_WATCH_STALL_RUNS` | `2` | подряд таймаутов или холостых запусков до блока |
 
-## Вторая машина и ssh
+## Машины и ssh
 
-Вторая машина — сторож сам её не опрашивает; `RPV_DECK_HOST` нужен только для `wait_for` `host:deck:…`.
+Машина в `wait_for: host:<алиас>:…` — любой алиас из `~/.ssh/config`: адрес, пользователя, ключ и `known_hosts` берёт сам `ssh`. Переменных для хостов и ключей у плагина нет ([wait-for.md](wait-for.md#машины)).
+
+Переменные `tools/jobrun.sh` — их задают на самой машине, в окружении запуска скрипта ([wait-for.md](wait-for.md#задание-на-машине-jobrunsh)):
 
 | переменная | по умолчанию | смысл |
 |---|---|---|
-| `RPV_CALC_HOST`, `RPV_VPS_HOST`, `RPV_DECK_HOST` | не заданы | хосты для `wait_for: host:<calc\|vps\|deck>:…` (`user@host` или алиас из `~/.ssh/config`) |
-| `RPV_DECK_KEY` | — | ключ ssh (`-i`) |
-| `RPV_DECK_KNOWN_HOSTS` | — | файл known_hosts (`-o UserKnownHostsFile=`) |
-| `RPV_WATCH_SERVER_LOAD_MAX` | `4` | простой сервера (алиас `calc`): нагрузка (loadavg) машины ниже порога, а задания под замком `benchrun.sh` ждут дольше `RPV_WATCH_SERVER_LOCK_WAIT_MIN`… |
-| `RPV_WATCH_SERVER_LOCK_WAIT_MIN` | `20` | …минут — сторож будит владельца тикета, державшего замок |
-| `RPV_WATCH_SERVER_WAKE_REPEAT_HOURS` | `2` | повтор такого сигнала, ч |
+| `RPV_RUNS_DIR` | `/var/lib/rpv/runs` | куда `jobrun.sh` пишет файл итога задания `<unit>.rc` (и `<unit>.log` без systemd) |
+| `RPV_JOBRUN_MODE` | сам: `systemd`, если есть `/run/systemd/system` и `systemd-run`, иначе `trap` | режим запуска задания: юнит systemd с `ExecStopPost` или фоновая оболочка с `trap` |
 
 ## Страж удаления
 
@@ -119,23 +115,6 @@
 | `RPV_GUARD_FORBIDDEN_HOSTS` | закрытые хосты и IP, через запятую: там нельзя ничего |
 
 `git reset --hard` и `git clean -f` страж пропускает только в каталоге вне основного дерева, заданном явным путём; `git push --force` — никогда. Публикации (выпуск, слияние PR, пуш в main/master и теги, публикация пакетов) запуску роли закрыты, пока в шапке его тикета нет `allow: publish (В-N)` (`tickets.py allow`, только CEO); настроек для этого нет.
-
-## Шина событий
-
-| переменная | по умолчанию | смысл |
-|---|---|---|
-| `RPV_BUS_URL` | не задан — шина выключена | адрес шины |
-| `RPV_BUS_TOKEN` | — | токен значением |
-| `RPV_BUS_TOKEN_FILE` | запасной `~/.rpv-bus-token` | токен файлом |
-| `RPV_BUS_SPOOL` | `~/.rpv/outbox.jsonl` | очередь неотправленных событий |
-| `RPV_BUS_DOWN_NOTICE_S` | `120` | простой шины короче — CEO не будим (`bus-down`/`bus-up` только при простое дольше) |
-| `RPV_BUS_DISABLE` | — | `1` — выключить шину |
-| `RPV_BUS_SNAPSHOT_S` | `300` | период полного снимка блокеров, с |
-| `RPV_RUNS_DIR` | `/var/lib/rpv/runs` | куда `jobrun.sh` пишет запись запуска (InvocationID) |
-
-Задан `RPV_BUS_URL` — сигналы к CEO идут через очередь `ceo` шины, а `ceo-inbox.md` и `ceo-wake.log` становятся запасным путём и будильником; не задан или `RPV_BUS_DISABLE` — файлы остаются основным путём ([signals.md](signals.md)). Порог «не обработано» у очереди `ceo` — 2 часа (константа шины), у остальных — флаг `--stale-after` у `bus.py` (600 с).
-
-Подробнее — [bus.md](bus.md).
 
 ## Присмотр
 

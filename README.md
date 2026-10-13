@@ -27,9 +27,8 @@
 - **Сторож** (`watch.py`) — ищет тикеты-сироты, `blocked`, `needs_owner` и мёртвые цели ожиданий; сигналы пишет в `ceo-wake.log`.
 - **Роли и тикеты** — CEO, Исследователь, Инженер, Судья; тикет — файл `.claude/tickets/TK-NNN.md` с шапкой и журналом; работа передаётся только через `--next`; Судья — ревьюер по умолчанию: исполнитель сдаёт по договору, Судья выносит вердикт по пунктам.
 - **Хуки** — вставка роли, устава и команды тикетов в начале сессии, конспекты сессий и блокнот роли; **страж удаления** (`PreToolUse`) разрешает удалять и перезаписывать только внутри своей папки, не трогает пути, которые проект объявил защищёнными (`.claude/rpv.json`, ключ `protected_paths`), а запускам ролей закрывает публикации без согласия владельца по тикету.
-- **Сигналы CEO** — при шине сигнал идёт в очередь `ceo` с приоритетом, CEO читает её командой `tickets.py inbox`; при лежащей шине — запасной файл; [подробнее](docs/signals.md).
-- **Ожидания `wait_for`** — тикет ждёт файл, другой тикет или задание на удалённой машине (`unit:`) и просыпается сам; [подробнее](docs/wait-for.md).
-- **Шина событий** (необязательно) — HTTP и sqlite без внешних пакетов: конец задания будит диспетчера за секунды, а не на следующем тике; [подробнее](docs/bus.md).
+- **Сигналы CEO** — строка в `ceo-inbox.md` и короткая копия в `ceo-wake.log` (на нём Monitor CEO); новые строки CEO читает командой `tickets.py inbox`; [подробнее](docs/signals.md).
+- **Ожидания `wait_for`** — тикет ждёт файл, другой тикет или задание на любой машине из `~/.ssh/config`: `tools/jobrun.sh` пишет файл итога (успех или код выхода), диспетчер видит его по ssh не позже чем через 5 минут и будит владельца; [подробнее](docs/wait-for.md).
 - **Надёжность** — присмотр ОС за диспетчером и сторожем, счётчик простоя с SLO и тревогой, инвариант «у открытого тикета есть ход», прогон на выносливость; [подробнее](docs/reliability.md).
 - **`/rpv-doctor`** — здоровье команды одной таблицей.
 - **Выпуск плагина** — вручную: `release.py bump` меняет версию и ставит тег, `release.py check` сверяет версии; автовыпуска нет, пользователи обновляются штатно через `/plugin`; [подробнее](docs/release.md).
@@ -52,7 +51,7 @@
 
 ## Установка
 
-Нужно: Python 3.11 (только stdlib) и команда `python` в `PATH`, git, Claude Code CLI `claude` в `PATH` с выполненным входом. `ssh` и ключ — только если тикеты ждут задания на удалённых машинах (`wait_for: host:…`).
+Нужно: Python 3.11 (только stdlib) и команда `python` в `PATH`, git, Claude Code CLI `claude` в `PATH` с выполненным входом. `ssh` и алиасы машин в `~/.ssh/config` — только если тикеты ждут задания на удалённых машинах (`wait_for: host:…`).
 
 `/rpv-start` выбирает способ фонового запуска по ОС и отвязывает службы от сессии: закрытие окна Claude их не останавливает.
 
@@ -123,19 +122,19 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | `/rpv-init` | Подготовить проект: `.claude/roles` из шаблонов плагина, `notes/`, `tickets/`, реестр владельца (`decisions.md` + `@` в `CLAUDE.md`, `goals/`), реестр ошибок `errors/`, строки в `.gitignore`; существующее не перезаписывает |
 | `/ceo` | Пометить сессию как CEO (метку читают хуки; роль держится и после `/clear` в Desktop) |
 | `/rpv-start` | Запустить или перезапустить диспетчер и сторож в фоне |
-| `/rpv-doctor` | Здоровье команды одной таблицей: диспетчер, сторож, присмотр ОС, шина, очередь, ошибки за сутки; только читает |
+| `/rpv-doctor` | Здоровье команды одной таблицей: диспетчер, сторож, присмотр ОС, очередь, ошибки за сутки; только читает |
 
 Скрипты плагина (запускаются из его папки, `--project <проект>`):
 
 | скрипт | назначение |
 |---|---|
-| `dispatcher/tickets.py` | тикеты: `new`, `comment`, `start`, `stop` (только CEO), `allow <ID> publish --ref В-N` / `--revoke` (только CEO: согласие владельца на публикацию по тикету), `wait`, `status`; `inbox [--peek]` — очередь сигналов CEO |
+| `dispatcher/tickets.py` | тикеты: `new`, `comment`, `start`, `stop` (только CEO), `allow <ID> publish --ref В-N` / `--revoke` (только CEO: согласие владельца на публикацию по тикету), `wait`, `status`; `inbox [--peek]` — новые строки `ceo-inbox.md` с прошлого чтения |
 | `dispatcher/registry.py` | реестр владельца: `decide` (решение В-N), `goal` / `accept-goal` / `drop-goal` (цель G-NNN), `show`, `list`; пишет только CEO (помощник `secretary`), роли — только читают |
 | `dispatcher/errors.py` | реестр ошибок `.claude/errors/E-NNN.md`: `add`, `fix E-N --check "<команда>"` (исправленной ошибка становится, только когда проверка — тест или скрипт из git — зелёная), `run`, `show`, `list`; ставят и закрывают любые роли; проверки всех исправленных гоняет приёмка Судьи (`result … accept`, `accept`) |
 | `dispatcher/supervise.py` | присмотр ОС за диспетчером и сторожем: `--install` / `--uninstall` |
 | `dispatcher/release.py` | выпуск плагина вручную: `bump` (версия, коммит, тег), `check` |
 | `dispatcher/notify.py` | сообщение владельцу в Telegram: `send "текст"`, `test` (`RPV_TG_TOKEN`, `RPV_TG_CHAT`) |
-| `bus/busclient.py` | отправка события в шину: `send <адрес>` |
+| `tools/jobrun.sh` | запуск задания на машине с файлом итога `<unit>.rc` (копируется на машину; [подробнее](docs/wait-for.md#задание-на-машине-jobrunsh)) |
 
 ## Настройка
 
@@ -155,10 +154,6 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | `RPV_WATCH_INTERVAL` | `120` | цикл сторожа, с |
 | `RPV_WATCH_ORPHAN_HOURS` | `2` | через сколько часов без записи тикет считается сиротой |
 | `RPV_IDLE_SLO_MIN` | `10` | допустимый простой, минут в сутки |
-| `RPV_BUS_URL` | не задан — шина выключена | адрес шины событий |
-| `RPV_BUS_TOKEN` / `RPV_BUS_TOKEN_FILE` | — / `~/.rpv-bus-token` | токен шины: значением или файлом |
-| `RPV_CALC_HOST` / `RPV_VPS_HOST` / `RPV_DECK_HOST` | не заданы | хосты для `wait_for: host:<calc\|vps\|deck>:…` и ssh-проверок (`user@host` или алиас из `~/.ssh/config`) |
-| `RPV_DECK_KEY` / `RPV_DECK_KNOWN_HOSTS` | — | ключ ssh и файл known_hosts |
 | `RPV_GUARD_REMOTE_ROOTS` / `RPV_GUARD_STAGE` / `RPV_GUARD_FORBIDDEN_HOSTS` | не заданы — на удалённых машинах удалять нельзя нигде | страж удаления: разрешённые каталоги на удалённых машинах, стадия, закрытые хосты |
 | `.claude/rpv.json` → `protected_paths` | нет — защиты нет | **файл проекта**, не переменная: шаблоны путей, которые не удаляет и не перезаписывает никто (`["data/raw/**", "backups", "*.pem"]`); [подробнее](docs/configuration.md#защищённые-пути--clauderpvjson) |
 
@@ -169,11 +164,11 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 - **Сессия CEO** — команда `/ceo` (метка сессии); запасной путь — слово `CEO` в названии сессии Claude Desktop.
 - **Роли и зоны** — уставы и ссылки в `.claude/roles/*.md` проекта.
 - **Хуки** запускает `hooks/run-hook.sh`: `python3`, иначе `python`, иначе `py -3`; в проекте без `.claude/roles` хуки молчат. Страж удаления ловит Bash, PowerShell, Write, Edit, MultiEdit и NotebookEdit (`hooks/hooks.json`); корень проекта — `CLAUDE_PROJECT_DIR`; защищённые пути проекта берёт из `.claude/rpv.json` (битый файл — отказ любому удалению и перезаписи, пока не исправят).
-- **Вторая машина** — сторож сам её не опрашивает; `RPV_DECK_HOST` нужен только для `wait_for` `host:deck:…`.
+- **Машины** — любой алиас из `~/.ssh/config` (пользователь, ключ, known_hosts — там же); отдельных переменных для хостов у плагина нет.
 
 ## Диагностика
 
-`/rpv-doctor` печатает таблицу `OK / WARN / FAIL / —`: диспетчер и сторож (pid жив, возраст сердцебиения), присмотр ОС, шина, очередь тикетов по статусам, тикеты `waiting` без условия, запуски не `ok` за сутки, сегодняшний простой. Команда только читает; код возврата 1 — есть FAIL, 2 — проект не найден, `--json` — машинный вид.
+`/rpv-doctor` печатает таблицу `OK / WARN / FAIL / —`: диспетчер и сторож (pid жив, возраст сердцебиения), присмотр ОС, очередь тикетов по статусам, тикеты `waiting` без условия, запуски не `ok` за сутки, сегодняшний простой. Команда только читает; код возврата 1 — есть FAIL, 2 — проект не найден, `--json` — машинный вид.
 
 Диспетчер каждый тик учитывает **счётчик простоя** (`state.json` → `downtime`): минуты в сутки, когда есть готовая работа без исполнителя, роль ждёт без условия (дольше 10 мин) или диспетчер молчит при работе. Минуты идут в ежедневный отчёт. Готовая работа стоит 15 мин подряд (`RPV_STALL_ALARM_MIN`) — одна тревога «работа стоит» владельцу в Telegram (`notify.py`) и строкой CEO; пошла — «снова идёт». Остальная механика (слепота к машинам, сверки, сбои снятия и разбора) CEO не будит — строки в `mechanics.log`.
 
@@ -186,9 +181,9 @@ python -m pip install pytest
 python -m pytest .claude -q
 ```
 
-Или без pytest — `python -m unittest discover -s .claude/dispatcher`, затем то же для `-s .claude/hooks` и `-s .claude/bus`.
+Или без pytest — `python -m unittest discover -s .claude/dispatcher`, затем то же для `-s .claude/hooks`.
 
-**На машине с живой установкой** настройка `RPV_*` (шина, машины, ключи) лежит в окружении пользователя, и тесты не должны её видеть — иначе фикстуры уходят в живую шину и очередь CEO. Под pytest это делает `.claude/conftest.py`; под `unittest` очисти окружение сам (PowerShell: `Get-ChildItem Env: | ? Name -match '^(RPV|ALPHA)_' | % { Remove-Item "Env:$($_.Name)" }`). Страж — `test_env_isolation.py` падает, если настройка просочилась или spool шины совпал с общим `~/.rpv/outbox.jsonl`; под `unittest` задай ещё `RPV_BUS_SPOOL` во временный файл.
+**На машине с живой установкой** настройка `RPV_*` (пороги, адаптеры, ключи) лежит в окружении пользователя, и тесты не должны её видеть. Под pytest это делает `.claude/conftest.py` (он же не пускает тесты в настоящий `ssh`: алиасы машин из `~/.ssh/config` живые); под `unittest` очисти окружение сам (PowerShell: `Get-ChildItem Env: | ? Name -match '^(RPV|ALPHA)_' | % { Remove-Item "Env:$($_.Name)" }`). Страж — `test_env_isolation.py` падает, если настройка просочилась.
 
 - **CI** — workflow [`ci`](.github/workflows/ci.yml): тесты на Windows, macOS и Linux × Python 3.11–3.13 на каждый PR и каждый push в `main`; итоговая проверка `ci-ok`.
 - **Версии** — `python .claude/dispatcher/release.py check` проверяет, что версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают.
@@ -199,10 +194,10 @@ python -m pytest .claude -q
 commands/            слэш-команды плагина
 agents/              помощники ролей: coder, reader; помощники CEO: secretary, inbox, reporter
 hooks/               hooks.json и запускатель хуков
+tools/               fastcheck.py (быстрый прогон тестов), jobrun.sh (задание на машине с файлом итога)
 templates/roles/     уставы ролей — копируются в проект командой /rpv-init
 templates/brief/     шаблон задачи по расписанию «ежедневный отчёт владельцу» (копировать в `.claude/brief/`; предпочтения — только чтение, память — `state/`)
 .claude/dispatcher/  диспетчер, сторож, тикеты, doctor, присмотр, выпуск
-.claude/bus/         шина событий, сторож машины, клиент
 .claude/hooks/       страж удаления, страж сигналов CEO, контекст и память ролей
 docs/                подробные инструкции
 ```
@@ -215,8 +210,7 @@ docs/                подробные инструкции
 | [docs/install-windows.md](docs/install-windows.md), [docs/install-macos.md](docs/install-macos.md), [docs/install-linux.md](docs/install-linux.md) | запуск, остановка и автозапуск по ОС |
 | [docs/configuration.md](docs/configuration.md) | все переменные окружения |
 | [docs/wait-for.md](docs/wait-for.md) | ожидания тикетов: файл, тикет, задание на машине |
-| [docs/bus.md](docs/bus.md) | шина событий, сервер шины, задания на машинах |
-| [docs/signals.md](docs/signals.md) | стандарт сигналов CEO: очередь с приоритетом, `tickets.py inbox`, запасной путь |
+| [docs/signals.md](docs/signals.md) | стандарт сигналов CEO: `ceo-inbox.md`, `ceo-wake.log`, `tickets.py inbox` |
 | [docs/reliability.md](docs/reliability.md) | присмотр ОС, счётчик простоя, инвариант хода |
 | [docs/release.md](docs/release.md) | выпуск плагина вручную, обновление через `/plugin` |
 | [CHANGELOG.md](CHANGELOG.md) | история версий |

@@ -63,7 +63,7 @@ cat > "$HOME/Library/LaunchAgents/local.rpv.$s.plist" <<EOF
     <key>PATH</key><string>$AGENT_PATH</string>
     <key>PYTHONUTF8</key><string>1</string>
     <key>PYTHONIOENCODING</key><string>utf-8</string>
-    <!-- по необходимости добавьте RPV_* из docs/configuration.md (RPV_DISPATCH_ROLE_PARALLEL, RPV_BUS_URL, RPV_CALC_HOST, RPV_DECK_KEY) -->
+    <!-- по необходимости добавьте RPV_* из docs/configuration.md (RPV_DISPATCH_ROLE_PARALLEL, RPV_STALL_ALARM_MIN) -->
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
