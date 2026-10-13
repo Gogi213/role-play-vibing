@@ -268,6 +268,36 @@ def stats_at(now: datetime, entries: list, runs: list, start=None) -> Stats:
                  days=[(d, v[0], v[1]) for d, v in sorted(per_day.items())][-DAYS_SHOWN:])
 
 
+def closed_scale(tickets: dict, runs: dict) -> list:
+    """Закрытые (`done`) тикеты проекта → [(время закрытия — последняя запись или запуск, $, запусков, часов)] по времени:
+    масштаб «сколько обычно стоит тикет» для окна — только тикеты, закрытые до него (без заглядывания вперёд)."""
+    out = []
+    for t in tickets.values():
+        rs = runs.get(t.tid, [])
+        if t.status != "done" or not (t.entries or rs):
+            continue
+        start = ticket_start(t.entries, rs)
+        end = max([e.ts for e in t.entries] + [r.ts for r in rs])
+        out.append((end, sum(r.cost for r in rs), len(rs), (end - start).total_seconds() / 3600))
+    return sorted(out)
+
+
+def _pct(xs: list, q: float) -> float:
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(q * len(xs)))]
+
+
+def scale_text(scale: list, now: datetime, min_n: int = 5) -> str:
+    """Строка масштаба: медиана и 90-й процентиль закрытых к `now` тикетов; меньше `min_n` — масштаба нет."""
+    done = [x for x in scale if x[0] <= now]
+    if len(done) < min_n:
+        return ""
+    cost, n, hours = ([x[i] for x in done] for i in (1, 2, 3))
+    return (f"Закрытые тикеты проекта к этому моменту ({len(done)}): медиана — ${_pct(cost, 0.5):.2f}, запусков "
+            f"{_pct(n, 0.5)}, часов {_pct(hours, 0.5):.1f}; 90-й процентиль — ${_pct(cost, 0.9):.2f}, запусков "
+            f"{_pct(n, 0.9)}, часов {_pct(hours, 0.9):.1f}.")
+
+
 def stats_text(s: Stats) -> str:
     out = [f"к этому моменту: запусков {s.runs}, потрачено ${s.cost:.2f}, часов от начала {s.hours:.1f}, "
            f"возвратов Судьи {s.returns}.",
@@ -311,13 +341,13 @@ def pick_new(new: list, max_bytes: int, entry_chars: int) -> tuple:
 
 
 def build_prompt(t: Ticket, w: Window, stats: Stats, *, max_kb: float = 12, ctx_lines: int = 40, ctx_width: int = 180,
-                 entry_chars: int = 2500, desc_chars: int = 3000, skip_roles=()) -> str:
+                 entry_chars: int = 2500, desc_chars: int = 3000, skip_roles=(), scale: str = "") -> str:
     before = [e for e in t.entries if e.ts < w.start and e.role not in skip_roles]
     shown = before[-ctx_lines:] if ctx_lines else []
     blocks, dropped = pick_new(w.new, int(max_kb * 1024), entry_chars)
     out = [f"Тикет {t.tid} — {t.title}", f"Сейчас: {w.end.isoformat()}", "",
            "## Цель (описание тикета)", cut(t.desc, desc_chars), "",
-           "## Числа (считал код)", stats_text(stats), ""]
+           "## Числа (считал код)", stats_text(stats)] + ([scale] if scale else []) + [""]
     if shown:
         head = "## Ход тикета до этого окна (по строке на запись" + (
             f"; показаны последние {len(shown)} из {len(before)})" if len(before) > len(shown) else ")")
@@ -511,6 +541,7 @@ def window_key(tid: str, step: int, end: datetime) -> str:
 def plan_jobs(tickets: dict, runs: dict, chosen: list, a) -> list:
     """Все окна набора с готовым промптом и числами: [{…поля строки итогов…, prompt}]."""
     opts, jobs = prompt_opts(a), []
+    scale = closed_scale(tickets, runs)
     for tid, group in chosen:
         t = tickets[tid]
         rs = runs.get(tid, [])
@@ -518,7 +549,7 @@ def plan_jobs(tickets: dict, runs: dict, chosen: list, a) -> list:
         total = sum(r.cost for r in rs)
         for w in make_windows(t.entries, a.step_min, opts["skip_roles"]):
             st = stats_at(w.end, t.entries, rs, start)
-            prompt = build_prompt(t, w, st, **opts)
+            prompt = build_prompt(t, w, st, scale=scale_text(scale, w.end), **opts)
             jobs.append({"key": window_key(tid, a.step_min, w.end), "ticket": tid, "group": group, "window": w.n,
                          "start": w.start.isoformat(), "end": w.end.isoformat(), "step_min": a.step_min, "n_new": len(w.new),
                          "prompt_chars": len(prompt), "runs": st.runs, "spent": round(st.cost, 4), "hours": round(st.hours, 2),
@@ -685,7 +716,9 @@ def cmd_prompt(a) -> int:
     w = next((w for w in wins if w.n == a.window), None)
     if not w:
         raise SystemExit(f"{a.ticket}: окон {len(wins)}, окна {a.window} нет")
-    emit(build_prompt(t, w, stats_at(w.end, t.entries, rs, ticket_start(t.entries, rs)), **opts))
+    tickets, runs = load_all(alpha)
+    emit(build_prompt(t, w, stats_at(w.end, t.entries, rs, ticket_start(t.entries, rs)),
+                      scale=scale_text(closed_scale(tickets, runs), w.end), **opts))
     return 0
 
 

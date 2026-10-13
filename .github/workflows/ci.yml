@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest pytest-xdist
-      - run: python -m pytest .claude -q -p no:cacheprovider -n auto --durations=15
+      - run: python -m pytest .claude tools -q -p no:cacheprovider -n auto --durations=15
   jobrun-systemd:
     # CP6: итог задания на машине без шины — файл <unit>.rc от ExecStopPost; здесь — настоящий systemd, не подделка
     name: jobrun на настоящем systemd
