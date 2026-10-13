@@ -17,6 +17,9 @@ watch.pid
 watch.*.log
 mechanics.log
 notify.log
+report.log
+regressions.log
+reports/
 supervise-state.json
 stop/
 runs/*

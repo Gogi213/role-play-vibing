@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -287,6 +288,19 @@ class ErrorsTests(unittest.TestCase):
         self.assertIn("регрессия", msg)
         self.assertIn(f"{a} «Цена»: код 3", msg)
         self.assertIn("запись в тикете не сделана", msg)
+
+    def test_gate_refusal_is_logged_for_the_daily_report(self):
+        log = self.root / ".claude" / "dispatcher" / "regressions.log"
+        a = self.fixed("python tools/flag.py", "Цена")
+        b = self.fixed("python tools/flag.py", "Скидка")
+        self.assertEqual(E.gate(self.root, "TK-5"), "")
+        self.assertFalse(log.exists(), "зелёная приёмка в журнал регрессов не пишет")
+        (self.root / "flag.txt").write_text("x", encoding="utf-8")
+        E.gate(self.root, "TK-5")
+        E.gate(self.root, "")
+        rows = [ln.split("\t") for ln in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(r[1], r[2]) for r in rows], [("TK-5", f"{a},{b}"), ("-", f"{a},{b}")])
+        self.assertTrue(datetime.fromisoformat(rows[0][0]).tzinfo)      # время с поясом: отчёт сравнивает с периодом
 
     def test_gate_runs_in_ticket_worktree_when_present(self):
         self.fixed("python tools/flag.py")
