@@ -71,7 +71,7 @@ python <плагин>/.claude/dispatcher/supervise.py --uninstall [--project <п
 | `return` | Судья | `--sha H` либо `--path <артефакт проверки>` | `in_progress`, next — владелец |
 | `blocked` | любая | — | `blocked`, next — CEO |
 | `ask-owner` | не Судья | — | `blocked`, next — Судья (В-206) |
-| `ask-owner` | Судья | — | `needs_owner`, next — CEO |
+| `ask-owner` | Судья | `--why-owner деньги\|видимое\|необратимое\|бизнес-правило` (иначе отказ) | `needs_owner`, next — CEO |
 | `wait` | любая | `--form` (годная форма wait_for) | `waiting` + `wait_for` |
 | `continue` | исследователь, инженер | — | `in_progress`, next — та же роль (следующий запуск; длинная работа кусками), не более 5 подряд |
 

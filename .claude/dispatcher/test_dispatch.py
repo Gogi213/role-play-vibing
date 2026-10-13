@@ -2663,10 +2663,10 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
         return calls
 
-    def test_default_review_returns_limit_is_three_with_env_name(self):
+    def test_default_review_returns_limit_is_two_with_env_name(self):
         if P.env("DISPATCH_MAX_REVIEW_RETURNS"):
             self.skipTest("порог задан в окружении")
-        self.assertEqual(D.MAX_REVIEW_RETURNS, 3)
+        self.assertEqual(D.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2
         self.assertIn("DISPATCH_MAX_REVIEW_RETURNS", Path(D.__file__).read_text(encoding="utf-8"))
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
@@ -2688,23 +2688,25 @@ class DispatchRunTests(unittest.TestCase):
         self.review_round(path, 2, "in_review", next_role="ceo")
         self.assertNotIn(path.stem, D.load_state().get("review_returns", {}))
 
-    def test_three_returns_then_resubmit_goes_to_owner_and_reviewer_is_not_woken(self):
+    def test_two_returns_then_resubmit_closes_not_done_with_remainder_and_reviewer_is_not_woken(self):
         path = self.review_setup()
         tid = path.stem
-        for n in (1, 2, 3):
+        for n in (1, 2):
             self.review_round(path, n, "in_progress")
-            self.owner_resubmits(path, n, "in_review" if n < 3 else "done")
-        self.assertEqual(D.load_state()["review_returns"][tid], 3)
+            self.owner_resubmits(path, n, "in_review" if n < 2 else "done")
+        self.assertEqual(D.load_state()["review_returns"][tid], 2)
         calls = self.recording_popen()
         D.tick()
         tkt = T.read_ticket(path)
-        self.assertEqual(calls, [], "ревьюера на четвёртый круг не будим")
-        self.assertEqual(tkt.status, "needs_owner")  # TK-094: владельцу («ждёт вас»), не next: ceo
+        self.assertEqual(calls, [], "ревьюера на третий круг не будим")
+        self.assertEqual(tkt.status, "done")  # TK-233: закрыт «не сделано», не blocked/needs_owner
         self.assertEqual(tkt.log[-1].author, "dispatcher")
-        self.assertIn("3", tkt.log[-1].text)
+        self.assertIn("Не сделано", tkt.log[-1].text)
+        self.assertIn("Остаток", tkt.log[-1].text)
+        self.assertIn("круг 2", tkt.log[-1].text, "остаток — последний возврат ревьюера")
         self.assertEqual(tkt.next_role, "")
         self.assertEqual(len(self.ceo_lines(tid)), 1, self.ceo_lines(tid))
-        self.assertIn("[needs_owner]", self.ceo_lines(tid)[0])
+        self.assertIn("[done]", self.ceo_lines(tid)[0])
         D.tick()
         D.tick()
         self.assertEqual(len(self.ceo_lines(tid)), 1, "повторов нет")
@@ -2713,18 +2715,18 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_below_the_limit_reviewer_is_still_woken(self):
         path = self.review_setup()
-        for n in (1, 2):
+        for n in (1,):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "done")
         calls = self.recording_popen()
         D.tick()
-        self.assertEqual(len(calls), 1, "после двух возвратов ревьюер ещё получает третий круг")
+        self.assertEqual(len(calls), 1, "после одного возврата ревьюер ещё получает второй круг")
         self.assertEqual(T.read_ticket(path).status, "in_review")
         self.assertEqual(self.ceo_lines(path.stem), [])
 
     def test_ceo_next_wakes_reviewer_even_over_the_limit_and_counter_keeps_going(self):
         path = self.review_setup()
-        for n in (1, 2, 3):
+        for n in (1, 2):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         tkt = T.read_ticket(path)
@@ -2737,7 +2739,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_limit_is_judged_only_after_owner_resubmits_not_on_ceo_or_reviewer_entries(self):
         path = self.review_setup()
-        for n in (1, 2, 3):
+        for n in (1, 2):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         T.append_log(path, "ceo", "пока думаю", now=dt("2026-10-03T15:00:00+04:00"))     # последняя запись — CEO
@@ -2753,7 +2755,7 @@ class DispatchRunTests(unittest.TestCase):
         эскалация ждёт конца запуска (тикет в RUNNING), потом срабатывает один раз."""
         path = self.review_setup()
         tid = path.stem
-        for n in (1, 2, 3):
+        for n in (1, 2):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])   # запуск владельца ещё идёт
@@ -2772,22 +2774,22 @@ class DispatchRunTests(unittest.TestCase):
         self.recording_popen()
         D.tick(now=dt("2026-10-03T15:20:00+04:00"))                     # запуск кончился — эскалация, одна строка
         self.assertEqual(T.read_ticket(path).log[-1].author, "dispatcher")
-        self.assertEqual(len(self.ceo_lines(tid, "needs_owner")), 1, self.ceo_lines(tid))
+        self.assertEqual(len(self.ceo_lines(tid, "done")), 1, self.ceo_lines(tid))
 
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
         path = self.review_setup()
-        for n in (1, 2, 3):
+        for n in (1, 2):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         self.recording_popen()
         D.tick()                                       # эскалация + первый тик (метка «историю done не пересказываем»)
-        self.assertEqual(len(self.ceo_lines(path.stem, "needs_owner")), 1)
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1)
         T.append_log(path, "ceo", "принимаю как есть", now=dt("2026-10-03T15:00:00+04:00"))
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-03T15:00:00+04:00"))
         D.tick()
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, self.ceo_lines(path.stem))
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, self.ceo_lines(path.stem))  # «не сделано» + закрытие CEO
         D.tick()
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, "дедуп")
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, "дедуп")
 
     # --- A6: ротация контекста
     def test_timeout_without_json_keeps_last_known_context_and_rotation_still_fires(self):
@@ -2957,7 +2959,7 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertEqual(T.read_ticket(path).status, "todo")
 
     def test_new_backlog_flag(self):
-        rc = TK.main(["new", "--owner", "engineer", "--title", "Перенесено", "--backlog"])
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Перенесено", "--backlog"])
         self.assertEqual(rc, 0)
         tickets = T.list_tickets(self.tickets_dir)
         self.assertEqual(len(tickets), 1)
@@ -2965,36 +2967,36 @@ class TicketsCliStartTests(unittest.TestCase):
 
     def test_new_has_no_default_reviewer(self):
         """v2 (02.10): ревьюера по умолчанию нет — Судья только по явному `--reviewer judge`."""
-        TK.main(["new", "--owner", "researcher", "--title", "А"])
-        TK.main(["new", "--owner", "engineer", "--title", "Б"])
+        TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "А"])
+        TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Б"])
         tickets = {t.header["owner"]: t for t in (T.read_ticket(p) for p in T.list_tickets(self.tickets_dir))}
         self.assertEqual(tickets["researcher"].reviewer, "")
         self.assertEqual(tickets["engineer"].reviewer, "")
 
     def test_new_no_reviewer_flag_is_accepted_noop(self):
-        rc = TK.main(["new", "--owner", "researcher", "--title", "Без ревью", "--no-reviewer"])
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Без ревью", "--no-reviewer"])
         self.assertEqual(rc, 0)
         tkt = T.read_ticket(T.list_tickets(self.tickets_dir)[0])
         self.assertEqual(tkt.reviewer, "")
 
     def test_new_explicit_reviewer_judge_is_written(self):
-        TK.main(["new", "--owner", "researcher", "--title", "С Судьёй", "--reviewer", "judge"])
+        TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "С Судьёй", "--reviewer", "judge"])
         tkt = T.read_ticket(T.list_tickets(self.tickets_dir)[0])
         self.assertEqual(tkt.reviewer, "judge")
 
     def test_new_judge_owner_has_no_default_reviewer(self):
-        TK.main(["new", "--owner", "judge", "--title", "Судейское"])
+        TK.main(["new", "--ref", "В-229", "--owner", "judge", "--title", "Судейское"])
         tkt = T.read_ticket(T.list_tickets(self.tickets_dir)[0])
         self.assertEqual(tkt.reviewer, "")
 
     def test_new_effort_flag_writes_header_and_rejects_garbage(self):
-        TK.main(["new", "--owner", "engineer", "--title", "Лёгкая", "--effort", "medium"])
+        TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Лёгкая", "--effort", "medium"])
         self.assertEqual(T.read_ticket(T.list_tickets(self.tickets_dir)[0]).effort, "medium")
         with self.assertRaises(SystemExit):
             import contextlib
             import io
             with contextlib.redirect_stderr(io.StringIO()):
-                TK.main(["new", "--owner", "engineer", "--title", "Странная", "--effort", "ultra"])
+                TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Странная", "--effort", "ultra"])
 
     def test_comment_next_writes_header_without_touching_updated(self):
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Передача",
@@ -3022,7 +3024,7 @@ class TicketsCliStartTests(unittest.TestCase):
         """В-173: `tickets.py budget` удалена, `new --budget` не принимается; `new` не пишет в state.json."""
         import contextlib
         import io
-        TK.main(["new", "--owner", "engineer", "--title", "Без бюджета"])
+        TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Без бюджета"])
         path = T.list_tickets(self.tickets_dir)[0]
         self.assertFalse(D.STATE_FILE.exists(), "new больше не трогает state.json")
         self.assertNotIn("budget", T.read_ticket(path).header)
@@ -3030,11 +3032,11 @@ class TicketsCliStartTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 TK.main(["budget", path.stem, "L"])
             with self.assertRaises(SystemExit):
-                TK.main(["new", "--owner", "engineer", "--title", "С флагом", "--budget", "L"])
+                TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "С флагом", "--budget", "L"])
         self.assertEqual(len(T.list_tickets(self.tickets_dir)), 1)
 
     def test_status_shows_only_spent_for_ceo(self):
-        TK.main(["new", "--owner", "engineer", "--title", "С тратами"])
+        TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "С тратами"])
         path = T.list_tickets(self.tickets_dir)[0]
         state = D.load_state()
         D.add_ticket_cost(state, path.stem, 1.5)
@@ -3051,29 +3053,29 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertNotIn("бюджет", out)
 
     def test_new_haiku_requires_kind(self):
-        rc = TK.main(["new", "--owner", "engineer", "--title", "Без kind", "--executor", "haiku"])
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Без kind", "--executor", "haiku"])
         self.assertEqual(rc, 1)
         self.assertEqual(T.list_tickets(self.tickets_dir), [])
 
     def test_new_haiku_without_reviewer_flag_is_allowed_but_explicit_judge_is_refused(self):
         """v2: ревьюера по умолчанию нет, так что `--executor haiku` проходит без `--no-reviewer`; явный
         `--reviewer judge` с haiku по-прежнему запрещён (условие г судьи TK-002)."""
-        rc = TK.main(["new", "--owner", "engineer", "--title", "Механическая без флага",
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Механическая без флага",
                       "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 0)
-        rc = TK.main(["new", "--owner", "engineer", "--title", "Обход", "--reviewer", "judge",
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Обход", "--reviewer", "judge",
                       "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 1)
         self.assertEqual(len(T.list_tickets(self.tickets_dir)), 1)
 
     def test_new_haiku_researcher_owner_is_refused(self):
-        rc = TK.main(["new", "--owner", "researcher", "--title", "Не Haiku", "--no-reviewer",
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Не Haiku", "--no-reviewer",
                       "--executor", "haiku", "--kind", "publish"])
         self.assertEqual(rc, 1)
         self.assertEqual(T.list_tickets(self.tickets_dir), [])
 
     def test_new_haiku_valid_combo_succeeds(self):
-        rc = TK.main(["new", "--owner", "engineer", "--title", "Механическая", "--no-reviewer",
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Механическая", "--no-reviewer",
                       "--executor", "haiku", "--kind", "table-format"])
         self.assertEqual(rc, 0)
         tkt = T.read_ticket(T.list_tickets(self.tickets_dir)[0])
@@ -3082,7 +3084,7 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertEqual(tkt.reviewer, "")
 
     def test_new_kind_without_executor_is_refused(self):
-        rc = TK.main(["new", "--owner", "engineer", "--title", "Странно", "--kind", "publish"])
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Странно", "--kind", "publish"])
         self.assertEqual(rc, 1)
 
 
@@ -4056,12 +4058,12 @@ class WaitForNoticeTests(unittest.TestCase):
     def test_cli_new_refuses_unknown_wait_for_without_creating_file(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            rc = TK.main(["new", "--owner", "engineer", "--title", "t", "--wait-for", "потом посмотрю"])
+            rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "t", "--wait-for", "потом посмотрю"])
         self.assertEqual(rc, 1)
         self.assertIn("wait_for не понят", err.getvalue())
         self.assertEqual(list(D.TICKETS_DIR.glob("TK-*.md")) if D.TICKETS_DIR.exists() else [], [])
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(TK.main(["new", "--owner", "engineer", "--title", "t", "--wait-for", "host:calc:unit:u"]), 0)
+            self.assertEqual(TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "t", "--wait-for", "host:calc:unit:u"]), 0)
 
     def test_cli_wait_sets_status_and_checks_form(self):
         path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
@@ -4335,7 +4337,7 @@ class ProjectRootTests(unittest.TestCase):
         proj = self.make_project(self.proj / "work")
         sub = proj / "src" / "deep"
         sub.mkdir(parents=True)
-        done = self.run_script("tickets.py", ["new", "--owner", "engineer", "--title", "Из подпапки"], sub)
+        done = self.run_script("tickets.py", ["new", "--ref", "В-229", "--owner", "engineer", "--title", "Из подпапки"], sub)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual([p.name for p in (proj / ".claude" / "tickets").glob("TK-*.md")], ["TK-001.md"])
         self.assertFalse((sub / ".claude").exists())
@@ -4343,7 +4345,7 @@ class ProjectRootTests(unittest.TestCase):
     def test_scripts_outside_project_fail_with_hint_and_create_no_directories(self):
         empty = self.proj / "nowhere"
         empty.mkdir()
-        for script, args in (("tickets.py", ["new", "--owner", "engineer", "--title", "x"]),
+        for script, args in (("tickets.py", ["new", "--ref", "В-229", "--owner", "engineer", "--title", "x"]),
                              ("dispatch.py", ["--once"]), ("watch.py", ["--once"])):
             done = self.run_script(script, args, empty)
             self.assertEqual(done.returncode, 2, (script, done.stdout, done.stderr))
@@ -4374,7 +4376,7 @@ class ProjectRootTests(unittest.TestCase):
         orig = (TK.TICKETS_DIR, TK.PROJECT_ROOT, D.PROJECT_ROOT)
         self.addCleanup(lambda: (D.configure_project(orig[2]), setattr(TK, "TICKETS_DIR", orig[0]),
                                  setattr(TK, "PROJECT_ROOT", orig[1])))
-        self.assertEqual(TK.main(["--project", str(self.proj), "new", "--owner", "engineer", "--title", "Проект"]), 0)
+        self.assertEqual(TK.main(["--project", str(self.proj), "new", "--ref", "В-229", "--owner", "engineer", "--title", "Проект"]), 0)
         self.assertEqual([p.name for p in (self.proj / ".claude" / "tickets").glob("TK-*.md")], ["TK-001.md"])
 
     def test_scripts_run_from_plugin_folder_keep_state_in_project(self):

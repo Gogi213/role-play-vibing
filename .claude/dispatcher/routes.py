@@ -20,6 +20,7 @@ RULES = {
     "wait": ({"researcher", "engineer", "judge"}, "form"),
     "continue": ({"researcher", "engineer"}, ""),  # TK-090 в: длинная работа кусками — следующий запуск той же роли
 }
+OWNER_REASONS = ("деньги", "видимое", "необратимое", "бизнес-правило")  # TK-233 п.4: поводы вопроса владельцу (В-229)
 CONTINUE_MAX = 5  # подряд идущих continue у одной роли в тикете; дальше — wait/blocked/pr/done
 HINT = {
     "path": "--path <файл или каталог с результатом, существует на диске>",
@@ -32,7 +33,7 @@ HINT = {
 
 
 def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = "", form: str = "",
-          root: Path = Path("."), owner: str = "") -> str:
+          root: Path = Path("."), owner: str = "", why_owner: str = "") -> str:
     """Пустая строка — команда годна; иначе — что исправить (текст отказа в сессии роли)."""
     if result not in RESULTS:
         return f"неизвестный итог {result!r}; допустимо: {', '.join(RESULTS)}"
@@ -47,6 +48,10 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
     why = (why or "").strip()
     if not why:
         return "нужен --why «зачем/почему» (≤ 200 знаков)"
+    if result == "ask-owner" and role == "judge" and why_owner not in OWNER_REASONS:
+        # TK-233 п.4: владельцу — только деньги/видимое/необратимое/бизнес-правило; остальное Судья решает сам (blocked, если встал)
+        return (f"ask-owner к владельцу — только с --why-owner {'|'.join(OWNER_REASONS)}; другой повод владельцу не "
+                f"уходит: реши сам по методике либо blocked")
     if len(why) > WHY_MAX:
         return f"--why длиннее {WHY_MAX} знаков ({len(why)}) — сократи"
 
