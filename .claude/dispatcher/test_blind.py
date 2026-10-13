@@ -66,7 +66,8 @@ def test_alert_file_removed_when_target_leaves_active(tmp_path, monkeypatch):
     D._blind_tick(None)
     f = tmp_path / "ALERT-BLIND.txt"
     assert f.exists() and "ssh:calc" in f.read_text(encoding="utf-8")
-    assert "blind" in (tmp_path / "ceo-wake.log").read_text(encoding="utf-8")
+    assert "[blind]" in (tmp_path / "mechanics.log").read_text(encoding="utf-8")  # CP5: механика — в лог, CEO не будит
+    assert not (tmp_path / "ceo-wake.log").exists()
     monkeypatch.setattr(D, "_WAIT_WATCH", {})  # ожидание снято -> acts пуст, файл обязан уйти
     D._blind_tick(None)
     assert not f.exists()

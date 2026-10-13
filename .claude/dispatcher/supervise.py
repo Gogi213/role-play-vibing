@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import notify  # noqa: E402
 import project as P  # noqa: E402
 import start as S  # noqa: E402
 
@@ -98,7 +99,37 @@ def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> 
             r = spawn(CODE_DIR / f"{name}.py", project, state_dir / f"{name}.run.log")
         _log(state_dir, f"{name}: {act} (сердцебиение {'нет' if age is None else f'{age:.0f} с'}, "
                         f"остановлен pid {stopped or '-'}) -> pid {r.pid} {r.how}")
+    _alarm(state_dir, out)
     return out
+
+
+NAMES = {"dispatch": "диспетчер", "watch": "сторож", "ci_watch": "сторож CI"}
+
+
+def _alarm(state_dir: Path, out: dict) -> None:
+    """CP5: служба нужна перезапуском второй проход подряд (поднятая не ожила) — одна тревога владельцу в Telegram, пока
+    не оживёт; ожила — «снова работает». Счёт — supervise-state.json. Сбой тревоги проход не роняет."""
+    f = state_dir / "supervise-state.json"
+    try:
+        st = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    try:
+        down = st.setdefault("down", {})
+        for name, act in out.items():
+            down[name] = down.get(name, 0) + 1 if act != "ok" else 0
+        stuck = [n for n, k in down.items() if k >= 2]
+        if stuck and not st.get("alarmed"):
+            notify.send(f"Работа стоит: {', '.join(NAMES.get(n, n) for n in stuck)} команды падает и не поднимается — "
+                        f"перезапуск не помог дважды подряд. Откройте сессию CEO и скажите «почему стоит работа».",
+                        log_dir=state_dir)
+            st["alarmed"] = True
+        elif not stuck and st.get("alarmed"):
+            notify.send("Команда снова работает.", log_dir=state_dir)
+            st["alarmed"] = False
+        f.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:  # тревога не должна ронять присмотр
+        _log(state_dir, f"тревога: {type(e).__name__}: {e}")
 
 
 def task_name(project: Path) -> str:

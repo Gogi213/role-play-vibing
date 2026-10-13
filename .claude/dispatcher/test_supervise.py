@@ -78,6 +78,25 @@ class SuperviseTest(unittest.TestCase):
             self.assertEqual(spawned, ["dispatch.py", "watch.py"])
 
 
+    def test_alarm_when_service_stays_dead_after_restart(self):  # CP5: одна тревога владельцу, пока не оживёт
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            sd = project / ".claude" / "dispatcher"
+            sd.mkdir(parents=True)
+            kw = dict(stop=lambda p, s, unit=None: 0, spawn=lambda script, proj, log: _Started(7))
+            V.run_once(project, **kw)  # поднял — тревоги нет
+            self.assertFalse((sd / "notify.log").exists())
+            V.run_once(project, **kw)  # снова мёртв — тревога
+            V.run_once(project, **kw)  # всё ещё мёртв — повтора нет
+            log = (sd / "notify.log").read_text(encoding="utf-8")
+            self.assertEqual(log.count("Работа стоит: диспетчер, сторож команды падает и не поднимается"), 1)
+            beat = datetime.now().astimezone().isoformat(timespec="seconds")
+            (sd / "state.json").write_text(json.dumps({"last_tick": beat}), encoding="utf-8")
+            (sd / "watch-heartbeat.json").write_text(json.dumps({"ts": beat}), encoding="utf-8")
+            with mock.patch.object(V.S, "is_ours_state", lambda *a: True):
+                V.run_once(project, **kw)  # ожили — «снова работает»
+            self.assertIn("Команда снова работает", (sd / "notify.log").read_text(encoding="utf-8"))
+
     def test_ci_watch_supervised_only_with_repo(self):  # TK-090 Д-1
         with tempfile.TemporaryDirectory() as d:
             project = Path(d)

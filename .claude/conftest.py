@@ -22,6 +22,8 @@ def _strip_live_env():
     # токен шины читается ещё и из ~/.rpv-bus-token владельца: без отключения на его ПК тесты находят «шину» и пишут
     # сигналы в очередь, а не в ceo-inbox.md (красные test_watch локально при зелёном CI, TK-101 п.5)
     os.environ["RPV_BUS_DISABLE"] = "1"
+    # настоящий `claude` тестам не нужен и стоит денег: без этого сжатие конспекта (haiku_aux) звало живой `claude -p`
+    os.environ["CLAUDE_BIN"] = os.path.join(_SPOOL_DIR, "no-claude")
 
 
 _strip_live_env()

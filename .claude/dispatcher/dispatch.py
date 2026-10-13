@@ -37,6 +37,7 @@ import worktree_hygiene as WH  # noqa: E402
 import bus_link  # noqa: E402
 import blind  # noqa: E402
 import downtime  # noqa: E402
+import notify  # noqa: E402
 import haiku_aux as HA  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
@@ -728,10 +729,7 @@ def _blind_tick(link) -> None:
     for act, tgt, secs in acts:
         text = (f"диспетчер слеп: {tgt} недоступна {secs} с" if act != "recovered"
                 else f"зрение вернулось: {tgt} снова отвечает (простой {secs} с)")
-        try:
-            _ceo_file_write("*", "blind", text, fallback=True)  # стандарт сигналов; шину не трогает (она может быть целью)
-        except OSError:
-            pass
+        _mech_log("*", "blind", text)  # CP5: механика — в лог; стоит работа — скажет одна тревога «работа стоит»
         if act == "recovered":
             _RECON_LAST = 0.0  # сверка сразу
             _WAIT_NEW.set()
@@ -760,7 +758,7 @@ def _ssh_stderr(r) -> str:
 # в очередь `ceo` с приоритетом (urgent — читать первым); CEO читает её `tickets.py inbox`. Файлы ceo-inbox.md и
 # ceo-wake.log при шине — ТОЛЬКО запасной путь, когда шина не приняла событие (строка помечена «[запасной путь]»);
 # без шины (RPV_BUS_URL не задан) файлы — основной путь, как раньше. Неизвестный вид — urgent (безопасная сторона).
-NORMAL_KINDS = {"done", "next-ceo", "wait-for", "model", "watch-summary", "summary", "bus-up"}
+NORMAL_KINDS = {"done", "next-ceo", "wait-for", "model", "watch-summary", "summary", "bus-up", "работа-идёт"}
 
 
 def signal_prio(kind: str) -> str:
@@ -792,8 +790,26 @@ def _bus_configured() -> bool:
         return False
 
 
+# CP5 (критерий 8): механика CEO не будит — строка в mechanics.log. Владельцу и CEO — одна тревога «работа стоит»
+# (_stall_alarm): её считают по тому, стоит ли готовая работа, а не по виду поломки
+MECH_KINDS = {"blind", "idle-slo", "нет-хода", "цикл-ожиданий", "recon-miss", "stop-failed", "parse-error"}
+
+
+def _mech_log(tid: str, kind: str, note: str, now=None) -> None:
+    try:
+        DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+        with (DISPATCHER_DIR / "mechanics.log").open("a", encoding="utf-8") as f:
+            f.write(f"{T.now_iso(now)} {tid} [{kind}] {' '.join(str(note).split())}\n")
+    except OSError:
+        pass
+
+
 def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
-    """Сигнал CEO: шина (очередь `ceo`, ack на стороне CEO); шина не настроена — файл; не приняла — запасной файл."""
+    """Сигнал CEO: шина (очередь `ceo`, ack на стороне CEO); шина не настроена — файл; не приняла — запасной файл.
+    Вид механики (MECH_KINDS) — только в mechanics.log."""
+    if kind in MECH_KINDS:
+        _mech_log(tid, kind, note, now)
+        return
     if not _bus_configured():
         _ceo_file_write(tid, kind, note, now)
         return
@@ -2502,6 +2518,7 @@ def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ti
     reason = _no_move_reason(tkt, now, state)
     if not reason:
         return tkt
+    STALLED.append(_stall_title(tkt))
     key = f"{tkt.id}|{tkt.header.get('updated', '')}"
     sig = state.setdefault("invariant_signaled", {})
     if sig.get(tkt.id) != key:
@@ -2527,6 +2544,7 @@ def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
     cycle = T.wait_cycle(TICKETS_DIR, tkt.id, parsed[1])
     if not cycle or tkt.id != min(cycle[:-1]):
         return
+    STALLED.append(_stall_title(tkt))
     notified = state.setdefault("ceo_wait_cycle_notified", {})
     prev = notified.get(tkt.id)
     if prev:
@@ -2539,31 +2557,47 @@ def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
     notified[tkt.id] = T.now_iso(now)
 
 
-def _alert_idle(day: str, rec: dict, now) -> None:
-    note = (f"простой за {day}: {downtime.total_min(rec):.0f} мин при SLO {IDLE_SLO_MIN:.0f} "
-            f"(готовая работа без исполнителя {rec['idle_s'] / 60:.0f}, ожидание без условия {rec['wait_s'] / 60:.0f}, "
-            f"молчание диспетчера {rec['stall_s'] / 60:.0f}, тормоз запусков {rec.get('throttle_s', 0) / 60:.0f}; "
-            f"сумма корзин)")
-    try:
-        import busclient
-        if not os.environ.get("RPV_BUS_DISABLE") and busclient.config()[0]:
-            busclient.post("служба.простой.превышен", {"note": note}, f"idle-slo-{day}")  # недоступна — spool, дошлётся
-            return
-    except Exception:
-        pass
-    append_ceo_inbox("*", "idle-slo", note, now)  # шина выключена — файл
+STALL_ALARM_MIN = float(P.env("STALL_ALARM_MIN", "15"))  # CP5: столько минут подряд стоит готовая работа — тревога
+STALLED = []  # заголовки тикетов, стоящих в этом тике (инвариант хода, цикл ожиданий, ожидание без условия, не взят)
+
+
+def _stall_title(tkt: T.Ticket) -> str:
+    return " ".join((tkt.header.get("title") or tkt.id).split())[:70]
+
+
+def _stall_alarm(state: dict, now, stalled: list) -> None:
+    """CP5 (критерии 8, 9, 10): одна тревога владельцу — в Telegram (`notify.py`) и строкой CEO — когда готовая работа
+    стоит STALL_ALARM_MIN минут подряд; одна на эпизод. Пошла снова — короткое «снова идёт»."""
+    st = state.get("stall") or {}
+    if not stalled:
+        if st.get("sent"):
+            mins = (now - T.parse_dt(st["since"])).total_seconds() / 60
+            text = f"Работа снова идёт (стояла {mins:.0f} мин)."
+            notify.send(text, log_dir=DISPATCHER_DIR)
+            append_ceo_inbox("*", "работа-идёт", text, now)
+        state["stall"] = {}
+        return
+    st.setdefault("since", T.now_iso(now))
+    mins = (now - T.parse_dt(st["since"])).total_seconds() / 60
+    if mins >= STALL_ALARM_MIN and not st.get("sent"):
+        names = sorted(set(stalled))
+        text = (f"Работа стоит {mins:.0f} мин: {len(names)} задач(и) ждут, их никто не делает — "
+                + "; ".join(f"«{n}»" for n in names[:3]) + (f" и ещё {len(names) - 3}" if len(names) > 3 else "")
+                + ". CEO разбирается; если сессии CEO нет — откройте её и скажите «почему стоит работа».")
+        notify.send(text, log_dir=DISPATCHER_DIR)
+        append_ceo_inbox("*", "работа-стоит", text, now)
+        st["sent"] = True
+    state["stall"] = st
 
 
 def _account_downtime(state: dict, now, **flags) -> None:
     try:
-        day, rec, breached = downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)
+        downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)  # минуты простоя — в отчёт (CP10)
         try:
             import busclient
             state["bus_url"] = "" if os.environ.get("RPV_BUS_DISABLE") else busclient.config()[0]
         except Exception:
             state["bus_url"] = ""
-        if breached:
-            _alert_idle(day, rec, now)
     except Exception as e:  # счётчик не должен ронять тик
         print(f"[dispatch] downtime: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -2597,6 +2631,7 @@ def tick(now=None) -> int:
     unblock_limit_victims(now)
     paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
+    STALLED.clear()
     waiting_nocond = False  # TK-076 п.4: роль ждёт без условия (ни wait_for, ни next) дольше IDLE_GRACE_S
     for path in T.list_tickets(TICKETS_DIR):
         try:
@@ -2634,6 +2669,7 @@ def tick(now=None) -> int:
             if decision is None:
                 if _waits_without_condition(tkt, now):
                     waiting_nocond = True
+                    STALLED.append(_stall_title(tkt))
                 tkt = enforce_move_invariant(path, tkt, state, now)
                 decision = decide(tkt, state, now)
                 if decision is None:
@@ -2668,6 +2704,12 @@ def tick(now=None) -> int:
         launched += 1
 
     idle_now = not RUNNING and not launched and not paused
+    if idle_now:  # готовая работа не взята, и никто не работает — стоит
+        STALLED.extend(_stall_title(t) for p_, t, _ in candidates if t.id not in RUNNING and p_.stem not in RUNNING)
+    try:
+        _stall_alarm(state, now, STALLED)
+    except Exception as e:  # тревога не должна ронять тик
+        print(f"[dispatch] тревога: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)

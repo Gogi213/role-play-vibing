@@ -787,8 +787,11 @@ class DispatchRunTests(unittest.TestCase):
             D.tick(t0 + timedelta(seconds=1000))
         rec = D.load_state()["downtime"]["2026-10-06"]
         self.assertEqual(rec["wait_s"], 1000)
-        self.assertTrue(rec["alerted"])
-        self.assertEqual(self.dispatcher_dir.joinpath("ceo-inbox.md").read_text(encoding="utf-8").count("[idle-slo]"), 1)
+        inbox = self.dispatcher_dir.joinpath("ceo-inbox.md").read_text(encoding="utf-8")
+        self.assertNotIn("[idle-slo]", inbox, "CP5: суточный SLO CEO не будит — одна тревога «работа стоит»")
+        self.assertEqual(inbox.count("[работа-стоит]"), 1, "15 мин стоит — одна тревога на эпизод")
+        self.assertIn("не отправлено (нет RPV_TG_TOKEN/RPV_TG_CHAT): Работа стоит",
+                      (D.DISPATCHER_DIR / "notify.log").read_text(encoding="utf-8"))
 
     def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
@@ -822,7 +825,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(late.status, "in_progress")
         self.assertEqual(D.decide(late, state, t0 + timedelta(minutes=11)).role, "engineer")
         self.assertTrue(any(e.author == "dispatcher" and "инвариант" in e.text for e in late.log))
-        self.assertIn("нет-хода", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("нет-хода", (D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8"))
 
     def test_waiting_with_good_wait_for_is_a_move(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
@@ -952,7 +955,7 @@ class DispatchRunTests(unittest.TestCase):
         state, now = {}, dt("2026-10-06T12:30:00+04:00")
         for p in (b, a, a):
             D.notify_wait_cycle(T.read_ticket(p), state, now)
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
 
     def test_limit_pause_capped_to_one_hour(self):
         self.assertEqual(D.LIMIT_PAUSE_MAX, timedelta(hours=1))
@@ -1759,8 +1762,7 @@ class DispatchRunTests(unittest.TestCase):
         (self.tickets_dir / "X5.md").write_text("нет шапки тут\n", encoding="utf-8")
         for i in range(3):
             D.tick(now=dt("2026-09-27T12:00:00+04:00") + timedelta(seconds=15 * i))
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
-        self.assertEqual(inbox.count("parse-error"), 1, "3 тика с одной и той же ошибкой — одна строка")
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 1, "3 тика с одной и той же ошибкой — одна строка")
 
     def test_tick_reports_waiting_with_unknown_wait_for_once_and_launches_nobody(self):
         """v4: свободный текст в wait_for — одна строка CEO за несколько тиков, роль не запускается."""
@@ -1783,7 +1785,7 @@ class DispatchRunTests(unittest.TestCase):
         D.notify_parse_error("X5", "ValueError: тикет без шапки", state, dt("2026-09-27T12:00:15+04:00"))
         D.notify_parse_error("X5", "UnicodeDecodeError: 'utf-8' codec can't decode byte", state,
                               dt("2026-09-27T12:00:30+04:00"))
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("parse-error"), 2)
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 2)
 
     def test_done_without_reviewer_signals_ceo_one_line(self):
         """v2: done без reviewer (V2-1: Haiku-задача, тикет Судьи, закрыл CEO) — ровно одна строка CEO «done»; дедуп по `updated`."""
@@ -1918,7 +1920,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(tid, D.RUNNING)
         self.assertTrue((D.STOP_DIR / f"{tid}.json").exists(), "заявка ждёт следующего тика")
         self.assertEqual(T.read_ticket(path).status, "in_progress")
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[stop-failed]"), 1)
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("[stop-failed]"), 1)
         D._kill_tree = real_kill
         D.tick()
         self.assertNotIn(tid, D.RUNNING)
@@ -4638,13 +4640,13 @@ class WaitReconcileTest(unittest.TestCase):
             alert = (tmp / "ALERT-BLIND.txt").read_text(encoding="utf-8")
             self.assertIn("ssh:calc", alert)
             self.assertNotIn("ssh:vps", alert)
-            self.assertIn("диспетчер слеп: ssh:calc", D.CEO_INBOX.read_text(encoding="utf-8"))
-            self.assertIn(" * blind", D.CEO_WAKE_LOG.read_text(encoding="utf-8"))
+            self.assertIn("диспетчер слеп: ssh:calc", (tmp / "mechanics.log").read_text(encoding="utf-8"))
+            self.assertFalse(D.CEO_WAKE_LOG.exists(), "CP5: механика CEO не будит")
             D._RECON_LAST = time.time()
             D.BLIND.record("ssh:calc", True, time.time())
             D._blind_tick(None)
             self.assertFalse((tmp / "ALERT-BLIND.txt").exists())
-            self.assertIn("зрение вернулось: ssh:calc", D.CEO_INBOX.read_text(encoding="utf-8"))
+            self.assertIn("зрение вернулось: ssh:calc", (tmp / "mechanics.log").read_text(encoding="utf-8"))
             self.assertEqual(D._RECON_LAST, 0.0)
         finally:
             D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
