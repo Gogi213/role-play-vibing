@@ -1151,8 +1151,8 @@ class SecondAudit(unittest.TestCase):
                     "git restore --staged --source=HEAD x", "git branch", "git branch -a", "git branch -vv",
                     "git branch -d merged", "git branch new-branch", "git branch --list", "git branch -r",
                     "git stash", "git stash list", "git stash pop", "git stash push -m x", "git stash apply",
-                    "git push origin main", "git push origin HEAD:refs/heads/x", "git push -u origin feature",
-                    "git push --tags", "git checkout --help", "git restore --help"):
+                    "git push origin HEAD:refs/heads/x", "git push -u origin feature",     # main и теги — публикации: Publication
+                    "git checkout --help", "git restore --help"):
             self.ok(cmd)
 
     def test_git_text_mentions_are_not_commands(self):
@@ -1665,6 +1665,254 @@ class BenchLock(unittest.TestCase):
 
 
 
+class Publication(unittest.TestCase):
+    """CP2 (критерий 14): публикации — выпуск, слияние PR, пуш в main/master и теги, пакеты и образы — запуску диспетчера только с
+    `allow: publish (В-N)` в шапке его тикета (`tickets.py allow`, ставит CEO); сессии CEO и владельца не ограничены. Шапка не
+    прочитана — отказ. Запись строки `allow:` в файл тикета запуском диспетчера — отказ."""
+
+    TID = "TK-7"
+    ALLOW = "allow: publish (В-3)"
+    DENY = (
+        "gh release create v1.2.3 --notes x", "gh release upload v1.2.3 dist.zip", "gh release edit v1.2.3 --draft=false",
+        "gh pr merge 5 --squash", "gh -R o/r pr merge 5", "gh.exe release create v1",
+        "git push origin main", "git push origin master", "git push -u origin main", "git push origin HEAD:main",
+        "git push origin HEAD:refs/heads/main", "git push origin feat/x:main", "git push upstream refs/heads/main",
+        "git push --tags", "git push origin --tags", "git push --follow-tags origin feat/x", "git push --all",
+        "git push origin v1.8.48", "git push origin refs/tags/v1.8.48", "git push origin tag v1.8.48",
+        "git push --repo=origin main", "git -C data push origin main", "git -c core.x=y push origin main",
+        "npm publish", "npm --otp 123456 publish", "pnpm publish --no-git-checks", "yarn publish", "yarn npm publish",
+        "cargo publish", "poetry publish --build", "uv publish", "uv run twine upload dist/*", "twine upload dist/*",
+        "python -m twine upload dist/*", "py -3 -m twine upload dist/*", "docker push reg/img:1", "docker image push reg/img:1",
+        "gem push x.gem",
+        "sudo gh pr merge 5", "bash -c 'git push origin main'", "echo ok && git push origin main",
+        "ssh deck@192.0.2.49 'cd ~/alpha && git push origin main'", 'ssh deck@192.0.2.49 "gh release create v1"',
+        "ssh deck@192.0.2.49 'cd ~/alpha && git push'",              # на удалённой машине текущая ветка неизвестна
+        "python -c \"import subprocess; subprocess.run(['git', 'push', 'origin', 'main'])\"",
+        "echo 'abc; git push origin main",                           # не разобрать — прежний регэксп как страховка
+    )
+    DENY_PS = (
+        "git push origin main", "& gh release create v1 --notes x", 'powershell -Command "git push origin HEAD:main"',
+        'pwsh -c "npm publish"', "Set-Location C:\\visual projects\\alpha; gh pr merge 5",
+        '& "C:\\Program Files\\Git\\bin\\git.exe" push origin main', "if ($?) { git push origin main }",
+    )
+    ALLOW_OK = (
+        "git push -u origin feat/cp2-publish", "git push origin HEAD:feat/x", "git push origin feat/x:feat/y",
+        "git push origin v2", "git push origin release/1.2", "git push -o ci.skip origin feat/x",
+        "git push --dry-run origin main", "git push -n origin master",
+        'git commit -m "git push origin main"', 'echo "gh release create v1"', "grep -n 'npm publish' README.md",
+        'python .claude/dispatcher/tickets.py comment TK-7 --author engineer --text "git push origin main и gh pr merge 5"',
+        'python .claude/dispatcher/tickets.py result TK-7 blocked --why "нужен gh release create"',
+        "gh pr create --title x", "gh pr view 5", "gh pr checks 5", "gh release list", "gh release view v1",
+        "npm install", "npm run build", "npm test", "cargo build", "docker build .", "docker run img", "twine check dist/*",
+        "uv run pytest", "python -m pytest -q", "git status", "git log --oneline",
+    )
+
+    def setUp(self):
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory(prefix="dg-pub-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.ticket = self.root / ".claude" / "tickets" / f"{self.TID}.md"
+        self.ticket.parent.mkdir(parents=True)
+        self.write_ticket()
+        for p in (mock.patch.dict(os.environ, {"RPV_ROLE": "engineer", "RPV_TICKET": self.TID}),
+                  mock.patch.object(dg, "PROJECT_DIR", str(self.root))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def write_ticket(self, allow=None, body="## Лог\n### 2026-10-13T10:00:00+04:00 ceo\nтекст\n"):
+        extra = [] if allow is None else [allow]
+        head = ["id: " + self.TID, "title: Выпуск", "owner: engineer", "status: in_progress", *extra, "updated: 2026-10-13T10:00:00+04:00"]
+        self.ticket.write_text("---\n" + "\n".join(head) + "\n---\n\n" + body, encoding="utf-8")
+
+    def as_ceo(self):
+        os.environ.pop("RPV_ROLE", None)
+
+    def reason(self, cmd, tool="Bash", cwd=CWD):
+        return dg.check_tool({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": cwd})
+
+    def all_denied(self):
+        for tool, cmds in (("Bash", self.DENY), ("PowerShell", self.DENY_PS)):
+            for cmd in cmds:
+                reason = self.reason(cmd, tool)
+                self.assertIsNotNone(reason, f"пропущено: {tool} {cmd!r}")
+                self.assertIn("Публикация", reason, f"{cmd!r}")
+
+    def all_allowed(self):
+        for tool, cmds in (("Bash", self.DENY), ("PowerShell", self.DENY_PS)):
+            for cmd in cmds:
+                self.assertIsNone(self.reason(cmd, tool), f"ложный отказ: {tool} {cmd!r}")
+
+    # ------------------------------------------------------------------------------------------ роль без согласия
+    def test_publication_denied_to_role_without_consent(self):
+        for role in ("engineer", "researcher", "judge"):
+            os.environ["RPV_ROLE"] = role
+            self.all_denied()
+
+    def test_reason_says_how_to_get_consent(self):
+        reason = self.reason("git push origin main")
+        for part in ("TK-7", "tickets.py allow <ID> publish --ref В-N", "ask-owner", "--why-owner необратимое", "registry.py decide",
+                     "merge_rule", "git push origin <ветка>"):
+            self.assertIn(part, reason)
+
+    def test_working_branch_push_and_plain_commands_allowed(self):
+        for cmd in self.ALLOW_OK:
+            self.assertIsNone(self.reason(cmd), f"ложный отказ: {cmd!r}")
+
+    def test_force_push_stays_irreversible_refusal(self):
+        for cmd in ("git push --force origin feat/x", "git push -f origin main", "git push origin +feat/x"):
+            self.assertIn("Необратимая команда git", self.reason(cmd), cmd)
+
+    def test_ticket_text_does_not_trigger(self):
+        for text in ("git push origin main", "gh pr merge 5", "npm publish", "docker push img"):
+            self.assertIsNone(self.reason(f'python tickets.py comment TK-7 --author engineer --text "{text}"'), text)
+            self.assertIsNone(self.reason(f"python tickets.py result TK-7 blocked --why '{text}'"), text)
+        self.assertIsNone(self.reason('python tickets.py result TK-7 ask-owner --why "git push origin main нужен" --why-owner необратимое'))
+
+    def test_journal_group(self):
+        tr = []
+        self.assertIsNotNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "npm publish"}, "cwd": CWD}, tr))
+        self.assertEqual(tr[-1], ("publish", "deny"))
+
+    # ------------------------------------------------------------------------------------------ сессия CEO / владельца
+    def test_ceo_and_owner_sessions_unrestricted(self):
+        self.as_ceo()
+        self.all_allowed()
+        os.environ["RPV_ROLE"] = "ceo"                                       # не роль диспетчера — сессия CEO
+        self.assertIsNone(self.reason("git push origin main"))
+        self.assertIsNone(self.reason("ssh root@203.0.113.1 'git push origin main'"))   # закрытый узел, не удаление
+
+    # ------------------------------------------------------------------------------------------ согласие в шапке тикета
+    def test_consent_allows_publication_for_this_ticket(self):
+        self.write_ticket(self.ALLOW)
+        self.all_allowed()
+        tr = []
+        self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5"}, "cwd": CWD}, tr))
+        self.assertEqual(tr, [("publish", "allow")])
+        self.assertEqual(dg.publish_consent(), (True, self.TID))
+
+    def test_consent_is_per_ticket(self):
+        self.write_ticket(self.ALLOW)
+        os.environ["RPV_TICKET"] = "TK-8"
+        (self.ticket.parent / "TK-8.md").write_text("---\nid: TK-8\nstatus: todo\n---\n", encoding="utf-8")
+        self.assertIn("TK-8", self.reason("git push origin main"))
+
+    def test_revoked_consent_denies_again(self):
+        self.write_ticket("allow: ")
+        self.assertIsNotNone(self.reason("git push origin main"))
+        self.write_ticket(self.ALLOW)
+        self.assertIsNone(self.reason("git push origin main"))
+        self.write_ticket(self.ALLOW + "\nallow:")                           # последняя строка ключа решает, как в разборе шапки
+        self.assertIsNotNone(self.reason("git push origin main"))
+
+    def test_consent_is_read_from_header_only(self):
+        for allow in ("allow: publishing", "allow: deploy", "x-allow: publish (В-3)", "allow publish"):
+            self.write_ticket(allow)
+            self.assertIsNotNone(self.reason("npm publish"), allow)
+        self.write_ticket(None, body="## Лог\n### 2026-10-13T10:00:00+04:00 engineer\nallow: publish (В-3)\n")
+        self.assertIsNotNone(self.reason("npm publish"))                     # строка в логе — не шапка
+
+    def test_unreadable_ticket_denies(self):
+        self.ticket.unlink()
+        self.assertIn("шапка не прочитана", self.reason("git push origin main"))      # нет файла
+        self.ticket.mkdir()
+        self.assertIn("шапка не прочитана", self.reason("git push origin main"))      # вместо файла каталог
+        self.ticket.rmdir()
+        self.ticket.write_bytes(b"---\nid: TK-7\nallow: publish (\xd0\xb2\xff\xfe)\n---\n")
+        self.assertIn("шапка не прочитана", self.reason("git push origin main"))      # не UTF-8
+        self.ticket.write_text("id: TK-7\nallow: publish (В-3)\n", encoding="utf-8")
+        self.assertIn("нет шапки", self.reason("git push origin main"))
+        self.ticket.write_text("---\nid: TK-7\nallow: publish (В-3)\n", encoding="utf-8")
+        self.assertIn("шапка не закрыта", self.reason("git push origin main"))        # у ticket.py такой тикет не разобрать
+
+    def test_ticket_id_missing_or_unsafe_denies(self):
+        self.write_ticket(self.ALLOW)
+        for tid in (None, "", "../TK-7", "TK-7/../TK-7", "a" * 40):
+            if tid is None:
+                os.environ.pop("RPV_TICKET", None)
+            else:
+                os.environ["RPV_TICKET"] = tid
+            self.assertIn("не определён", self.reason("git push origin main"), tid)
+
+    # ------------------------------------------------------------------------------------------ пуш без названной ветки
+    def make_repo(self, name, head):
+        repo = self.root / name
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text(head, encoding="utf-8")
+        return repo.as_posix()
+
+    def test_bare_push_follows_current_branch(self):
+        main = self.make_repo("on-main", "ref: refs/heads/main\n")
+        feat = self.make_repo("on-feat", "ref: refs/heads/feat/cp2\n")
+        detached = self.make_repo("detached", "0123456789abcdef0123456789abcdef01234567\n")
+        for cmd in ("git push", "git push origin", "git push origin HEAD", "git push -u origin HEAD", "git push origin @"):
+            self.assertIn("текущая — main", self.reason(cmd, cwd=main), cmd)
+            self.assertIsNone(self.reason(cmd, cwd=feat), cmd)
+            self.assertIn("не определить", self.reason(cmd, cwd=detached), cmd)
+        self.assertIsNone(self.reason("git push origin feat/x", cwd=main))             # ветка названа — текущая не при чём
+        self.assertIn("не определить", self.reason("git push origin HEAD", cwd=None))
+        self.assertIn("текущая — main", self.reason(f"git -C {main} push", cwd=feat))
+        self.assertIsNone(self.reason(f"git -C {feat} push", cwd=main))
+        self.assertIsNone(self.reason(f"cd {feat} && git push", cwd=main))
+        self.assertIn("не определить", self.reason("cd $WT && git push", cwd=feat))    # переменная в cd: каталог неизвестен
+
+    def test_bare_push_in_linked_worktree_reads_its_head(self):
+        main = self.make_repo("main-tree", "ref: refs/heads/main\n")
+        gitdir = self.root / "main-tree" / ".git" / "worktrees" / "tk7"
+        gitdir.mkdir(parents=True)
+        (gitdir / "HEAD").write_text("ref: refs/heads/feat/tk7\n", encoding="utf-8")
+        wt = self.root / "main-tree" / ".claude" / "worktrees" / "tk7"
+        wt.mkdir(parents=True)
+        (wt / ".git").write_text(f"gitdir: {gitdir.as_posix()}\n", encoding="utf-8")
+        self.assertIsNone(self.reason("git push -u origin HEAD", cwd=wt.as_posix()))
+        self.assertIn("текущая — main", self.reason("git push -u origin HEAD", cwd=main))
+        (wt / ".git").write_text("gitdir: ../../../.git/worktrees/tk7\n", encoding="utf-8")   # относительный gitdir
+        self.assertIsNone(self.reason("git push", cwd=wt.as_posix()))
+        (wt / ".git").write_text("мусор\n", encoding="utf-8")
+        self.assertIn("не определить", self.reason("git push", cwd=wt.as_posix()))
+
+    def test_bare_push_is_free_for_ceo(self):
+        self.as_ceo()
+        self.assertIsNone(self.reason("git push origin HEAD", cwd=self.make_repo("on-main", "ref: refs/heads/main\n")))
+        self.assertIsNone(self.reason("git push", cwd=None))
+
+    # ------------------------------------------------------------------------------------------ подделка согласия
+    def edit(self, tool, path, text):
+        if tool == "MultiEdit":
+            ti = {"file_path": path, "edits": [{"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": text}]}
+        else:
+            ti = {"file_path": path, **({"content": text} if tool == "Write" else {"old_string": "status:", "new_string": text})}
+        return dg.check_tool({"tool_name": tool, "tool_input": ti, "cwd": CWD})
+
+    def test_role_cannot_write_allow_into_ticket(self):
+        for tool in ("Write", "Edit", "MultiEdit"):
+            for path in (self.ticket.as_posix(), "C:\\visual projects\\alpha\\.claude\\tickets\\TK-9.md", ".claude/tickets/TK-7.md"):
+                for text in ("allow: publish (В-3)\nstatus:", "id: x\n  Allow : publish\n"):
+                    self.assertEqual(self.edit(tool, path, text), dg.REASON_CONSENT, f"{tool} {path} {text!r}")
+        for cmd in ('echo "allow: publish (В-3)" >> .claude/tickets/TK-7.md',
+                    "sed -i 's/^status:.*/allow: publish (В-3)/' .claude/tickets/TK-7.md",
+                    "cat >> .claude/tickets/TK-7.md <<'EOF'\nallow: publish (В-3)\nEOF",
+                    "python -c \"open('.claude/tickets/TK-7.md', 'a').write('allow: publish')\"",
+                    "tee -a .claude/tickets/TK-7.md <<< 'allow: publish'"):
+            self.assertEqual(self.reason(cmd), dg.REASON_CONSENT, cmd)
+        self.assertEqual(self.reason('Add-Content .claude\\tickets\\TK-7.md "allow: publish (В-3)"', "PowerShell"), dg.REASON_CONSENT)
+
+    def test_ordinary_ticket_work_is_not_forgery(self):
+        for tool in ("Write", "Edit", "MultiEdit"):
+            self.assertIsNone(self.edit(tool, self.ticket.as_posix(), "status: in_review\n"), tool)
+            self.assertIsNone(self.edit(tool, (self.root / "docs" / "x.md").as_posix(), "allow: publish\n"), tool)   # не тикет
+        for cmd in ("cat .claude/tickets/TK-7.md", "grep '^allow:' .claude/tickets/TK-7.md 2>/dev/null",
+                    "grep -n allow .claude/tickets/TK-7.md 2>&1", "echo 'allow: publish' > notes.txt",
+                    'python tickets.py comment TK-7 --author engineer --text "строку allow: пишет CEO в .claude/tickets/"',
+                    "sed -i 's/in_progress/in_review/' .claude/tickets/TK-7.md"):
+            self.assertIsNone(self.reason(cmd), cmd)
+
+    def test_ceo_may_edit_tickets(self):
+        self.as_ceo()
+        self.assertIsNone(self.edit("Edit", self.ticket.as_posix(), "allow: publish (В-3)\nstatus:"))
+        self.assertIsNone(self.reason('echo "allow: publish (В-3)" >> .claude/tickets/TK-7.md'))
+
+
 class HookEntryPoint(unittest.TestCase):
     """Точка входа PreToolUse: JSON со stdin → deny с причиной; не наш инструмент / нет `.claude/roles` в проекте — тишина;
     битое событие и сбой стража — отказ (fail-closed); обёртка в hooks.json — отказ, когда нет Python или страж сломан."""
@@ -1672,7 +1920,7 @@ class HookEntryPoint(unittest.TestCase):
     HERE = os.path.dirname(os.path.abspath(__file__))
     ROOT = os.path.dirname(os.path.dirname(HERE))
 
-    def run_hook(self, event, project, with_roles=True, raw=None, script=None, role=None):
+    def run_hook(self, event, project, with_roles=True, raw=None, script=None, role=None, ticket=None):
         import json
         import subprocess
         if with_roles:
@@ -1682,6 +1930,8 @@ class HookEntryPoint(unittest.TestCase):
         env.pop("ALPHA_ROLE", None)
         if role:
             env["RPV_ROLE"] = role
+        if ticket:
+            env["RPV_TICKET"] = ticket
         r = subprocess.run([sys.executable, script or os.path.join(self.HERE, "delete_guard.py")],
                            input=(raw if raw is not None else json.dumps(event)).encode("utf-8"),
                            capture_output=True, env=env)
@@ -1727,6 +1977,25 @@ class HookEntryPoint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d2:                           # без команды ролей — молчит и для файлов
             ev = {"tool_name": "Write", "tool_input": {"file_path": existing}, "cwd": d2}
             self.assertEqual(self.run_hook(ev, d2, with_roles=False), "")
+
+    def test_publication_consent_through_entry_point(self):
+        with tempfile.TemporaryDirectory() as d:
+            tickets = os.path.join(d, ".claude", "tickets")
+            os.makedirs(tickets)
+            os.makedirs(os.path.join(d, ".claude", "dispatcher"))                            # сюда страж пишет журнал
+            ev = {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}, "cwd": d}
+            self.assertEqual(self.run_hook(ev, d), "")                                       # сессия CEO — можно
+            out = self.decision(self.run_hook(ev, d, role="engineer", ticket="TK-9"))        # тикета нет — отказ
+            self.assertEqual(out["permissionDecision"], "deny")
+            self.assertIn("Публикация", out["permissionDecisionReason"])
+            Path(tickets, "TK-9.md").write_text("---\nid: TK-9\nowner: engineer\n---\n", encoding="utf-8")
+            self.assertEqual(self.decision(self.run_hook(ev, d, role="engineer", ticket="TK-9"))["permissionDecision"], "deny")
+            Path(tickets, "TK-9.md").write_text("---\nid: TK-9\nowner: engineer\nallow: publish (В-3)\n---\n", encoding="utf-8")
+            self.assertEqual(self.run_hook(ev, d, role="engineer", ticket="TK-9"), "")        # согласие в шапке — можно
+            self.assertEqual(self.decision(self.run_hook(ev, d, role="engineer", ticket="TK-8"))["permissionDecision"], "deny")
+            log = Path(d, ".claude", "dispatcher", "guard.log").read_text(encoding="utf-8")
+            self.assertIn("\tpublish\tallow\t", log)
+            self.assertIn("\tpublish\tdeny\t", log)
 
     def test_unreadable_event_is_refusal_in_a_roles_project(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1914,6 +2183,7 @@ class GuardGroups(unittest.TestCase):
             "ssh": ("Bash", {"command": "ssh deck@192.0.2.49 'rm -rf /home/other/x'"}),
             "tee-trunc-cp": ("Bash", {"command": f'echo a > "{self.f}"'}),
             "git": ("Bash", {"command": "git reset --hard"}),
+            "publish": ("Bash", {"command": "git push origin main"}),
             "heavy": ("Bash", {"command": "ssh root@203.0.113.3 'du -sh /data'"}),
             "file": ("Write", {"file_path": self.f}),
             "ceo-signal": ("Write", {"file_path": "C:/x/.claude/dispatcher/ceo-inbox.md"}),

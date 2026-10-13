@@ -36,6 +36,11 @@ clear|drop`, `git push +ref|:ref|--delete|--mirror` — как `git reset --hard
 (`RPV_ROLE`); сессия CEO/владельца правит файлы вне проекта, кроме root/ и deep/ и закрытых узлов; (ж) `.git` — удаление,
 перенос, шаблоны вроде `.*` никому (кроме `*.lock`), запись внутрь — не запускам диспетчера; (з) настройки Claude Code
 `.claude/settings*.json` запуску диспетчера не менять (через них выключаются хуки и плагин).
+Публикации (CP2, критерий 14: необратимое — только с согласия владельца): запуску диспетчера (`RPV_ROLE`) закрыты `gh release
+create|upload|edit`, `gh pr merge` (вливает программа `merge_rule.py` после Судьи), `git push` в main/master, тега, `--all`
+(и пуш без ветки, пока текущая — main/master или не определима), `npm|pnpm|yarn|cargo|poetry|uv publish`, `twine upload`,
+`docker push`, `gem push` — если в шапке тикета запуска (`RPV_TICKET`) нет `allow: publish (В-N)`. Поле ставит только CEO
+(`tickets.py allow`); запуск диспетчера строку `allow:` в файл тикета не пишет; шапка не прочитана — отказ. Сессии CEO и владельца не ограничены.
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
@@ -88,12 +93,14 @@ def _env_host_roots():
 
 
 def configure(project_dir):
-    global LOCAL_ROOTS, WRITE_HOME_ROOTS
+    global LOCAL_ROOTS, WRITE_HOME_ROOTS, PROJECT_DIR
     LOCAL_ROOTS = project_roots(project_dir)
     WRITE_HOME_ROOTS = memory_roots(project_dir)
+    PROJECT_DIR = str(project_dir)
 
 
 _PROJECT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+PROJECT_DIR = str(_PROJECT)                                  # тикеты запуска — `<проект>/.claude/tickets/` (согласие на публикацию)
 LOCAL_ROOTS = project_roots(_PROJECT)
 WRITE_HOME_ROOTS = memory_roots(_PROJECT)
 SCRATCH = "/appdata/local/temp/claude/"
@@ -123,6 +130,14 @@ REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): тол�
                        "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из RPV_GUARD_REMOTE_ROOTS, "
                        "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
                        "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
+REASON_PUBLISH = ("Публикация ({t}) запуску роли закрыта без согласия владельца по тикету {who}: выпуск, слияние PR, пуш в "
+                  "основную ветку (main/master) и теги, публикация пакетов и образов необратимы. Нужна — `tickets.py result <ID> "
+                  "ask-owner --why \"...\" --why-owner необратимое`; слово владельца CEO заносит в реестр (`registry.py decide`) и "
+                  "ставит согласие `tickets.py allow <ID> publish --ref В-N`. Пуш рабочей ветки разрешён (ветку назови явно: "
+                  "`git push origin <ветка>`); PR вливает программа (merge_rule) после приёмки Судьи.")
+REASON_CONSENT = ("Согласие на публикацию запуск диспетчера в шапку тикета не пишет: строку `allow:` ставит только CEO командой "
+                  "`tickets.py allow <ID> publish --ref В-N` после слова владельца. Нужна публикация — `tickets.py result <ID> "
+                  "ask-owner --why \"...\" --why-owner необратимое`.")
 REASON_FILE = ("Запись в файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit/MultiEdit/NotebookEdit "
                "меняют существующие файлы только внутри папки проекта, scratchpad сессии, временного каталога и автопамяти "
                "проекта (~/.claude/projects/<проект>/memory/). Новый файл вне папки создать можно (его ещё нет). Записи "
@@ -153,6 +168,11 @@ class Heavy(str):
 
 class Forbid(str):
     """Необратимая команда (git reset --hard и т. п.): отказ «только через CEO», путь не при чём."""
+
+
+class Publish(Forbid):
+    """Публикация (выпуск, слияние PR, пуш в main/master или тега, публикация пакета): запуску роли — только с согласием
+    владельца по тикету (`allow: publish` в шапке), сессиям CEO и владельца можно. Подкласс Forbid: те же ветки find/ssh."""
 
 
 def norm(p):
@@ -968,6 +988,26 @@ def python_scan(code, ctx, depth):
             yield (v if v is not None else UNKNOWN_TARGET, ctx.copy())
 
 
+PUBLISH_SUBS = {      # публикации, кроме `git push` (его разбирает git_scan): команда → подкоманды среди первых слов без опций
+    "gh": (("release", "create"), ("release", "upload"), ("release", "edit"), ("pr", "merge")),
+    "npm": (("publish",),), "pnpm": (("publish",),), "yarn": (("publish",),), "cargo": (("publish",),),
+    "poetry": (("publish",),), "uv": (("publish",),), "twine": (("upload",),), "gem": (("push",),),
+    "docker": (("push",), ("image", "push")),
+}
+
+
+def publish_label(name, args):
+    """Метка публикации у команды `имя арг…` (таблица PUBLISH_SUBS; `python -m twine upload` — как `twine upload`) либо None."""
+    if PY_NAMES.match(name) and "-m" in args[:-1]:
+        k = args.index("-m")
+        name, args = cmd_name(args[k + 1]), args[k + 2:]
+    pos = [a for a in args if not a.startswith("-")][:4]
+    for sub in PUBLISH_SUBS.get(name, ()):
+        if any(tuple(pos[i:i + len(sub)]) == sub for i in range(len(pos))):
+            return f"{name} {' '.join(sub)}"
+    return None
+
+
 def del_targets(name, args, xargs, piped):
     """Цели команды-удаления; None — это не удаление (справка, сухой прогон)."""
     ps = name in ("remove-item", "ri")
@@ -1136,6 +1176,81 @@ def git_discard(sub, rest, ctx, repo):
     return None
 
 
+DEFAULT_BRANCHES = ("main", "master")
+PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+TAG_NAME = re.compile(r"^v?\d+\.\d+(?:\.\d+)*[-+.\w]*$")        # `v1.8.48`, `2.0.0-rc1`: без точки (`v2`) — ветка
+
+
+def head_branch(repo, ctx):
+    """Ветка, на которой стоит репозиторий каталога `repo`, по `.git/HEAD` (у связанного worktree `.git` — файл со ссылкой
+    на gitdir); None — не определить: удалённая машина, неизвестный каталог, отсоединённая HEAD."""
+    cur = (repo or "").rstrip("/")
+    if getattr(ctx, "remote", False):
+        return None
+    for _ in range(40):
+        fp = fs_path(cur + "/.git", None) if cur else None
+        if fp is None:
+            return None
+        try:
+            if os.path.isfile(fp):
+                with open(fp, encoding="utf-8") as f:
+                    m = re.match(r"gitdir:\s*(.+)", f.read().strip())
+                if not m:
+                    return None
+                fp = os.path.join(cur, m.group(1).strip())                  # относительный gitdir — от каталога worktree
+            if os.path.isdir(fp):
+                with open(os.path.join(fp, "HEAD"), encoding="utf-8") as f:
+                    m = re.match(r"ref:\s*refs/heads/(\S+)", f.read().strip())
+                return m.group(1) if m else None
+        except (OSError, ValueError):
+            return None
+        parent = posixpath.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+    return None
+
+
+def push_publication(rest, repo, ctx):
+    """Метка публикации у `git push` — основная ветка (main/master) в любой записи refspec (`HEAD:main`, `refs/heads/main`,
+    `x:main`), тег (`--tags`, `--follow-tags`, `refs/tags/…`, `tag <имя>`, `v1.2.3`), все ветки (`--all`, шаблон `*`); пуш без
+    ветки (`git push`, `origin HEAD`) — по текущей ветке репозитория, не определена — тоже публикация. Рабочая ветка и
+    `--dry-run` — None."""
+    if any(a in ("--dry-run", "-n") for a in rest):
+        return None
+    flag = next((a for a in rest if a in ("--tags", "--all", "--branches") or a.startswith("--follow-tags")), None)
+    if flag:
+        return f"git push {flag}"
+    pos, k = [], 0
+    while k < len(rest):
+        a = rest[k]
+        k += 1
+        if a in PUSH_VALUE_OPTS:
+            k += 1
+        elif not a.startswith("-"):
+            pos.append(a)
+    specs = pos if any(a == "--repo" or a.startswith("--repo=") for a in rest) else pos[1:]    # первое слово — удалённый репозиторий
+    if specs[:1] == ["tag"]:
+        return "git push tag: тег"
+    for spec in specs:
+        src, sep, dst = spec.partition(":")
+        ref = dst if sep and dst else src
+        name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+        if ref.startswith("refs/tags/") or TAG_NAME.match(ref):
+            return f"git push {spec}: тег"
+        if name in DEFAULT_BRANCHES:
+            return f"git push {spec}: основная ветка"
+        if "*" in ref:
+            return f"git push {spec}: все ветки по шаблону"
+    if not specs or "HEAD" in specs or "@" in specs:                  # ветка не названа: уйдёт текущая
+        cur = head_branch(repo, ctx)
+        if cur in DEFAULT_BRANCHES:
+            return f"git push без ветки: текущая — {cur}"
+        if cur is None:
+            return "git push без ветки: текущую не определить"
+    return None
+
+
 def git_scan(args, ctx, vars_, redirected=False):
     """`redirected` — GIT_DIR/GIT_WORK_TREE в окружении команды: каталог репозитория не равен рабочему."""
     j = 0
@@ -1177,6 +1292,8 @@ def git_scan(args, ctx, vars_, redirected=False):
         elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
               or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
             yield (Forbid("git push --delete/--mirror/:ветка (удаление веток на удалённом)"), ctx.copy())
+        elif label := push_publication(rest, repo, ctx):
+            yield (Publish(label), ctx.copy())
         return
     if sub in ("checkout", "switch", "restore", "branch", "stash"):
         label = git_discard(sub, rest, ctx, repo)
@@ -1461,7 +1578,7 @@ def ssh_scan(args, ctx, vars_, stdin, depth):
         found = []
         for text in stdin:
             found.extend(scan_text(text, remote, (), depth + 1))
-    if found and bad:
+    if bad and any(not isinstance(x[0], Publish) for x in found):     # публикация на закрытом узле — не удаление: решает check
         yield (f"<ssh {host}: удаление на закрытом узле (Storage Box, коллектор, хост не определён)>", ctx.copy())
     else:
         yield from found
@@ -1567,6 +1684,9 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
         label = heavy_guard.heavy_label(name, args, sin, xargs)
         if label:
             yield (Heavy(label), ctx.copy())
+    label = publish_label(name, args)                # публикация (CP2): запуску роли — только с согласием, решает check()
+    if label:
+        yield (Publish(label), ctx.copy())
     if name in ("export", "declare", "local", "readonly", "typeset"):
         for a in words[i + 1:]:
             if ASSIGN.match(a):
@@ -1607,7 +1727,7 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     elif name in RUNNERS:                            # `uv run python -c …`, `poetry run rm …`
         for k, a in enumerate(args):
             nm = cmd_name(a)
-            if nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or PY_NAMES.match(nm):
+            if nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or nm in PUBLISH_SUBS or PY_NAMES.match(nm):
                 yield from scan_one(Cmd(args[k:]), ctx, vars_, sin, depth + 1)
                 break
     elif name in OTHER_INTERP:                       # perl/ruby/node/php: вызовы удаления в коде — цель не видна
@@ -1714,6 +1834,10 @@ LEGACY_VERBS = re.compile(
     r"|find\s[^;&|\n]*-delete|rsync\s[^;&|\n]*--delete|git\s+clean|shutil\.rmtree|os\.(?:remove|unlink|rmdir)"
     r"|\.unlink\(|rmtree\(", re.I)
 LEGACY_SEP = re.compile(r"[;&|\n)`]")
+LEGACY_PUBLISH = re.compile(                      # публикации запуску роли и в неразобранной команде (CP2)
+    r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*(?:\b(?:main|master)\b|--(?:tags|all|branches|follow-tags))"
+    r"|\bgh\s+(?:release\s+(?:create|upload|edit)|pr\s+merge)\b|\b(?:npm|pnpm|yarn|cargo|poetry|uv)\s+publish\b"
+    r"|\btwine\s+upload\b|\bdocker\s+push\b|\bgem\s+push\b")
 
 
 def legacy_found(cmd, cwd):
@@ -1742,6 +1866,7 @@ def legacy_found(cmd, cwd):
         found.extend((t, ctx) for t in ts)
     if found and BOX_RE.search(cmd):
         found.append(("<Storage Box/коллектор в команде>", ctx))
+    found.extend((Publish(m.group(0)[:60]), ctx) for m in LEGACY_PUBLISH.finditer(cmd))
     return found
 
 
@@ -1770,6 +1895,29 @@ def dispatcher_role():
     сессия CEO или владельца."""
     r = _env("ROLE").strip().lower()
     return r if r in DISPATCH_ROLES else None
+
+
+def publish_consent():
+    """Согласие владельца на публикацию по тикету запуска (`RPV_TICKET`) → (есть, тикет для текста отказа). Читается только
+    шапка `<проект>/.claude/tickets/<ID>.md`: строка `allow: publish (В-N)` (ставит `tickets.py allow`, только CEO). Не
+    прочитано — согласия нет (fail-closed)."""
+    tid = _env("TICKET").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", tid):
+        return False, "(тикет запуска RPV_TICKET не определён)"
+    try:
+        with open(os.path.join(PROJECT_DIR, ".claude", "tickets", tid + ".md"), encoding="utf-8") as f:
+            if f.readline().strip() != "---":
+                return False, f"{tid} (в файле нет шапки)"
+            granted = False
+            for line in f:
+                key, _, val = line.partition(":")
+                if line.strip() == "---":
+                    return granted, tid
+                if key.strip() == "allow":                  # как в разборе шапки (ticket.py): последняя строка ключа решает
+                    granted = bool(re.match(r"publish\b", val.strip()))
+    except (OSError, ValueError) as e:                      # ValueError — и UnicodeDecodeError: тикет не читается
+        return False, f"{tid} (шапка не прочитана: {type(e).__name__})"
+    return False, f"{tid} (шапка не закрыта)"
 
 
 def _abs_norm(t, ctx):
@@ -1831,6 +1979,37 @@ def owner_record_write(tool, ti):
                for part in re.split(r"\n|&&|\|\||;", cmd))
 
 
+CONSENT_LINE = re.compile(r"(?mi)^[ \t]*allow[ \t]*:")      # строка шапки тикета `allow: publish (В-N)`
+BENIGN_REDIRECT = re.compile(r"\d*>&?\s*(?:/dev/null|\d)")  # `2>/dev/null`, `2>&1` — не запись в файл
+
+
+def _strings(x):
+    """Все строки внутри значения tool_input (Edit: new_string, MultiEdit: edits[].new_string, Write: content)."""
+    if isinstance(x, str):
+        yield x
+    elif isinstance(x, dict):
+        for v in x.values():
+            yield from _strings(v)
+    elif isinstance(x, (list, tuple)):
+        for v in x:
+            yield from _strings(v)
+
+
+def consent_forge(tool, ti):
+    """Запись запуском диспетчера строки `allow:` в файл тикета (`.claude/tickets/…`) мимо `tickets.py allow`: согласие на
+    публикацию ставит только CEO. Файловые инструменты — строка шапки `allow:` в новом тексте; оболочка — команда, которая
+    пишет (как в `owner_record_write`), называет `.claude/tickets/` и `allow:`; чтение и текст `--text`/`--why` не в счёт."""
+    if tool in SHELL_TOOLS:
+        cmd = str(ti.get("command") or "")
+        if "tickets.py" in cmd:
+            cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
+        cmd = BENIGN_REDIRECT.sub("", cmd)
+        return bool(CEO_SIGNAL_WRITE.search(cmd) and ".claude/tickets/" in cmd.replace("\\", "/").lower()
+                    and re.search(r"\ballow[ \t]*:", cmd, re.I))
+    path = file_target(ti) or ""
+    return ".claude/tickets/" in path.replace("\\", "/").lower() and any(CONSENT_LINE.search(s) for s in _strings(ti))
+
+
 def protected(t, ctx, role, deleting):
     """Защищённые места → причина отказа или None. `.git`: удаление и перенос — никому, запись — запускам диспетчера;
     настройки Claude Code и слово владельца (CLAUDE.md, решения, цели) — запускам диспетчера (ни удалить, ни
@@ -1882,7 +2061,7 @@ def _temp_hit(target, trace):
 
 def check(cmd, cwd, trace=None):
     """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed).
-    `trace` — список (группа ветки, deny|allow) для журнала: решающая ветка и разрешающие temp/legacy."""
+    `trace` — список (группа ветки, deny|allow) для журнала: решающая ветка и разрешающие temp/legacy/publish."""
     cmd = cmd or ""
     trace = [] if trace is None else trace
     legacy = False
@@ -1901,6 +2080,13 @@ def check(cmd, cwd, trace=None):
             group = "legacy" if legacy else ctx.via or ("ssh" if ctx.remote else None)
             if isinstance(target, Heavy):
                 return _deny(trace, "heavy", heavy_reason(target))
+            if isinstance(target, Publish):
+                if role:                                    # CEO и владелец публикуют свободно; роль — с согласием по тикету
+                    granted, who = publish_consent()
+                    if not granted:
+                        return _deny(trace, "publish", REASON_PUBLISH.format(t=target, who=who))
+                    trace.append(("publish", "allow"))
+                continue
             if isinstance(target, Forbid):
                 return _deny(trace, "git", REASON_IRREVERSIBLE.format(t=target))
             why = protected(target, ctx, role, deleting=not isinstance(target, Over))
@@ -1999,6 +2185,8 @@ def check_tool(data, trace=None):
             return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
         if dispatcher_role() and owner_record_write(tool, ti):
             return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals"))
+        if dispatcher_role() and consent_forge(tool, ti):
+            return _deny(trace, "publish", REASON_CONSENT)
         if tool in SHELL_TOOLS:
             reason = check(str(ti.get("command") or ""), cwd, trace)
             if tool == "PowerShell" and trace and trace[-1] == ("rm", "deny"):
@@ -2014,7 +2202,7 @@ def check_tool(data, trace=None):
 
 def journal_guard(project, tool, trace, reason):
     """Строки в `<проект>/.claude/dispatcher/guard.log`: время, инструмент, группа ветки, deny|allow, начало причины.
-    Отказы — решающей веткой, разрешения — только у temp/legacy (иначе их нуль ничего не значит): по журналу срез №5
+    Отказы — решающей веткой, разрешения — только у temp/legacy/publish (иначе их нуль ничего не значит): по журналу срез №5
     режет группы с нулём отказов за неделю (решение Судьи). Сбой записи не мешает решению стража."""
     try:
         from datetime import datetime
