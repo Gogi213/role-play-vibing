@@ -25,11 +25,13 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CLAUDE = shutil.which("claude") or "claude"
 WRITERS = {"secretary"}  # помощники, которые пишут в проект: каждому запуску — своя копия заготовки
+OPEN_STATUSES = ("todo", "in_progress", "in_review", "waiting", "blocked", "needs_owner")
 
 PROMPTS = {
     "secretary": lambda c, w: (f"Сейчас: {c['now']} (GMT+4). Команда реестра: `{registry_cmd(w)}`. "
@@ -210,12 +212,26 @@ def grade_reporter(c: dict, ans: str, work: Path, fixture: Path) -> dict:
             if not ids or n not in src:
                 unsupported.append(n)
     flagged = [t for t in c["gold_flag"] if t in cited]
+    now = datetime.fromisoformat(c["now"].replace(" ", "T") + "+04:00")
+    stale = []  # закрытые/остановленные тикеты старше суток: в ответ о текущем им не место
+    for t in sorted(cited - set(missing)):
+        head = ticket_text(t)
+        st = re.search(r"^status: *([a-z_]+)", head, re.M)
+        up = re.search(r"^updated: *(\S+)", head, re.M)
+        try:
+            old = up and datetime.fromisoformat(up.group(1)) < now - timedelta(days=1)
+        except ValueError:
+            old = False
+        if st and st.group(1) not in OPEN_STATUSES and old:
+            stale.append(t)
     return {
         "flags_recall": round(len(flagged) / len(c["gold_flag"]), 2),
         "numbers": nums,
         "numbers_sourced": round(1 - len(unsupported) / nums, 2) if nums else 1.0,
         "unsupported": unsupported[:6],
         "no_missing_ids": not missing,
+        "stale_cited": len(stale),
+        "stale": stale[:8],
         "lines_ok": len(lines) <= 15,
     }
 
@@ -388,7 +404,7 @@ METRICS = {
     "secretary": ["type_ok", "files_match_answer", "quotes_verbatim", "no_invented_numbers", "related_hit",
                   "numbering_ok", "registry_intact", "format_ok"],
     "inbox": ["action_exact", "done_recall", "no_invented_ids", "lines_ok"],
-    "reporter": ["flags_recall", "numbers_sourced", "no_missing_ids", "lines_ok"],
+    "reporter": ["flags_recall", "numbers_sourced", "no_missing_ids", "stale_cited", "lines_ok"],
 }
 
 
@@ -423,8 +439,9 @@ def cmd_report(a) -> int:
                     v = f"{sum(r['dur'] for r in mr) / max(len(mr), 1):.0f}"
                 else:
                     vals = [r["grade"].get(met) for r in ok if r["grade"].get(met) is not None]
-                    v = "—" if not vals else (f"{sum(vals) / len(vals):.2f}" if isinstance(vals[0], float)
-                                              else f"{sum(bool(x) for x in vals)}/{len(vals)}")
+                    v = ("—" if not vals else f"{sum(vals) / len(vals):.2f}" if isinstance(vals[0], float)
+                         else f"{sum(vals)} всего" if not isinstance(vals[0], bool)  # счётчик (stale_cited)
+                         else f"{sum(vals)}/{len(vals)}")
                 cells.append(v)
             md.append(f"| {met} | " + " | ".join(cells) + " |")
         md.append("")
