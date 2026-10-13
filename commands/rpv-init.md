@@ -28,3 +28,5 @@ for l in ".claude/roles/.state/" ".claude/roles/log/" ".claude/dispatcher/"; do 
 `.claude/roles/*.md` под проект и открыть сессию CEO командой `/ceo`. Одной строкой напомни: что в проекте нельзя
 удалять и перезаписывать никому (данные, резервные копии, ключи), владелец вписывает в `.claude/rpv.json`, ключ
 `protected_paths` (список шаблонов, например `{"protected_paths": ["data/raw/**", "backups"]}`); файл не создавай сам.
+Ещё одной строкой: ежедневный отчёт придёт владельцу в Telegram в 10:00 (`RPV_REPORT_AT`), когда на машине заданы `RPV_TG_TOKEN`
+и `RPV_TG_CHAT` (docs/configuration.md); без них отчёт ложится файлом в `.claude/dispatcher/reports/`.
