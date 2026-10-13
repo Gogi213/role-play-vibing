@@ -39,7 +39,7 @@ INTERPRETERS = ("python", "python3", "bash")   # то же правило, чт�
 SCRIPT_DIRS = ("tools", ".claude")
 PYTEST_FLAGS = ("-q", "-qq", "-v", "-vv", "-x", "-s")
 UNITTEST_FLAGS = ("-q", "-v", "-f", "-b")
-CHECK_TIMEOUT_S = float(P.env("ERRORS_TIMEOUT_S", "300"))   # одна проверка; дольше — убита деревом процессов
+CHECK_TIMEOUT_S = 300.0   # одна проверка; дольше — убита деревом процессов
 TAIL = 600     # знаков конца вывода проверки в отказе
 SHOWN = 5      # сколько упавших проверок раскрывает отказ приёмки
 

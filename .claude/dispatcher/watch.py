@@ -58,14 +58,14 @@ def configure_project(root) -> Path:
     return D.PROJECT_ROOT
 
 
-WATCH_INTERVAL_S = float(P.env("WATCH_INTERVAL", "120"))
-WATCH_DEDUP_REPEAT_HOURS = float(P.env("WATCH_REPEAT_HOURS", "2"))
+WATCH_INTERVAL_S = 120.0
+WATCH_DEDUP_REPEAT_HOURS = 2.0
 # v2: виды находок, которые повторяются не чаще раза в сутки (или пока не изменятся по сути); blocked/needs_owner
 # диспетчер уже сообщил один раз (`ceo-inbox`), сторож лишь страхует — раз в сутки
-WATCH_LONG_REPEAT_HOURS = float(P.env("WATCH_LONG_REPEAT_HOURS", "24"))
+WATCH_LONG_REPEAT_HOURS = 24.0
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner"}
 CLOSED_TICKET_STATUSES = ("done", "cancelled")
-ORPHAN_TICKET_HOURS = float(P.env("WATCH_ORPHAN_HOURS", "2"))
+ORPHAN_TICKET_HOURS = 2.0
 
 
 @dataclass
@@ -120,13 +120,13 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
 
 
 # --- триаж ожиданий без LLM (TK-056 п.4) ---------------------------------------------------------
-DEAD_WAIT_STRIKES = int(P.env("WATCH_DEAD_WAIT_STRIKES", "2"))  # подряд мёртвых проверок до действия
-AT_GRACE_MIN = int(P.env("WATCH_AT_GRACE_MIN", "30"))  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
-EMPTY_WAIT_STRIKES = int(P.env("WATCH_EMPTY_WAIT_STRIKES", "3"))  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
-MET_GRACE_MIN = int(P.env("WATCH_MET_GRACE_MIN", "15"))  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (RPV_DISPATCH_WAIT_RECON_S) — 15 мин = 3 сверки без реакции
-BY_GRACE_MIN = int(P.env("WATCH_BY_GRACE_MIN", "15"))  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
-IDLE_WAIT_MIN = int(P.env("WATCH_IDLE_WAIT_MIN", "15"))  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
-SSH_FAIL_STRIKES = int(P.env("WATCH_SSH_FAIL_STRIKES", "5"))  # подряд молчаний ssh до тревоги владельцу тикета
+DEAD_WAIT_STRIKES = 2  # подряд мёртвых проверок до действия
+AT_GRACE_MIN = 30  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
+EMPTY_WAIT_STRIKES = 3  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
+MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (dispatch.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
+BY_GRACE_MIN = 15  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
+IDLE_WAIT_MIN = 15  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
+SSH_FAIL_STRIKES = 5  # подряд молчаний ssh до тревоги владельцу тикета
 
 
 def _producer_pattern(path: str) -> str:
@@ -162,7 +162,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     return out[0]
 
 
-LINK_PROBES = [h.strip() for h in P.env("WATCH_LINK_PROBES", "1.1.1.1:443,8.8.8.8:53").split(",") if h.strip()]
+LINK_PROBES = ["1.1.1.1:443", "8.8.8.8:53"]
 
 
 def pc_link_up() -> bool:
@@ -218,7 +218,7 @@ def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "j
 def _fetch_owners(owners_probe) -> dict:
     probe = owners_probe or (lambda alias: LW.fetch_owners(alias, D._ssh_cmd))
     res = {}
-    for alias in sorted(D.WATCHED_ALIASES):
+    for alias in sorted(D.watched_aliases()):
         got = probe(alias)
         if got is not None:
             res[alias] = got
@@ -252,7 +252,7 @@ def _resubmitted(mine: list, j: dict) -> bool:
 def _covered_failure(mine: list, j: dict) -> bool:
     """Упавшее задание не повод будить владельца: у тикета есть живое задание (идёт/в очереди — та же волна, wait_for
     снимать рано, п.4) либо пересдача с тем же именем юнита (done — п.1). Снятое владельцем адаптер отдаёт как
-    `done` (договор `RPV_JOB_STATE_CMD`/`RPV_JOB_OWNERS_CMD`, п.2) — до сюда не доходит."""
+    `done` (договор `job_state_cmd`/`job_owners_cmd`, п.2) — до сюда не доходит."""
     return any(o["id"] != j["id"] and (o["state"] in ("running", "queued") or (o["unit"] == j["unit"] and o["state"] == "done"))
                for o in mine)
 
@@ -536,16 +536,16 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
     return alive
 
 
-STRAY_WAKE_REPEAT_HOURS = float(P.env("WATCH_STRAY_WAKE_REPEAT_HOURS", "2"))  # повтор сигнала о том же прогоне: замер идёт часами, раз в 2 ч напомнить, не спамить
+STRAY_WAKE_REPEAT_HOURS = 2.0  # повтор сигнала о том же прогоне: замер идёт часами, раз в 2 ч напомнить, не спамить
 
 
 def check_strays(ws: dict, now, probe=None) -> list:
-    """Прогон мимо планировщика поверх чужого задания (замер портит чужую волну): адаптер проекта `RPV_STRAY_CMD` даёт
+    """Прогон мимо планировщика поверх чужого задания (замер портит чужую волну): адаптер проекта `stray_cmd` даёт
     строки «тикет<TAB>описание»; владельца тикета-нарушителя будим записью, нет тикета — строка CEO. Один сигнал на
     (тикет, описание) за STRAY_WAKE_REPEAT_HOURS. Адаптер не задан — тихо ничего."""
     probe = probe or (lambda alias: LW.fetch_strays(alias, D._ssh_cmd))
     seen, out = ws.setdefault("stray_seen", {}), []
-    for alias in sorted(D.WATCHED_ALIASES):
+    for alias in sorted(D.watched_aliases()):
         for tid, desc in probe(alias) or []:
             key = f"{tid or '?'}|{desc}"
             prev = seen.get(key)
@@ -582,7 +582,7 @@ def _stale(ts: str, now) -> bool:
 
 
 # --- счётчик застоя по runs.log (TK-056 п.4) -----------------------------------------------------
-STALL_RUNS = int(P.env("WATCH_STALL_RUNS", "2"))  # подряд таймаутов / холостых запусков до блока
+STALL_RUNS = 2  # подряд таймаутов / холостых запусков до блока
 _RUN_KV = re.compile(r"(\w+)=(\S+)")
 
 

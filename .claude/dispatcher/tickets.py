@@ -238,7 +238,7 @@ def cmd_result(args) -> int:
                                       "repo": getattr(args, "repo", None),
                                       "decisions": getattr(args, "decisions", None),
                                       "numbers": getattr(args, "numbers", None)})())
-        if rc == 0:  # запись итога — иначе строгий Stop (RPV_STOP_STRICT) не видит сдачи шага и блокирует Судью
+        if rc == 0:  # запись итога — иначе Stop-хук (stop_result.py) не видит сдачи шага и блокирует Судью
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
         return rc
@@ -389,9 +389,9 @@ def cmd_accept(args) -> int:
         return 1
     import merge_rule
     import routes
-    slug = (getattr(args, "repo", None) or D.P.env("CI_REPO", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
+    slug = (getattr(args, "repo", None) or D.P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
-        print("accept: репозиторий не задан — --repo <владелец/репо> или RPV_CI_REPO", file=sys.stderr)
+        print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
     err = merge_rule.check_pr(slug, int(args.pr), args.sha)
     if err:
@@ -646,7 +646,7 @@ def main(argv=None) -> int:
     p_accept.add_argument("--pr", type=int, required=True)
     p_accept.add_argument("--sha", required=True)
     p_accept.add_argument("--text", default="")
-    p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе RPV_CI_REPO)")
+    p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе ci_repo в .claude/rpv.json)")
     p_accept.add_argument("--decisions", default=None, help="решения владельца, с которыми сверено: В-N[,В-M] или - (связанных нет)")
     p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл[:строка] |» или - (чисел нет)")
     p_accept.set_defaults(func=cmd_accept)
@@ -663,7 +663,7 @@ def main(argv=None) -> int:
                           help="ask-owner Судьи: повод вопроса владельцу (деньги|направление|необратимое|бизнес-правило)")
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
-    p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
+    p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе ci_repo в .claude/rpv.json)")
     p_result.add_argument("--decisions", default=None,
                           help="accept: решения владельца, с которыми сверена сдача: В-N[,В-M] или - (связанных нет)")
     p_result.add_argument("--numbers", default=None,

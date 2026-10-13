@@ -2,6 +2,22 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.19.0 — 2026-10-14
+
+### Изменено (CP8, настройки)
+- Переменных окружения — 10 вместо 70: владельцу — `RPV_PROJECT`, `RPV_TG_TOKEN`, `RPV_TG_CHAT`, `RPV_PLUGIN_DIR`; на удалённой машине — `RPV_RUNS_DIR`, `RPV_JOBRUN_MODE` (`jobrun.sh`); служебные — `RPV_ROLE`, `RPV_TICKET`, `RPV_START_CMD`, `RPV_START_CWD`.
+- Настройки проекта — ключи `.claude/rpv.json` (`project.setting`, перечитывается по времени изменения): `report_at`, `max_parallel`, `role_parallel` (`{"engineer": 3}`), `role_mcp` (`all`/`none`/список), `ci_repo`, `watched_aliases`, `job_state_cmd`, `job_owners_cmd`, `stray_cmd`, `guard_remote_roots`, `guard_stage`, `guard_forbidden_hosts` (плюс прежний `protected_paths`). Неверный тип ключа стража — отказ любому удалению (fail-closed), как у `protected_paths`. Несовместимо: `RPV_CI_REPO`, `RPV_GUARD_*`, `RPV_DISPATCH_MAX_PARALLEL`, `RPV_DISPATCH_ROLE_PARALLEL`, `RPV_ROLE_MCP`, `RPV_REPORT_AT`, `RPV_WATCHED_ALIASES`, `RPV_JOB_*_CMD`, `RPV_STRAY_CMD` больше не читаются — перенесите в `.claude/rpv.json`.
+- Остальное — константы (тик, таймауты, тормоза цикла, модели и усилие ролей, пороги сторожа, присмотра, Haiku). `docs/configuration.md` переписан: окружение · файл проекта · константы; тест `test_configuration_doc.py` сверяет документ с кодом.
+- Stop-хук: запуск роли кончается только записью итога (`tickets.py result`); заметка `comment` итогом не считается (был мягкий режим по умолчанию и строгий по `RPV_STOP_STRICT`).
+- Сжатие логов и конспектов Haiku — всегда (выключатель `RPV_HAIKU_COMPACT` снят); каталоги состояния хуков — только от проекта (`RPV_STATE_DIR`, `RPV_LOG_DIR`, `RPV_DISPATCHER_DIR`, `RPV_TICKET_ID` сняты).
+
+### Изменено (CP11, подключение)
+- Пауза 60 с между запусками тикета — только для одной и той же роли: передача Инженер → Судья идёт на ближайшем тике (на чистом проекте 2:15 → 1:42).
+- `RPV_PLUGIN_DIR` → `claude --plugin-dir` у запуска роли; `tools/e2e_clean_project.py` — проверка чистого проекта: `/rpv-init` → цель → принятый Судьёй результат, время и цена.
+
+### Исправлено
+- Тесты не собираются из копий агентов `.claude/worktrees/` (`norecursedirs`).
+
 ## 1.18.0 — 2026-10-14
 
 ### Добавлено (CP10, ежедневный отчёт)

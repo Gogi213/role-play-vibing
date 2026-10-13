@@ -164,12 +164,12 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
                procs=None) -> list:
     now = time.time() if now is None else now
     sd = project / ".claude" / "dispatcher"
-    names = S.services()
+    names = S.services(project)
     procs = S._list_procs() if procs is None else procs   # один снимок на все службы
     rows = [check_service(n, sd, now) for n in names]
     rows += [c for c in (check_copies(project, n, procs) for n in names) if c]
     rows.append(check_supervise(project, sd, now, installed))
-    rows.append(check_idle(sd, now, float(P.env("IDLE_SLO_MIN", "10"))))
+    rows.append(check_idle(sd, now))
     rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
 

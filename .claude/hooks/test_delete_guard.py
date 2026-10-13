@@ -10,14 +10,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# проверки написаны на примере условного проекта proj: корень и удалённые каталоги задаём окружением ДО импорта (умолчаний
-# нет); защищённых путей у этого проекта нет — их проверяют тесты ProtectedPaths, подставляя шаблоны на время теста
+# проверки написаны на примере условного проекта proj: корень задаём окружением ДО импорта, удалённые каталоги — как после
+# чтения его `.claude/rpv.json` (умолчаний нет); защищённых путей у этого проекта нет — их проверяют тесты ProtectedPaths,
+# подставляя шаблоны на время теста
 os.environ["CLAUDE_PROJECT_DIR"] = r"C:\visual projects\proj"
-os.environ["RPV_GUARD_REMOTE_ROOTS"] = "~/proj/,$home/proj/,${home}/proj/,/home/srv/proj/,/opt/proj-compute/"
-os.environ["RPV_GUARD_STAGE"] = "/dev/shm/proj-stage"
-os.environ["RPV_GUARD_FORBIDDEN_HOSTS"] = "203.0.113.1"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import delete_guard as dg  # noqa: E402
+
+PROJ_RPV = {"guard_remote_roots": ["~/proj/", "$home/proj/", "${home}/proj/", "/home/srv/proj/", "/opt/proj-compute/"],
+            "guard_stage": "/dev/shm/proj-stage", "guard_forbidden_hosts": ["203.0.113.1"]}
+dg.REMOTE_ROOTS, dg.STAGE, dg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)
 
 CWD = r"C:\visual projects\proj"
 SCRATCH = "C:/Users/3D6B~1/AppData/Local/Temp/claude/C--visual-projects-proj/abc/scratchpad"
@@ -249,7 +251,7 @@ class Denied(unittest.TestCase):
     def test_remove_item_windows_double_backslash(self):
         self.no("Remove-Item C:\\\\Windows\\\\x -Recurse")
 
-    # --- закрытые хосты (RPV_GUARD_FORBIDDEN_HOSTS)
+    # --- закрытые хосты (guard_forbidden_hosts)
     def test_closed_host_overrides_remote_roots(self):
         self.no("ssh ubuntu@203.0.113.1 'rm -rf /opt/proj-compute/x'")
         self.no("ssh ubuntu@203.0.113.1 'rm -rf ~/proj/x'")
@@ -1371,10 +1373,12 @@ class ProtectedPaths(unittest.TestCase):
         self.d = tempfile.mkdtemp(prefix="dg-pp-", dir=str(Path.home()))    # под домашним: не временный каталог
         self.addCleanup(shutil.rmtree, self.d, True)
         self.base = Path(self.d).as_posix()
-        saved = (dg.LOCAL_ROOTS, dg.WRITE_HOME_ROOTS, dg.PROJECT_DIR, dg.PROTECTED, dg.PROTECTED_ERROR)
+        saved = (dg.LOCAL_ROOTS, dg.WRITE_HOME_ROOTS, dg.PROJECT_DIR, dg.PROTECTED, dg.PROTECTED_ERROR, dg.REMOTE_ROOTS,
+                 dg.STAGE, dg.CLOSED_RE)
 
         def restore():
-            dg.LOCAL_ROOTS, dg.WRITE_HOME_ROOTS, dg.PROJECT_DIR, dg.PROTECTED, dg.PROTECTED_ERROR = saved
+            (dg.LOCAL_ROOTS, dg.WRITE_HOME_ROOTS, dg.PROJECT_DIR, dg.PROTECTED, dg.PROTECTED_ERROR, dg.REMOTE_ROOTS,
+             dg.STAGE, dg.CLOSED_RE) = saved
         self.addCleanup(restore)
         for rel in self.FILES:
             f = Path(self.d, rel)
@@ -1385,6 +1389,7 @@ class ProtectedPaths(unittest.TestCase):
         self.addCleanup(p.stop)
         self.as_role(None)
         dg.configure(self.d)
+        dg.REMOTE_ROOTS, dg.STAGE, dg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)  # машины проекта proj — как у остальных тестов
 
     def as_role(self, role):
         os.environ.pop("RPV_ROLE", None)
@@ -1392,11 +1397,11 @@ class ProtectedPaths(unittest.TestCase):
             os.environ["RPV_ROLE"] = role
 
     def rpv(self, content):
-        """Записать `.claude/rpv.json` проекта (объект → JSON, строка — как есть) и перечитать настройки."""
+        """Записать `.claude/rpv.json` проекта (объект → JSON вместе с машинами proj, строка — как есть) и перечитать."""
         import json
         path = Path(self.d, ".claude", "rpv.json")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
+        path.write_text(content if isinstance(content, str) else json.dumps({**PROJ_RPV, **content}), encoding="utf-8")
         dg.configure(self.d)
 
     def check(self, cmd):
@@ -2120,31 +2125,46 @@ class Lexer(unittest.TestCase):
             dg.tokenize("echo 'abc")
 
 
-class EnvNames(unittest.TestCase):
-    """Переменные `RPV_*`; прежние `ALPHA_*` не читаются (TK-100 №28)."""
+class SettingsSource(unittest.TestCase):
+    """CP8: удалённые машины — ключи `.claude/rpv.json` проекта; окружение (`RPV_GUARD_*`, прежние `ALPHA_*`) не читается."""
 
     HERE = os.path.dirname(os.path.abspath(__file__))
 
-    def read(self, env_extra):
+    def read(self, env_extra, rpv=None):
+        import json
         import subprocess
+        proj = tempfile.mkdtemp(prefix="dg-settings-")
+        self.addCleanup(shutil.rmtree, proj, True)
+        os.makedirs(os.path.join(proj, ".claude", "roles"))
+        if rpv is not None:
+            with open(os.path.join(proj, ".claude", "rpv.json"), "w", encoding="utf-8") as f:
+                json.dump(rpv, f)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("RPV_", "ALPHA_"))}
-        env.update(env_extra)
+        env.update(env_extra, CLAUDE_PROJECT_DIR=proj, PYTHONIOENCODING="utf-8")
         code = ("import delete_guard as d; print(d.STAGE, d.REMOTE_ROOTS, d.dispatcher_role(), "
-                "d.closed_host('host-9.example'))")
-        r = subprocess.run([sys.executable, "-c", code], cwd=self.HERE, env=env, capture_output=True, text=True)
+                "d.closed_host('host-9.example'), d.PROTECTED_ERROR)")
+        r = subprocess.run([sys.executable, "-c", code], cwd=self.HERE, env=env, capture_output=True, text=True,
+                           encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
 
-    def test_proj_names_not_read(self):
-        out = self.read({"ALPHA_GUARD_STAGE": "/dev/shm/old", "ALPHA_GUARD_REMOTE_ROOTS": "/srv/old/", "ALPHA_ROLE": "judge",
-                         "RPV_GUARD_STAGE": "/dev/shm/new", "RPV_GUARD_REMOTE_ROOTS": "/srv/new/", "RPV_ROLE": "engineer"})
-        self.assertEqual(out, "/dev/shm/new ('/srv/new/',) engineer False")
-        self.assertNotIn("/dev/shm/old", self.read({"ALPHA_GUARD_STAGE": "/dev/shm/old"}))
+    def test_rpv_json_is_read_env_is_not(self):
+        out = self.read({"ALPHA_GUARD_STAGE": "/dev/shm/old", "ALPHA_ROLE": "judge", "RPV_GUARD_STAGE": "/dev/shm/env",
+                         "RPV_GUARD_REMOTE_ROOTS": "/srv/env/", "RPV_ROLE": "engineer"},
+                        {"guard_stage": "/dev/shm/new", "guard_remote_roots": ["/srv/new/"],
+                         "guard_forbidden_hosts": ["host-9.example"]})
+        self.assertEqual(out, "/dev/shm/new ('/srv/new/',) engineer True None")
+        self.assertEqual(self.read({"RPV_GUARD_STAGE": "/dev/shm/env"}), "() None False None")
 
-    def test_texts_name_rpv_variables_only(self):
+    def test_bad_machine_keys_are_fail_closed(self):
+        self.assertIn("guard_remote_roots — не список", self.read({}, {"guard_remote_roots": "/srv/new/"}))
+        self.assertIn("guard_stage — не строка", self.read({}, {"guard_stage": ["/x"]}))
+
+    def test_texts_name_settings_keys(self):
         for text in (dg.REASON, dg.REASON_OVERWRITE, dg.REASON_IRREVERSIBLE):
             self.assertNotIn("ALPHA_", text)
-        self.assertIn("RPV_GUARD_REMOTE_ROOTS", dg.REASON)
+            self.assertNotIn("RPV_GUARD", text)
+        self.assertIn("guard_remote_roots", dg.REASON)
 
 
 class GuardGroups(unittest.TestCase):

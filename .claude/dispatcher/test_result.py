@@ -7,13 +7,13 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
-os.environ["RPV_CI_REPO"] = "o/r"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
@@ -40,6 +40,10 @@ class ResultTests(unittest.TestCase):
         import merge_rule
         self._chk = merge_rule.check_pr
         merge_rule.check_pr = lambda repo, n, sha, gh=None: ""
+        self.settings = {"ci_repo": "o/r"}  # .claude/rpv.json проекта
+        patch = mock.patch.object(D.P, "settings", lambda root=None: self.settings)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def tearDown(self):
         import merge_rule
@@ -169,14 +173,11 @@ class ResultTests(unittest.TestCase):
 
     def test_accept_refuses_without_repo_or_unknown_pr(self):
         import merge_rule
-        os.environ.pop("RPV_CI_REPO")
-        try:
-            self.refused("judge", "accept", pr=7, sha=SHA)  # репо не задан — без догадки по cwd
-            self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, repo="x/y"), 0)
-            merge_rule.check_pr = lambda repo, n, sha, gh=None: "PR не найден"
-            self.refused("judge", "accept", pr=7, sha=SHA, repo="x/y")  # PR нет в репо — ничего не пишем
-        finally:
-            os.environ["RPV_CI_REPO"] = "o/r"
+        self.settings = {}
+        self.refused("judge", "accept", pr=7, sha=SHA)  # репо не задан — без догадки по cwd
+        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, repo="x/y"), 0)
+        merge_rule.check_pr = lambda repo, n, sha, gh=None: "PR не найден"
+        self.refused("judge", "accept", pr=7, sha=SHA, repo="x/y")  # PR нет в репо — ничего не пишем
 
     def test_wait_ticket_cycle_writes_nothing(self):
         other = T.create_ticket(D.TICKETS_DIR, owner="researcher", title="Д", status="todo", now=NOW)

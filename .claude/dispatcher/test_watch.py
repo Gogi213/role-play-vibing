@@ -57,8 +57,6 @@ class WatchSandbox(unittest.TestCase):
         aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"calc"})   # умолчания нет: машины со сторожем задаёт окружение
         aliases_patch.start()
         self.addCleanup(aliases_patch.stop)
-        for name in ("RPV_JOB_OWNERS_CMD", "RPV_JOB_STATE_CMD", "RPV_STRAY_CMD"):
-            os.environ.pop(name, None)
 
     def tearDown(self):
         for k, v in self._orig.items():
@@ -614,7 +612,7 @@ class TriageWaitsTests(WatchSandbox):
         class R:
             returncode = 0
             stdout = "a\tTK-1\tu1\tfailed\trc 143: oom-kill\nb\tTK-1\tu2\trunning\t\nc\tTK-1\tu3\tdone\n".encode()
-        with mock.patch.object(W.LW.hide, "run", return_value=R()), mock.patch.dict(os.environ, {"RPV_JOB_OWNERS_CMD": "x"}):
+        with mock.patch.object(W.LW.hide, "run", return_value=R()), mock.patch.object(W.LW.P, "settings", return_value={"job_owners_cmd": "x"}):
             got = W.LW.fetch_owners("calc", lambda a, c: ["ssh"])
         self.assertEqual([j["reason"] for j in got], ["rc 143: oom-kill", "", ""])
 

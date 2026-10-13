@@ -53,6 +53,7 @@ def configure_project(root) -> Path:
     """Корень проекта и все пути состояния от него (ничего не создаёт — каталоги появляются при записи)."""
     global PROJECT_ROOT, DISPATCHER_DIR, TICKETS_DIR, STATE_FILE, PID_FILE, RUNS_DIR, RUNS_LOG, CEO_INBOX, CEO_WAKE_LOG, STOP_DIR
     PROJECT_ROOT = Path(root).expanduser().resolve()
+    P.set_root(PROJECT_ROOT)  # CP8: настройки проекта — `.claude/rpv.json` (P.setting)
     DISPATCHER_DIR = PROJECT_ROOT / ".claude" / "dispatcher"
     TICKETS_DIR = PROJECT_ROOT / ".claude" / "tickets"
     STATE_FILE = DISPATCHER_DIR / "state.json"
@@ -86,93 +87,85 @@ def ensure_project(argv, prog: str) -> bool:
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"  # имя из PATH, без зашитых путей
 PID_EXPECT_NAME = "claude"  # _pid_alive: подстрока имени образа процесса; тесты подменяют на "python"
-POLL_INTERVAL = float(P.env("DISPATCH_INTERVAL", "15"))
+POLL_INTERVAL = 15.0
 # v2 (02.10, аудит ролевой системы): всего параллельно ≤ 3 запусков и по умолчанию не больше ОДНОГО запуска на роль
 # (по всем тикетам сразу, см. _role_busy); таймаут запуска 20 мин (было 40 — фоновые помощники в `-p` висели
-# до убийства, а цена убитого запуска в учёте — $0). Предел на роль настраивается RPV_DISPATCH_ROLE_PARALLEL
-# (например engineer:3); на один тикет — по-прежнему один запуск роли.
-MAX_PARALLEL = int(P.env("DISPATCH_MAX_PARALLEL", "3"))
+# до убийства, а цена убитого запуска в учёте — $0). Проект меняет пределы в `.claude/rpv.json`: `max_parallel`,
+# `role_parallel` ({"engineer": 3}); на один тикет — по-прежнему один запуск роли.
+MAX_PARALLEL = 3
 
 
-def _parse_role_parallel(spec: str) -> dict:
-    """«engineer:3,researcher:1» → {роль: предел запусков}. Роль без записи — предел 1 (см. _role_busy); пара не вида
-    «роль:целое ≥ 1» игнорируется с предупреждением в stderr."""
+def _parse_role_parallel(spec) -> dict:
+    """`role_parallel` из `.claude/rpv.json` — {"engineer": 3, "researcher": 1} → {роль: предел запусков}. Роль без
+    записи — предел 1 (см. _role_busy); пара не вида «роль: целое ≥ 1» пропускается с предупреждением в stderr."""
+    if not isinstance(spec, dict):
+        print("[dispatch] rpv.json role_parallel — не объект {роль: предел}, пропущено", file=sys.stderr)
+        return {}
     out = {}
-    for pair in (spec or "").split(","):
-        pair = pair.strip()
-        if not pair:
-            continue
-        role, sep, num = pair.partition(":")
-        role, num = role.strip(), num.strip()
-        if sep and role and re.fullmatch(r"[0-9]+", num) and int(num) >= 1:
-            out[role] = int(num)
+    for role, num in spec.items():
+        if str(role).strip() and isinstance(num, int) and not isinstance(num, bool) and num >= 1:
+            out[str(role).strip()] = num
         else:
-            print(f"[dispatch] RPV_DISPATCH_ROLE_PARALLEL: пара {pair!r} пропущена (нужно роль:целое≥1), предел 1",
+            print(f"[dispatch] rpv.json role_parallel: {role!r}: {num!r} пропущено (нужно целое ≥ 1), предел 1",
                   file=sys.stderr)
     return out
 
 
-ROLE_PARALLEL = _parse_role_parallel(P.env("DISPATCH_ROLE_PARALLEL", ""))  # тесты подменяют на модуле
-RUN_TIMEOUT = float(P.env("DISPATCH_TIMEOUT", str(20 * 60)))
+ROLE_PARALLEL = {}  # пределы по ролям без rpv.json; тесты подменяют на модуле
+
+
+def max_parallel() -> int:
+    """Всего запусков ролей одновременно: `max_parallel` из `.claude/rpv.json`, иначе MAX_PARALLEL."""
+    v = P.setting("max_parallel")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else MAX_PARALLEL
+
+
+def role_parallel() -> dict:
+    """Пределы запусков по ролям: `role_parallel` из `.claude/rpv.json`, иначе ROLE_PARALLEL."""
+    v = P.setting("role_parallel")
+    return ROLE_PARALLEL if v is None else _parse_role_parallel(v)
+
+
+RUN_TIMEOUT = 20 * 60.0
 
 # Защита от петли (владелец 27.09, v1.1). MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — троттлинг решений (а)-(г):
 # тикет просто пропускается этот тик, без ceo-inbox (не ошибка, а пауза); ретраи правила (д) их не считают —
 # они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
 # В-173 (03.10) — на тикет, владелец 03.10 («бюджет до конца убирай») — и потолок запуска; траты только считаются
 # (runs.log, state.json).
-MAX_RUNS_PER_TICKET_HOUR = int(P.env("DISPATCH_MAX_RUNS_PER_TICKET_HOUR", "6"))
-MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
+MAX_RUNS_PER_TICKET_HOUR = 6
+MIN_GAP_S = 60.0
 # Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Числа НАЗНАЧЕНЫ CEO 03.10,
 # не измерены: MAX_SAME_STATUS_RUNS (12) — роль пишет запись, а статус (in_progress; waiting при выполненном wait_for) не
 # меняется → на MAX тикет blocked + строка CEO; MAX_IDLE_RUNS (2) — запуски без записи и без смены статуса (холостой ход) → blocked (первый
 # холостой — обычный один повтор, см. _finish_role_part).
-MAX_SAME_STATUS_RUNS = int(P.env("DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
-MAX_IDLE_RUNS = int(P.env("DISPATCH_MAX_IDLE_RUNS", "2"))
+MAX_SAME_STATUS_RUNS = 12
+MAX_IDLE_RUNS = 2
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
 # После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher, тикет
 # закрыт «не сделано» с остатком (последний возврат ревьюера) в логе — не blocked и не вопрос владельцу (TK-233, 13.10:
 # потолок ремонта 2; был 3 и needs_owner). Число НАЗНАЧЕНО владельцем 13.10, не измерено.
-MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "2"))
+MAX_REVIEW_RETURNS = 2
 # Остановка роли CEO (`tickets.py stop`): после снятия дерева процессов ждём смерти процесса не дольше STOP_VERIFY_S
 # секунд (число НАЗНАЧЕНО, не измерено: taskkill/killpg возвращаются сразу, 10 с — запас на очередь ОС); не умер —
 # строка CEO `stop-failed`, заявка остаётся до следующего тика.
-STOP_VERIFY_S = float(P.env("DISPATCH_STOP_VERIFY_S", "10"))
+STOP_VERIFY_S = 10.0
 STOP_NOTE = ("Прошлый запуск оборван CEO — проверь git status и недописанные правки, начни с новой постановки "
              "(последняя запись CEO в логе тикета).")
 
 # Модель и перерасход (владелец 27.09, v1.2 — пилот Судьи на умолчаниях CLI стоил $6,8 на Fable 5.1
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
-# В-153 (02.10): все роли — Sonnet 5.5 с усилием xhigh. Усилие переопределяемо через
-# RPV_DISPATCH_EFFORT=judge:xhigh,engineer:high (или одно значение — на все роли).
-CLAUDE_MODEL = P.env("DISPATCH_MODEL", "claude-sonnet-5-5")
+# В-153 (02.10): все роли — Sonnet 5.5.
+CLAUDE_MODEL = "claude-sonnet-5-5"
 # v2 (02.10): усилие — по виду задачи (статья «spending your effort»): исследователь и инженер — high, Судья
 # (вердикт) — xhigh; на тикете переопределяется полем `effort: low|medium|high|xhigh` в шапке
 # (`tickets.py new --effort`), см. effort_for().
 ROLE_EFFORT = {"judge": "xhigh", "engineer": "high", "researcher": "high"}
 
 
-def _parse_role_map(spec: str, base: dict) -> dict:
-    """«role:val,role:val» → правки к base; одно значение без «:» — на все роли base."""
-    out = dict(base)
-    spec = (spec or "").strip()
-    if not spec:
-        return out
-    if ":" not in spec:
-        return {r: spec for r in out}
-    for _pair in spec.split(","):
-        _role, _, _val = _pair.partition(":")
-        if _role.strip() and _val.strip():
-            out[_role.strip()] = _val.strip()
-    return out
-
-
-ROLE_EFFORT = _parse_role_map(P.env("DISPATCH_EFFORT", ""), ROLE_EFFORT)
-
 # В-153 уточнение (02.10, v1.6.1): на Sonnet 5.5 — только те, кого рационально; Судья (проверяет всех)
-# остаётся на Opus 5.5 xhigh. Переопределение: RPV_DISPATCH_ROLE_MODEL=judge:claude-opus-5-5,engineer:...
-# (или одно значение — на все роли). Роль вне словаря и executor haiku — см. launch_run.
-ROLE_MODEL = _parse_role_map(P.env("DISPATCH_ROLE_MODEL", ""),
-                             {"judge": "claude-opus-5-5", "engineer": CLAUDE_MODEL, "researcher": CLAUDE_MODEL})
+# остаётся на Opus 5.5 xhigh. Роль вне словаря и executor haiku — см. launch_run.
+ROLE_MODEL = {"judge": "claude-opus-5-5", "engineer": CLAUDE_MODEL, "researcher": CLAUDE_MODEL}
 
 
 def model_family(model_id: str) -> str:
@@ -196,14 +189,14 @@ def _expected_model_family(info: dict) -> str:
 # tickets.py new), приёмка результата — кодом (в конкретных скриптах-проверках по виду, не здесь).
 # Обход Судьи запрещён (условие г): reviewer: judge или owner: researcher — не Haiku, tickets.py new
 # отказывает раньше, чем тикет вообще появится; здесь — вторая защита на случай ручной правки шапки.
-CLAUDE_HAIKU_MODEL = P.env("DISPATCH_HAIKU_MODEL", "claude-haiku-5-5")
+CLAUDE_HAIKU_MODEL = "claude-haiku-5-5"
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
 # Сессия: каждое пробуждение роли — новая (бабочка); память между запусками — блокнот роли и лог тикета.
 # --resume — только повтор после таймаута в том же запуске (TK-056 п.3′). Предел запусков на роль — _role_busy
-# (RPV_DISPATCH_ROLE_PARALLEL, по умолчанию 1); на один тикет — один запуск роли.
+# (`role_parallel` в rpv.json, по умолчанию 1); на один тикет — один запуск роли.
 # транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
 # `usage.iterations` (см. _context_tokens_last)
 CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
@@ -326,13 +319,20 @@ _UNIT_RUNNING = ("active", "activating", "reloading", "deactivating", "refreshin
 # (WAIT_ASYNC) ssh в тике не трогает: первую проверку нового условия и сверку всех ждущих раз в WAIT_RECON_S (один ssh на
 # машину) делает поток _wait_poller, поэтому конец задания виден не позже периода сверки.
 WAIT_ASYNC = False  # True ставит main() для боевого цикла; тесты и --once — синхронный путь
-WAIT_POLL_S = float(P.env("DISPATCH_WAIT_POLL_S", "300"))
+WAIT_POLL_S = 300.0
 _WAIT_WATCH = set()  # ключи (алиас, what, арг), которые ждут тикеты — их опрашивает _wait_poller
 _WAIT_NEW = threading.Event()
-WAIT_RECON_S = float(P.env("DISPATCH_WAIT_RECON_S", "300"))  # сверка всех ждущих host:… одним ssh на машину
-WATCHED_ALIASES = {a.strip() for a in P.env("WATCHED_ALIASES", "").split(",") if a.strip()}  # машины, где сторож гоняет адаптеры заданий (RPV_JOB_OWNERS_CMD, RPV_STRAY_CMD); умолчания нет
+WAIT_RECON_S = 300.0  # сверка всех ждущих host:… одним ssh на машину
+WATCHED_ALIASES = set()  # без rpv.json машин нет; тесты подменяют на модуле
+
+
+def watched_aliases() -> set:
+    """Машины, где сторож гоняет адаптеры заданий (`job_owners_cmd`, `stray_cmd`): `watched_aliases` из
+    `.claude/rpv.json` (список ssh-алиасов), иначе WATCHED_ALIASES (пусто)."""
+    v = P.setting("watched_aliases")
+    return {str(a).strip() for a in v if str(a).strip()} if isinstance(v, list) else WATCHED_ALIASES
 # TK-217: детектор «диспетчер слеп» — недоступность машины с ожиданиями дольше порога → тревога вне этой машины (вердикт Судьи 12.10)
-BLIND = blind.Tracker(float(P.env("BLIND_ALERT_S", str(blind.ALERT_S))), float(P.env("BLIND_REPEAT_S", str(blind.REPEAT_S))))
+BLIND = blind.Tracker(blind.ALERT_S, blind.REPEAT_S)
 WAIT_RECON_BLIND_S = 30.0  # пока цель недоступна — сверка раз в 30 с (+ссылка таймаут 20 с), чтобы после возврата связи проснуться ≤ 60 с (стенд 12.10: 45 с таймаут + 60 с период дали 150 с)
 _RECON_LAST = 0.0
 
@@ -681,7 +681,7 @@ def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
 # Неизвестный вид (кто-то добавит новый append_ceo_inbox без обновления таблицы) — по умолчанию "wake",
 # безопасная сторона асимметрии.
 SIGNAL_SUMMARY_KINDS = {"model"}  # уже само по себе диагностика/лог, не требует немедленной реакции
-SUMMARY_EVERY_HOURS = float(P.env("DISPATCH_SUMMARY_HOURS", "1"))
+SUMMARY_EVERY_HOURS = 1.0
 
 
 def classify_signal(kind: str) -> str:
@@ -1040,9 +1040,9 @@ def _context_tokens_last(result: dict) -> int:
 def _role_busy(role: str) -> bool:
     """v2 (02.10): активных запусков роли по всем тикетам сразу не больше её предела (по умолчанию 1; раньше — только
     при scope="role"; аудит: одну задачу вели три сессии Исследователя, до 6 запусков параллельно). Предел на роль
-    настраивается RPV_DISPATCH_ROLE_PARALLEL; на один тикет —
+    настраивается `role_parallel` в rpv.json; на один тикет —
     по-прежнему один запуск роли (RUNNING по ключу тикета). Занята — запуск ждёт следующего тика."""
-    return sum(1 for info in RUNNING.values() if info["role"] == role) >= ROLE_PARALLEL.get(role, 1)
+    return sum(1 for info in RUNNING.values() if info["role"] == role) >= role_parallel().get(role, 1)
 
 
 # --- защита от петли и перерасхода (v1.1) --------------------------------------------------
@@ -1480,23 +1480,21 @@ def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
 
 
 def role_mcp_args(run_stem: str) -> list[str]:
-    """TK-171: MCP-серверы роли по `RPV_ROLE_MCP`. Не задана/`all` — флагов нет, роль видит всё, что видит обычный
+    """TK-171: MCP-серверы роли — `role_mcp` из `.claude/rpv.json`. Нет ключа/`all` — флагов нет, роль видит всё, что видит обычный
     `claude` (поведение до 1.8.26); `none` — `--strict-mcp-config` без конфига, ни одного сервера (TK-140: свой
-    Playwright на каждый запуск ≈ 600 МБ); список имён через запятую — временный json только с этими серверами
+    Playwright на каждый запуск ≈ 600 МБ); список имён — временный json только с этими серверами
     (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
     `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
-    mode = (P.env("ROLE_MCP", "all") or "all").strip()
-    if mode.lower() == "all":
-        return []
-    if mode.lower() == "none":
-        return ["--strict-mcp-config"]
-    names = [n.strip() for n in mode.split(",") if n.strip()]
+    mode = P.setting("role_mcp", "all")
+    if isinstance(mode, str) and mode.strip().lower() in ("all", "none"):
+        return [] if mode.strip().lower() == "all" else ["--strict-mcp-config"]
+    names = [str(n).strip() for n in (mode if isinstance(mode, list) else str(mode).split(",")) if str(n).strip()]
     servers = _read_mcp_servers(Path.home() / ".claude.json", str(PROJECT_ROOT))
     servers.update(_read_mcp_servers(PROJECT_ROOT / ".mcp.json"))
     picked = {n: servers[n] for n in names if n in servers}
     for n in names:
         if n not in picked:
-            print(f"[dispatch] RPV_ROLE_MCP: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
+            print(f"[dispatch] rpv.json role_mcp: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
                   file=sys.stderr, flush=True)
     cfg = RUNS_DIR / f"{run_stem}.mcp.json"
     cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -1513,7 +1511,7 @@ def plugin_dir_args() -> list[str]:
 
 def effort_for(role: str, tkt=None) -> str:
     """v2: усилие запуска — поле `effort:` тикета, иначе умолчание роли (ROLE_EFFORT: исследователь/инженер
-    high, Судья xhigh; env RPV_DISPATCH_EFFORT переопределяет умолчания ролей, не поле тикета)."""
+    high, Судья xhigh)."""
     if tkt is not None and getattr(tkt, "effort", ""):
         return tkt.effort
     return ROLE_EFFORT.get(role, "high")
@@ -2178,7 +2176,7 @@ def _candidate_sort_key(state: dict, tkt: T.Ticket, decision: Decision):
 
 
 # --- on_met: продолжение по коду после wait_for (TK-056 п.2; семантика — запись Судьи 05.10 23:34) -------------
-ON_MET_TIMEOUT_S = float(P.env("DISPATCH_ON_MET_TIMEOUT_S", "120"))
+ON_MET_TIMEOUT_S = 120.0
 ON_MET_MAX_CHAIN = 3          # подряд on_met без запуска роли на тикет; 4-й раз — будим владельца
 ON_MET_INTERPRETERS = ("python", "python3", "bash")
 ON_MET_DIRS = ("tools", ".claude")
@@ -2288,9 +2286,9 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
     return True
 
 
-IDLE_SLO_MIN = float(P.env("IDLE_SLO_MIN", "10"))
+IDLE_SLO_MIN = 10.0
 IDLE_GRACE_S = 600.0
-INVARIANT_GRACE_S = float(os.environ.get("RPV_DISPATCH_INVARIANT_GRACE_S") or 600.0)  # TK-076 п.6: открытый тикет без хода дольше этого — владельца будим сами
+INVARIANT_GRACE_S = 600.0  # TK-076 п.6: открытый тикет без хода дольше этого — владельца будим сами
 LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее часа: дальше пробный запуск (429 бесплатен), новая метка — новая пауза
 
 
@@ -2422,7 +2420,7 @@ def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
     notified[tkt.id] = T.now_iso(now)
 
 
-STALL_ALARM_MIN = float(P.env("STALL_ALARM_MIN", "15"))  # CP5: столько минут подряд стоит готовая работа — тревога
+STALL_ALARM_MIN = 15.0  # CP5: столько минут подряд стоит готовая работа — тревога
 STALLED = []  # заголовки тикетов, стоящих в этом тике (инвариант хода, цикл ожиданий, ожидание без условия, не взят)
 
 
@@ -2455,7 +2453,7 @@ def _stall_alarm(state: dict, now, stalled: list) -> None:
     state["stall"] = st
 
 
-REPORT_AT = P.env("REPORT_AT", "10:00")  # CP10: местное время ежедневного отчёта владельцу, ЧЧ:ММ
+REPORT_AT = "10:00"  # CP10: местное время ежедневного отчёта владельцу, ЧЧ:ММ; проект — `report_at` в rpv.json
 _REPORT_PROC = None  # процесс отчёта (report.py): короткоживущий, тик его не ждёт
 
 
@@ -2471,7 +2469,7 @@ def _daily_report(state: dict, now) -> None:
     if not last:
         state["last_report_at"] = T.now_iso(now)
         return
-    if not REPORT.due(last, now, REPORT_AT):
+    if not REPORT.due(last, now, str(P.setting("report_at", REPORT_AT))):
         return
     state["last_report_at"] = T.now_iso(now)
     cmd = [sys.executable, str(CODE_DIR / "report.py"), "--project", str(PROJECT_ROOT), "--since", last,
@@ -2577,7 +2575,7 @@ def tick(now=None) -> int:
     throttled = 0
     for path, tkt, decision in sorted(candidates, key=lambda c: _candidate_sort_key(state, c[1], c[2])):
         tid = tkt.id
-        if paused or len(RUNNING) >= MAX_PARALLEL:
+        if paused or len(RUNNING) >= max_parallel():
             break
         if tid in RUNNING or path.stem in RUNNING:
             continue  # на один тикет — один запуск роли (RUNNING по stem файла; tkt.id из шапки мог разойтись с ним)
@@ -2612,7 +2610,7 @@ def tick(now=None) -> int:
 
 USAGE = """Диспетчер задач (v2, 02.10). Запускается из папки плагина; проект — --project <путь>, иначе RPV_PROJECT /
 CLAUDE_PROJECT_DIR, иначе ближайший каталог вверх с .claude/roles. Состояние — <проект>/.claude/dispatcher/.
-  python <плагин>/.claude/dispatcher/dispatch.py --project <проект>          # цикл раз в RPV_DISPATCH_INTERVAL (15 с) — БОЕВОЙ
+  python <плагин>/.claude/dispatcher/dispatch.py --project <проект>          # цикл раз в 15 с — БОЕВОЙ
   python <плагин>/.claude/dispatcher/dispatch.py --project <проект> --once   # один тик (тоже боевой: может запустить роли)
   python <плагин>/.claude/dispatcher/dispatch.py --help                      # эта справка (ничего не запускает)
 Правила — README.md рядом с диспетчером."""
@@ -2636,7 +2634,7 @@ def main(argv=None) -> int:
         n = tick()
         print(f"[dispatch] once: launched={n} running={len(RUNNING)}")
         return 0
-    print(f"[dispatch] v2 loop every {POLL_INTERVAL}s, MAX_PARALLEL={MAX_PARALLEL}, run timeout "
+    print(f"[dispatch] v2 loop every {POLL_INTERVAL}s, MAX_PARALLEL={max_parallel()}, run timeout "
           f"{RUN_TIMEOUT / 60:.0f} min, CLAUDE_BIN={CLAUDE_BIN}")
     global WAIT_ASYNC
     WAIT_ASYNC = True

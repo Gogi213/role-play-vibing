@@ -63,7 +63,7 @@ cat > "$HOME/Library/LaunchAgents/local.rpv.$s.plist" <<EOF
     <key>PATH</key><string>$AGENT_PATH</string>
     <key>PYTHONUTF8</key><string>1</string>
     <key>PYTHONIOENCODING</key><string>utf-8</string>
-    <!-- по необходимости добавьте RPV_* из docs/configuration.md (RPV_DISPATCH_ROLE_PARALLEL, RPV_STALL_ALARM_MIN) -->
+    <!-- по необходимости добавьте RPV_TG_TOKEN и RPV_TG_CHAT; настройки проекта — в .claude/rpv.json (docs/configuration.md) -->
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

@@ -45,11 +45,12 @@ SERVICES = ("dispatch", "watch")   # порядок запуска: сначал
 
 # необязательные службы под присмотром (TK-090 Д-1): включаются настройкой — один список для start.py (выпуск версии
 # перезапускает их вместе с остальными) и supervise.py (сердцебиение и подъём)
-OPTIONAL = (("ci_watch", lambda: bool(P.env("CI_REPO"))),)          # автовлив PR
+OPTIONAL = (("ci_watch", lambda root: bool(P.setting("ci_repo", root=root))),)  # автовлив PR: ci_repo в rpv.json          # автовлив PR
 
 
-def services() -> tuple:
-    return SERVICES + tuple(n for n, on in OPTIONAL if on())
+def services(project=None) -> tuple:
+    """Службы проекта: обязательные и включённые его `.claude/rpv.json` (`project` не задан — проект `P.set_root`)."""
+    return SERVICES + tuple(n for n, on in OPTIONAL if on(project))
 LOCK_IMAGE = "py"                  # подстрока имени образа процесса, как в dispatch.acquire_instance_lock
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом
@@ -442,7 +443,7 @@ def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) ->
     state_dir.mkdir(parents=True, exist_ok=True)
     use_systemd = _launcher() == "systemd"
     procs = []
-    for name in services():
+    for name in services(project):
         with restart_lock(state_dir):
             restarted = stop_running(state_dir / f"{name}.pid", f"{name}.py",
                                      unit=unit_name(name, project) if use_systemd else None, project=project)

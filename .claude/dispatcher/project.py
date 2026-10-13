@@ -7,10 +7,12 @@
 (state.json, логи, pid, ceo-inbox, ceo-wake.log) пишется в `<проект>/.claude/dispatcher/`, тикеты читаются
 из `<проект>/.claude/tickets/`.
 
-Переменные: `RPV_<имя>`.
+Окружение — только то, что принадлежит машине (`RPV_PROJECT`, токен и чат Telegram, `RPV_PLUGIN_DIR`); настройки проекта —
+ключи файла `<проект>/.claude/rpv.json` (`setting`), остальное — константы в коде (CP8, `docs/configuration.md`).
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -36,6 +38,49 @@ def utf8_stdio() -> None:
 def env(name: str, default=None):
     """Значение `RPV_<name>`, иначе `default` (пустая строка — как «не задано»)."""
     return os.environ.get("RPV_" + name) or default
+
+
+SETTINGS_NAME = "rpv.json"
+_ROOT: Path | None = None
+_CACHE: dict = {}
+
+
+def set_root(root) -> None:
+    """Корень проекта для `setting` — ставит `dispatch.configure_project`."""
+    global _ROOT
+    _ROOT = Path(root) if root else None
+
+
+def settings(root=None) -> dict:
+    """Настройки проекта `<проект>/.claude/rpv.json` (объект JSON); проект — `root`, иначе заданный `set_root`. Нет
+    файла — {}; не читается или не объект — {} и строка в stderr один раз на версию файла (страж удаления читает его сам
+    и при порче отказывает — fail-closed). Перечитывается по времени изменения: правка CEO действует без перезапуска."""
+    root = Path(root) if root else _ROOT
+    if root is None:
+        return {}
+    path = root / ".claude" / SETTINGS_NAME
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    hit = _CACHE.get(str(path))
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict):
+            raise ValueError("корень — не объект JSON")
+    except (OSError, ValueError) as e:
+        print(f"[rpv] {path}: не прочитан ({type(e).__name__}: {e}) — настройки проекта по умолчанию", file=sys.stderr)
+        data = {}
+    _CACHE[str(path)] = (mtime, data)
+    return data
+
+
+def setting(key: str, default=None, root=None):
+    """Ключ `.claude/rpv.json`; нет ключа, `null` или пустая строка — `default`."""
+    value = (settings(root) if root else settings()).get(key)
+    return default if value is None or value == "" else value
 
 
 def project_arg(argv) -> str | None:

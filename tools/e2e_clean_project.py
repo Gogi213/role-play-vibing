@@ -78,7 +78,7 @@ def main(argv=None) -> int:
     proj = Path(tempfile.mkdtemp(prefix="rpv-e2e-")).resolve()
     py = sys.executable
     env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_")}
-    env.update(RPV_PLUGIN_DIR=str(ROOT), RPV_DISPATCH_INTERVAL="5", RPV_PROJECT=str(proj))
+    env.update(RPV_PLUGIN_DIR=str(ROOT), RPV_PROJECT=str(proj))
     marks, out = {}, {"project": str(proj)}
     t0 = time.time()
     try:

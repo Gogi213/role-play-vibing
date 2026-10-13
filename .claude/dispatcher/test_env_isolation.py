@@ -2,8 +2,8 @@
 import os
 import unittest
 
-# ключи живой установки; прочие RPV_* (RPV_CI_REPO и др.) ставят сами тесты при импорте — по ним порядок файлов не гадаем
-_LIVE = ("RPV_WATCHED_ALIASES", "RPV_JOB_STATE_CMD", "RPV_JOB_OWNERS_CMD", "RPV_STRAY_CMD", "RPV_PROJECT")
+# ключи живой установки (CP8: в окружении остались только они): проект, бот владельца, папка плагина
+_LIVE = ("RPV_PROJECT", "RPV_TG_TOKEN", "RPV_TG_CHAT", "RPV_PLUGIN_DIR")
 
 
 class EnvIsolation(unittest.TestCase):

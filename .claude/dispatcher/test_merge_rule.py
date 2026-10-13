@@ -10,11 +10,11 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
-os.environ["RPV_CI_REPO"] = "o/r"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
@@ -44,6 +44,9 @@ class MergeRuleTests(unittest.TestCase):
         C.save_state({f"{REPO}#7": {"sha": SHA, "state": "success"}})
         self._chk = M.check_pr
         M.check_pr = lambda repo, n, sha, gh=None: ""
+        settings = mock.patch.object(D.P, "settings", return_value={"ci_repo": REPO})  # .claude/rpv.json проекта
+        settings.start()
+        self.addCleanup(settings.stop)
 
     def tearDown(self):
         M.check_pr = self._chk

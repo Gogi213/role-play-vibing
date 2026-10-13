@@ -712,7 +712,7 @@ class DispatchRunTests(unittest.TestCase):
                        "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
                        "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
         D.DISPATCHER_DIR = self.dispatcher_dir  # CP5: mechanics.log и notify.log — не в каталог живого проекта
-        D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль), независимо от RPV_DISPATCH_ROLE_PARALLEL в окружении
+        D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль)
         D.TICKETS_DIR = self.tickets_dir
         D.PROJECT_ROOT = self.base
         D.STATE_FILE = self.dispatcher_dir / "state.json"
@@ -1225,7 +1225,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(second.stem, D.RUNNING, "роль освободилась — вторая задача берётся")
 
     def test_role_parallel_limit_two_allows_second_ticket_not_third(self):
-        """RPV_DISPATCH_ROLE_PARALLEL=engineer:2 (CEO 05.10): две задачи роли идут параллельно, третья ждёт;
+        """role_parallel {"engineer": 2} (CEO 05.10): две задачи роли идут параллельно, третья ждёт;
         на тот же тикет второй запуск роли не стартует никогда (даже при большом пределе)."""
         self.set_fake_bin(FAKE_BIN_SLOW_OK)
         D.MAX_PARALLEL = 5
@@ -1247,13 +1247,21 @@ class DispatchRunTests(unittest.TestCase):
         self.wait_running()
 
     def test_role_parallel_parse(self):
-        self.assertEqual(D._parse_role_parallel("engineer:3,researcher:1"), {"engineer": 3, "researcher": 1})
-        self.assertEqual(D._parse_role_parallel(""), {})
+        """CP8: `role_parallel` в .claude/rpv.json — объект {роль: целое ≥ 1}; мусор пропускается с предупреждением."""
+        self.assertEqual(D._parse_role_parallel({"engineer": 3, "researcher": 1}), {"engineer": 3, "researcher": 1})
+        self.assertEqual(D._parse_role_parallel({}), {})
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            parsed = D._parse_role_parallel("engineer:abc,judge:0,researcher,:2,engineer:2")
+            parsed = D._parse_role_parallel({"engineer": 2, "judge": 0, "researcher": "3", "": 2, "x": True})
+            self.assertEqual(D._parse_role_parallel("engineer:3"), {})
         self.assertEqual(parsed, {"engineer": 2}, "мусор игнорируется, остальное разбирается")
-        self.assertEqual(err.getvalue().count("RPV_DISPATCH_ROLE_PARALLEL"), 4, "по предупреждению на каждую пару")
+        self.assertEqual(err.getvalue().count("role_parallel"), 5, "по предупреждению на каждую пару и на не-объект")
+
+    def test_parallel_limits_come_from_project_settings(self):
+        with mock.patch.object(D.P, "settings", return_value={"max_parallel": 5, "role_parallel": {"engineer": 3}}):
+            self.assertEqual((D.max_parallel(), D.role_parallel()), (5, {"engineer": 3}))
+        with mock.patch.object(D.P, "settings", return_value={"max_parallel": 0}):
+            self.assertEqual((D.max_parallel(), D.role_parallel()), (D.MAX_PARALLEL, D.ROLE_PARALLEL))
 
     def test_each_wake_starts_new_session(self):
         """TK-232/236: каждое пробуждение — новая сессия (без --resume), даже при малом контексте прошлой."""
@@ -1402,8 +1410,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.RUNNING, {}, "без повтора")
 
     def test_default_idle_limit_is_two_retry_once_then_block(self):
-        if P.env("DISPATCH_MAX_IDLE_RUNS"):
-            self.skipTest("RPV_DISPATCH_MAX_IDLE_RUNS задан в окружении")
         self.assertEqual(D.MAX_IDLE_RUNS, 2)
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Дважды холостой",
                                 now=dt("2026-09-27T12:00:00+04:00"))
@@ -2178,8 +2184,6 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
         """v2: умолчания — исследователь/инженер high, Судья xhigh; `effort:` в шапке тикета — приоритетнее."""
-        if P.env("DISPATCH_EFFORT"):
-            self.skipTest("RPV_DISPATCH_EFFORT задан в окружении")
         self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
         cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "xhigh"),
                  ("engineer", "low", "low"), ("researcher", "medium", "medium"), ("judge", "high", "high"),
@@ -2335,9 +2339,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("status: waiting + wait_for", prompt)
 
     def test_v2_constants(self):
-        for var, expected in (("DISPATCH_MAX_PARALLEL", 3), ("DISPATCH_TIMEOUT", 1200.0)):
-            if P.env(var):
-                self.skipTest(f"{var} задан в окружении")
         self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT), (3, 1200.0))
         self.assertFalse(hasattr(D, "SESSION_SCOPE") or hasattr(D, "ROTATE_TOKENS"))
 
@@ -2417,12 +2418,9 @@ class DispatchRunTests(unittest.TestCase):
         D.MAX_SAME_STATUS_RUNS = max_runs
         self.addCleanup(lambda: setattr(D, "MAX_SAME_STATUS_RUNS", old))
 
-    def test_default_same_status_limit_is_twelve_and_env_name(self):
-        if P.env("DISPATCH_MAX_SAME_STATUS_RUNS"):
-            self.skipTest("порог тормоза цикла задан в окружении")
-        self.assertEqual(D.MAX_SAME_STATUS_RUNS, 12)
+    def test_default_same_status_limit_is_twelve(self):
+        self.assertEqual(D.MAX_SAME_STATUS_RUNS, 12)  # CP8 — константа
         source = Path(D.__file__).read_text(encoding="utf-8")
-        self.assertIn("DISPATCH_MAX_SAME_STATUS_RUNS", source)
         self.assertNotIn("SAME_STATUS_WARN", source, "предупреждение на полпути снято (TK-100 №27)")
 
     def test_silent_until_max_then_block_with_exactly_one_line(self):
@@ -2549,11 +2547,8 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
         return calls
 
-    def test_default_review_returns_limit_is_two_with_env_name(self):
-        if P.env("DISPATCH_MAX_REVIEW_RETURNS"):
-            self.skipTest("порог задан в окружении")
-        self.assertEqual(D.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2
-        self.assertIn("DISPATCH_MAX_REVIEW_RETURNS", Path(D.__file__).read_text(encoding="utf-8"))
+    def test_default_review_returns_limit_is_two(self):
+        self.assertEqual(D.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2; CP8 — константа
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
         path = self.review_setup()
@@ -3191,7 +3186,7 @@ def iso(d):
 
 
 class RoleMcpTests(unittest.TestCase):
-    """TK-171: RPV_ROLE_MCP — all (умолчание, без флагов) | none | список имён."""
+    """TK-171: `role_mcp` в .claude/rpv.json — all (умолчание, без флагов) | none | список имён."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -3212,10 +3207,7 @@ class RoleMcpTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def _args(self, mode):
-        env = {"RPV_ROLE_MCP": mode} if mode is not None else {}
-        with mock.patch.dict(os.environ, env):
-            if mode is None:
-                os.environ.pop("RPV_ROLE_MCP", None)
+        with mock.patch.object(D.P, "settings", return_value={} if mode is None else {"role_mcp": mode}):
             return D.role_mcp_args("run1")
 
     def test_default_and_all_have_no_flags(self):
@@ -3226,10 +3218,11 @@ class RoleMcpTests(unittest.TestCase):
         self.assertEqual(self._args("none"), ["--strict-mcp-config"])
 
     def test_list_builds_config_from_user_project_and_mcp_json(self):
-        args = self._args("figma, xcodebuildmcp,local,ghost")
-        self.assertEqual(args[:2], ["--strict-mcp-config", "--mcp-config"])
-        cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
-        self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # playwright не просили, ghost нет
+        for mode in ("figma, xcodebuildmcp,local,ghost", ["figma", "xcodebuildmcp", "local", "ghost"]):
+            args = self._args(mode)
+            self.assertEqual(args[:2], ["--strict-mcp-config", "--mcp-config"])
+            cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
+            self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # playwright не просили, ghost нет
 
 class PluginDirTests(unittest.TestCase):
     """CP11: RPV_PLUGIN_DIR → `--plugin-dir` у запуска роли; не задана — флага нет."""
@@ -3432,32 +3425,15 @@ class MoneyControlsTests(unittest.TestCase):
     # --- п.1: модель/усилие ---
 
     def test_role_effort_mapping(self):
-        # v2 (02.10): исследователь/инженер — high, Судья — xhigh (тест в окружении без RPV_DISPATCH_EFFORT)
+        # v2 (02.10): исследователь/инженер — high, Судья — xhigh
         if not P.env("DISPATCH_EFFORT"):
             self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
 
-    def test_role_effort_env_override(self):
-        base = {"judge": "xhigh", "engineer": "xhigh", "researcher": "xhigh"}
-        self.assertEqual(D._parse_role_map("judge:xhigh,engineer:high", base),
-                         {"judge": "xhigh", "engineer": "high", "researcher": "xhigh"})
-        self.assertEqual(D._parse_role_map("high", base),
-                         {"judge": "high", "engineer": "high", "researcher": "high"})
-        self.assertEqual(D._parse_role_map("", base), base)
-        self.assertEqual(base["engineer"], "xhigh")  # исходный словарь не меняется
-
-    def test_role_model_defaults_and_env_override(self):
-        # v1.6.1: Судья — Opus 5.5 (проверка всех не ослабляется), остальные — CLAUDE_MODEL
-        if not P.env("DISPATCH_ROLE_MODEL"):
-            self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
-                                            "researcher": D.CLAUDE_MODEL})
-        base = {"judge": "claude-opus-5-5", "engineer": "claude-sonnet-5-5", "researcher": "claude-sonnet-5-5"}
-        self.assertEqual(D._parse_role_map("judge:claude-opus-5-5,engineer:claude-opus-5-5", base),
-                         {"judge": "claude-opus-5-5", "engineer": "claude-opus-5-5",
-                          "researcher": "claude-sonnet-5-5"})
-        self.assertEqual(D._parse_role_map("claude-sonnet-5-5", base),
-                         {"judge": "claude-sonnet-5-5", "engineer": "claude-sonnet-5-5",
-                          "researcher": "claude-sonnet-5-5"})
-        self.assertEqual(base["judge"], "claude-opus-5-5")  # исходный словарь не меняется
+    def test_role_effort_and_model_defaults(self):
+        # v1.6.1: Судья — Opus 5.5 xhigh (проверка всех не ослабляется), остальные — CLAUDE_MODEL high; CP8 — константы
+        self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
+                                        "researcher": D.CLAUDE_MODEL})
+        self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
 
     def test_expected_model_family_follows_role_model(self):
         orig_role_model = D.ROLE_MODEL
@@ -4181,7 +4157,7 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
 class ProjectRootTests(unittest.TestCase):
     """Запуск из папки плагина: корень — аргумент/окружение/текущий каталог, не расположение файла."""
 
-    ENV_KEYS = ("RPV_PROJECT", "CLAUDE_PROJECT_DIR", "RPV_DISPATCH_MAX_PARALLEL", "ALPHA_DISPATCH_MAX_PARALLEL")
+    ENV_KEYS = ("RPV_PROJECT", "CLAUDE_PROJECT_DIR", "RPV_TG_CHAT", "ALPHA_TG_CHAT")
 
     def setUp(self):
         self.saved = {k: os.environ.get(k) for k in self.ENV_KEYS}
@@ -4284,11 +4260,27 @@ class ProjectRootTests(unittest.TestCase):
         self.assertEqual(list(empty.iterdir()), [])
 
     def test_env_reads_rpv_only_else_default(self):
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
-        os.environ["ALPHA_DISPATCH_MAX_PARALLEL"] = "5"
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
-        os.environ["RPV_DISPATCH_MAX_PARALLEL"] = "7"
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "7")
+        self.assertEqual(P.env("TG_CHAT", "-"), "-")
+        os.environ["ALPHA_TG_CHAT"] = "5"
+        self.assertEqual(P.env("TG_CHAT", "-"), "-")
+        os.environ["RPV_TG_CHAT"] = "7"
+        self.assertEqual(P.env("TG_CHAT", "-"), "7")
+
+    def test_settings_file_of_project(self):
+        """CP8: настройки проекта — `.claude/rpv.json`; правка видна без перезапуска, битый файл — умолчания."""
+        import time
+        root = self.make_project(self.proj / "s")
+        self.assertEqual((P.settings(root), P.setting("report_at", "10:00", root=root)), ({}, "10:00"))
+        cfg = root / ".claude" / "rpv.json"
+        cfg.write_text('{"report_at": "09:30", "ci_repo": ""}', encoding="utf-8")
+        self.assertEqual((P.setting("report_at", "10:00", root=root), P.setting("ci_repo", "-", root=root)), ("09:30", "-"))
+        time.sleep(0.05)
+        cfg.write_text('{"report_at": "08:00"}', encoding="utf-8")
+        os.utime(cfg, ns=(time.time_ns(), time.time_ns() + 10**9))
+        self.assertEqual(P.setting("report_at", "10:00", root=root), "08:00")
+        cfg.write_text("[1, 2]", encoding="utf-8")
+        os.utime(cfg, ns=(time.time_ns(), time.time_ns() + 2 * 10**9))
+        self.assertEqual(P.settings(root), {})
 
     def test_configure_project_moves_all_state_paths_into_project(self):
         import watch as W

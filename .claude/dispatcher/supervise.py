@@ -24,7 +24,7 @@ import project as P  # noqa: E402
 import start as S  # noqa: E402
 
 CODE_DIR = Path(__file__).resolve().parent
-STALE_S = float(os.environ.get("RPV_SUPERVISE_STALE_S", "600"))
+STALE_S = 600.0
 PERIOD_MIN = 5
 # служба -> (файл сердцебиения, поле времени)
 BEATS = {"dispatch": ("state.json", "last_tick"), "watch": ("watch-heartbeat.json", "ts"),
@@ -82,7 +82,7 @@ def run_once(project: Path, now: float | None = None, stop=None, spawn=None) -> 
     load_env(state_dir)
     use_systemd = real and S._launcher() == "systemd"
     out = {}
-    beats = {n: BEATS[n] for n in S.services() if n in BEATS}  # тот же список, что у start.py
+    beats = {n: BEATS[n] for n in S.services(project) if n in BEATS}  # тот же список, что у start.py
     for name, (beat, field) in beats.items():
         age = heartbeat_age(state_dir / beat, field, now)
         alive = S.is_ours_state(S.read_pid(state_dir / f"{name}.pid"), f"{name}.py")

@@ -2,10 +2,10 @@
 
 Вызывается PreToolUse-хуком плагина (`hooks/hooks.json`: Bash, PowerShell, Write, Edit, MultiEdit,
 NotebookEdit): точка входа `main()` читает JSON события со stdin, `check(cmd, cwd)` → причина отказа или None. Корень проекта — `CLAUDE_PROJECT_DIR` (иначе cwd); нет `.claude/roles` — молчит.
-Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `RPV_GUARD_REMOTE_ROOTS`;
-оперативная стадия — `RPV_GUARD_STAGE`. Никогда: хосты из `RPV_GUARD_FORBIDDEN_HOSTS` и защищённые пути проекта — шаблоны
-из `<проект>/.claude/rpv.json`, ключ `protected_paths` (что в них вписать, решает проект; плагин своих правил про чужие
-каталоги не несёт). Цель, которую нельзя проверить (переменная без буквального префикса, список из конвейера/xargs, путь
+Настройки — файл проекта `<проект>/.claude/rpv.json` (что в них вписать, решает проект; плагин своих правил про чужие
+каталоги не несёт). Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги
+`guard_remote_roots`; оперативная стадия — `guard_stage`. Никогда: хосты `guard_forbidden_hosts` и защищённые пути
+`protected_paths`. Цель, которую нельзя проверить (переменная без буквального префикса, список из конвейера/xargs, путь
 из кода), — отказ: переписать явным путём.
 
 Разбор (02.10, аудит: регэксп по всему тексту давал ~52 ложных отказа за 5 дней — на переменную `rd`, слово «rm» в
@@ -19,7 +19,7 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 `git clean -f…`, `git push --force/-f/--force-with-lease` — отказ «только через CEO» в любом каталоге. Исключений по имени
 скрипта нет: строка в тексте команды проверку не отключает.
 `git reset --hard` и `git clean -f…` разрешены в каталоге вне основного дерева, заданном явным путём (`cd <путь>`,
-`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `<подкаталог из RPV_GUARD_REMOTE_ROOTS>`, `/tmp/<подкаталог>`,
+`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `<подкаталог из guard_remote_roots>`, `/tmp/<подкаталог>`,
 связанные worktree внутри папки проекта (`.git` — файл); неизвестная переменная в `cd $W`,
 `--git-dir`/`--work-tree`/GIT_DIR, основное дерево и вложенные репозитории — отказ; `git push --force` —
 всегда отказ; перезапись/усечение (не удаление) разрешены в автопамяти `~/.claude/projects/<проект>/memory/`.
@@ -61,10 +61,6 @@ def _env(name, default=""):
     return os.environ.get("RPV_" + name) or default
 
 
-def _env_list(name):
-    return tuple(x.strip().lower() for x in _env(name).split(",") if x.strip())
-
-
 def norm(p):
     return p.strip().strip("'\"").replace("\\", "/").lower()
 
@@ -82,63 +78,90 @@ def memory_roots(project_dir):
     return (f".claude/projects/{enc}/memory/",)
 
 
+def _load_rpv(project_dir):
+    """`<проект>/.claude/rpv.json` → (объект, ошибка). Нет файла — ({}, None)."""
+    try:
+        with open(os.path.join(str(project_dir), ".claude", "rpv.json"), encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}, None
+    except (OSError, ValueError) as e:                      # ValueError — и JSONDecodeError, и UnicodeDecodeError
+        return {}, f"файл не прочитан: {type(e).__name__}: {e}"[:160]
+    return (data, None) if isinstance(data, dict) else ({}, "корень файла — не объект JSON")
+
+
+def _str_list(data, key):
+    """Ключ — список непустых строк (нет ключа — пусто) → (кортеж, ошибка)."""
+    raw = data.get(key)
+    if raw is None:
+        return (), None
+    if not isinstance(raw, list) or not all(isinstance(x, str) and norm(x).rstrip("/") for x in raw):
+        return (), f"{key} — не список непустых строк"
+    return tuple(raw), None
+
+
 def load_protected(project_dir):
     """Защищённые пути проекта: `<проект>/.claude/rpv.json`, ключ `protected_paths` — список шаблонов путей (glob) →
     (шаблоны, ошибка). Нет файла или ключа — защиты нет. Файл есть, но не читается, не JSON или ключ не список непустых
     строк — ошибка: страж отказывает любому удалению и перезаписи (fail-closed), пока файл не исправят. Шаблон приводится
     к виду путей стража (строчные, `/`, без хвостового `/`); `..` в шаблоне недопустимо."""
-    try:
-        with open(os.path.join(str(project_dir), ".claude", "rpv.json"), encoding="utf-8-sig") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return (), None
-    except (OSError, ValueError) as e:                      # ValueError — и JSONDecodeError, и UnicodeDecodeError
-        return (), f"файл не прочитан: {type(e).__name__}: {e}"[:160]
-    raw = data.get("protected_paths") if isinstance(data, dict) else None
-    if raw is None:
-        return (), (None if isinstance(data, dict) else "корень файла — не объект JSON")
-    if not isinstance(raw, list) or not all(isinstance(x, str) and norm(x).rstrip("/") for x in raw):
-        return (), "protected_paths — не список непустых строк"
+    data, err = _load_rpv(project_dir)
+    if err:
+        return (), err
+    raw, err = _str_list(data, "protected_paths")
+    if err:
+        return (), err
     out = tuple(norm(x).rstrip("/") for x in raw)
     bad = [x for x in out if ".." in x.split("/")]
     return ((), f"шаблон «{bad[0]}» недопустим (`..`)") if bad else (out, None)
 
 
+def machine_rules(data):
+    """Удалённые машины из настроек проекта (объект rpv.json) → (корни, стадия, закрытые хосты как regex, ошибка).
+    `guard_remote_roots` — каталоги, где на любых удалённых машинах можно удалять (нет ключа — нигде); `guard_stage` —
+    оперативная стадия (целиком); `guard_forbidden_hosts` — хосты/IP, где нельзя ничего. Неверный тип — ошибка
+    (fail-closed, как у `protected_paths`)."""
+    roots, e1 = _str_list(data, "guard_remote_roots")
+    hosts, e2 = _str_list(data, "guard_forbidden_hosts")
+    stage = data.get("guard_stage") or ""
+    e3 = None if isinstance(stage, str) else "guard_stage — не строка"
+    hosts = tuple(h.strip().lower() for h in hosts if h.strip())
+    closed = re.compile("|".join(re.escape(h) for h in hosts), re.I) if hosts else None
+    return (tuple(r.strip().lower() for r in roots if r.strip()), (stage if not e3 else "").strip().lower().rstrip("/"),
+            closed, e1 or e2 or e3)
+
+
 def configure(project_dir):
-    global LOCAL_ROOTS, WRITE_HOME_ROOTS, PROJECT_DIR, PROTECTED, PROTECTED_ERROR
+    global LOCAL_ROOTS, WRITE_HOME_ROOTS, PROJECT_DIR, PROTECTED, PROTECTED_ERROR, REMOTE_ROOTS, STAGE, CLOSED_RE
     LOCAL_ROOTS = project_roots(project_dir)
     WRITE_HOME_ROOTS = memory_roots(project_dir)
     PROJECT_DIR = str(project_dir)
     PROTECTED, PROTECTED_ERROR = load_protected(project_dir)
+    REMOTE_ROOTS, STAGE, CLOSED_RE, err = machine_rules(_load_rpv(project_dir)[0])
+    PROTECTED_ERROR = PROTECTED_ERROR or err
 
 
 _PROJECT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-PROJECT_DIR = str(_PROJECT)                                  # тикеты запуска — `<проект>/.claude/tickets/` (согласие на публикацию)
-LOCAL_ROOTS = project_roots(_PROJECT)
-WRITE_HOME_ROOTS = memory_roots(_PROJECT)
 SCRATCH = "/appdata/local/temp/claude/"
-# Удалённые машины и закрытые хосты — только из окружения, без умолчаний (через запятую, примеры в README плагина):
-# RPV_GUARD_REMOTE_ROOTS — каталоги, где на любых удалённых машинах можно удалять (нет переменной — нигде);
-# RPV_GUARD_STAGE — оперативная стадия (целиком); RPV_GUARD_FORBIDDEN_HOSTS — хосты/IP, где нельзя вообще.
-REMOTE_ROOTS = _env_list("GUARD_REMOTE_ROOTS")
-STAGE = _env("GUARD_STAGE").strip().lower().rstrip("/")
-_CLOSED = _env_list("GUARD_FORBIDDEN_HOSTS")
-CLOSED_RE = re.compile("|".join(re.escape(h) for h in _CLOSED), re.I) if _CLOSED else None
-PROTECTED, PROTECTED_ERROR = load_protected(_PROJECT)       # проект сам решает, что защищено; нет настройки — защиты нет
+# пути проекта, защищённые пути и удалённые машины — из `<проект>/.claude/rpv.json`; проект сам решает, что в них
+# вписать; нет настройки — защиты и удалённых корней нет. PROJECT_DIR — тикеты запуска (согласие на публикацию).
+LOCAL_ROOTS = WRITE_HOME_ROOTS = REMOTE_ROOTS = PROTECTED = ()
+PROJECT_DIR, STAGE, CLOSED_RE, PROTECTED_ERROR = str(_PROJECT), "", None, None
+configure(_PROJECT)
 REASON = ("Удаление запрещено вне своей папки. Можно только явным путём внутри папки проекта или scratchpad сессии; на "
-          "удалённых машинах — только каталоги из RPV_GUARD_REMOTE_ROOTS. Закрытые хосты (RPV_GUARD_FORBIDDEN_HOSTS) и "
-          "защищённые пути проекта (.claude/rpv.json, protected_paths) — никогда (только владелец через CEO). "
+          "удалённых машинах — только каталоги guard_remote_roots. Закрытые хосты (guard_forbidden_hosts) и "
+          "защищённые пути (protected_paths) из .claude/rpv.json — никогда (только владелец через CEO). "
           "Непроверяемая цель: {t}")
 REASON_OVERWRITE = ("Перезапись/усечение файла (`> файл`, truncate, dd of=, cp/mv поверх существующего) вне своей папки "
                     "запрещены, как и удаление: внутри папки проекта или scratchpad сессии; на удалённых машинах — "
-                    "только каталоги из RPV_GUARD_REMOTE_ROOTS; автопамять проекта (~/.claude/projects/<проект>/memory/) "
+                    "только каталоги guard_remote_roots (.claude/rpv.json); автопамять проекта (~/.claude/projects/<проект>/memory/) "
                     "— можно. Новый локальный файл вне папки можно создать (его ещё нет). Закрытые хосты и защищённые "
                     "пути проекта — никогда. Цель: {t}")
 REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO итогом "
                        "шага (`tickets.py result <ID> blocked --why \"...\"`). `git reset --hard`, "
                        "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
                        "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
-                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из RPV_GUARD_REMOTE_ROOTS, "
+                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни guard_remote_roots, "
                        "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
                        "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
 REASON_PUBLISH = ("Публикация ({t}) запуску роли закрыта без согласия владельца по тикету {who}: выпуск, слияние PR, пуш в "
@@ -188,7 +211,7 @@ def literal_part(p):
 
 
 def closed_host(text):
-    """В тексте (путь, имя хоста, аргументы ssh) назван закрытый хост из `RPV_GUARD_FORBIDDEN_HOSTS`."""
+    """В тексте (путь, имя хоста, аргументы ssh) назван закрытый хост из `guard_forbidden_hosts`."""
     return bool(CLOSED_RE and CLOSED_RE.search(text or ""))
 
 
@@ -334,7 +357,7 @@ def linked_worktree(p):
 def scratch_repo_ok(d, ctx):
     """`git reset --hard` / `git clean -f` не трогают основное дерево: каталог репозитория известен явным путём (не
     переменная, не относительный без cwd) и лежит вне папки проекта — scratch (scratchpad сессии, свои удалённые корни
-    вроде <подкаталог из RPV_GUARD_REMOTE_ROOTS>), `/tmp/<подкаталог>` либо связанный worktree внутри папки проекта
+    вроде <подкаталог из guard_remote_roots>), `/tmp/<подкаталог>` либо связанный worktree внутри папки проекта
     (`.git` — файл). Защищённый путь проекта (или настройка защиты не прочитана) — нет."""
     p = norm(d) if d else ""
     if not p or "$" in p or ".." in p.split("/") or closed_host(p):
@@ -712,7 +735,7 @@ class Ctx:
         return Ctx(self.cwd, self.remote, self.funcs, self.host, self.via)
 
 
-CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (хост из RPV_GUARD_FORBIDDEN_HOSTS или не определён)
+CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (хост из `guard_forbidden_hosts` или не определён)
 
 
 def host_of(arg):
@@ -1560,7 +1583,7 @@ def ssh_scan(args, ctx, vars_, stdin, depth):
         for text in stdin:
             found.extend(scan_text(text, remote, (), depth + 1))
     if bad and any(not isinstance(x[0], Publish) for x in found):     # публикация на закрытом узле — не удаление: решает check
-        yield (f"<ssh {host}: удаление на закрытом хосте (RPV_GUARD_FORBIDDEN_HOSTS) или хост не определён>", ctx.copy())
+        yield (f"<ssh {host}: удаление на закрытом хосте (`guard_forbidden_hosts`) или хост не определён>", ctx.copy())
     else:
         yield from found
 

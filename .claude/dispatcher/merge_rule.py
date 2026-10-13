@@ -74,7 +74,7 @@ def _note(tkt, text: str, wake_owner: bool = False) -> None:
 def _note_not_found(repo: str, number: int) -> None:
     """404 в `merged:`: запись в лог тикета, который ждёт этот PR, — проснувшийся владелец видит причину в тикете, а не
     только в журнале диспетчера. Повторный опрос того же ожидания вторую запись не пишет."""
-    text = f"PR #{number} не найден в {repo} — ожидание merged: снято; проверь номер PR и репозиторий (RPV_CI_REPO)."
+    text = f"PR #{number} не найден в {repo} — ожидание merged: снято; проверь номер PR и репозиторий (ci_repo в .claude/rpv.json)."
     want = f"merged:{repo}#{number}"
     for p in T.list_tickets(D.TICKETS_DIR):
         try:
@@ -113,7 +113,7 @@ def check_pr(repo: str, number: int, sha: str, gh=C.gh_api) -> str:
     try:
         head = gh(f"repos/{repo}/pulls/{number}")["head"]["sha"]
     except Exception as e:
-        return f"PR #{number} не найден в {repo} ({e}) — проверь RPV_CI_REPO/--repo"
+        return f"PR #{number} не найден в {repo} ({e}) — проверь ci_repo в .claude/rpv.json/--repo"
     if not head.startswith(sha.lower()):
         return f"голова PR #{number} в {repo} — {head[:7]}, а вердикт на {sha[:7]}: сверь --sha"
     return ""

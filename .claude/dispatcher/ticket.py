@@ -68,7 +68,7 @@ WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<ssh-алиас>:<пу
                     "done>=total; …/<unit>.rc — файл итога tools/jobrun.sh; иначе файл существует) | host:<ssh-алиас>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
                     "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<ssh-алиас>:<id задания> (готово при done; "
-                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD) | "
+                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер job_state_cmd в rpv.json) | "
                     "at:<время ISO> (готово по наступлении времени; суточное наблюдение — сторож жизни его не трогает)")
 _HOST_ALIAS_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")  # не с дефиса: ssh принял бы имя за свою опцию
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
@@ -168,7 +168,7 @@ def parse_wait_for(spec: str):
     if spec.startswith("at:"):  # ожидание по времени: без метки-файла и задания планировщика (TK-092)
         at = parse_at(spec[len("at:"):])
         return ("at", at) if at else None
-    if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, RPV_JOB_STATE_CMD)
+    if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, job_state_cmd в rpv.json)
         alias, sep, jid = spec[len("job:"):].partition(":")
         jid = jid.strip()
         return ("job", alias, jid) if host_alias_ok(alias) and sep and _JOB_ID_RE.match(jid) else None
@@ -413,7 +413,7 @@ def atomic_write_text(path, text: str, retries: int = 8) -> None:
 
 
 # --- блокировка на тикет (аудит 03.10): диспетчер, tickets.py и роли пишут один файл из разных процессов ------------
-LOCK_TIMEOUT_S = float(P.env("TICKET_LOCK_TIMEOUT", "120"))
+LOCK_TIMEOUT_S = 120.0
 _LOCKS_DIR = Path(tempfile.gettempdir()) / "rpv-ticket-locks"  # вне репозитория: тикетный каталог не засоряется
 _thread_locks: dict = {}
 _thread_locks_guard = threading.Lock()
@@ -545,9 +545,7 @@ def _compact_log_locked(path, keep, limit_bytes) -> int:
 
 
 def _haiku_digest(old_part: str):
-    """TK-087 п.2: конспект (RPV_HAIKU_COMPACT=0 — выкл) переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
-    if os.environ.get("RPV_HAIKU_COMPACT") == "0":
-        return None
+    """TK-087 п.2: конспект переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
     try:
         import haiku_aux
         return haiku_aux.compact(old_part)

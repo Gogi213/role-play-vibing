@@ -46,7 +46,7 @@ Type=oneshot
 RemainAfterExit=yes
 Environment="PATH=$UNIT_PATH"
 # по необходимости - RPV_* из docs/configuration.md, start.py перенесёт их в службы:
-#Environment="RPV_DISPATCH_ROLE_PARALLEL=engineer:3"
+#Environment="RPV_TG_CHAT=<чат владельца>"
 ExecStart="$PY" "$PLUGIN/.claude/dispatcher/start.py" --project "$PROJECT"
 
 [Install]

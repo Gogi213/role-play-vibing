@@ -41,8 +41,7 @@ ROLES_DIR = os.path.join(ROOT, ".claude", "roles")
 if not os.path.isdir(ROLES_DIR):  # в проекте нет команды ролей — хуки молчат
     sys.exit(0)
 TICKETS_DIR = os.path.join(ROOT, ".claude", "tickets")
-# каталог меток сессий и состояния хуков; переопределение — `RPV_STATE_DIR` (для проверок хука)
-STATE_DIR = env("STATE_DIR") or os.path.join(ROLES_DIR, ".state")
+STATE_DIR = os.path.join(ROLES_DIR, ".state")  # метки сессий и состояние хуков
 
 LIMIT = 8000          # знаков вставки; больше — Claude Code покажет роли только превью ~2 КБ
 NOTEBOOK_TAIL = 4000  # знаков конца блокнота роли
@@ -96,7 +95,7 @@ def env_role():
 
 def ticket_id():
     """Id тикета запуска диспетчера (`RPV_TICKET`), если передан и безопасен для имени файла."""
-    t = env("TICKET") or env("TICKET_ID")
+    t = env("TICKET")
     return t if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", t) else None
 
 

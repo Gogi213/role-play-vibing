@@ -20,7 +20,7 @@ import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
 
-INTERVAL_S = min(60.0, float(P.env("CI_WATCH_INTERVAL_S", "60")))
+INTERVAL_S = 60.0
 RED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale")
 GREEN = ("success", "skipped", "neutral")
 _TK_RE = re.compile(r"\bTK-?(\d+)\b", re.I)
@@ -190,9 +190,9 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not D.ensure_project(argv, "ci_watch"):
         return 2
-    repo = next((a.split("=", 1)[1] for a in argv if a.startswith("--repo=")), None) or P.env("CI_REPO", "")
+    repo = next((a.split("=", 1)[1] for a in argv if a.startswith("--repo=")), None) or P.setting("ci_repo", "")
     if not repo:
-        print("ci_watch: нужен --repo=<владелец/репо> или RPV_CI_REPO", file=sys.stderr)
+        print("ci_watch: нужен --repo=<владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 2
     if "--once" not in argv:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра supervise (TK-090 Д-1)
         lock = D.DISPATCHER_DIR / "ci_watch.pid"
