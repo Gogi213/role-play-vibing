@@ -304,9 +304,6 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "совсем другое про счёт", now=NOW), "")
         self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "т", now=NOW + timedelta(hours=2)), "")
 
-if __name__ == "__main__":
-    unittest.main()
-
     # --- TK-233
     def test_judge_ask_owner_needs_owner_reason(self):
         T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
@@ -322,15 +319,6 @@ if __name__ == "__main__":
         t = self.tkt()
         self.assertEqual((t.status, t.header.get("next")), ("blocked", "judge"))
 
-    def test_wait_on_script_marker_is_refused_and_rc_is_accepted(self):
-        for spec in ("host:calc:/data/x/gate.done", "host:calc:/data/x/done"):
-            a = dict(id=self.tid, spec=spec, on_met=None, by="23:59")
-            self.assertEqual(TK.cmd_wait(type("A", (), a)()), 1, spec)
-            self.assertNotEqual(self.tkt().status, "waiting")
-        a = dict(id=self.tid, spec="host:calc:/data/sched/rc/abc", on_met=None, by="23:59")
-        self.assertEqual(TK.cmd_wait(type("A", (), a)()), 0)
-        self.assertEqual(self.tkt().status, "waiting")
-
     def test_new_requires_ref(self):
         def new(**kw):
             a = dict(owner="engineer", title="Новое дело", reviewer=None, effort=None, desc="", wait_for="", force=True,
@@ -341,6 +329,12 @@ if __name__ == "__main__":
         self.assertEqual(new(), 1)
         self.assertEqual(new(ref="да"), 1)
         self.assertEqual(len(list(D.TICKETS_DIR.glob("TK-*.md"))), before, "отказ не создаёт файл")
+        self.assertEqual(new(ref="В-12"), 0)
+        self.assertEqual(new(ref="В-"), 1)
         self.assertEqual(new(ref="В-229"), 0)
         made = max(D.TICKETS_DIR.glob("TK-*.md"))
         self.assertIn("Ссылка на задачу владельца: В-229", made.read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()

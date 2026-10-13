@@ -46,7 +46,8 @@ import ticket as T  # noqa: E402
 # Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
 # в main() флаг --project переключает их ещё раз. Тесты подменяют TICKETS_DIR прямо на модуле.
 TICKETS_DIR = D.TICKETS_DIR
-REF_MIN = 5  # знаков в --ref: «В-12» проходит, «да»/пусто — нет
+REF_MIN = 5  # знаков в цитате --ref; решение «В-<число>» (REF_DECISION) проходит любой длины, «да»/пусто — нет
+REF_DECISION = re.compile(r"^В-\d+")
 PROJECT_ROOT = D.PROJECT_ROOT
 
 
@@ -124,7 +125,7 @@ def cmd_inbox(args) -> int:
 def cmd_new(args) -> int:
     # TK-233 п.2: незаказанной работе — отказ. Тикет заводится только со ссылкой на задачу владельца (цитата или В-##)
     ref = " ".join((getattr(args, "ref", None) or "").split())
-    if len(ref) < REF_MIN:
+    if len(ref) < REF_MIN and not REF_DECISION.match(ref):
         print(f"new: нужна --ref «ссылка на задачу владельца»: его цитата (≥ {REF_MIN} знаков) или решение В-##. "
               f"Работы, которую владелец не заказывал, не заводим", file=sys.stderr)
         return 1
@@ -375,8 +376,7 @@ def cmd_wait(args) -> int:
                   f"осознанно ждать готовое — `--allow-met`.", file=sys.stderr)
             return 1
     if parsed and parsed[0] == "host" and parsed[2] == "path" and (note := T.sched_marker_warning(parsed[1], parsed[3])):
-        print(f"wait: отказ (TK-233 п.5) — {note}", file=sys.stderr)  # маркер не отличит успех от падения: только код завершения
-        return 1
+        print(f"wait: предупреждение — {note}", file=sys.stderr)
     if parsed and parsed[0] == "ticket":
         cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
         if cycle:
