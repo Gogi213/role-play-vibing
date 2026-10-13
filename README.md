@@ -196,7 +196,7 @@ python -m pytest .claude -q
 
 ```
 commands/            слэш-команды плагина
-agents/              помощники ролей: coder, reader
+agents/              помощники ролей: coder, reader; помощники CEO: secretary, inbox, reporter
 hooks/               hooks.json и запускатель хуков
 templates/roles/     уставы ролей — копируются в проект командой /rpv-init
 templates/brief/     шаблон задачи по расписанию «ежедневный отчёт владельцу» (копировать в `.claude/brief/`; предпочтения — только чтение, память — `state/`)
