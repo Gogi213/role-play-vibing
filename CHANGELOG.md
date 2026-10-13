@@ -2,6 +2,21 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.17.0 — 2026-10-14
+
+### Удалено (CP6, шина)
+- Шина событий целиком: `.claude/bus/` (шина, сторож машины, клиент, юниты, маршруты), `bus_link.py`, `docs/bus.md`, все `RPV_BUS_*`, `RPV_CEO_WAKE`, события шины в `tickets.py`/`ci_watch.py`/`merge_rule.py`, строка «шина» в `/rpv-doctor`.
+- Механика под шину: события закрытия `wait_for`, `watch.list` и `RPV_PROGRESS_DIR`, тревога `recon-miss`, `ssh-calls.log`, диагноз упавшего юнита Haiku по событию.
+- Переменные машин: `RPV_CALC_HOST`, `RPV_VPS_HOST`, `RPV_DECK_HOST`, `RPV_DECK_KEY`, `RPV_DECK_KNOWN_HOSTS`, `RPV_DISPATCH_DECK_CACHE_S`.
+- Сторож «сервер простаивает под замком benchrun.sh» (`SERVER_*`, `RPV_WATCH_SERVER_*`).
+
+### Изменено
+- Сигналы CEO — только `ceo-inbox.md` + строка в `ceo-wake.log`; `tickets.py inbox [--peek]` печатает новые строки `ceo-inbox.md`.
+- `host:<алиас>` и `job:<алиас>` — любое ssh-имя из `~/.ssh/config` (несовместимо: `RPV_<ALIAS>_HOST=user@host` больше не читается — заведите `Host <алиас>` в ssh-конфиге).
+- `jobrun.sh` переехал в `tools/`, пишет итог задания в `<RPV_RUNS_DIR>/<unit>.rc` (ExecStopPost или trap без systemd); тикет ждёт его формой `host:<алиас>:<путь>`, диспетчер кладёт текст итога в лог тикета, провал — «НЕ успешно». Проверка на настоящем systemd — задача CI `jobrun-systemd`.
+- Счёт исходов ожиданий — `jobs.jsonl` (`met`/`overdue`) для ежедневного отчёта.
+- Тесты не ходят в настоящий ssh (`conftest.py`).
+
 ## 1.16.0 — 2026-10-14
 
 ### Изменено (CP5, одна тревога владельцу)
