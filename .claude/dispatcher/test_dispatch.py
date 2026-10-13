@@ -709,9 +709,10 @@ class DispatchRunTests(unittest.TestCase):
         self.dispatcher_dir.mkdir(parents=True)
 
         self._orig = {k: getattr(D, k) for k in
-                      ("TICKETS_DIR", "PROJECT_ROOT", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
+                      ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
                        "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
                        "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
+        D.DISPATCHER_DIR = self.dispatcher_dir  # CP5: mechanics.log и notify.log — не в каталог живого проекта
         D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль), независимо от RPV_DISPATCH_ROLE_PARALLEL в окружении
         D.TICKETS_DIR = self.tickets_dir
         D.PROJECT_ROOT = self.base
