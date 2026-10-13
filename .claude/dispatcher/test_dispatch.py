@@ -609,7 +609,7 @@ print(json.dumps({"session_id": "sess-silent", "total_cost_usd": 0.0}))
 """
 
 # Пишет каждый вызов в calls.jsonl (tid, role, resumed session_id или None, prompt) — для проверки
-# SESSION_SCOPE (одна сессия на роль vs на задачу) и ротации по RPV_DISPATCH_ROTATE_TOKENS.
+# сессии запуска (новая на пробуждение, --resume только у повтора).
 # Размер контекста ответа берёт из FAKE_CTX_TOKENS (по умолчанию 10).
 FAKE_BIN_RECORD = r"""
 import json, os, re, sys
@@ -725,7 +725,6 @@ class DispatchRunTests(unittest.TestCase):
         D.PID_EXPECT_NAME = python_image_name()
         D.RUNNING.clear()
         self._orig_popen = D._popen
-        self._orig_scope = dict(D.SESSION_SCOPE)
         # по умолчанию подпроцесс — безвредный `python -c pass`: тесты, доходящие до launch_run (повтор в
         # _finish_run и т. п.), не запускают настоящий `claude`; set_fake_bin() подменяет на фейк роли
         D._popen = lambda cmd, **kwargs: subprocess.Popen([sys.executable, "-c", "pass"], **kwargs)
@@ -745,8 +744,6 @@ class DispatchRunTests(unittest.TestCase):
                     pass
         D.RUNNING.clear()
         D._popen = self._orig_popen
-        D.SESSION_SCOPE.clear()
-        D.SESSION_SCOPE.update(self._orig_scope)
         del os.environ["FAKE_TICKETS_DIR"]
         for k, v in self._orig.items():
             setattr(D, k, v)
@@ -1268,107 +1265,19 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(parsed, {"engineer": 2}, "мусор игнорируется, остальное разбирается")
         self.assertEqual(err.getvalue().count("RPV_DISPATCH_ROLE_PARALLEL"), 4, "по предупреждению на каждую пару")
 
-    def test_role_scope_serializes_and_shares_session(self):
-        """judge со scope "role" (только по env/правке словаря): вторая задача продолжает ту же сессию;
-        запуск на роль — один (теперь так у всех ролей, см. test_one_run_per_role_globally)."""
-        D.SESSION_SCOPE["judge"] = "role"
-        self.set_fake_bin(FAKE_BIN_RECORD)
-        os.environ["FAKE_CTX_TOKENS"] = "10"
-        self.addCleanup(lambda: os.environ.pop("FAKE_CTX_TOKENS", None))
-        D.MAX_PARALLEL = 2
-        T.create_ticket(self.tickets_dir, owner="judge", title="Проверка A")
-        T.create_ticket(self.tickets_dir, owner="judge", title="Проверка B")
-
-        D.tick()
-        self.assertEqual(len(D.RUNNING), 1, "одна роль — один запуск: вторая задача не должна стартовать сразу")
-        self.wait_running()
-
-        D.tick()
-        self.assertEqual(len(D.RUNNING), 1)
-        self.wait_running()
-
-        calls = [json.loads(l) for l in (self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8")
-                 .splitlines()]
-        self.assertEqual(len(calls), 2)
-        self.assertNotEqual(calls[0]["tid"], calls[1]["tid"], "вторая задача должна была дождаться своей очереди")
-        self.assertIsNone(calls[0]["resumed"], "первый запуск роли — новая сессия, без --resume")
-        first_sid = f"sess-judge-{calls[0]['tid']}"
-        self.assertEqual(calls[1]["resumed"], first_sid, "вторая задача должна продолжить ту же сессию judge")
-        state = D.load_state()
-        self.assertIn("judge", state.get("role_sessions", {}))
-
-    def test_role_scope_rotates_after_big_context(self):
-        """Контекст прошлого запуска роли выше ROTATE_TOKENS → следующий запуск без --resume + напоминание."""
-        D.SESSION_SCOPE["judge"] = "role"
-        self.set_fake_bin(FAKE_BIN_RECORD)
-        os.environ["FAKE_CTX_TOKENS"] = str(D.ROTATE_TOKENS + 1)
-        self.addCleanup(lambda: os.environ.pop("FAKE_CTX_TOKENS", None))
-        T.create_ticket(self.tickets_dir, owner="judge", title="Проверка A")
-        T.create_ticket(self.tickets_dir, owner="judge", title="Проверка B")
-
-        D.tick()
-        self.wait_running()
-        D.tick()
-        self.wait_running()
-
-        calls = [json.loads(l) for l in (self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8")
-                 .splitlines()]
-        self.assertEqual(len(calls), 2)
-        self.assertNotEqual(calls[0]["tid"], calls[1]["tid"], "вторая задача должна была дождаться своей очереди")
-        self.assertIsNone(calls[1]["resumed"], "контекст первой сессии превысил порог — вторая начинает новую")
-        self.assertIn("Начинаем новую сессию", calls[1]["prompt"])
-        self.assertIn(".claude/roles/notes/judge.md", calls[1]["prompt"])
-
-    def _second_wake_call(self, scope):
-        """Тикет уже будился (в state — сессия с малым контекстом); возвращает вызов claude при новом пробуждении."""
-        D.SESSION_SCOPE["engineer"] = scope
+    def test_each_wake_starts_new_session(self):
+        """TK-232/236: каждое пробуждение — новая сессия (без --resume), даже при малом контексте прошлой."""
         self.set_fake_bin(FAKE_BIN_RECORD)
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Пробуждение")
         state = D.load_state()
-        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old", "last_context_tokens": 10}}
+        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old"}}
         D.save_state(state)
         D.tick()
         self.wait_running()
-        return json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
-
-    def test_run_scope_is_default_and_starts_new_session_each_wake(self):
-        """TK-232 п.1: по умолчанию каждое пробуждение — новая сессия (без --resume), даже при малом контексте."""
-        self.assertEqual(set(self._orig_scope.values()), {"run"})
-        call = self._second_wake_call("run")
+        call = json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
         self.assertIsNone(call["resumed"])
-        self.assertIn("каждое пробуждение — новая сессия", call["prompt"])
+        self.assertIn("Начинаем новую сессию", call["prompt"])
         self.assertIn(".claude/roles/notes/engineer.md", call["prompt"])
-
-    def test_ticket_scope_still_resumes_small_context(self):
-        """Область "ticket" (настройка) прежняя: малый контекст — продолжаем сессию через --resume."""
-        self.assertEqual(self._second_wake_call("ticket")["resumed"], "old")
-
-    def test_multiturn_run_does_not_rotate_on_summed_usage(self):
-        """CEO 27.09: usage — сумма по ходам запуска. Многоходовой прогон с большой суммой, но
-        нормальным контекстом последнего хода, НЕ должен рвать долгую сессию (раньше рвал — баг)."""
-        D.SESSION_SCOPE["judge"] = "role"
-        self.set_fake_bin(FAKE_BIN_RECORD)
-        # сумма по 5 ходам (≈ 1,25×порога) за порогом, но на ход — четверть порога, сильно меньше
-        per_turn = D.ROTATE_TOKENS // 4
-        os.environ["FAKE_CTX_TOKENS"] = str(per_turn * 5)
-        os.environ["FAKE_NUM_TURNS"] = "5"
-        self.assertGreater(per_turn * 5, D.ROTATE_TOKENS, "сумма должна была бы превышать порог")
-        self.assertLess(per_turn, D.ROTATE_TOKENS, "а контекст хода — нет")
-        self.addCleanup(lambda: os.environ.pop("FAKE_CTX_TOKENS", None))
-        self.addCleanup(lambda: os.environ.pop("FAKE_NUM_TURNS", None))
-        T.create_ticket(self.tickets_dir, owner="judge", title="Проверка A")
-        T.create_ticket(self.tickets_dir, owner="judge", title="Проверка B")
-
-        D.tick()
-        self.wait_running()
-        D.tick()
-        self.wait_running()
-
-        calls = [json.loads(l) for l in (self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8")
-                 .splitlines()]
-        self.assertEqual(len(calls), 2)
-        self.assertIsNotNone(calls[1]["resumed"], "контекст ХОДА не превышен — сессия должна продолжиться")
-        self.assertNotIn("Начинаем новую сессию", calls[1]["prompt"])
 
     def test_stuck_todo_after_log_retries_then_blocks(self):
         """TK-070 п.6: роль оставила запись и не трогала status — диспетчер уже поставил in_progress при старте: ни повтора, ни blocked."""
@@ -1979,17 +1888,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual((tkt.log[-1].author, tkt.log[-1].text), ("ceo", "Новая постановка"))
         self.assertNotIn(tid, D.load_state().get("stopped_runs", {}), "пометка снята одним запуском")
 
-    def test_stop_new_session_also_when_session_scope_is_role(self):
-        """scope «role»: сессия общая на роль и у тикета её не стереть — новая сессия идёт по пометке запуска."""
-        D.SESSION_SCOPE["researcher"] = "role"
-        path, _ = self.start_tree_run()
-        state = D.load_state()
-        state.setdefault("role_sessions", {})["researcher"] = {"session_id": "shared-sess", "last_context_tokens": 5}
-        D.save_state(state)
-        cmd = self._stop_next_launch_cmd(path.stem)
-        self.assertNotIn("--resume", cmd)
-        self.assertIn("оборван CEO", cmd[cmd.index("-p") + 1])
-
     def test_stop_resets_loop_counters_rotation_and_launch_history(self):
         path, _ = self.start_tree_run()
         tid, key = path.stem, f"{path.stem}::researcher"
@@ -1997,7 +1895,7 @@ class DispatchRunTests(unittest.TestCase):
         state["idle_runs"] = {key: 1}
         state["same_status_runs"] = {key: 5}
         state.setdefault("sessions", {}).setdefault(key, {})["retries"] = 1
-        state["ticket_sessions"] = {key: {"session_id": "old", "last_context_tokens": D.ROTATE_TOKENS + 1}}
+        state["ticket_sessions"] = {key: {"session_id": "old"}}
         D.save_state(state)
         self.assertIn(tid, state["launch_history"])
         D.write_stop_request(tid, "", "x")
@@ -2448,12 +2346,11 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("status: waiting + wait_for", prompt)
 
     def test_v2_constants(self):
-        for var, expected in (("DISPATCH_MAX_PARALLEL", 3), ("DISPATCH_TIMEOUT", 1200.0),
-                              ("DISPATCH_ROTATE_TOKENS", 120000)):
+        for var, expected in (("DISPATCH_MAX_PARALLEL", 3), ("DISPATCH_TIMEOUT", 1200.0)):
             if P.env(var):
                 self.skipTest(f"{var} задан в окружении")
-        self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT, D.ROTATE_TOKENS), (3, 1200.0, 120000))
-        self.assertEqual(set(D.SESSION_SCOPE.values()), {"run"})
+        self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT), (3, 1200.0))
+        self.assertFalse(hasattr(D, "SESSION_SCOPE") or hasattr(D, "ROTATE_TOKENS"))
 
     def test_no_money_limit_machinery_left(self):
         """В-173 (на тикет), В-149 (в час/в сутки), 03.10 («бюджет до конца убирай»): денежных ограничений в
@@ -2791,13 +2688,13 @@ class DispatchRunTests(unittest.TestCase):
         D.tick()
         self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, "дедуп")
 
-    # --- A6: ротация контекста
-    def test_timeout_without_json_keeps_last_known_context_and_rotation_still_fires(self):
+    # --- повтор после таймаута
+    def test_timeout_without_json_keeps_session_and_retry_resumes(self):
         path = self.make_in_progress("Таймаут")
         tid = path.stem
         state = D.load_state()
         store = D._resume_store(state, tid, "engineer")
-        store.update({"session_id": "sess-big", "last_context_tokens": D.ROTATE_TOKENS + 30_000})
+        store.update({"session_id": "sess-big"})
         D.save_state(state)
         run_file = self.dispatcher_dir / "timeout.json"
         run_file.write_text("", encoding="utf-8")           # убит по таймауту — JSON не дописан
@@ -2812,12 +2709,11 @@ class DispatchRunTests(unittest.TestCase):
         finally:
             D._popen = orig_popen
         saved = D.load_state()["ticket_sessions"][f"{tid}::engineer"]
-        self.assertEqual(saved["last_context_tokens"], D.ROTATE_TOKENS + 30_000, "таймаут не обнуляет счётчик")
         self.assertEqual(saved["session_id"], "sess-big")
         self.assertTrue(captured, "повтор запущен")
-        self.assertNotIn("--resume", captured, "контекст за порогом — повтор идёт в новой сессии")
+        self.assertIn("--resume", captured, "повтор после таймаута продолжает сессию")
 
-    # --- аудит-2 п.4: ротация после таймаута — последний ход из транскрипта убитой сессии
+    # --- убитая по таймауту сессия: повтор идёт --resume по id
     def write_session_transcript(self, root, session_id, turns):
         proj = Path(root) / "any-project-slug"
         proj.mkdir(parents=True, exist_ok=True)
@@ -2825,13 +2721,12 @@ class DispatchRunTests(unittest.TestCase):
         lines.append(json.dumps({"type": "user", "message": {"role": "user", "content": "x"}}))
         (proj / f"{session_id}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    def killed_run(self, previous_tokens, turns, sid="sess-killed", stored_sid="sess-killed", result_text="", info_sid=None):
-        """Запуск убит по таймауту (JSON пуст): возвращает (сохранённый контекст, команда повторного запуска)."""
+    def killed_run(self, turns, sid="sess-killed", stored_sid="sess-killed", result_text="", info_sid=None):
+        """Запуск убит по таймауту (JSON пуст): возвращает команду повторного запуска."""
         path = self.make_in_progress("Убит")
         tid = path.stem
         state = D.load_state()
         store = D._resume_store(state, tid, "engineer")
-        store.update({"last_context_tokens": previous_tokens})
         if stored_sid:
             store["session_id"] = stored_sid
         D.save_state(state)
@@ -2852,81 +2747,16 @@ class DispatchRunTests(unittest.TestCase):
                 D._finish_run(tid, info, state, dt("2026-10-03T10:20:00+04:00"), timed_out=True)
             finally:
                 D._popen, D.CLAUDE_PROJECTS_DIR = orig_popen, orig_dir
-        saved = D.load_state()["ticket_sessions"][f"{tid}::engineer"]["last_context_tokens"]
-        return saved, captured
-
-    def test_killed_run_takes_last_turn_from_its_transcript_not_the_old_number(self):
-        small = [{"input_tokens": 5, "cache_read_input_tokens": 100_000, "cache_creation_input_tokens": 0},
-                 {"input_tokens": 7, "cache_read_input_tokens": 20_000, "cache_creation_input_tokens": 3_000}]
-        saved, captured = self.killed_run(150_000, small)
-        self.assertEqual(saved, 7 + 20_000 + 3_000, "последний ход из транскрипта, не прежние 150000")
-        self.assertIn("--resume", captured, "контекст под порогом — повтор продолжает ту же сессию")
-        self.assertIn("sess-killed", captured)
+        return captured
 
     def test_killed_fresh_session_is_resumed_by_preassigned_id(self):
         """TK-056 п.3′: новая сессия убита по таймауту до JSON — id назначен при запуске, повтор идёт --resume ею."""
         turns = [{"input_tokens": 5, "cache_read_input_tokens": 1_000, "cache_creation_input_tokens": 0}]
-        _, captured = self.killed_run(0, turns, sid="sess-new", stored_sid=None, info_sid="sess-new")
+        captured = self.killed_run(turns, sid="sess-new", stored_sid=None, info_sid="sess-new")
         self.assertIn("--resume", captured)
         self.assertIn("sess-new", captured)
-        _, captured = self.killed_run(0, None, sid="sess-new", stored_sid=None, info_sid="sess-new")
+        captured = self.killed_run(None, sid="sess-new", stored_sid=None, info_sid="sess-new")
         self.assertNotIn("--resume", captured, "транскрипта нет — резюмировать нечего, новая сессия")
-
-    def test_killed_run_with_big_transcript_makes_rotation_fire_even_if_old_number_was_small(self):
-        big = [{"input_tokens": 5, "cache_read_input_tokens": D.ROTATE_TOKENS + 10_000, "cache_creation_input_tokens": 0}]
-        saved, captured = self.killed_run(30_000, big)
-        self.assertEqual(saved, 5 + D.ROTATE_TOKENS + 10_000)
-        self.assertTrue(captured, "повтор запущен")
-        self.assertNotIn("--resume", captured, "по транскрипту контекст за порогом — новая сессия")
-
-    def test_killed_run_without_transcript_or_session_id_keeps_the_old_number(self):
-        saved, _ = self.killed_run(150_000, None)                              # транскрипта нет
-        self.assertEqual(saved, 150_000)
-        turns = [{"input_tokens": 1, "cache_read_input_tokens": 500, "cache_creation_input_tokens": 0}]
-        saved, _ = self.killed_run(150_000, turns, sid="sess-other", stored_sid=None)   # id сессии неизвестен
-        self.assertEqual(saved, 150_000)
-
-    def test_error_json_with_zero_usage_also_uses_the_session_transcript(self):
-        turns = [{"input_tokens": 2, "cache_read_input_tokens": 41_000, "cache_creation_input_tokens": 0}]
-        text = json.dumps({"is_error": True, "session_id": "sess-err2", "total_cost_usd": 0.0,
-                           "usage": {"input_tokens": 0, "output_tokens": 0}})
-        saved, _ = self.killed_run(150_000, turns, sid="sess-err2", stored_sid="sess-old", result_text=text)
-        self.assertEqual(saved, 41_002)
-
-    def test_error_result_with_zero_usage_keeps_last_known_context(self):
-        path = self.make_in_progress("Ошибка")
-        tid = path.stem
-        state = D.load_state()
-        D._resume_store(state, tid, "engineer").update({"session_id": "sess-big", "last_context_tokens": 140_000})
-        D.save_state(state)
-        run_file = self.dispatcher_dir / "err.json"
-        run_file.write_text(json.dumps({"is_error": True, "subtype": "success", "num_turns": 1, "session_id": "sess-err",
-                                         "total_cost_usd": 0.0, "usage": {"input_tokens": 0, "output_tokens": 0}}),
-                            encoding="utf-8")
-        info = {"role": "engineer", "popen": None, "pid": None, "started": dt("2026-10-03T10:00:00+04:00"),
-                "attempt": 1, "run_file": run_file, "err_file": run_file, "out_fh": None, "err_fh": None,
-                "reason": "retry", "status_at_launch": "in_progress", "log_keys_at_launch": []}
-        D._finish_run(tid, info, state, dt("2026-10-03T10:20:00+04:00"), timed_out=False)
-        saved = D.load_state()["ticket_sessions"][f"{tid}::engineer"]
-        self.assertEqual(saved["last_context_tokens"], 140_000)
-
-    def test_run_with_usage_updates_context(self):
-        path = self.make_in_progress("Обычный")
-        tid = path.stem
-        state = D.load_state()
-        D._resume_store(state, tid, "engineer").update({"session_id": "s0", "last_context_tokens": 140_000})
-        T.append_log(path, "engineer", "шаг", now=dt("2026-10-03T10:01:00+04:00"))
-        run_file = self.dispatcher_dir / "ok.json"
-        run_file.write_text(json.dumps({"session_id": "s1", "total_cost_usd": 0.1, "num_turns": 2,
-                                         "usage": {"input_tokens": 50, "cache_read_input_tokens": 30_000,
-                                                   "iterations": [{"input_tokens": 10, "cache_read_input_tokens": 20_000,
-                                                                   "cache_creation_input_tokens": 0}]}}), encoding="utf-8")
-        info = {"role": "engineer", "popen": None, "pid": None, "started": dt("2026-10-03T10:00:00+04:00"),
-                "attempt": 0, "run_file": run_file, "err_file": run_file, "out_fh": None, "err_fh": None,
-                "reason": "in_progress-resume", "status_at_launch": "in_progress", "log_keys_at_launch": []}
-        D._finish_run(tid, info, state, dt("2026-10-03T10:20:00+04:00"), timed_out=False)
-        self.assertEqual(D.load_state()["ticket_sessions"][f"{tid}::engineer"]["last_context_tokens"], 20_010)
-
 
 class TicketsCliStartTests(unittest.TestCase):
     """v1.1: `tickets.py start` — backlog → todo, и только backlog.
@@ -3653,16 +3483,6 @@ class ContextTokensTests(unittest.TestCase):
             finally:
                 D.CLAUDE_PROJECTS_DIR = orig
         self.assertNotEqual(7 + 70_000 + 3_000, (162 + 300_000 + 33_724) // 5)
-
-    def test_context_for_store_keeps_previous_when_nothing_known_and_never_drops_below_it(self):
-        self.assertEqual(D._context_tokens_for_store({}, 150_000), 150_000)                      # нет JSON — прежнее
-        self.assertEqual(D._context_tokens_for_store({"usage": {}}, 150_000), 150_000)
-        self.assertEqual(D._context_tokens_for_store({"usage": {"input_tokens": 0}}, 150_000), 150_000)
-        iters = {"usage": {"input_tokens": 9, "iterations": [{"input_tokens": 1, "cache_read_input_tokens": 400}]}}
-        self.assertEqual(D._context_tokens_for_store(iters, 150_000), 401)                       # есть ход — берём его
-        no_iter = {"num_turns": 4, "usage": {"input_tokens": 400}}                               # среднее 100 < известного
-        self.assertEqual(D._context_tokens_for_store(no_iter, 150_000), 150_000)
-        self.assertEqual(D._context_tokens_for_store(no_iter, 0), 100)
 
     def test_last_falls_back_to_sum_when_num_turns_missing_or_zero(self):
         result = {"usage": {"input_tokens": 100}}

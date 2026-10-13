@@ -7,12 +7,12 @@
     GET  /<токен>/dispetcher    то же
     GET  /<токен>/phosphor.css, phosphor.js   оболочка и ядро страницы
     GET  /<токен>/status.json   {teams:[{id,name,view2,built_at,age_s}], view2, built_at, age_s} — сводки команд;
-                                верхний view2/built_at/age_s — встроенная команда «home» (её кладёт bridge.py в <RPV_BOARD_DATA>/status.json)
+                                верхний view2/built_at/age_s — встроенная команда «home» (лежит в <RPV_BOARD_DATA>/status.json)
     POST /<токен>/ingest        сводка команды: заголовок X-Board-Key, тело {"view2": …, "built_at": …} → <RPV_BOARD_DATA>/teams/<id>.json
     POST /<токен>/teams/<id>/delete  удалить команду: ключ отзывается, сводка стирается (home — 403)
     POST /<токен>/teams         {"name": "…"} → {id, name, key}: новая команда, ключ показывается один раз (хранится только его sha256)
 Остальные POST (в том числе /answer) — 404, ответы на вопросы даются в чате с CEO. Сервер ничего не исполняет.
-Встроенная команда «home» (id `home`, имя — `home_name` из teams.json, по умолчанию «Моя команда») — через мост bridge.py.
+Встроенная команда «home» (id `home`, имя — `home_name` из teams.json, по умолчанию «Моя команда») — из <RPV_BOARD_DATA>/status.json.
 Реестр других — <RPV_BOARD_DATA>/teams.json. Токен и ключи в логи не пишутся.
 
 Настройки (окружение): RPV_BOARD_DATA (данные; по умолчанию ~/rpv-board), RPV_BOARD_TOKEN_FILE, RPV_BOARD_PORT (8787),

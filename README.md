@@ -132,7 +132,6 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | `dispatcher/supervise.py` | присмотр ОС за диспетчером и сторожем: `--install` / `--uninstall` |
 | `dispatcher/release.py` | выпуск, обновление, откат: `bump`, `update`, `rollback`, `check` |
 | `dispatcher/board_push.py` | сводка команды на табло и в `.claude/pulse/status.json` |
-| `dispatcher/endurance.py` | прогон на выносливость |
 | `bus/busclient.py` | отправка события в шину: `send <адрес>` |
 
 ## Настройка
@@ -150,7 +149,6 @@ python <плагин>/.claude/dispatcher/watch.py --project <проект>
 | `RPV_DISPATCH_MODEL` | `claude-sonnet-5-5` | модель ролей |
 | `RPV_DISPATCH_ROLE_MODEL` | Судья — `claude-opus-5-5`, остальные — `RPV_DISPATCH_MODEL` | модель по ролям, `judge:…,engineer:…` или одно значение на все |
 | `RPV_DISPATCH_EFFORT` | Судья `xhigh`, Инженер и Исследователь `high` | усилие по ролям; в тикете перекрывается полем `effort` |
-| `RPV_DISPATCH_ROTATE_TOKENS` | `120000` | контекст, после которого сессия роли начинается заново |
 | `RPV_WATCH_INTERVAL` | `120` | цикл сторожа, с |
 | `RPV_WATCH_ORPHAN_HOURS` | `2` | через сколько часов без записи тикет считается сиротой |
 | `RPV_IDLE_SLO_MIN` | `10` | допустимый простой, минут в сутки |
@@ -192,7 +190,6 @@ python -m pytest .claude -q
 **На машине с живой установкой** настройка `RPV_*` (шина, машины, ключи) лежит в окружении пользователя, и тесты не должны её видеть — иначе фикстуры уходят в живую шину и очередь CEO. Под pytest это делает `.claude/conftest.py`; под `unittest` очисти окружение сам (PowerShell: `Get-ChildItem Env: | ? Name -match '^(RPV|ALPHA)_' | % { Remove-Item "Env:$($_.Name)" }`). Страж — `test_env_isolation.py` падает, если настройка просочилась или spool шины совпал с общим `~/.rpv/outbox.jsonl`; под `unittest` задай ещё `RPV_BUS_SPOOL` во временный файл.
 
 - **CI** — workflow [`ci`](.github/workflows/ci.yml): тесты на Windows, macOS и Linux × Python 3.11–3.13 на каждый PR и каждый push в `main`; итоговая проверка `ci-ok`.
-- **Выносливость** — workflow [`endurance`](.github/workflows/endurance.yml) каждую ночь и вручную: настоящий диспетчер, фейковые роли и сбои (падение шины, убитый диспетчер, лимит 429); критерий — 0 потерянных сигналов, 0 `blocked`, простой не больше порога. Локально: `python .claude/dispatcher/endurance.py --rounds N` (или `--hours H`; ещё `--idle-max S`, `--seed K`, `--keep`, `--modes`) — [docs/reliability.md](docs/reliability.md#прогон-на-выносливость).
 - **Версии** — `python .claude/dispatcher/release.py check` проверяет, что версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают.
 
 Структура репозитория:

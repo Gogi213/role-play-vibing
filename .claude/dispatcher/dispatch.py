@@ -201,24 +201,9 @@ HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
-# Область сессии на роль (владелец 27.09): "run" (по умолчанию, TK-232) — новая сессия на каждое пробуждение,
-# память между запусками — блокнот роли и лог тикета; "ticket" — сессия на (задача, роль), --resume в пределах
-# задачи (с ротацией по ROTATE_TOKENS); "role" — одна долгая сессия роли на ВСЕ задачи.
-# Предел запусков на роль действует всегда (_role_busy), а не только при "role"; по умолчанию 1, настраивается
-# RPV_DISPATCH_ROLE_PARALLEL; на один тикет — один запуск роли.
-# Переопределяемо через RPV_DISPATCH_SESSION_SCOPE=judge:role,engineer:ticket.
-SESSION_SCOPE = {"judge": "run", "researcher": "run", "engineer": "run"}
-if P.env("DISPATCH_SESSION_SCOPE"):
-    for _pair in P.env("DISPATCH_SESSION_SCOPE").split(","):
-        _role, _, _scope = _pair.partition(":")
-        if _role and _scope:
-            SESSION_SCOPE[_role.strip()] = _scope.strip()
-
-# Ротация долгой сессии: если контекст прошлого запуска (input + cache_read + cache_creation, по usage
-# из JSON-вывода claude) превысил это число токенов — следующий запуск роли начинает новую сессию (без
-# --resume) и получает в промпте напоминание перечитать блокнот и прежние решения по нужной задаче.
-# v2: 250 000 → 120 000 — при окне Sonnet 200 тыс. прежний порог не срабатывал (TK-025: одна сессия $36).
-ROTATE_TOKENS = int(P.env("DISPATCH_ROTATE_TOKENS", "120000"))
+# Сессия: каждое пробуждение роли — новая (бабочка); память между запусками — блокнот роли и лог тикета.
+# --resume — только повтор после таймаута в том же запуске (TK-056 п.3′). Предел запусков на роль — _role_busy
+# (RPV_DISPATCH_ROLE_PARALLEL, по умолчанию 1); на один тикет — один запуск роли.
 # транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
 # `usage.iterations` (см. _context_tokens_last)
 CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
@@ -1115,12 +1100,10 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
     return None
 
 
-# --- область сессии (SESSION_SCOPE) ------------------------------------------------------------
+# --- сессия запуска ----------------------------------------------------------------------------
 
 def _resume_store(state: dict, tid: str, role: str) -> dict:
-    """session_id/токены контекста: при scope="role" — общие на роль, при "ticket" — на (задача, роль)."""
-    if SESSION_SCOPE.get(role, "ticket") == "role":
-        return state.setdefault("role_sessions", {}).setdefault(role, {})
+    """session_id/токены контекста на (задача, роль) — для повтора после таймаута."""
     return state.setdefault("ticket_sessions", {}).setdefault(f"{tid}::{role}", {})
 
 
@@ -1174,7 +1157,7 @@ def _context_tokens_last(result: dict) -> int:
     завышает контекст в разы, рвя ротацию раньше времени (CEO 27.09, живой прогон: ctx_sum=333 886
     при реальном контексте хода ~52 тыс.). usage.iterations[-1] — контекст последнего хода; нет
     iterations (аудит 03.10) — последний ход из транскрипта сессии; нет и его — запасная оценка
-    ctx_sum // num_turns (среднее по ходам, занижена: см. _context_tokens_for_store)."""
+    ctx_sum // num_turns (среднее по ходам, занижена)."""
     usage = result.get("usage") or {}
     iterations = usage.get("iterations")
     if isinstance(iterations, list) and iterations:
@@ -1188,25 +1171,6 @@ def _context_tokens_last(result: dict) -> int:
     except (TypeError, ValueError):
         num_turns = 1
     return total // num_turns
-
-
-def _context_tokens_for_store(result: dict, previous: int, session_id=None) -> int:
-    """Что записать в `last_context_tokens` сессии после запуска (аудит 03.10): нет JSON (таймаут/убит) или usage
-    пуст (ответ-ошибка) — НЕ обнулять; аудит-2: если id сессии известен (`session_id` — та, что продолжал запуск, либо
-    из JSON), последний ход берётся из её транскрипта (убитая сессия успела записать ходы), а не старое число;
-    транскрипта нет — остаётся последнее известное. Есть ход (iterations/транскрипт) — он; иначе запасная
-    оценка-среднее, но не ниже известного (контекст сессии без сжатия только растёт)."""
-    usage = (result or {}).get("usage") or {}
-    if not _tokens_of(usage):
-        last = _transcript_last_turn_tokens(session_id or (result or {}).get("session_id"))
-        return last if last else previous
-    iterations = usage.get("iterations")
-    if isinstance(iterations, list) and iterations and _tokens_of(iterations[-1]):
-        return _tokens_of(iterations[-1])
-    last = _transcript_last_turn_tokens(result.get("session_id"))
-    if last:
-        return last
-    return max(previous, _context_tokens_last(result))
 
 
 def _role_busy(role: str) -> bool:
@@ -1716,14 +1680,11 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         # прошлый запуск этого тикета оборван CEO (`tickets.py stop`): сессия НОВАЯ (без --resume), в промпте — пометка
         sid = None
         extra_note = " ".join(x for x in (extra_note, STOP_NOTE) if x)
-    run_scope = SESSION_SCOPE.get(role) == "run" and not attempt  # повтор после таймаута — тот же запуск, --resume
-    if sid and (run_scope or store.get("last_context_tokens", 0) > ROTATE_TOKENS):
-        # область «запуск»: каждое пробуждение — новая сессия; иначе ротация — контекст прошлой слишком большой
+    if sid and not attempt:
+        # каждое пробуждение — новая сессия; --resume только у повтора после таймаута (attempt > 0)
         sid = None
-        why = "каждое пробуждение — новая сессия" if run_scope else f"контекст прошлой превысил {ROTATE_TOKENS} токенов"
-        rotate_note = (f"Начинаем новую сессию ({why}): "
-                        f"прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
-                        f"docs/research/reviews/ по нужной задаче.")
+        rotate_note = (f"Начинаем новую сессию: прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
+                       f"docs/research/reviews/ по нужной задаче.")
         extra_note = " ".join(x for x in (extra_note, rotate_note) if x)
 
     if reason == "next":
@@ -1801,7 +1762,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         "log_keys_at_launch": log_keys_at_launch, "effort": effort, "session_id": sid,
     }
     # last_woken — приоритет очереди запусков внутри роли (кто дольше не запускался — тот первый, см. tick);
-    # всегда на (задачу, роль), не зависит от SESSION_SCOPE
+    # всегда на (задачу, роль)
     sess_entry = state.setdefault("sessions", {}).setdefault(f"{tid}::{role}", {})
     sess_entry["last_woken"] = T.now_iso(now)
     _record_launch(state, tid, now)
@@ -1927,15 +1888,11 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     role = info["role"]
     key = f"{tid}::{role}"
     sess = state.setdefault("sessions", {}).setdefault(key, {})  # retries — всегда на (задачу, роль)
-    store = _resume_store(state, tid, role)  # session_id/токены — по SESSION_SCOPE[role]
-    sid_used = result.get("session_id") or store.get("session_id")  # сессия этого запуска (убит — id прежней, --resume)
+    store = _resume_store(state, tid, role)
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
     elif timed_out and info.get("session_id") and not store.get("session_id") and             next(CLAUDE_PROJECTS_DIR.glob(f"*/{info['session_id']}.jsonl"), None) is not None:
         store["session_id"] = info["session_id"]  # убитая новая сессия: транскрипт есть — повтор продолжит её, не с нуля
-        sid_used = info["session_id"]
-    # контекст последнего хода; нет JSON/usage (таймаут, ответ-ошибка) — прежнее значение, не ноль
-    store["last_context_tokens"] = _context_tokens_for_store(result, store.get("last_context_tokens", 0), sid_used)
 
     path = TICKETS_DIR / f"{tid}.md"
     if not path.exists():
@@ -2275,7 +2232,6 @@ def _reset_loop_state(state: dict, tid: str) -> None:
         store = state.get("ticket_sessions", {}).get(key)
         if store:
             store.pop("session_id", None)
-            store.pop("last_context_tokens", None)
     state.get("launch_history", {}).pop(tid, None)
 
 
