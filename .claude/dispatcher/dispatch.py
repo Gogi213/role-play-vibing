@@ -129,9 +129,10 @@ MIN_GAP_S = float(P.env("DISPATCH_MIN_GAP_S", "60"))
 MAX_SAME_STATUS_RUNS = int(P.env("DISPATCH_MAX_SAME_STATUS_RUNS", "12"))
 MAX_IDLE_RUNS = int(P.env("DISPATCH_MAX_IDLE_RUNS", "2"))
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
-# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher +
-# `next: ceo` (одна строка CEO). Число НАЗНАЧЕНО CEO 03.10, не измерено.
-MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "3"))
+# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher, тикет
+# закрыт «не сделано» с остатком (последний возврат ревьюера) в логе — не blocked и не вопрос владельцу (TK-233, 13.10:
+# потолок ремонта 2; был 3 и needs_owner). Число НАЗНАЧЕНО владельцем 13.10, не измерено.
+MAX_REVIEW_RETURNS = int(P.env("DISPATCH_MAX_REVIEW_RETURNS", "2"))
 # Остановка роли CEO (`tickets.py stop`): после снятия дерева процессов ждём смерти процесса не дольше STOP_VERIFY_S
 # секунд (число НАЗНАЧЕНО, не измерено: taskkill/killpg возвращаются сразу, 10 с — запас на очередь ОС); не умер —
 # строка CEO `stop-failed`, заявка остаётся до следующего тика.
@@ -891,7 +892,7 @@ def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
 
 def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
     """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
-    ревьюера не будим; запись dispatcher, статус needs_owner (строка «ждёт вас» на Диспетчерской, CEO не будится). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
+    ревьюера не будим; запись dispatcher с остатком, статус done («не сделано»). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
     не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
     if tkt.status not in ("done", "in_review") or tkt.reviewer not in ROLE_KEYS:
         return tkt
@@ -901,11 +902,12 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     last_author = tkt.log[-1].author if tkt.log else ""
     if not T.author_is(last_author, tkt.owner):
         return tkt
+    rest = next((e.text.strip() for e in reversed(tkt.log) if T.author_is(e.author, tkt.reviewer)), "")
     T.append_log(path, "dispatcher",
-                 f"Ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (спор ревью, не вопрос об исследовании) — на новый круг не будим. Решение за владельцем: "
-                 f"ещё один круг (`tickets.py comment {tkt.id} --author ceo --text \"...\" --next {tkt.reviewer}`) "
-                 "либо принять/закрыть самому.", now=now)
-    T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)
+                 f"Не сделано: ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (потолок ремонта) — тикет закрыт "
+                 f"без нового круга. Остаток (последний возврат ревьюера): {rest[:1500] or '(записи ревьюера нет)'}. "
+                 f"Взять остаток — новый тикет со ссылкой на задачу владельца (`new --ref`).", now=now)
+    T.write_header_updates(path, {"status": "done", "next": ""}, now=now)
     return T.read_ticket(path)
 
 

@@ -40,11 +40,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
 
 # Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
 # в main() флаг --project переключает их ещё раз. Тесты подменяют TICKETS_DIR прямо на модуле.
 TICKETS_DIR = D.TICKETS_DIR
+REF_MIN = 5  # знаков в --ref: «В-12» проходит, «да»/пусто — нет
 PROJECT_ROOT = D.PROJECT_ROOT
 
 
@@ -120,6 +122,12 @@ def cmd_inbox(args) -> int:
 
 
 def cmd_new(args) -> int:
+    # TK-233 п.2: незаказанной работе — отказ. Тикет заводится только со ссылкой на задачу владельца (цитата или В-##)
+    ref = " ".join((getattr(args, "ref", None) or "").split())
+    if len(ref) < REF_MIN:
+        print(f"new: нужна --ref «ссылка на задачу владельца»: его цитата (≥ {REF_MIN} знаков) или решение В-##. "
+              f"Работы, которую владелец не заказывал, не заводим", file=sys.stderr)
+        return 1
     # v2 (02.10): ревьюера по умолчанию НЕТ — Судья только по явному `--reviewer judge` (исследования с
     # выводом и необратимое); `--no-reviewer` принимается как no-op (совместимость со старыми командами)
     reviewer = args.reviewer
@@ -147,7 +155,8 @@ def cmd_new(args) -> int:
         return 1
     try:
         path = T.create_ticket(TICKETS_DIR, owner=args.owner, title=args.title, reviewer=reviewer,
-                                description=args.desc or "", wait_for=args.wait_for or "",
+                                description=f"Ссылка на задачу владельца: {ref}\n\n{args.desc or ''}".rstrip(),
+                                wait_for=args.wait_for or "",
                                 status="backlog" if args.backlog else "todo",
                                 executor=args.executor, kind=args.kind, effort=args.effort)
     except ValueError as e:  # неизвестная форма wait_for — файл не создан
@@ -206,7 +215,8 @@ def cmd_result(args) -> int:
     role = _caller_role()
     tkt = T.read_ticket(path)
     err = routes.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
-                       form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "")
+                       form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "",
+                       why_owner=getattr(args, "why_owner", None) or "")
     if err:
         print(f"result: {err}", file=sys.stderr)
         return 1
@@ -218,7 +228,8 @@ def cmd_result(args) -> int:
     why = args.why.strip()
     on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
-             "done": f" результат: {args.path}", "wait": f" ждём: {args.form}"}.get(args.result, "")
+             "done": f" результат: {args.path}", "wait": f" ждём: {args.form}",
+             "ask-owner": f" повод: {args.why_owner}" if getattr(args, "why_owner", None) else ""}.get(args.result, "")
     if role == "judge" and tkt.owner == "judge" and args.result in ("done", "accept") and not (args.pr or args.sha):
         head, _ = routes.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
@@ -364,7 +375,8 @@ def cmd_wait(args) -> int:
                   f"осознанно ждать готовое — `--allow-met`.", file=sys.stderr)
             return 1
     if parsed and parsed[0] == "host" and parsed[2] == "path" and (note := T.sched_marker_warning(parsed[1], parsed[3])):
-        print(f"wait: предупреждение — {note}", file=sys.stderr)
+        print(f"wait: отказ (TK-233 п.5) — {note}", file=sys.stderr)  # маркер не отличит успех от падения: только код завершения
+        return 1
     if parsed and parsed[0] == "ticket":
         cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
         if cycle:
@@ -460,6 +472,7 @@ def main(argv=None) -> int:
                         help="no-op (v2: ревьюера по умолчанию нет); оставлено для совместимости")
     p_new.add_argument("--effort", choices=list(T.VALID_EFFORTS), default=None,
                         help="усилие запусков по этому тикету; без поля — исследователь/инженер high, Судья xhigh")
+    p_new.add_argument("--ref", default="", help="обязательно: ссылка на задачу владельца — его цитата или решение В-##")
     p_new.add_argument("--desc", default="")
     p_new.add_argument("--wait-for", dest="wait_for", default="")
     p_new.add_argument("--force", action="store_true", help="создать, даже если за час есть тикет с похожим заголовком")
@@ -495,6 +508,8 @@ def main(argv=None) -> int:
     p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")
     p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
     p_result.add_argument("--form", default=None, help="wait: форма wait_for")
+    p_result.add_argument("--why-owner", dest="why_owner", default=None, choices=list(routes_mod.OWNER_REASONS),
+                          help="ask-owner Судьи: повод вопроса владельцу (деньги|видимое|необратимое|бизнес-правило)")
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")

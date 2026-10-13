@@ -146,7 +146,7 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", "judge"))
         self.assertEqual(self.res("judge", "blocked"), 0)  # Судья сам встал — Судье некуда, ждёт владельца
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("blocked", ""))
-        self.assertEqual(self.res("judge", "ask-owner"), 0)
+        self.assertEqual(self.res("judge", "ask-owner", why_owner="деньги"), 0)
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_sets_waiting_with_form(self):
@@ -282,7 +282,7 @@ class ResultTests(unittest.TestCase):
             t = self.tkt()
             self.assertEqual((t.status, t.header.get("next")), ("blocked", "judge"))
         T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
-        self.assertEqual(self.res("judge", "ask-owner"), 0)
+        self.assertEqual(self.res("judge", "ask-owner", why_owner="необратимое"), 0)
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_refuses_already_met_file_unless_allowed(self):
@@ -306,3 +306,41 @@ class ResultTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    # --- TK-233
+    def test_judge_ask_owner_needs_owner_reason(self):
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        self.assertEqual(self.res("judge", "ask-owner"), 1)
+        self.assertEqual(self.res("judge", "ask-owner", why_owner="любопытно"), 1)
+        self.assertEqual(self.tkt().status, "in_review", "отказ ничего не пишет")
+        for why in R.OWNER_REASONS:
+            self.assertEqual(R.check("judge", "ask-owner", "x", why_owner=why), "")
+        self.assertIn("повод: деньги", (self.res("judge", "ask-owner", why_owner="деньги"), self.tkt().log[-1].text)[1])
+
+    def test_non_judge_ask_owner_still_routes_to_judge_without_reason(self):
+        self.assertEqual(self.res("engineer", "ask-owner"), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("blocked", "judge"))
+
+    def test_wait_on_script_marker_is_refused_and_rc_is_accepted(self):
+        for spec in ("host:calc:/data/x/gate.done", "host:calc:/data/x/done"):
+            a = dict(id=self.tid, spec=spec, on_met=None, by="23:59")
+            self.assertEqual(TK.cmd_wait(type("A", (), a)()), 1, spec)
+            self.assertNotEqual(self.tkt().status, "waiting")
+        a = dict(id=self.tid, spec="host:calc:/data/sched/rc/abc", on_met=None, by="23:59")
+        self.assertEqual(TK.cmd_wait(type("A", (), a)()), 0)
+        self.assertEqual(self.tkt().status, "waiting")
+
+    def test_new_requires_ref(self):
+        def new(**kw):
+            a = dict(owner="engineer", title="Новое дело", reviewer=None, effort=None, desc="", wait_for="", force=True,
+                     backlog=False, executor=None, kind=None)
+            a.update(kw)
+            return TK.cmd_new(type("A", (), a)())
+        before = len(list(D.TICKETS_DIR.glob("TK-*.md")))
+        self.assertEqual(new(), 1)
+        self.assertEqual(new(ref="да"), 1)
+        self.assertEqual(len(list(D.TICKETS_DIR.glob("TK-*.md"))), before, "отказ не создаёт файл")
+        self.assertEqual(new(ref="В-229"), 0)
+        made = max(D.TICKETS_DIR.glob("TK-*.md"))
+        self.assertIn("Ссылка на задачу владельца: В-229", made.read_text(encoding="utf-8"))
