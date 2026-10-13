@@ -116,16 +116,23 @@ def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
     types = sorted({k for k in ("решение", "цель") if k in t})
     seeds = (fixture / ".claude" / "decisions.md").read_text(encoding="utf-8")
     dec_p = work / ".claude" / "decisions.md"
-    dec = dec_p.read_text(encoding="utf-8") if dec_p.exists() else ""
+    raw = dec_p.read_text(encoding="utf-8") if dec_p.exists() else ""
+    repeated, cur = [], None  # отметки «Повторено владельцем» (registry.py repeat) — в блоке старого решения
+    for ln in raw.splitlines():
+        cur = (m.group(1) if (m := re.match(r"^## (В-\d+) · ", ln)) else cur)
+        if ln.startswith("Повторено владельцем"):
+            repeated.append((cur, ln))
+    dec = "".join(ln for ln in raw.splitlines(keepends=True) if not ln.startswith("Повторено владельцем"))
     new_dec = dec[len(seeds):] if dec.startswith(seeds) else dec  # переписанный целиком реестр — всё «новое»
     seeds_intact = dec.startswith(seeds)
     old_goals = {p.name for p in (fixture / ".claude" / "goals").glob("*.md")}
     goals_dir = work / ".claude" / "goals"
     new_goals = [p for p in sorted(goals_dir.glob("*.md")) if p.name not in old_goals] if goals_dir.exists() else []
     new_blocks = re.findall(r"^## В-(\d+)", new_dec, re.M)
-    written = sorted(({"решение"} if new_blocks else set()) | ({"цель"} if new_goals else set()))
+    written = sorted(({"решение"} if new_blocks or repeated else set()) | ({"цель"} if new_goals else set()))
     records = new_dec + "".join(p.read_text(encoding="utf-8") for p in new_goals)
     quotes = [ln.lstrip("> ").strip() for ln in records.splitlines() if ln.startswith(">")]
+    quotes += [ln.split(": ", 1)[1] for _, ln in repeated if ": " in ln]
     if (f.get("цитата") or "").strip() not in ("", "—", "-"):
         quotes.append(f["цитата"])
     owner = norm(c["text"]).replace(" / ", " ")
@@ -149,6 +156,8 @@ def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
         "no_invented_numbers": not invented,
         "invented": invented[:5],
         "related_hit": rel_hit,
+        "repeat_hit": None if not c.get("gold_repeat") else any(r == c["gold_repeat"] for r, _ in repeated),
+        "repeated": [r for r, _ in repeated],
         "numbering_ok": numbering,
         "registry_intact": seeds_intact,
         "format_ok": all(k in f for k in ("тип", "запись", "цитата", "суть", "связано")),
@@ -401,7 +410,7 @@ def cmd_run(a) -> int:
 # ------------------------------------------------------------------------------------------------------------
 
 METRICS = {
-    "secretary": ["type_ok", "files_match_answer", "quotes_verbatim", "no_invented_numbers", "related_hit",
+    "secretary": ["type_ok", "files_match_answer", "quotes_verbatim", "no_invented_numbers", "related_hit", "repeat_hit",
                   "numbering_ok", "registry_intact", "format_ok"],
     "inbox": ["action_exact", "done_recall", "no_invented_ids", "lines_ok"],
     "reporter": ["flags_recall", "numbers_sourced", "no_missing_ids", "stale_cited", "lines_ok"],

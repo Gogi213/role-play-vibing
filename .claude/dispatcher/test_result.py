@@ -426,7 +426,77 @@ class ResultTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             R.main(["--project", str(root), "accept-goal", "G-001"])
         self.assertEqual(new("G-001"), 1, "принятая цель — не ссылка для новой работы")
-        self.assertEqual(new("«цитата владельца целиком»"), 0)
+        self.assertEqual(new("«цитата владельца целиком»"), 1, "CP2: реестр есть — цитату сначала записывает secretary")
+        R.decisions_file(root).unlink()
+        self.assertEqual(new("«цитата владельца целиком»"), 0, "без реестра — цитата, как раньше")
+
+    # --- CP2: приёмка сверяется с решениями владельца, срок владельцу записан
+    def _registry_with_decision(self):
+        import contextlib
+        import io
+        import registry as R
+        os.environ.pop("RPV_ROLE", None)  # реестр пишет CEO, не роль
+        with contextlib.redirect_stdout(io.StringIO()):
+            R.main(["--project", str(TK.PROJECT_ROOT), "decide", "--quote", "шорты не добавляем", "--gist", "без шортов"])
+
+    def test_accept_without_pr_needs_decisions_ack_when_registry_exists(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        self.assertEqual(self.res("judge", "accept", path="review.md"), 0, "реестра нет — сверка не требуется")
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self._registry_with_decision()
+        self.refused("judge", "accept", path="review.md")
+        self.refused("judge", "accept", path="review.md", decisions="В-9")
+        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="В-1"), 0)
+        self.assertIn("решения: сверено В-1", self.tkt().log[-1].text)
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-"), 0)
+        self.assertIn("решения: связанных нет", self.tkt().log[-1].text)
+
+    def test_accept_pr_needs_decisions_ack_on_both_entry_points(self):
+        import contextlib
+        import io
+        self._registry_with_decision()
+        self.refused("judge", "accept", pr=7, sha=SHA)
+        os.environ["RPV_ROLE"] = "judge"
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            rc = TK.cmd_accept(type("A", (), dict(id=self.tid, pr=7, sha=SHA, text="", repo="o/r", decisions=None))())
+        self.assertEqual(rc, 1)
+        self.assertIn("--decisions", err.getvalue())
+        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, decisions="В-1"), 0)
+        self.assertIn("решения: сверено В-1", self.tkt().log[-1].text)
+
+    def test_due_records_first_and_current_deadline_ceo_only(self):
+        import contextlib
+        import io
+        os.environ.pop("RPV_ROLE", None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(TK.cmd_due(type("A", (), dict(id=self.tid, by="2099-01-02T18:00+04:00", said="к шести"))()), 0)
+            self.assertEqual(TK.cmd_due(type("A", (), dict(id=self.tid, by="2099-01-03T12:00+04:00", said=None))()), 0)
+        h = self.tkt().header
+        self.assertEqual((h.get("due_first"), h.get("due")), ("2099-01-02T18:00+04:00", "2099-01-03T12:00+04:00"))
+        self.assertIn("Срок владельцу: 2099-01-02T18:00+04:00 — «к шести»", self.tkt().log[-2].text)
+        os.environ["RPV_ROLE"] = "engineer"
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(TK.cmd_due(type("A", (), dict(id=self.tid, by="2099-01-04T12:00+04:00", said=None))()), 1)
+            os.environ.pop("RPV_ROLE", None)
+            self.assertEqual(TK.cmd_due(type("A", (), dict(id=self.tid, by="вчера", said=None))()), 1)
+        self.assertEqual(self.tkt().header.get("due"), "2099-01-03T12:00+04:00")
+
+    def test_new_with_due(self):
+        import contextlib
+        import io
+        a = dict(owner="engineer", title="Срочно", reviewer=None, effort=None, desc="", wait_for="", force=True,
+                 backlog=False, executor=None, kind=None, ref="В-229", due="2099-01-02T18:00+04:00", said=None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(TK.cmd_new(type("A", (), a)()), 0)
+        made = T.read_ticket(max(D.TICKETS_DIR.glob("TK-*.md")))
+        self.assertEqual(made.header.get("due_first"), "2099-01-02T18:00+04:00")
+        before = len(list(D.TICKETS_DIR.glob("TK-*.md")))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(TK.cmd_new(type("A", (), dict(a, title="Другое", due="не срок"))()), 1)
+        self.assertEqual(len(list(D.TICKETS_DIR.glob("TK-*.md"))), before, "непонятый срок — файл не создан")
 
 
     # --- V2-3: приёмка Судьи гоняет проверки всех исправленных ошибок

@@ -16,6 +16,7 @@
     tickets.py start TK-001                                     # backlog|stopped → todo
     tickets.py wait TK-001 host:calc:<путь>/<job>.json [--on-met "python tools/x.py арг"]  # status: waiting + wait_for
     tickets.py stop TK-001 --text "..." [--next engineer]       # только CEO: снять роль
+    tickets.py due TK-001 --by 18:00 [--said "к шести"]          # только CEO: срок, названный владельцу (due / due_first)
     tickets.py status                                           # потрачено по задачам
 
 Приёмка Судьи (`result … accept`, `accept`) сначала гоняет проверки всех исправленных ошибок (`errors.py`; в worktree
@@ -134,6 +135,12 @@ def cmd_new(args) -> int:
         print(f"new: нужна --ref «ссылка на задачу владельца»: его цитата (≥ {REF_MIN} знаков) или решение В-##. "
               f"Работы, которую владелец не заказывал, не заводим", file=sys.stderr)
         return 1
+    # CP2 (критерий 1): реестр владельца есть — ссылка только на его номер, цель G-NNN или решение В-N; слова владельца
+    # сначала записывает `secretary`. Без реестра (`.claude/decisions.md` нет) — цитата или В-## как раньше
+    if registry_mod.decisions_file(PROJECT_ROOT).exists() and not REF_REGISTRY.match(ref):
+        print("new: --ref — только номер реестра владельца: цель G-NNN или решение В-N (`registry.py list`). Слова "
+              "владельца сначала в реестр — помощник `secretary` (`registry.py decide|goal`)", file=sys.stderr)
+        return 1
     # V2-2: номер реестра владельца (В-N, G-NNN) — только существующий; цель — только открытая. Решения без
     # реестра (.claude/decisions.md нет — номера ведутся в другом месте проекта) проходят как раньше
     num = REF_REGISTRY.match(ref)
@@ -173,14 +180,17 @@ def cmd_new(args) -> int:
               file=sys.stderr)
         return 1
     try:
+        due = T.parse_by(args.due) if getattr(args, "due", None) else None  # непонятый срок — отказ до создания файла
         path = T.create_ticket(TICKETS_DIR, owner=args.owner, title=args.title, reviewer=reviewer,
                                 description=f"Ссылка на задачу владельца: {ref}\n\n{args.desc or ''}".rstrip(),
                                 wait_for=args.wait_for or "",
                                 status="backlog" if args.backlog else "todo",
                                 executor=args.executor, kind=args.kind, effort=args.effort)
-    except ValueError as e:  # неизвестная форма wait_for — файл не создан
+    except ValueError as e:  # неизвестная форма wait_for или срока — файл не создан
         print(e, file=sys.stderr)
         return 1
+    if due:
+        _set_due(path, due, getattr(args, "said", None) or "")
     try:
         print(path.relative_to(PROJECT_ROOT))
     except ValueError:
@@ -261,14 +271,22 @@ def cmd_result(args) -> int:
     if role == "judge" and tkt.owner == "judge" and args.result in ("done", "accept") and not (args.pr or args.sha):
         head, _ = routes.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
+    ack = ""
+    if args.result == "accept":
+        err, ack = _decisions_ack(args)
+        if err:
+            print(f"result: {err}", file=sys.stderr)
+            return 1
+        proof += ack
     if args.result == "accept" and not (args.pr or args.sha) and _regression(args.id, "result"):
         return 1  # приёмка в PR проходит ту же проверку в cmd_accept
     if args.result == "accept" and (args.pr or args.sha):
         rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
-                                      "repo": getattr(args, "repo", None)})())
+                                      "repo": getattr(args, "repo", None),
+                                      "decisions": getattr(args, "decisions", None)})())
         if rc == 0:  # запись итога — иначе строгий Stop (RPV_STOP_STRICT) не видит сдачи шага и блокирует Судью
             with T.ticket_lock(path):
-                T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]} — {why}")
+                T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
         return rc
     if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
         rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None),
@@ -297,6 +315,56 @@ def _caller_role() -> str:
     return (D.P.env("ROLE", "") or "").strip().lower()
 
 
+def _decisions_ack(args) -> tuple[str, str]:
+    """CP2 (критерий 6): приёмка Судьи при заведённом реестре — с перечнем решений владельца, с которыми сдача сверена:
+    `--decisions В-3,В-7` (номера есть в реестре) или `--decisions -` (связанных нет). → (отказ, пометка для лога)."""
+    if not registry_mod.decisions_file(PROJECT_ROOT).exists():
+        return "", ""
+    raw = (getattr(args, "decisions", None) or "").strip()
+    if raw in ("-", "—"):
+        return "", " решения: связанных нет"
+    refs = [r for r in re.split(r"[,\s]+", raw) if r]
+    if not refs:
+        return ("приёмка — только со сверкой с решениями владельца: --decisions В-N[,В-M] (с чем сверено) или "
+                "--decisions - (связанных нет); противоречит решению — не принимать, а вернуть"), ""
+    missing = [r for r in refs if not (REF_DECISION.fullmatch(r) and registry_mod.ref_exists(PROJECT_ROOT, r))]
+    if missing:
+        return f"--decisions: {', '.join(missing)} — таких решений в реестре нет (`registry.py list`)", ""
+    return "", f" решения: сверено {', '.join(refs)}"
+
+
+def _set_due(path: Path, due, said: str = "") -> None:
+    """Срок, названный владельцу: `due` — текущий, `due_first` — первый названный (по нему меряется «сбылось»)."""
+    iso = due.isoformat(timespec="minutes")
+    with T.ticket_lock(path):
+        tkt = T.read_ticket(path)
+        upd = {"due": iso}
+        if not (tkt.header.get("due_first") or "").strip():
+            upd["due_first"] = iso
+        T.write_header_updates(path, upd, stamp_updated=False)
+        T.append_log(path, "ceo", f"Срок владельцу: {iso}" + (f" — «{' '.join(said.split())}»" if said.strip() else ""))
+
+
+def cmd_due(args) -> int:
+    """CEO: срок, названный владельцу (критерий 4). Перенос — новая запись, первый срок остаётся в `due_first`."""
+    role = _caller_role()
+    if role and role != "ceo":
+        print(f"due — только CEO (срок называет владельцу он); эта сессия — роль {role}", file=sys.stderr)
+        return 1
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    try:
+        due = T.parse_by(args.by)
+    except ValueError as e:
+        print(f"due: {e}", file=sys.stderr)
+        return 1
+    _set_due(path, due, args.said or "")
+    print(f"{args.id}: срок владельцу {due.isoformat(timespec='minutes')}")
+    return 0
+
+
 def cmd_accept(args) -> int:
     """Судья: машиночитаемый вердикт «принято» на конкретной голове PR (TK-079 п.2). Вливает программа (merge_rule), когда
     на этой голове CI зелёный и PR без конфликтов; сменится голова — вердикт не действует, нужен новый."""
@@ -321,6 +389,10 @@ def cmd_accept(args) -> int:
     if err:
         print(f"accept: {err}", file=sys.stderr)
         return 1
+    derr, ack = _decisions_ack(args)
+    if derr:
+        print(f"accept: {derr}", file=sys.stderr)
+        return 1
     if _regression(args.id, "accept"):
         return 1
     tkt = T.read_ticket(path)
@@ -329,7 +401,7 @@ def cmd_accept(args) -> int:
             and merge_rule.merged_done(slug, int(args.pr))):
         # финальная приёмка: PR уже влит (все PR тикета влиты), владелец сдавал done — ждать нечего, круга не будет (TK-090 а)
         with T.ticket_lock(path):
-            T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]} (уже влит). {args.text or 'Тикет закрыт.'}")
+            T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]} (уже влит).{ack} {args.text or 'Тикет закрыт.'}")
             acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
             acc.pop(int(args.pr), None)
             T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "done", "wait_for": "",
@@ -338,7 +410,7 @@ def cmd_accept(args) -> int:
         print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} (влит) → status: done")
         return 0
     with T.ticket_lock(path):
-        T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}. "
+        T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}.{ack} "
                      + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."))
         acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
         acc[int(args.pr)] = args.sha  # вердикты по другим PR тикета не трогаем
@@ -503,7 +575,10 @@ def main(argv=None) -> int:
                         help="только с --executor haiku (там и так без Судьи); иначе отказ — Судью снимает владелец")
     p_new.add_argument("--effort", choices=list(T.VALID_EFFORTS), default=None,
                         help="усилие запусков по этому тикету; без поля — исследователь/инженер high, Судья xhigh")
-    p_new.add_argument("--ref", default="", help="обязательно: ссылка на задачу владельца — его цитата или решение В-##")
+    p_new.add_argument("--ref", default="", help="обязательно: цель G-NNN или решение В-N из реестра владельца "
+                                                  "(без реестра — цитата владельца или В-##)")
+    p_new.add_argument("--due", default=None, help="срок, названный владельцу: ЧЧ:ММ или ISO (GMT+4)")
+    p_new.add_argument("--said", default=None, help="как срок сказан владельцу (дословно)")
     p_new.add_argument("--desc", default="")
     p_new.add_argument("--wait-for", dest="wait_for", default="")
     p_new.add_argument("--force", action="store_true", help="создать, даже если за час есть тикет с похожим заголовком")
@@ -529,6 +604,7 @@ def main(argv=None) -> int:
     p_accept.add_argument("--sha", required=True)
     p_accept.add_argument("--text", default="")
     p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе RPV_CI_REPO)")
+    p_accept.add_argument("--decisions", default=None, help="решения владельца, с которыми сверено: В-N[,В-M] или - (связанных нет)")
     p_accept.set_defaults(func=cmd_accept)
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
@@ -544,6 +620,8 @@ def main(argv=None) -> int:
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе RPV_CI_REPO)")
+    p_result.add_argument("--decisions", default=None,
+                          help="accept: решения владельца, с которыми сверена сдача: В-N[,В-M] или - (связанных нет)")
     p_result.set_defaults(func=cmd_result)
 
     p_start = sub.add_parser("start")
@@ -559,6 +637,12 @@ def main(argv=None) -> int:
     p_wait.add_argument("--on-met", default=None,
                         help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
     p_wait.set_defaults(func=cmd_wait)
+
+    p_due = sub.add_parser("due", help="только CEO: срок, названный владельцу (первый остаётся в due_first)")
+    p_due.add_argument("id")
+    p_due.add_argument("--by", required=True, help="ЧЧ:ММ или ISO (GMT+4)")
+    p_due.add_argument("--said", default=None, help="как срок сказан владельцу (дословно)")
+    p_due.set_defaults(func=cmd_due)
 
     p_stop = sub.add_parser("stop", help="только CEO: остановить запущенную роль тикета и дать новую постановку")
     p_stop.add_argument("id")

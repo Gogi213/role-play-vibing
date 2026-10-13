@@ -9,6 +9,7 @@
     registry.py goal --title "..." --quote "<дословно>" [--criterion "..."]... [--budget "..."] [--due "..."] [--at <время>]
     registry.py accept-goal G-NNN [--at <время>]     # владелец принял результат цели: отметка времени принятия
     registry.py drop-goal G-NNN --quote "<дословно>"  # владелец снял цель
+    registry.py repeat В-N --quote -                 # владелец повторил уже принятое — отметка в блоке, нового В-N нет
     registry.py show В-N|G-NNN
     registry.py list [--open]
 
@@ -193,11 +194,42 @@ def cmd_show(a, root: Path) -> int:
     return 0
 
 
+REPEAT = "Повторено владельцем"
+
+
+def repeats(root: Path) -> dict[str, int]:
+    """{"В-N": сколько раз владелец повторил уже принятое} — мера критерия 6 (должно быть 0)."""
+    return {k: n for k, block in decisions(root).items()
+            if (n := sum(ln.startswith(REPEAT) for ln in block.splitlines()))}
+
+
+def cmd_repeat(a, root: Path) -> int:
+    """Владелец повторил уже принятое решение: строка «Повторено владельцем · время: «цитата»» в его блок, нового В-N нет."""
+    if err := _refuse_role() or _need_quote(a.quote):
+        print(err, file=sys.stderr)
+        return 1
+    f = decisions_file(root)
+    text = f.read_text(encoding="utf-8") if f.exists() else ""
+    marks = list(DECISION.finditer(text))
+    i = next((i for i, m in enumerate(marks) if f"В-{m.group(1)}" == a.ref), None)
+    if i is None:
+        print(f"нет {a.ref} в реестре решений", file=sys.stderr)
+        return 1
+    end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+    block, after = text[marks[i].start():end].rstrip("\n"), text[end:]
+    line = f"{REPEAT} · {_now(a.at)}: «{' '.join(a.quote.split())}»"
+    f.write_text(text[:marks[i].start()] + block + "\n" + line + "\n" + ("\n" + after.lstrip("\n") if after.strip() else ""),
+                 encoding="utf-8")
+    print(f"{a.ref}: повтор №{repeats(root).get(a.ref, 0)}")
+    return 0
+
+
 def cmd_list(a, root: Path) -> int:
+    rep = repeats(root)
     for k, block in decisions(root).items():
         gist = next((ln[6:] for ln in block.splitlines() if ln.startswith("Суть: ")), "")
         if not a.open:
-            print(f"{k} — {gist}")
+            print(f"{k} — {gist}" + (f" (повторено владельцем: {rep[k]})" if k in rep else ""))
     for gid, p in goals(root).items():
         h = goal_header(p)
         if a.open and h.get("status") != "open":
@@ -237,6 +269,11 @@ def main(argv=None) -> int:
     s = sub.add_parser("show")
     s.add_argument("ref")
     s.set_defaults(func=cmd_show)
+    rp = sub.add_parser("repeat", help="владелец повторил уже принятое решение (мера: должно быть 0)")
+    rp.add_argument("ref", help="В-N")
+    rp.add_argument("--quote", required=True, help="слова владельца дословно; «-» — из stdin")
+    rp.add_argument("--at", default=None)
+    rp.set_defaults(func=cmd_repeat)
     li = sub.add_parser("list")
     li.add_argument("--open", action="store_true", help="только открытые цели")
     li.set_defaults(func=cmd_list)

@@ -104,6 +104,23 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('> нет "не надо" сразу.\n> сначала макет покажи\n',
                       R.decisions_file(self.root).read_text(encoding="utf-8"))
 
+    def test_repeat_marks_existing_decision_without_new_number(self):
+        self.run_cli("decide", "--quote", "первое", "--gist", "г1", "--at", "2026-10-14 10:00")
+        self.run_cli("decide", "--quote", "второе", "--gist", "г2", "--at", "2026-10-14 11:00")
+        code, out, _ = self.run_cli("repeat", "В-1", "--quote", "я же говорил: первое", "--at", "2026-10-15 09:00")
+        self.assertEqual((code, out), (0, "В-1: повтор №1"))
+        self.run_cli("repeat", "В-2", "--quote", "второе!", "--at", "2026-10-15 09:30")
+        self.run_cli("repeat", "В-2", "--quote", "второе!!", "--at", "2026-10-15 09:40")
+        self.assertEqual(list(R.decisions(self.root)), ["В-1", "В-2"], "нового номера нет")
+        self.assertEqual(R.repeats(self.root), {"В-1": 1, "В-2": 2})
+        text = R.decisions_file(self.root).read_text(encoding="utf-8")
+        self.assertIn("Заменяет: —\nПовторено владельцем · 2026-10-15 09:00: «я же говорил: первое»\n\n## В-2", text)
+        self.assertTrue(text.endswith("Повторено владельцем · 2026-10-15 09:40: «второе!!»\n"))
+        self.assertIn("В-2 — г2 (повторено владельцем: 2)", self.run_cli("list")[1])
+        self.assertEqual(self.run_cli("repeat", "В-7", "--quote", "x y")[0], 1)
+        with mock.patch.dict(os.environ, {"RPV_ROLE": "judge"}):
+            self.assertEqual(self.run_cli("repeat", "В-1", "--quote", "x y")[0], 1)
+
     def test_bad_time(self):
         code, _, err = self.run_cli("decide", "--quote", "a b", "--gist", "g", "--at", "14.10 10:00")
         self.assertEqual(code, 1)
