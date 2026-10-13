@@ -11,8 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_merge_rule as TM  # noqa: E402  (песочница проекта и окружение — оттуда)
 
-Base = TM.MergeRuleTests
-del TM.MergeRuleTests  # унаследованные тесты базы здесь не повторяем
+Base = TM.MergeRuleBase  # песочница без тестов: тесты test_merge_rule.py здесь не повторяются
 import dispatch as D  # noqa: E402
 import merge_rule as M  # noqa: E402
 import routes as R  # noqa: E402

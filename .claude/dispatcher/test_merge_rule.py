@@ -28,7 +28,9 @@ SHA = "a" * 40
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone(timedelta(hours=4)))
 
 
-class MergeRuleTests(unittest.TestCase):
+class MergeRuleBase(unittest.TestCase):
+    """Песочница тикетов и подделка GitHub; тестов нет — их наследники здесь и в test_tk109.py."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
@@ -64,6 +66,17 @@ class MergeRuleTests(unittest.TestCase):
             return {"merged": True}
         return {"mergeable": self.mergeable, "merged": self.merged and any(c[0] == "PUT" for c in self.calls)}
 
+    def run_m(self):
+        return M.merge_once(REPO, gh=self.gh)
+
+    def tkt(self):
+        return T.read_ticket(self.path)
+
+    def put(self):
+        return [c for c in self.calls if c[0] == "PUT"]
+
+
+class MergeRuleTests(MergeRuleBase):
     def test_plugin_repo_pr_is_ordinary_pr(self):
         """CP4: PR в репозиторий самого плагина — обычный PR: те же условия, без проверки версии, тега и автовыпуска."""
         repo = "Gogi213/role-play-vibing"
@@ -73,15 +86,6 @@ class MergeRuleTests(unittest.TestCase):
         self.assertEqual([c[0] for c in self.calls if c[0] != "GET"], ["PUT"])
         self.assertFalse([c for c in self.calls if "contents/" in c[1] or c[1].endswith("/git/refs")])
         self.assertFalse(hasattr(M, "R"))
-
-    def run_m(self):
-        return M.merge_once(REPO, gh=self.gh)
-
-    def tkt(self):
-        return T.read_ticket(self.path)
-
-    def put(self):
-        return [c for c in self.calls if c[0] == "PUT"]
 
     def test_merges_when_all_conditions_hold(self):
         self.assertEqual(self.run_m(), [(7, "влит")])
