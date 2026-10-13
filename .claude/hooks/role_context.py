@@ -144,13 +144,14 @@ def rel(path):
     return os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
-def tickets_command():
-    """Готовая команда тикетов: `python|"<sys.executable>" "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`.
+def tickets_command(name="tickets.py"):
+    """Готовая команда тикетов: `python|"<sys.executable>" "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`
+    (`name` — другой скрипт диспетчера той же формы, например `registry.py`).
 
     Плагин лежит в своей папке, в проекте `tickets.py` нет — хук знает свой путь и подставляет его сам (слэши прямые:
     работают и в Bash, и в PowerShell на Windows). Подкоманда (`comment`, `new` …) дописывается после `--project`."""
     here = os.path.dirname(os.path.abspath(__file__))                      # <плагин>/.claude/hooks
-    script = os.path.join(os.path.dirname(here), "dispatcher", "tickets.py")
+    script = os.path.join(os.path.dirname(here), "dispatcher", name)
     exe = "python" if shutil.which("python") else '"' + sys.executable.replace(os.sep, "/") + '"'   # TK-110 В-1: путь только без python в PATH
     return f'{exe} "{script.replace(os.sep, "/")}" --project "{ROOT.replace(os.sep, "/")}"'
 
@@ -233,9 +234,12 @@ def full_context(role, title, source, hook_in):
                 "\"...\"` (@упоминания никого не будят)."
                 + (" Остальные подкоманды (`new`, `start`, `stop`, `status`) — после `--project \"...\"` той же командой."
                    if role == "ceo" else ""))
+    if role == "ceo":
+        head.append(f"Реестр владельца (решения В-N, цели G-NNN): `{tickets_command('registry.py')} "
+                    "decide|goal|accept-goal|show|list` — пишет помощник `secretary`; передай ему эту команду.")
     if role != "ceo":
-        head.append("Общую память проекта (CLAUDE.md, автопамять) пишет только `CEO`; ты работаешь по своему "
-                    "тикету.")
+        head.append("Общую память проекта (CLAUDE.md, решения и цели владельца, автопамять) пишет только `CEO`; ты "
+                    "работаешь по своему тикету.")
     try:  # память ролей: догнать конспект прошлой сессии, дать на него ссылку
         from role_memory import on_session_start
         last = on_session_start(hook_in, role, title)

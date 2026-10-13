@@ -1407,6 +1407,34 @@ class ThirdAudit(unittest.TestCase):
         self.assertIsNone(self.tool("Write", "C:/visual projects/alpha/.claude/roles/notes/engineer.md"))
         self.assertIsNone(dg.check("cat .claude/settings.json", CWD))
 
+    # ------------------------------------------------------------------------------------------ (и) слово владельца
+    def test_owner_record_closed_to_dispatcher_roles(self):
+        for role in ("engineer", "researcher", "judge"):
+            self.as_role(role)
+            for name in ("Write", "Edit", "MultiEdit"):
+                for path in ("C:/visual projects/alpha/CLAUDE.md", "CLAUDE.md", ".claude/decisions.md",
+                             "C:\\visual projects\\alpha\\.claude\\goals\\G-001.md", "docs/CLAUDE.md"):
+                    reason = self.tool(name, path)
+                    self.assertIsNotNone(reason, f"{role} {name} {path}")
+                    self.assertIn("Слово владельца", reason)
+            for cmd in ("echo x >> CLAUDE.md", "echo '## В-9' >> .claude/decisions.md", "rm .claude/goals/G-001.md",
+                        "cat x | tee -a .claude/decisions.md", "sed -i 's/a/b/' CLAUDE.md",
+                        "Add-Content .claude\\decisions.md x", "mv .claude/goals/G-001.md /tmp/x"):
+                reason = dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
+                self.assertIn("Слово владельца", reason or "", f"{role}: {cmd}")
+            for cmd in ("cat CLAUDE.md", "grep В-12 .claude/decisions.md", "ls .claude/goals",
+                        'python registry.py show В-3', 'python tickets.py result TK-1 done --why "в CLAUDE.md > x"'):
+                self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD}), cmd)
+            self.assertIsNone(self.tool("Write", "C:/visual projects/alpha/.claude/roles/notes/engineer.md"))
+            self.assertIsNone(self.tool("Write", "C:/visual projects/alpha/docs/goals.md"))
+
+    def test_owner_record_open_to_ceo(self):
+        self.as_role(None)
+        self.assertIsNone(self.tool("Edit", "C:/visual projects/alpha/CLAUDE.md"))
+        self.assertIsNone(self.tool("Write", "C:/visual projects/alpha/.claude/decisions.md"))
+        self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "echo x >> CLAUDE.md"},
+                                         "cwd": CWD}))
+
     def test_settings_open_to_ceo(self):
         self.as_role(None)
         self.assertIsNone(self.tool("Edit", "C:/visual projects/alpha/.claude/settings.json"))

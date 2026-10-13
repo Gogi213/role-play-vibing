@@ -5,7 +5,9 @@
     python tools/helper_eval.py run --data <каталог набора> --out <каталог итогов> \\
         [--models claude-haiku-5-5,claude-sonnet-5-5] [--effort xhigh] [--tasks secretary,inbox,reporter] \\
         [--only s-611,r-666] [--jobs 6] [--budget 1.0]
+    python tools/helper_eval.py regrade --data <каталог набора> --out <каталог итогов>  # эталон поправлен — без запусков
     python tools/helper_eval.py report --out <каталог итогов>
+    python tools/helper_eval.py pair --a <итоги A> --b <итоги B> [--model …]  # две Haiku: совпали — берём, иначе к CEO
 
 Набор (`--data`) — `cases.jsonl` и `fixtures/<имя>/` (проект-заготовка: `.claude/tickets`, `.claude/decisions.md`…).
 Набор собирается из данных проекта и в репозиторий не кладётся. Случай — строка JSON: `id`, `task` (имя помощника),
@@ -30,14 +32,21 @@ CLAUDE = shutil.which("claude") or "claude"
 WRITERS = {"secretary"}  # помощники, которые пишут в проект: каждому запуску — своя копия заготовки
 
 PROMPTS = {
-    "secretary": lambda c: (f"Сейчас: {c['now']} (GMT+4). Владелец написал (дословно, между линиями):\n---\n{c['text']}"
-                            f"\n---\nПеред этим CEO писал владельцу (контекст, не слова владельца):\n---\n{c['prev']}\n---\n"
-                            "Оформи по своему уставу."),
-    "inbox": lambda c: (f"Сейчас: {c['now']} (GMT+4). Разбери строки {c['lines'][0]}–{c['lines'][1]} файла "
+    "secretary": lambda c, w: (f"Сейчас: {c['now']} (GMT+4). Команда реестра: `{registry_cmd(w)}`. "
+                               f"Владелец написал (дословно, между линиями):\n---\n{c['text']}"
+                               f"\n---\nПеред этим CEO писал владельцу (контекст, не слова владельца):\n---\n{c['prev']}"
+                               "\n---\nОформи по своему уставу."),
+    "inbox": lambda c, w: (f"Сейчас: {c['now']} (GMT+4). Разбери строки {c['lines'][0]}–{c['lines'][1]} файла "
                         ".claude/dispatcher/ceo-inbox.md."),
-    "reporter": lambda c: (f"Сейчас: {c['now']} (GMT+4). Вопрос владельца (дословно): «{c['question']}». "
+    "reporter": lambda c, w: (f"Сейчас: {c['now']} (GMT+4). Вопрос владельца (дословно): «{c['question']}». "
                            "Собери ответ по своему уставу."),
 }
+
+
+def registry_cmd(work: Path) -> str:
+    """Команда реестра для проекта-копии — как её даёт CEO хук role_context (python, путь плагина, --project)."""
+    exe = "python" if shutil.which("python") else sys.executable
+    return f'{exe} "{(ROOT / ".claude" / "dispatcher" / "registry.py").as_posix()}" --project "{work.as_posix()}"'
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -83,7 +92,7 @@ def numbers(s: str) -> list[str]:
 def quote_pieces(q: str) -> list[str]:
     """Куски цитаты, каждый обязан быть в словах владельца: «…» по отдельности, разрывы «…»/«...», перенос как « / »."""
     q = norm(q)
-    parts = re.findall(r"«([^»]+)»", q) or [q.strip("\"„“ ")]
+    parts = re.findall(r"«([^»]+)»", q) or [q.strip("«»\"„“ ")]
     out = []
     for part in parts:
         out += [p.strip(" \"„“") for p in re.split(r"…|\.\.\.| / ", part) if len(p.strip(" \"„“")) >= 3]
@@ -125,7 +134,10 @@ def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
     invented = [n for n in numbers(body) if n not in allowed]
     rel = c.get("gold_related")
     rel_hit = None if not rel else bool(re.search(rf"\b{re.escape(rel)}\b", (f.get("связано") or "") + "\n" + new_dec))
-    numbering = all(b == "8" for b in new_blocks) and all(p.name == "G-002.md" for p in new_goals)
+    seed_max = max((int(n) for n in re.findall(r"^## В-(\d+)", seeds, re.M)), default=0)
+    goal_max = max((int(n[2:5]) for n in old_goals if re.match(r"G-\d{3}", n)), default=0)
+    numbering = ([int(b) for b in new_blocks] == list(range(seed_max + 1, seed_max + 1 + len(new_blocks)))
+                 and [p.name for p in new_goals] == [f"G-{goal_max + i + 1:03d}.md" for i in range(len(new_goals))])
     return {
         "type_ok": types in [sorted(g) for g in c["gold_types"]],
         "types": types,
@@ -218,16 +230,21 @@ GRADERS = {"secretary": grade_secretary, "inbox": grade_inbox, "reporter": grade
 _LOCK = threading.Lock()
 
 
+def work_dir(c: dict, model: str, out: Path) -> Path:
+    slug = model.replace("claude-", "")
+    return out / "work" / slug / (c["id"] if c["task"] in WRITERS else f"_{c['fixture']}")
+
+
 def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: float) -> dict:
     task, slug = c["task"], model.replace("claude-", "")
     fixture = data / "fixtures" / c["fixture"]
     if task in WRITERS:
-        work = out / "work" / slug / c["id"]
+        work = work_dir(c, model, out)
         if work.exists():
             shutil.rmtree(work)
         shutil.copytree(fixture, work)
     else:
-        work = out / "work" / slug / f"_{c['fixture']}"
+        work = work_dir(c, model, out)
         with _LOCK:
             if not work.exists():
                 shutil.copytree(fixture, work)
@@ -247,7 +264,7 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
            "--permission-mode", "bypassPermissions", "--allowedTools", ",".join(tools)]
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, input=PROMPTS[task](c), capture_output=True, text=True, encoding="utf-8",
+        r = subprocess.run(cmd, input=PROMPTS[task](c, work), capture_output=True, text=True, encoding="utf-8",
                            cwd=str(work), timeout=900)
         raw = r.stdout
     except subprocess.TimeoutExpired:
@@ -270,6 +287,76 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
             w.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"{c['id']:<14} {slug:<12} ${row['cost'] or 0:.4f} {dur:>6}s {'ОШИБКА' if row['error'] else ''}", flush=True)
     return row
+
+
+def cmd_regrade(a) -> int:
+    """Проверки заново по сохранённым ответам и рабочим копиям: эталон или проверка поправлены — запуски не нужны."""
+    data, out = Path(a.data).resolve(), Path(a.out).resolve()
+    cases = {c["id"]: c for c in (json.loads(l) for l in (data / "cases.jsonl").open(encoding="utf-8") if l.strip())}
+    rows = {}
+    for l in (out / "results.jsonl").open(encoding="utf-8"):
+        r = json.loads(l)
+        rows[(r["id"], r["model"])] = r
+    with (out / "results.jsonl").open("w", encoding="utf-8") as w:
+        for r in rows.values():
+            c = cases.get(r["id"])
+            if c:
+                try:
+                    r["grade"] = GRADERS[c["task"]](c, r["answer"], work_dir(c, r["model"], out),
+                                                    data / "fixtures" / c["fixture"])
+                except Exception as e:
+                    r["grade"] = {"grader_error": f"{type(e).__name__}: {e}"}
+            w.write(json.dumps(r, ensure_ascii=False) + "\n")
+    return cmd_report(a)
+
+
+def _load(out: Path, model: str) -> dict:
+    rows = {}
+    for l in (out / "results.jsonl").open(encoding="utf-8"):
+        r = json.loads(l)
+        if r["model"] == model:
+            rows[r["id"]] = r
+    return rows
+
+
+def _pair_key(r: dict):
+    """Что сверяют два независимых прогона: secretary — типы записи, inbox — тикеты «требует действия»."""
+    if r["task"] == "secretary":
+        return tuple(r["grade"].get("types") or ())
+    if r["task"] == "inbox":
+        return tuple(sorted(_ids(_section(r["answer"], "требует действия",
+                                          ("закрыто", "идёт", "идет", "механика", "неактуально", "к сведению")))))
+    return None
+
+
+def _pair_ok(r: dict):
+    g = r["grade"]
+    return g.get("type_ok") if r["task"] == "secretary" else g.get("action_exact")
+
+
+def cmd_pair(a) -> int:
+    """Две модели (или два прогона одной) независимо: совпали — ответ берётся, разошлись — к CEO. Сколько расходятся,
+    верно ли там, где совпали, и сколько ошибок одиночного прогона пара отдала бы CEO."""
+    ra, rb = _load(Path(a.a).resolve(), a.model), _load(Path(a.b).resolve(), a.model_b or a.model)
+    md = ["# Пара прогонов", "", f"A — `{a.a}`, B — `{a.b}`", "",
+          "| помощник | случаев | совпали | верно из совпавших | к CEO | ошибок A | из них к CEO | цена пары, $ на случай |",
+          "|---|---|---|---|---|---|---|---|"]
+    for task in ("secretary", "inbox"):
+        ids = sorted(i for i in ra if i in rb and ra[i]["task"] == task and not ra[i]["error"] and not rb[i]["error"])
+        if not ids:
+            continue
+        same = [i for i in ids if _pair_key(ra[i]) == _pair_key(rb[i])]
+        right = [i for i in same if _pair_ok(ra[i])]
+        wrong_a = [i for i in ids if not _pair_ok(ra[i])]
+        caught = [i for i in wrong_a if i not in same]
+        cost = sum((ra[i]["cost"] or 0) + (rb[i]["cost"] or 0) for i in ids) / len(ids)
+        md.append(f"| {task} | {len(ids)} | {len(same)} | {len(right)}/{len(same)} | {len(ids) - len(same)} | "
+                  f"{len(wrong_a)} | {len(caught)} | {cost:.4f} |")
+        md += [f"  - разошлись: `{i}` A={_pair_key(ra[i])} B={_pair_key(rb[i])}" for i in ids if i not in same]
+        md += [f"  - совпали, но мимо эталона: `{i}` {_pair_key(ra[i])}" for i in same if not _pair_ok(ra[i])]
+    sys.stdout.reconfigure(encoding="utf-8")
+    print("\n".join(md))
+    return 0
 
 
 def cmd_run(a) -> int:
@@ -366,10 +453,18 @@ def main(argv=None) -> int:
     r.add_argument("--only", default="")
     r.add_argument("--jobs", type=int, default=6)
     r.add_argument("--budget", type=float, default=1.0)
+    g = sub.add_parser("regrade")
+    g.add_argument("--data", required=True)
+    g.add_argument("--out", required=True)
     p = sub.add_parser("report")
     p.add_argument("--out", required=True)
+    pr = sub.add_parser("pair", help="два независимых прогона: совпали — берём, разошлись — к CEO")
+    pr.add_argument("--a", required=True, help="каталог итогов прогона A")
+    pr.add_argument("--b", required=True, help="каталог итогов прогона B")
+    pr.add_argument("--model", default="claude-haiku-5-5")
+    pr.add_argument("--model-b", dest="model_b", default=None, help="модель прогона B (по умолчанию та же)")
     a = ap.parse_args(argv)
-    return cmd_run(a) if a.cmd == "run" else cmd_report(a)
+    return {"run": cmd_run, "regrade": cmd_regrade, "report": cmd_report, "pair": cmd_pair}[a.cmd](a)
 
 
 if __name__ == "__main__":
