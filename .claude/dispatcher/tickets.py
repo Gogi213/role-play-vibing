@@ -545,8 +545,6 @@ def cmd_wait(args) -> int:
                   f"прогона или чужой результат: ждать нечего. Удали старый маркер или возьми новый путь; "
                   f"осознанно ждать готовое — `--allow-met`.", file=sys.stderr)
             return 1
-    if parsed and parsed[0] == "host" and parsed[2] == "path" and (note := T.sched_marker_warning(parsed[1], parsed[3])):
-        print(f"wait: предупреждение — {note}", file=sys.stderr)
     if parsed and parsed[0] == "ticket":
         cycle = T.wait_cycle(TICKETS_DIR, args.id, parsed[1])
         if cycle:

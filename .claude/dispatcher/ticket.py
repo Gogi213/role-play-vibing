@@ -219,17 +219,6 @@ def file_wait_problem(spec: str) -> str:
     return ""
 
 
-def sched_marker_warning(alias: str, path: str) -> str:
-    """TK-218 п.3: для заданий alsched канон — код завершения `/data/sched/rc/<id>` (`job:<алиас>:<id>` / host-путь на него);
-    свой маркер (`done`, `*.done`) сообщает «дошёл до строки», а не «задание кончилось и с каким кодом». Пусто — путь годится."""
-    p = path.strip().replace("\\", "/")
-    base = p.rsplit("/", 1)[-1]
-    if "/sched/rc/" in p or not (base == "done" or base.endswith(".done")):
-        return ""
-    return (f"{alias}:{p} похоже на собственный маркер скрипта. Для задания alsched ждите код завершения: "
-            f"`job:{alias}:<id>` или `host:{alias}:/data/sched/rc/<id>` — маркер не отличит успех от падения до строки с touch")
-
-
 DUP_WINDOW_S = 3600
 DUP_RATIO = 0.8
 

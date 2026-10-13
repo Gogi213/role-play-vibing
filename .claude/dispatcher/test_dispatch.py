@@ -4507,8 +4507,9 @@ class WaitReconcileTest(unittest.TestCase):
         D._RECON_MISS.clear(); D._WL_REG.clear()
         self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
         self._alarm, self.alarms = D.append_ceo_inbox, []
-        self._link = D._LINK
+        self._link, self._watched = D._LINK, D.WATCHED_ALIASES
         D._LINK = types.SimpleNamespace(down_since=None)  # шина жива: пропуск события сверкой виден
+        D.WATCHED_ALIASES = {"calc"}                       # умолчания нет: машина со сторожем задаётся окружением
         D.append_ceo_inbox = lambda *a, **k: self.alarms.append(a)
         D._ssh_cmd = lambda alias, cmd: ["ssh", alias, cmd]
         D.WAIT_ASYNC = True
@@ -4519,7 +4520,7 @@ class WaitReconcileTest(unittest.TestCase):
 
     def tearDown(self):
         D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd = self._run, self._async, self._sshcmd
-        D.append_ceo_inbox, D._LINK = self._alarm, self._link
+        D.append_ceo_inbox, D._LINK, D.WATCHED_ALIASES = self._alarm, self._link, self._watched
         D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
         D._RECON_MISS.clear(); D._WL_REG.clear()
 

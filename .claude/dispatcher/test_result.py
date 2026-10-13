@@ -343,11 +343,6 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(TK.cmd_wait(type("A", (), a)()), 0)
         self.assertEqual(self.tkt().status, "waiting")
 
-    def test_sched_marker_warning(self):
-        self.assertIn("alsched", T.sched_marker_warning("calc", "/data/x/gate.done"))
-        self.assertEqual(T.sched_marker_warning("calc", "/data/sched/rc/abc"), "")
-        self.assertEqual(T.sched_marker_warning("calc", "/data/x/out.json"), "")
-
     def test_new_refuses_similar_recent_title(self):
         self.assertTrue(T.similar_recent_ticket(D.TICKETS_DIR, "т", now=NOW))
         self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "совсем другое про счёт", now=NOW), "")

@@ -53,6 +53,9 @@ class WatchSandbox(unittest.TestCase):
         env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
         env_patch.start()
         self.addCleanup(env_patch.stop)
+        aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"calc"})   # умолчания нет: машины со сторожем задаёт окружение
+        aliases_patch.start()
+        self.addCleanup(aliases_patch.stop)
         for name in ("RPV_JOB_OWNERS_CMD", "RPV_JOB_STATE_CMD", "RPV_STRAY_CMD"):
             os.environ.pop(name, None)
 
