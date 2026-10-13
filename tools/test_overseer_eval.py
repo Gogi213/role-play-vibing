@@ -272,7 +272,7 @@ class SetTests(NoClaude):
 class AgentTests(NoClaude):
     def test_overseer_definition(self):
         d = ov.load_agent("overseer")
-        self.assertEqual((d["model"], d["effort"], d["tools"]), ("claude-haiku-5-5", "high", []))
+        self.assertEqual((d["model"], d["effort"], d["tools"]), ("claude-haiku-5-5", "xhigh", []))
         for kind in ov.KINDS:
             self.assertIn(kind, d["prompt"])
         self.assertIn('{"verdict":"тихо"}', d["prompt"])
@@ -367,7 +367,7 @@ class FakeProject(NoClaude):
         self.assertEqual({ln.count("|") for ln in table}, {14})  # 13 столбцов у всех строк
         self.assertIn("TK-087", table[2])
         agents = json.loads((out / "agents.json").read_text(encoding="utf-8"))["overseer"]
-        self.assertEqual((agents["model"], agents["effort"], agents["tools"]), ("claude-haiku-5-5", "high", []))
+        self.assertEqual((agents["model"], agents["effort"], agents["tools"]), ("claude-haiku-5-5", "xhigh", []))
 
     def test_regrade_without_calls(self):
         out = self.root / "out"

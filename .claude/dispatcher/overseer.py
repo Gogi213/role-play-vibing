@@ -6,7 +6,7 @@
 Один взгляд (`look`):
   1. Правило кода «дорого»: открытый тикет потратил больше 1×, 2×, 4× 90-го процентиля цены закрытых тикетов проекта —
      по строке CEO на каждую ступень (на истории alpha оно первым ловило TK-049 — на 12 % его цены).
-  2. Haiku 5.5 high (`agents/overseer.md`, без инструментов): по каждому открытому тикету с новыми записями лога (не больше
+  2. Haiku 5.5 xhigh (`agents/overseer.md`, без инструментов): по каждому открытому тикету с новыми записями лога (не больше
      MAX_TICKETS самых свежих) — «тихо» или находка из четырёх видов с дословной цитатой. Числа (запуски, $, часы, возвраты
      Судьи, масштаб закрытых тикетов) считает код; цель владельца (G-NNN) и, если в записях вопрос владельцу, реестр решений —
      в промпте. Находку код принимает, только если цитата есть в логе дословно; одна находка по тикету — не чаще раза в
@@ -33,6 +33,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import registry  # noqa: E402
+import ticket as T  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]  # корень плагина: agents/overseer.md
 KINDS = ("не-движемся", "ломает-принятое", "вопрос-уже-решён", "не-служит-цели")
 DEFAULT_TZ = timezone(timedelta(hours=4))  # запись без пояса — время владельца (GMT+4), как у логов проекта
@@ -48,14 +52,18 @@ RETURN = re.compile(r"^\[итог:\s*return\]")
 OPEN = ("todo", "in_progress", "in_review", "waiting", "blocked", "needs_owner")
 EVERY_S = 15 * 60          # диспетчер зовёт не чаще
 SUPPRESS_H = 24            # одна находка по тикету — не чаще раза в сутки (без этого модель повторяет её в каждом окне)
-MAX_TICKETS = 12           # тикетов за один взгляд — с самыми свежими записями
-MODEL, EFFORT = "claude-haiku-5-5", "high"   # слово владельца 14.10: Надзиратель — Haiku high
+MAX_TICKETS = 12           # тикетов за один взгляд: самые свежие записи и MAX_COSTLY самых дорогих из остальных
+MAX_COSTLY = 2             # дорогой дрейфующий тикет не всегда самый свежий
+MODEL, EFFORT = "claude-haiku-5-5", "xhigh"  # замер 14.10 на истории alpha: xhigh до половины цены ловит 6 из 10, high — 2
 PER_CALL_USD = 0.05        # потолок цены одного вызова (`--max-budget-usd`); замер: средняя $0.0023
 TIMEOUT_S = 180
-COST_STEPS = (1, 2, 4)     # ступени правила «дорого»: × 90-й процентиль цены закрытых тикетов проекта
+COST_STEPS = (3, 6, 12)    # ступени правила «дорого»: × медиана цены закрытых тикетов проекта
 MIN_CLOSED = 5             # меньше закрытых тикетов — масштаба нет, правила «дорого» нет
+SPIKE_H, SPIKE_K = 6, 3    # правило «всплеск»: траты тикета за SPIKE_H ч > SPIKE_K × обычных трат тикета за SPIKE_H ч
+SPIKE_MIN = 30             # меньше стольких замеров «траты за окно» в истории проекта — правила «всплеск» нет
 ACTIVE_H = 24              # тикет без записей и запусков за столько часов — брошен, а не тратит: его не смотрим
 STATE_NAME, LOG_NAME = "overseer.json", "overseer.log"
+SELF = "надзиратель"       # автор записей Надзирателя в логе тикета
 GOAL_ID = re.compile(r"\bG-\d{3,}\b")
 ASK = re.compile(r"\[итог:\s*ask-owner\]|needs_owner|владельц\w* вопрос|спрошу владельца|спрашиваю владельца", re.I)
 
@@ -399,7 +407,8 @@ def grade(raw: str, tid: str, entries: list, until: datetime, shown: str = "") -
     if verdict != "находка":
         res["reason"] = f"verdict «{verdict}» не из двух"
         return res
-    res.update(kind=str(obj.get("kind", "")).strip(), quote=str(obj.get("quote", "")), action=str(obj.get("action", "")).strip())
+    res.update(kind=str(obj.get("kind", "")).strip(), quote=str(obj.get("quote", "")), action=str(obj.get("action", "")).strip(),
+               decision=str(obj.get("decision", "")).strip())
     res["outcome"] = "rejected"
     if res["kind"] not in KINDS:
         res["reason"] = "вид не из четырёх"
@@ -492,15 +501,37 @@ def log_row(root: Path, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def p90_closed(scale: list, now: datetime):
-    """90-й процентиль цены тикетов, закрытых к `now`; меньше MIN_CLOSED — None."""
+def median_closed(scale: list, now: datetime):
+    """Медиана цены тикетов, закрытых к `now`; меньше MIN_CLOSED — None. Медиана, а не 90-й процентиль: дорогие тикеты,
+    закрываясь, поднимают процентиль (история alpha: $23 → $37 → $21 за неделю), медиану — почти нет."""
     done = [x[1] for x in scale if x[0] <= now]
-    return _pct(done, 0.9) if len(done) >= MIN_CLOSED else None
+    return _pct(done, 0.5) if len(done) >= MIN_CLOSED else None
 
 
-def cost_step(spent: float, p90) -> int:
-    """Ступень правила «дорого»: наибольшее k из COST_STEPS, при котором spent > k × p90; нет — 0."""
-    return max((k for k in COST_STEPS if p90 and spent > k * p90), default=0)
+def window_spends(runs: dict, now: datetime, hours: float = SPIKE_H) -> list:
+    """Замеры «сколько тикет потратил за последние `hours` ч» на момент каждого запуска до `now` — по всем тикетам."""
+    out, w = [], timedelta(hours=hours)
+    for rs in runs.values():
+        done, j, acc = [r for r in rs if r.ts <= now], 0, 0.0
+        for r in done:
+            acc += r.cost
+            while done[j].ts <= r.ts - w:
+                acc -= done[j].cost
+                j += 1
+            out.append(acc)
+    return out
+
+
+def spike_base(runs: dict, now: datetime):
+    """Обычные траты тикета за SPIKE_H ч в проекте — медиана замеров `window_spends`; мало замеров — None. Ловит то, что
+    накопленные траты не видят: тикет вдруг стал тратить в разы быстрее (история alpha: TK-049 — на 7 % его цены)."""
+    xs = window_spends(runs, now)
+    return _pct(xs, 0.5) if len(xs) >= SPIKE_MIN else None
+
+
+def cost_step(spent: float, base) -> int:
+    """Ступень правила «дорого»: наибольшее k из COST_STEPS, при котором spent > k × base; нет — 0."""
+    return max((k for k in COST_STEPS if base and spent > k * base), default=0)
 
 
 def goal_context(root: Path, desc: str) -> str:
@@ -513,13 +544,26 @@ def goal_context(root: Path, desc: str) -> str:
     return "\n\n".join(parts)
 
 
-def decisions_context(root: Path, limit: int = 4000) -> str:
-    """Реестр решений владельца (`.claude/decisions.md`), последние `limit` знаков: для вида «вопрос-уже-решён»."""
-    p = Path(root) / ".claude" / "decisions.md"
-    if not p.exists():
+_WORD = re.compile(r"[А-Яа-яЁёA-Za-z]{5,}")
+
+
+def decisions_context(root: Path, about: str, full: int = 5) -> str:
+    """Реестр решений владельца для вида «вопрос-уже-решён»: все решения по строке «В-N · суть» (ранние не выпадают) и
+    полный текст `full` решений, больше всех совпавших словами с новыми записями."""
+    blocks = registry.decisions(Path(root))
+    if not blocks:
         return ""
-    text = p.read_text(encoding="utf-8").strip()
-    return "## Решения владельца (реестр)\n" + (text if len(text) <= limit else "⟦начало пропущено⟧ " + text[-limit:])
+    words = {w.lower() for w in _WORD.findall(about or "")}
+    heads, scored = [], []
+    for did, block in blocks.items():
+        gist = next((ln[5:].strip() for ln in block.splitlines() if ln.startswith("Суть:")), "")
+        heads.append(f"{did} · {gist or norm_ws(block.splitlines()[1] if len(block.splitlines()) > 1 else '')[:120]}")
+        hit = len(words & {w.lower() for w in _WORD.findall(block)})
+        if hit:
+            scored.append((hit, did, block))
+    top = [b for _, _, b in sorted(scored, key=lambda x: -x[0])[:full]]
+    return ("## Решения владельца (реестр: все по строке)\n" + "\n".join(heads)
+            + ("\n\n## Подходящие по словам — полностью\n" + "\n\n".join(top) if top else ""))
 
 
 def agents_file(work: Path) -> Path:
@@ -531,10 +575,44 @@ def agents_file(work: Path) -> Path:
     return p
 
 
-def look(root: Path, now: datetime | None = None, call=None, notify=None, dry: bool = False) -> list:
+JUDGE_ASK = ("Судье: проверь по делу. Работа идёт к цели — `return` с указанием владельцу, что делать дальше; не идёт — "
+             "`blocked` с причиной (CEO остановит или перепланирует) или `ask-owner --why-owner деньги`.")
+
+
+def busy(root: Path, tid: str, tkt_next: str) -> bool:
+    """Тикет сейчас нельзя передать Судье: идёт запуск роли (его итог перепишет `next`) или передача уже назначена."""
+    try:
+        active = json.loads((_dispatcher_dir(root) / "state.json").read_text(encoding="utf-8")).get("active_runs") or {}
+    except (OSError, ValueError):
+        active = {}
+    return tid in active or bool((tkt_next or "").strip())
+
+
+def to_judge(root: Path, tid: str, text: str, now: datetime) -> bool:
+    """Находка — в лог тикета записью «надзиратель» и `next: judge`: Судью диспетчер запускает всегда, даже когда сессии
+    CEO нет. Тикет занят (`busy`) — False, попробуем на следующем взгляде."""
+    path = Path(root) / ".claude" / "tickets" / f"{tid}.md"
+    if not path.exists():
+        return True  # тикета больше нет — передавать некому
+    tkt = T.read_ticket(path)
+    if tkt.status not in OPEN:
+        return True
+    if busy(root, tid, tkt.header.get("next", "")):
+        return False
+    T.append_log(path, SELF, f"{text} {JUDGE_ASK}", now=now)
+    T.write_header_updates(path, {"next": "judge"}, now=now)
+    return True
+
+
+def _key(tid: str, kind: str) -> str:
+    return f"{tid}|{kind}"
+
+
+def look(root: Path, now: datetime | None = None, call=None, notify=None, route=None, dry: bool = False) -> list:
     """Один взгляд по проекту → строки итогов (они же в `overseer.log`). `call(prompt)` → ответ как у `call_overseer`;
-    `notify(тикет, текст)` — строка CEO. Ошибка вызова не двигает «прочитано»: тикет посмотрим в следующий раз.
-    `dry` — ни лога, ни состояния."""
+    `notify(тикет, текст)` — строка CEO; `route(тикет, текст)` → передано ли Судье (`to_judge`; занят — повтор на
+    следующем взгляде). Ошибка вызова не двигает «прочитано»: тикет посмотрим в следующий раз. `dry` — ни лога, ни
+    состояния, ни записей в тикеты."""
     root = Path(root)
     now = now or datetime.now().astimezone()
     if call is None:
@@ -542,57 +620,87 @@ def look(root: Path, now: datetime | None = None, call=None, notify=None, dry: b
         af = agents_file(work)
         call = lambda prompt: call_overseer(prompt, af, work, MODEL, EFFORT, PER_CALL_USD, TIMEOUT_S)  # noqa: E731
     notify = notify or (lambda tid, text: None)
+    route = route or (lambda tid, text: True if dry else to_judge(root, tid, text, now))
     st = load_state(root)
     seen, found, steps = st.setdefault("seen", {}), st.setdefault("found", {}), st.setdefault("cost_step", {})
+    st["pending"] = [p for p in st.get("pending", []) if not route(p["ticket"], p["text"])]  # прошлые, не переданные
+
+    def emit(tid, text):
+        notify(tid, text)
+        if not route(tid, text):
+            st["pending"].append({"ticket": tid, "text": text})
+
     tickets = {tid: load_ticket(root, tid) for tid in ticket_ids(root)}
     runs = load_runs(root)
     scale = closed_scale(tickets, runs)
-    p90 = p90_closed(scale, now)
-    rows = []
+    base = median_closed(scale, now)
+    sbase = spike_base(runs, now)
     recent = now - timedelta(hours=ACTIVE_H)
+    rows = []
     for tid, t in sorted(tickets.items()):
         rs = runs.get(tid, [])
         if t.status not in OPEN or not any(r.ts > recent for r in rs):
             continue
         spent = sum(r.cost for r in rs)
-        k = cost_step(spent, p90)
+        k = cost_step(spent, base)
         if k > steps.get(tid, 0):
-            text = (f"Надзиратель, дорого: «{t.title}» ({tid}) потратил ${spent:.2f} — больше {k}× 90-го процентиля закрытых "
-                    f"тикетов проекта (${p90:.2f}). Проверь, движется ли он к цели; нет — останови и перепланируй, владельцу — "
-                    f"новый срок.")
-            notify(tid, text)
+            emit(tid, f"Надзиратель, дорого: «{t.title}» ({tid}) потратил ${spent:.2f} — больше {k}× медианы цены закрытых "
+                      f"тикетов проекта (${base:.2f}).")
             steps[tid] = k
             rows.append({"ts": now.isoformat(), "ticket": tid, "outcome": "cost", "kind": "дорого", "step": k,
-                         "spent": round(spent, 4), "p90": round(p90, 4), "cost": 0.0})
+                         "spent": round(spent, 4), "median": round(base, 4), "cost": 0.0})
+        last_h = sum(r.cost for r in rs if r.ts > now - timedelta(hours=SPIKE_H))
+        prev = found.get(_key(tid, "всплеск"))
+        if sbase and last_h > SPIKE_K * sbase and not (prev and now - parse_ts(prev) < timedelta(hours=SUPPRESS_H)):
+            emit(tid, f"Надзиратель, всплеск: «{t.title}» ({tid}) за {SPIKE_H} ч потратил ${last_h:.2f} — больше {SPIKE_K}× "
+                      f"обычных трат тикета за {SPIKE_H} ч в проекте (${sbase:.2f}).")
+            found[_key(tid, "всплеск")] = now.isoformat()
+            rows.append({"ts": now.isoformat(), "ticket": tid, "outcome": "cost", "kind": "всплеск",
+                         "spent": round(last_h, 4), "median": round(sbase, 4), "cost": 0.0})
     fresh = []
     for tid, t in tickets.items():
         if t.status in OPEN and t.entries:
             last = parse_ts(seen[tid]) if tid in seen else None
-            new = [e for e in t.entries if last is None or e.ts > last]
+            new = [e for e in t.entries if (last is None or e.ts > last) and e.role != SELF]  # свои записи — не работа
             if new and new[-1].ts > recent:
                 fresh.append((new[-1].ts, tid, new))
-    for _, tid, new in sorted(fresh, reverse=True)[:MAX_TICKETS]:
+    fresh.sort(key=lambda x: x[0], reverse=True)
+    picked = fresh[:MAX_TICKETS - MAX_COSTLY]
+    costly = sorted(fresh[len(picked):], key=lambda x: -sum(r.cost for r in runs.get(x[1], [])))[:MAX_COSTLY]
+    for _, tid, new in picked + costly:
         t, rs = tickets[tid], runs.get(tid, [])
         extra = goal_context(root, t.desc)
         if t.status == "needs_owner" or any(ASK.search(e.text) for e in new):
-            extra = "\n\n".join(x for x in (extra, decisions_context(root)) if x)
+            extra = "\n\n".join(x for x in (extra, decisions_context(root, " ".join(e.text for e in new))) if x)
         prompt = build_prompt(t, Window(1, 0, new[0].ts, now, new), stats_at(now, t.entries, rs),
                               scale=scale_text(scale, now), extra=extra)
         res = call(prompt)
         row = {"ts": now.isoformat(), "ticket": tid, "cost": float(res.get("cost") or 0.0), "n_new": len(new)}
         if res.get("error"):
             row.update(outcome="error", reason=str(res.get("answer", ""))[:200])
-        else:
-            g = grade(res["answer"], tid, t.entries, now, prompt)
-            row.update(outcome=g["outcome"], reason=g["reason"], kind=g["kind"], quote=g["quote"], action=g["action"])
-            seen[tid] = t.entries[-1].ts.isoformat()
-            if g["outcome"] == "accepted":
-                prev = found.get(tid)
-                if prev and now - parse_ts(prev) < timedelta(hours=SUPPRESS_H):
-                    row["suppressed"] = True
+            rows.append(row)
+            continue
+        g = grade(res["answer"], tid, t.entries, now, prompt)
+        row.update(outcome=g["outcome"], reason=g["reason"], kind=g["kind"], quote=g["quote"], action=g["action"],
+                   invented_numbers=g["invented_numbers"])
+        seen[tid] = t.entries[-1].ts.isoformat()
+        if g["outcome"] == "accepted":
+            action = g["action"]
+            if g["invented_numbers"]:  # критерий 4: число не из данных кода и лога не уходит дальше
+                action = f"(совет Надзирателя не передан: в нём числа не из данных — {', '.join(g['invented_numbers'])})"
+            decision = g.get("decision", "")
+            if g["kind"] == "вопрос-уже-решён":
+                known = registry.decisions(root)
+                if decision in known:
+                    action = f"решение уже есть: {decision} — {cut(norm_ws(known[decision]), 300)}"
                 else:
-                    notify(tid, f"Надзиратель, {g['kind']}: «{t.title}» ({tid}) — «{norm_ws(g['quote'])}» → {g['action']}")
-                    found[tid] = now.isoformat()
+                    row["decision_unknown"] = decision
+            prev = found.get(_key(tid, g["kind"]))
+            if prev and now - parse_ts(prev) < timedelta(hours=SUPPRESS_H):
+                row["suppressed"] = True
+            else:
+                emit(tid, f"Надзиратель, {g['kind']}: «{t.title}» ({tid}) — «{norm_ws(g['quote'])}» → {action}")
+                found[_key(tid, g["kind"])] = now.isoformat()
         rows.append(row)
     if not dry:
         for row in rows:
@@ -606,7 +714,7 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     ap = argparse.ArgumentParser(description="Надзиратель: один взгляд по проекту")
     ap.add_argument("--project", required=True)
-    ap.add_argument("--dry-run", action="store_true", help="находки напечатать, CEO не писать, состояние не двигать")
+    ap.add_argument("--dry-run", action="store_true", help="находки напечатать; CEO, тикеты и состояние не трогать")
     a = ap.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:

@@ -5,7 +5,7 @@
     python tools/overseer_eval.py plan   --alpha <проект> [--tickets TK-087,TK-048 | --group bad|normal|all] [--step-min 15]
                                           [--skip-roles watch,ci,…] [--fit <итоги>] [--per-call 0.01]
     python tools/overseer_eval.py run    --alpha <проект> --out <итоги> [--tickets …] [--group …] [--step-min 15]
-                                          [--jobs 4] [--budget 1.0] [--model claude-haiku-5-5] [--effort high]
+                                          [--jobs 4] [--budget 1.0] [--model claude-haiku-5-5] [--effort xhigh]
     python tools/overseer_eval.py report --out <итоги>
     python tools/overseer_eval.py regrade --alpha <проект> --out <итоги>   # правило проверки цитаты поправлено — без вызовов
     python tools/overseer_eval.py prompt --alpha <проект> --ticket TK-087 --window 5   # что увидит Надзиратель
@@ -34,7 +34,7 @@
 
 `--budget` — стоп новых вызовов, когда сумма цен этого запуска достигла лимита (уже идущие `--jobs` вызовов доделываются).
 Запуск продолжаемый: готовые окна (не ошибки) повторно не считаются; один `--out` — один набор настроек окон и промпта.
-Вызов — `claude -p --agent overseer --model claude-haiku-5-5 --effort high --output-format json` с определением из
+Вызов — `claude -p --agent overseer --model claude-haiku-5-5 --effort xhigh --output-format json` с определением из
 `agents/overseer.md` этой рабочей копии (через `--agents`, как у helper_eval), без инструментов, MCP и пользовательских
 настроек; цена вызова — `total_cost_usd` ответа. Итоги `--out`: `windows.jsonl` (строка на окно), `prompts/` (что видел
 Надзиратель), `summary.md`.
@@ -430,8 +430,8 @@ def main(argv=None) -> int:
     common(r)
     pick(r)
     r.add_argument("--out", required=True)
-    r.add_argument("--model", default="claude-haiku-5-5")
-    r.add_argument("--effort", default="high")
+    r.add_argument("--model", default=core.MODEL)
+    r.add_argument("--effort", default=core.EFFORT)
     r.add_argument("--jobs", type=int, default=4)
     r.add_argument("--budget", type=float, default=1.0, help="стоп, когда цена этого запуска достигла лимита, $")
     r.add_argument("--per-call", type=float, default=0.25, help="потолок цены одного вызова, $ (--max-budget-usd)")
