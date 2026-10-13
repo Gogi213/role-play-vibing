@@ -2,6 +2,12 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 1.8.47 — 2026-10-13
+
+### Удалено (TK-236, вычитание шаг 1)
+- Прогон на выносливость: `endurance.py`, `test_endurance.py`, workflow `endurance`, метка `endurance` в `conftest.py`; CI и `tools/fastcheck.py` гоняют один набор тестов.
+- `board/bridge.py` — «необязательный мост» встроенной команды `home` (сервер табло читает `status.json` как раньше).
+
 ## 1.8.46 — 2026-10-13
 
 ### Изменено (TK-232 п.1)
