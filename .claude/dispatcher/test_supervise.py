@@ -188,7 +188,7 @@ class InstallFilesTest(unittest.TestCase):
                 self.assertNotIn("RPV_LIVE", os.environ)
                 os.environ.pop("RPV_ONLY_SNAP", None)
 
-    def test_supervise_and_start_share_one_service_list(self):  # TK-090 Д-1: выпуск версии перезапускает и ci_watch
+    def test_supervise_and_start_share_one_service_list(self):  # TK-090 Д-1: start.py и supervise.py ведут одни и те же службы, включая ci_watch
         with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
             self.assertEqual(S.services(), ("dispatch", "watch", "ci_watch"))
             self.assertTrue(all(n in V.BEATS for n in S.services()))
