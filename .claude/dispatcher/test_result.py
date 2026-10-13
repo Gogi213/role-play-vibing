@@ -429,5 +429,75 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(new("«цитата владельца целиком»"), 0)
 
 
+    # --- V2-3: приёмка Судьи гоняет проверки всех исправленных ошибок
+    def _errors_repo(self):
+        """git-репо в base: проверка tools/chk.py зелёная, пока рядом нет red.flag; одна исправленная ошибка E-001 «Цена»."""
+        import contextlib
+        import io
+        import errors as ER
+        self._git("init", "-q")
+        (self.base / "tools").mkdir()
+        (self.base / "tools" / "chk.py").write_text(
+            "import sys\nfrom pathlib import Path\nprint('цена не нулевая')\nsys.exit(4 if Path('red.flag').exists() else 0)\n",
+            encoding="utf-8")
+        self._git("add", "tools/chk.py")
+        self._git("commit", "-qm", "chk")
+        with contextlib.redirect_stdout(io.StringIO()):
+            ER.main(["--project", str(self.base), "add", "--title", "Цена"])
+            self.assertEqual(ER.main(["--project", str(self.base), "fix", "E-001", "--check", "python tools/chk.py"]), 0)
+
+    def refused_regression(self, role, result, **kw):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.refused(role, result, **kw)   # файл тикета не тронут
+        self.assertIn("регрессия", err.getvalue())
+        self.assertIn("E-001 «Цена»: код 4", err.getvalue())
+        self.assertIn("цена не нулевая", err.getvalue())
+
+    def test_accept_without_pr_refused_while_error_check_fails(self):
+        self._errors_repo()
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        (self.base / "red.flag").write_text("x", encoding="utf-8")
+        self.refused_regression("judge", "accept", path="review.md")
+        self.assertEqual(self.res("judge", "return", path="review.md"), 0)       # возврат — не приёмка, проверки не гоняет
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        (self.base / "red.flag").unlink()
+        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)       # проверки зелёные — принято
+        self.assertIn("[итог: accept]", self.tkt().log[-1].text)
+
+    def test_accept_pr_refused_while_error_check_fails_on_both_entry_points(self):
+        self._errors_repo()
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        (self.base / "red.flag").write_text("x", encoding="utf-8")
+        self.refused_regression("judge", "accept", pr=7, sha=SHA)                # tickets.py result accept --pr --sha
+        import contextlib
+        import io
+        before = self.path.read_text(encoding="utf-8")
+        os.environ["RPV_ROLE"] = "judge"
+        accept = lambda: TK.cmd_accept(type("A", (), {"id": self.tid, "pr": 7, "sha": SHA, "text": ""})())  # tickets.py accept
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(accept(), 1)
+        self.assertIn("accept: регрессия", err.getvalue())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before, "отказ ничего не пишет")
+        (self.base / "red.flag").unlink()
+        self.assertEqual(accept(), 0)
+        self.assertEqual(self.tkt().header.get("accepted"), f"7@{SHA}")
+
+    def test_accept_error_checks_run_in_ticket_worktree_when_it_exists(self):
+        self._errors_repo()
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        wt = self.base / ".claude" / "worktrees" / self.tid
+        self._git("worktree", "add", "-q", str(wt), "-b", "work")
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        (self.base / "red.flag").write_text("x", encoding="utf-8")               # красно только в основном дереве
+        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)       # проверки шли в копии тикета
+        T.write_header_updates(self.path, {"status": "in_review", "next": "judge"}, now=NOW)
+        (wt / "red.flag").write_text("x", encoding="utf-8")                      # теперь красно в копии
+        self.refused_regression("judge", "accept", path="review.md")
+
+
 if __name__ == "__main__":
     unittest.main()

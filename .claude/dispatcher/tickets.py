@@ -18,6 +18,9 @@
     tickets.py stop TK-001 --text "..." [--next engineer]       # только CEO: снять роль
     tickets.py status                                           # потрачено по задачам
 
+Приёмка Судьи (`result … accept`, `accept`) сначала гоняет проверки всех исправленных ошибок (`errors.py`; в worktree
+тикета `.claude/worktrees/<ID>`, если он есть, иначе в корне проекта): упала любая — регрессия, отказ, в тикет ничего не пишется.
+
 `--next researcher|engineer|judge|ceo` — единственный способ разбудить другую роль (или CEO) записью лога:
 пишет `next: <роль>` в шапку, диспетчер запускает роль ОДИН раз и очищает поле. @упоминания в тексте никого
 не будят. После записи лог больше 20 КБ ужимается: всё, кроме последних 8 записей, — в `archive/<ID>-log.md`.
@@ -39,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import errors as errors_mod  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
@@ -219,6 +223,15 @@ def cmd_comment(args) -> int:
     return 0
 
 
+def _regression(tid: str, cmd: str) -> bool:
+    """V2-3: приёмка Судьи — только при зелёных проверках всех исправленных ошибок (`errors.py`). True — отказ (причина уже
+    в stderr, в тикет ничего не пишем). Нет реестра ошибок или исправленных в нём — ничего не запускается."""
+    err = errors_mod.gate(PROJECT_ROOT, tid)
+    if err:
+        print(f"{cmd}: {err}", file=sys.stderr)
+    return bool(err)
+
+
 def cmd_result(args) -> int:
     """Сдать шаг: итог из закрытого списка + зачем + доказательство; кого будить — таблица routes.py (TK-079 п.0).
     Неполная команда — отказ с текстом, что исправить; запись в лог тикета ставит сама команда."""
@@ -248,6 +261,8 @@ def cmd_result(args) -> int:
     if role == "judge" and tkt.owner == "judge" and args.result in ("done", "accept") and not (args.pr or args.sha):
         head, _ = routes.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
+    if args.result == "accept" and not (args.pr or args.sha) and _regression(args.id, "result"):
+        return 1  # приёмка в PR проходит ту же проверку в cmd_accept
     if args.result == "accept" and (args.pr or args.sha):
         rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
                                       "repo": getattr(args, "repo", None)})())
@@ -305,6 +320,8 @@ def cmd_accept(args) -> int:
     err = merge_rule.check_pr(slug, int(args.pr), args.sha)
     if err:
         print(f"accept: {err}", file=sys.stderr)
+        return 1
+    if _regression(args.id, "accept"):
         return 1
     tkt = T.read_ticket(path)
     prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))} | {int(args.pr)}
