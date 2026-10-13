@@ -316,7 +316,7 @@ class FakeProject(NoClaude):
 
     def args(self, out, **kw):
         d = dict(alpha=str(self.root), out=str(out), tickets="TK-087", group="all", step_min=15, skip_roles="", max_kb=12, ctx_lines=40,
-                 entry_chars=2500, desc_chars=3000, model="claude-haiku-5-5", effort="high", jobs=1, budget=1.0, per_call=0.25,
+                 entry_chars=2500, desc_chars=3000, model="claude-haiku-5-5", effort="xhigh", jobs=1, budget=1.0, per_call=0.25,
                  timeout=30, fit="")
         d.update(kw)
         return SimpleNamespace(**d)
