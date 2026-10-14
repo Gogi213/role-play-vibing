@@ -611,7 +611,8 @@ class ResultTests(unittest.TestCase):
 
     # --- V2-3: приёмка Судьи гоняет проверки всех исправленных ошибок
     def _errors_repo(self):
-        """git-репо в base: проверка tools/chk.py зелёная, пока рядом нет red.flag; одна исправленная ошибка E-001 «Цена»."""
+        """git-репо в base: проверка tools/chk.py зелёная, пока рядом нет red.flag; одна исправленная ошибка E-001 «Цена»
+        (красная проверка на коммите с red.flag, зелёная после коммита, который его убрал)."""
         import contextlib
         import io
         import errors as ER
@@ -620,11 +621,15 @@ class ResultTests(unittest.TestCase):
         (self.base / "tools" / "chk.py").write_text(
             "import sys\nfrom pathlib import Path\nprint('цена не нулевая')\nsys.exit(4 if Path('red.flag').exists() else 0)\n",
             encoding="utf-8")
-        self._git("add", "tools/chk.py")
-        self._git("commit", "-qm", "chk")
+        (self.base / "red.flag").write_text("ошибка есть", encoding="utf-8")
+        self._git("add", "tools/chk.py", "red.flag")
+        self._git("commit", "-qm", "chk с ошибкой")
         with contextlib.redirect_stdout(io.StringIO()):
-            ER.main(["--project", str(self.base), "add", "--title", "Цена"])
-            self.assertEqual(ER.main(["--project", str(self.base), "fix", "E-001", "--check", "python tools/chk.py"]), 0)
+            ER.main(["--project", str(self.base), "add", "--title", "Цена"])           # added_sha — коммит с ошибкой
+            self._git("rm", "-q", "-f", "red.flag")
+            self._git("commit", "-qm", "исправление")
+            with mock.patch.dict(os.environ, {"RPV_ROLE": "judge"}):                  # исправленной объявляет Судья
+                self.assertEqual(ER.main(["--project", str(self.base), "fix", "E-001", "--check", "python tools/chk.py"]), 0)
 
     def refused_regression(self, role, result, **kw):
         import contextlib

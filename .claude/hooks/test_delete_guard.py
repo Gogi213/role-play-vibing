@@ -1354,6 +1354,45 @@ class ThirdAudit(unittest.TestCase):
         self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "echo x >> CLAUDE.md"},
                                          "cwd": CWD}))
 
+    def test_errors_registry_closed_to_dispatcher_roles(self):
+        """CP1: `.claude/errors/` пишет только скрипт errors.py; роль напрямую — ни файловым инструментом, ни оболочкой."""
+        for role in ("engineer", "researcher", "judge"):
+            self.as_role(role)
+            for name in ("Write", "Edit", "MultiEdit"):
+                for path in ("C:/visual projects/proj/.claude/errors/E-001.md", ".claude/errors/E-001.md",
+                             "C:\\visual projects\\proj\\.claude\\errors\\E-012.md", "../proj/.claude/errors/E-003.md"):
+                    reason = self.tool(name, path)
+                    self.assertIsNotNone(reason, f"{role} {name} {path}")
+                    self.assertIn("реестр ошибок", reason)
+            for cmd in ("echo 'status: fixed' >> .claude/errors/E-001.md", "echo x > .claude/errors/E-001.md",
+                        "rm .claude/errors/E-001.md", "rm -rf .claude/errors", "rm -rf ./.claude/errors/",
+                        "sed -i 's/open/fixed/' .claude/errors/E-001.md", "cat x | tee .claude/errors/E-002.md",
+                        "cp /tmp/E-001.md .claude/errors/E-001.md", "mv .claude/errors/E-001.md /tmp/x",
+                        "Set-Content .claude\\errors\\E-001.md x", "python -c \"open('.claude/errors/E-001.md','w').write('x')\""):
+                reason = dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
+                self.assertIn("реестр ошибок", reason or "", f"{role}: {cmd}")
+            self.assertIsNone(self.tool("Write", "C:/visual projects/proj/docs/errors/E-001.md"))      # не тот каталог
+            self.assertIsNone(self.tool("Write", "C:/visual projects/proj/.claude/dispatcher/test_errors.py"))
+
+    def test_errors_registry_reading_and_errors_py_stay_open_to_roles(self):
+        """Читать реестр роли можно (в т. ч. с `2>&1`); сам errors.py пишет в него как раньше: страж смотрит на прямые записи
+        инструментов и команд оболочки, а не на работу скрипта плагина."""
+        script = "python C:/visual projects/plugin/.claude/dispatcher/errors.py"
+        for role in ("engineer", "researcher", "judge"):
+            self.as_role(role)
+            for cmd in ("cat .claude/errors/E-001.md", "ls .claude/errors", "grep -l fixed .claude/errors/*.md",
+                        "cat .claude/errors/E-001.md 2>/dev/null", "ls .claude/errors 2>&1 | head",
+                        f'{script} add --title "цена > 0" --ticket TK-5 --what "см. E-001: open(x) вернул None"',
+                        f"{script} fix E-001 --check \"python -m pytest tests/test_x.py\" --before abc1234 2>&1",
+                        f"{script} list", f"{script} run --cwd .claude/worktrees/TK-5", f"{script} show E-001"):
+                self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD}), f"{role}: {cmd}")
+
+    def test_errors_registry_open_to_ceo(self):
+        self.as_role(None)
+        self.assertIsNone(self.tool("Write", "C:/visual projects/proj/.claude/errors/E-001.md"))
+        self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "echo x >> .claude/errors/E-001.md"},
+                                         "cwd": CWD}))
+
     def test_settings_open_to_ceo(self):
         self.as_role(None)
         self.assertIsNone(self.tool("Edit", "C:/visual projects/proj/.claude/settings.json"))

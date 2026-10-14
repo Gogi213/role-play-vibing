@@ -2029,9 +2029,10 @@ REASON_GIT_WRITE = ("Запуск диспетчера не пишет внут�
 REASON_SETTINGS = ("Настройки Claude Code и плагина ({t}) запуску диспетчера менять нельзя: через них выключаются хуки и "
                    "плагин (`disableAllHooks`, `enabledPlugins`) и снимается защита путей (`protected_paths`), а с ними "
                    "и этот страж. Правка настроек — через CEO.")
-REASON_OWNER_RECORD = ("Слово владельца ({t}) запуск диспетчера не правит: решения и цели пишет только CEO командой "
-                       "`registry.py` (дословно), CLAUDE.md — только CEO. Нужно изменить — "
-                       "`tickets.py result <ID> ask-owner --why \"...\"`.")
+REASON_OWNER_RECORD = ("Слово владельца и реестр ошибок ({t}) запуск диспетчера напрямую не правит: решения и цели пишет "
+                       "только CEO командой `registry.py` (дословно), CLAUDE.md — только CEO, записи `.claude/errors/` — только "
+                       "скрипт `errors.py` (`add` — любая роль, `fix` — Судья после красной проверки на коммите до исправления). "
+                       "Нужно изменить — `tickets.py result <ID> ask-owner --why \"...\"`.")
 
 
 def dispatcher_role():
@@ -2099,26 +2100,29 @@ def settings_file(t, ctx):
 
 def owner_record(t, ctx):
     """Цель — слово владельца (V2): `CLAUDE.md` в любом каталоге, реестр решений `.claude/decisions.md`, цели
-    `.claude/goals/…`."""
+    `.claude/goals/…` — и реестр ошибок `.claude/errors/…` (CP1: записи пишет только `errors.py`; прямая правка проверки
+    или статуса — обход красного → зелёного)."""
     segs = [s for s in _abs_norm(t, ctx).split("/") if s]
     if not segs:
         return False
     if segs[-1] == "claude.md" or (len(segs) >= 2 and segs[-2] == ".claude" and segs[-1] == "decisions.md"):
         return True
-    return any(segs[i] == ".claude" and segs[i + 1] == "goals" for i in range(len(segs) - 1))
+    return any(segs[i] == ".claude" and segs[i + 1] in ("goals", "errors") for i in range(len(segs) - 1))
 
 
-OWNER_RECORD_NAMES = ("claude.md", ".claude/decisions.md", ".claude/goals")
+OWNER_RECORD_NAMES = ("claude.md", ".claude/decisions.md", ".claude/goals", ".claude/errors")
 
 
 def owner_record_write(tool, ti):
     """Запись запуска диспетчера в слово владельца через оболочку, в т. ч. дописывание `>>` (его разбор целей не видит);
-    чтение свободно, текст `--text`/`--why` у tickets.py не в счёт."""
+    чтение свободно (в т. ч. с `2>/dev/null`, `2>&1`), текст `--text`/`--why` у tickets.py не в счёт. Сам `errors.py` через
+    оболочку по-прежнему пишет в `.claude/errors/`: путь скрипта (`…/dispatcher/errors.py`) названием каталога не считается."""
     if tool not in SHELL_TOOLS:
         return False
     cmd = str(ti.get("command") or "")
     if "tickets.py" in cmd:
         cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
+    cmd = BENIGN_REDIRECT.sub("", cmd)
     return any(CEO_SIGNAL_WRITE.search(part) and any(n in part.lower().replace("\\", "/") for n in OWNER_RECORD_NAMES)
                for part in re.split(r"\n|&&|\|\||;", cmd))
 
@@ -2272,8 +2276,8 @@ def protected_path(t, ctx, deleting):
 
 def protected(t, ctx, role, deleting):
     """Защищённые места → причина отказа или None. `.git`: удаление и перенос — никому, запись — запускам диспетчера;
-    настройки Claude Code и плагина и слово владельца (CLAUDE.md, решения, цели) — запускам диспетчера (ни удалить, ни
-    перезаписать); защищённые пути проекта (`protected_paths`) — никому, ни роли, ни CEO."""
+    настройки Claude Code и плагина, слово владельца (CLAUDE.md, решения, цели) и реестр ошибок `.claude/errors/` — запускам
+    диспетчера (ни удалить, ни перезаписать); защищённые пути проекта (`protected_paths`) — никому, ни роли, ни CEO."""
     if git_internal(t, ctx):
         if deleting:
             return REASON_GIT_DIR.format(t=t)
@@ -2415,7 +2419,7 @@ def check_tool(data, trace=None):
         if ceo_signal_write(tool, ti):
             return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
         if dispatcher_role() and owner_record_write(tool, ti):
-            return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals"))
+            return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors"))
         if dispatcher_role() and consent_forge(tool, ti):
             return _deny(trace, "publish", REASON_CONSENT)
         if tool in SHELL_TOOLS:
