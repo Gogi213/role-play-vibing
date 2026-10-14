@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 490" width="1100" height="490" role="img" aria-labelledby="t-o d-o">
+<title id="t-o">Путь находки Надзирателя</title>
+<desc id="d-o">Диспетчер раз в 15 минут зовёт Надзирателя. Правила «дорого» и «всплеск» и Haiku по новым записям лога дают находку. Находка записывается в тикет с next: judge, и диспетчер запускает Судью. Судья отвечает return, blocked или ask-owner. CEO просыпается только после того, как Судья ответил blocked или ask-owner.</desc>
+<style>
+  :root{--bg:#F6F8FA;--surface:#FFFFFF;--fg:#1F2933;--muted:#586471;--line:#AEB9C4;--model-bg:#E1EDFB;--model-line:#3A6EA5;--wake:#B83A08;--wake-bg:#FCEBE2}
+  @media (prefers-color-scheme: dark){:root{--bg:#0E141A;--surface:#161E26;--fg:#E4EAF0;--muted:#98A5B1;--line:#4A5A68;--model-bg:#14283B;--model-line:#6FA8E0;--wake:#FF9A66;--wake-bg:#3B2216}}
+  .bg{fill:var(--bg)}
+  .n-code{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+  .n-model{fill:var(--model-bg);stroke:var(--model-line);stroke-width:1.4}
+  .n-file{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+  .n-fold{fill:none;stroke:var(--line);stroke-width:1.2}
+  .n-group{fill:none;stroke:var(--line);stroke-width:1.2}
+  .n-wake{fill:var(--wake-bg);stroke:var(--wake);stroke-width:1.4}
+  .t{fill:var(--fg);font:600 12px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .s{fill:var(--muted);font:400 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .m{fill:var(--fg);font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+  .l{fill:var(--muted);font:400 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .l-w{fill:var(--wake);font:600 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .e{fill:none;stroke:var(--fg);stroke-width:1.4}
+  .e-w{fill:none;stroke:var(--wake);stroke-width:2.2}
+  .dot{fill:var(--fg)}
+  .mk-e{fill:var(--fg)}
+  .mk-w{fill:var(--wake)}
+</style>
+<defs><marker id="mk-e-o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-e" d="M0 0L10 5L0 10z"/></marker><marker id="mk-w-o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-w" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" width="1100" height="490" rx="10"/>
+<rect class="n-code" x="4" y="187" width="108" height="60" rx="6"/>
+<text x="14" y="211" class="t">Диспетчер</text>
+<text x="14" y="228" class="s">тик каждые 15 с</text>
+<polyline class="e" points="112,217 196,217" marker-end="url(#mk-e-o)"/>
+<text x="154" y="236" class="l" text-anchor="middle">≤ раз в 15 мин,</text>
+<text x="154" y="249" class="l" text-anchor="middle">и только если</text>
+<text x="154" y="262" class="l" text-anchor="middle">менялись тикеты</text>
+<rect class="n-group" x="200" y="96" width="240" height="242" rx="8"/>
+<text x="212" y="117" class="t">Надзиратель</text>
+<text x="302" y="117" class="s">overseer.py</text>
+<rect class="n-code" x="212" y="128" width="216" height="58" rx="6"/>
+<text x="222" y="146" class="t">«дорого» · код</text>
+<text x="222" y="161" class="s">траты тикета &gt; 3×, 6×, 12×</text>
+<text x="222" y="175" class="s">медианы закрытых тикетов</text>
+<rect class="n-code" x="212" y="192" width="216" height="58" rx="6"/>
+<text x="222" y="210" class="t">«всплеск» · код</text>
+<text x="222" y="225" class="s">за 6 ч потрачено &gt; 3× обычного</text>
+<text x="222" y="239" class="s">за 6 ч в проекте</text>
+<rect class="n-model" x="212" y="256" width="216" height="74" rx="6"/>
+<text x="222" y="274" class="t">Haiku xhigh · ≈ $0,002</text>
+<text x="222" y="289" class="s">новые записи лога тикета →</text>
+<text x="222" y="303" class="s">«тихо» или находка с цитатой;</text>
+<text x="222" y="317" class="s">цитату сверяет код</text>
+<path class="n-file" d="M200 372H306L316 382V428H200Z"/>
+<path class="n-fold" d="M306 372V382H316"/>
+<text x="210" y="391" class="t">читает:</text>
+<text x="210" y="406" class="s">тикеты, runs.log,</text>
+<text x="210" y="419" class="s">overseer.json</text>
+<polyline class="e" points="258,372 258,340" marker-end="url(#mk-e-o)"/>
+<path class="n-file" d="M324 372H430L440 382V428H324Z"/>
+<path class="n-fold" d="M430 372V382H440"/>
+<text x="334" y="391" class="t">пишет:</text>
+<text x="334" y="406" class="s">overseer.log →</text>
+<text x="334" y="419" class="s">отчёт владельцу</text>
+<polyline class="e" points="382,340 382,370" marker-end="url(#mk-e-o)"/>
+<line class="e" x1="440" y1="217" x2="490" y2="217"/>
+<circle class="dot" cx="490" cy="217" r="4"/>
+<text x="465" y="208" class="l" text-anchor="middle">находка</text>
+<polyline class="e" points="490,217 490,376 516,376" marker-end="url(#mk-e-o)"/>
+<path class="n-file" d="M520 352H670L680 362V400H520Z"/>
+<path class="n-fold" d="M670 352V362H680"/>
+<text x="530" y="370" class="t">запись «надзиратель»</text>
+<text x="530" y="385" class="s">в логе тикета, next: judge</text>
+<polyline class="e" points="680,376 746,376" marker-end="url(#mk-e-o)"/>
+<text x="713" y="368" class="l" text-anchor="middle">запускает</text>
+<rect class="n-model" x="750" y="346" width="110" height="60" rx="6"/>
+<text x="760" y="364" class="t">Судья</text>
+<text x="760" y="379" class="s">Opus high</text>
+<text x="760" y="393" class="s">≈ $0,2 за запуск</text>
+<text x="520" y="422" class="l">тикет занят (идёт запуск роли</text>
+<text x="520" y="436" class="l">или next уже назначен):</text>
+<text x="520" y="450" class="l">находка ждёт в pending до</text>
+<text x="520" y="464" class="l">следующего взгляда, ≤ 15 мин</text>
+<line class="e" x1="860" y1="376" x2="886" y2="376"/>
+<line class="e" x1="886" y1="312" x2="886" y2="440"/>
+<polyline class="e" points="886,312 906,312" marker-end="url(#mk-e-o)"/>
+<rect class="n-code" x="910" y="285" width="160" height="54" rx="6"/>
+<text x="920" y="304" class="m">return</text>
+<text x="920" y="319" class="s">роли: указание</text>
+<text x="920" y="332" class="s">или «продолжать»</text>
+<polyline class="e" points="886,376 906,376" marker-end="url(#mk-e-o)"/>
+<rect class="n-code" x="910" y="349" width="160" height="54" rx="6"/>
+<text x="920" y="368" class="m">blocked</text>
+<text x="920" y="383" class="s">тикет встал,</text>
+<text x="920" y="396" class="s">причина записана</text>
+<polyline class="e" points="886,440 906,440" marker-end="url(#mk-e-o)"/>
+<rect class="n-code" x="910" y="413" width="160" height="54" rx="6"/>
+<text x="920" y="432" class="m">ask-owner</text>
+<text x="920" y="447" class="s">деньги, направление,</text>
+<text x="920" y="460" class="s">необратимое — владельцу</text>
+<rect class="n-wake" x="730" y="40" width="120" height="48" rx="6"/>
+<text x="740" y="58" class="t">CEO просыпается</text>
+<text x="740" y="74" class="s">только после Судьи</text>
+<polyline class="e-w" points="1070,376 1088,376 1088,64 854,64" marker-end="url(#mk-w-o)"/>
+<polyline class="e-w" points="1070,440 1088,440 1088,376"/>
+<text x="970" y="56" class="l-w" text-anchor="middle">blocked и ask-owner будят CEO</text>
+<text x="520" y="62" class="t">Надзиратель CEO не пишет:</text>
+<text x="520" y="78" class="s">в ceo-inbox.md находок нет.</text>
+<rect class="n-code" x="520" y="124" width="22" height="14" rx="3"/>
+<text x="550" y="135" class="s">код, бесплатно</text>
+<rect class="n-model" x="710" y="124" width="22" height="14" rx="3"/>
+<text x="740" y="135" class="s">запуск модели, платный</text>
+<path class="n-file" d="M520 152H534L542 160V166H520Z"/>
+<text x="550" y="163" class="s">файл или запись в файле</text>
+<line class="e-w" x1="710" y1="159" x2="732" y2="159"/>
+<text x="740" y="163" class="s">путь к CEO</text>
+</svg>

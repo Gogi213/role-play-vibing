@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 470" width="1100" height="470" role="img" aria-labelledby="t-c d-c">
+<title id="t-c">Что будит CEO</title>
+<desc id="d-c">Сигналы из тикетов, диспетчера и сторожа проходят через append_ceo_inbox. Виды «будит» пишутся в ceo-inbox.md и ceo-wake.log, и Monitor будит CEO. Предупреждения о модели копятся и уходят раз в час. Механика пишется в mechanics.log и CEO не будит. Надзиратель CEO не пишет: находка идёт Судье, и CEO просыпается, только если Судья ответит blocked или ask-owner.</desc>
+<style>
+  :root{--bg:#F6F8FA;--surface:#FFFFFF;--fg:#1F2933;--muted:#586471;--line:#AEB9C4;--model-bg:#E1EDFB;--model-line:#3A6EA5;--wake:#B83A08;--wake-bg:#FCEBE2}
+  @media (prefers-color-scheme: dark){:root{--bg:#0E141A;--surface:#161E26;--fg:#E4EAF0;--muted:#98A5B1;--line:#4A5A68;--model-bg:#14283B;--model-line:#6FA8E0;--wake:#FF9A66;--wake-bg:#3B2216}}
+  .bg{fill:var(--bg)}
+  .n-code{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+  .n-model{fill:var(--model-bg);stroke:var(--model-line);stroke-width:1.4}
+  .n-file{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+  .n-fold{fill:none;stroke:var(--line);stroke-width:1.2}
+  .n-group{fill:none;stroke:var(--line);stroke-width:1.2}
+  .n-wake{fill:var(--wake-bg);stroke:var(--wake);stroke-width:1.4}
+  .t{fill:var(--fg);font:600 12px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .s{fill:var(--muted);font:400 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .m{fill:var(--fg);font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+  .l{fill:var(--muted);font:400 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .l-w{fill:var(--wake);font:600 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .e{fill:none;stroke:var(--fg);stroke-width:1.4}
+  .e-w{fill:none;stroke:var(--wake);stroke-width:2.2}
+  .dot{fill:var(--fg)}
+  .mk-e{fill:var(--fg)}
+  .mk-w{fill:var(--wake)}
+</style>
+<defs><marker id="mk-e-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-e" d="M0 0L10 5L0 10z"/></marker><marker id="mk-w-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-w" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" width="1100" height="470" rx="10"/>
+<rect class="n-model" x="10" y="18" width="220" height="76" rx="6"/>
+<text x="20" y="37" class="t">Надзиратель</text>
+<text x="20" y="53" class="s">раз в 15 мин, если менялись тикеты</text>
+<text x="20" y="67" class="s">CEO и владельцу не пишет</text>
+<polyline class="e" points="120,94 120,126" marker-end="url(#mk-e-c)"/>
+<text x="128" y="114" class="l">находка → Судье</text>
+<rect class="n-code" x="10" y="128" width="220" height="104" rx="6"/>
+<text x="20" y="147" class="t">Тикеты и роли</text>
+<text x="20" y="163" class="s">Судья, Инженер, Исследователь:</text>
+<text x="20" y="177" class="s">done · blocked · needs_owner</text>
+<text x="20" y="191" class="s">next: ceo — передача хода</text>
+<rect class="n-code" x="10" y="252" width="220" height="104" rx="6"/>
+<text x="20" y="271" class="t">Диспетчер</text>
+<text x="20" y="287" class="s">тик каждые 15 с:</text>
+<text x="20" y="301" class="s">wait-for · ждёт-ceo · model</text>
+<text x="20" y="315" class="s">работа-стоит / работа-идёт</text>
+<text x="20" y="329" class="s">механика: blind, нет-хода …</text>
+<rect class="n-code" x="10" y="376" width="220" height="66" rx="6"/>
+<text x="20" y="395" class="t">Сторож watch.py</text>
+<text x="20" y="411" class="s">сироты, blocked/needs_owner,</text>
+<text x="20" y="425" class="s">нечитаемые тикеты, чужие запуски</text>
+<polyline class="e" points="230,180 290,180"/>
+<polyline class="e" points="230,304 290,304"/>
+<polyline class="e" points="230,409 290,409"/>
+<line class="e" x1="290" y1="180" x2="290" y2="409"/>
+<polyline class="e" points="290,290 336,290" marker-end="url(#mk-e-c)"/>
+<circle class="dot" cx="290" cy="290" r="3.5"/>
+<rect class="n-group" x="340" y="128" width="206" height="316" rx="8"/>
+<text x="352" y="148" class="m">append_ceo_inbox</text>
+<text x="352" y="163" class="s">код сортирует по виду сигнала</text>
+<rect class="n-wake" x="352" y="174" width="182" height="94" rx="6"/>
+<text x="362" y="192" class="t">будит</text>
+<text x="362" y="208" class="s">done · blocked · needs_owner</text>
+<text x="362" y="222" class="s">next-ceo · ждёт-ceo · wait-for</text>
+<text x="362" y="236" class="s">watch-* · работа-стоит/идёт</text>
+<rect class="n-code" x="352" y="278" width="182" height="62" rx="6"/>
+<text x="362" y="296" class="t">копится</text>
+<text x="362" y="312" class="s">model: одной строкой</text>
+<text x="362" y="326" class="s">summary, не чаще раза в час</text>
+<rect class="n-code" x="352" y="350" width="182" height="84" rx="6"/>
+<text x="362" y="368" class="t">механика</text>
+<text x="362" y="384" class="s">blind · idle-slo · нет-хода</text>
+<text x="362" y="398" class="s">цикл-ожиданий · stop-failed</text>
+<text x="362" y="412" class="s">parse-error</text>
+<path class="n-file" d="M630 196H780L790 206V244H630Z"/>
+<path class="n-fold" d="M780 196V206H790"/>
+<text x="640" y="215" class="m">ceo-inbox.md</text>
+<text x="640" y="231" class="m">ceo-wake.log</text>
+<polyline class="e-w" points="534,208 626,208" marker-end="url(#mk-w-c)"/>
+<polyline class="e-w" points="534,309 604,309 604,232 626,232" marker-end="url(#mk-w-c)"/>
+<text x="569" y="301" class="l-w" text-anchor="middle">раз в час</text>
+<path class="n-file" d="M630 368H780L790 378V416H630Z"/>
+<path class="n-fold" d="M780 368V378H790"/>
+<text x="640" y="387" class="m">mechanics.log</text>
+<text x="640" y="403" class="s">строка на каждый сбой</text>
+<polyline class="e" points="534,392 626,392" marker-end="url(#mk-e-c)"/>
+<rect class="n-wake" x="880" y="182" width="200" height="78" rx="6"/>
+<text x="890" y="201" class="t">CEO просыпается</text>
+<text x="890" y="218" class="s">Monitor на ceo-wake.log,</text>
+<text x="890" y="232" class="s">детали — tickets.py inbox</text>
+<polyline class="e-w" points="790,220 876,220" marker-end="url(#mk-w-c)"/>
+<text x="833" y="212" class="l-w" text-anchor="middle">Monitor</text>
+<text x="810" y="392" class="l">CEO не будит. О стоящей работе</text>
+<text x="810" y="406" class="l">скажет одна тревога «работа стоит»</text>
+<text x="810" y="420" class="l">(владельцу в Telegram и CEO строкой).</text>
+<rect class="n-code" x="340" y="40" width="22" height="14" rx="3"/>
+<text x="370" y="51" class="s">код, бесплатно</text>
+<rect class="n-model" x="530" y="40" width="22" height="14" rx="3"/>
+<text x="560" y="51" class="s">запуск модели, платный</text>
+<path class="n-file" d="M340 68H354L362 76V82H340Z"/>
+<text x="370" y="79" class="s">файл или запись в файле</text>
+<line class="e-w" x1="530" y1="75" x2="552" y2="75"/>
+<text x="560" y="79" class="s">путь, который будит CEO</text>
+<text x="340" y="108" class="s">Из Надзирателя в ceo-inbox.md ничего не идёт: CEO узнаёт, только если Судья ответил blocked или ask-owner.</text>
+</svg>
