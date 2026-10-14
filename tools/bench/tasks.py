@@ -5,6 +5,7 @@
 Текст задач одинаков на любой ОС и в любом прогоне: сравнивается плагин, а не формулировки."""
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -35,8 +36,10 @@ class Task:
 
 
 def _run(proj: Path, *cmd, timeout=120, input=None):
+    """Дочерний процесс — в режиме UTF-8: решение Инженера печатает кириллицу, а консольная кодировка Windows (cp1252) её не вывезет."""
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(list(cmd), cwd=str(proj), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout, input=input)
+                          timeout=timeout, input=input, env=env)
 
 
 # --- T1 -------------------------------------------------------------------------------------------
