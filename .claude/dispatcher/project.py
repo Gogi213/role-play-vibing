@@ -151,30 +151,28 @@ def ancestor_pids(pid: int | None = None, parents: dict | None = None) -> list:
 
 
 def caller_role(root=None, ancestors=None) -> str:
-    """Роль вызывающего процесса: `RPV_ROLE`, а без неё — по дереву процессов. Процесс внутри запуска роли (предок —
-    pid из `state.json` → `active_runs` диспетчера проекта) — это роль, даже если её окружение стёрто или подменено:
-    притвориться CEO запуск роли не может (слово владельца 14.10). Иначе — '' (CEO или владелец)."""
+    """Роль вызывающего процесса — сначала по записи диспетчера: процесс внутри запуска роли (предок — pid из
+    `state.json` → `active_runs` проекта; файл закрыт ролям стражем) — это роль того запуска, что бы ни стояло в
+    окружении: ни стёртое, ни подменённое `RPV_ROLE` (`RPV_ROLE=judge …`) её не меняет — притвориться CEO или другой ролью
+    запуск роли не может (слово владельца 14.10). Вне запусков — `RPV_ROLE` (тесты, ручной запуск); нет — '' (CEO, владелец)."""
     env = (os.environ.get("RPV_ROLE") or "").strip().lower()
-    if env:
-        return env
     root = Path(root) if root else _ROOT
     if root is None:
         try:
             root = resolve_project()
         except ProjectNotFound:
-            return ""
+            return env
     try:
         runs = json.loads((Path(root) / ".claude" / "dispatcher" / "state.json").read_text(encoding="utf-8"))
         runs = runs.get("active_runs") or {}
     except (OSError, ValueError, AttributeError):
-        return ""
+        return env
     by_pid = {int(r["pid"]): str(r.get("role") or "") for r in runs.values() if isinstance(r, dict) and r.get("pid")}
-    if not by_pid:
-        return ""
-    for pid in (ancestor_pids() if ancestors is None else ancestors):
-        if pid in by_pid:
-            return by_pid[pid].strip().lower() or "engineer"
-    return ""
+    if by_pid:
+        for pid in (ancestor_pids() if ancestors is None else ancestors):
+            if pid in by_pid:
+                return by_pid[pid].strip().lower() or "engineer"
+    return env
 
 
 def project_arg(argv) -> str | None:

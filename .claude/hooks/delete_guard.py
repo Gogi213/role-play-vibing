@@ -2046,7 +2046,7 @@ def dispatcher_role():
 # иначе `RPV_ROLE= python errors.py fix …` выглядит как CEO. Ловится запись (присваивание, unset, env -u/-i, $env:…=,
 # Remove-Item Env:, SetEnvironmentVariable, os.environ / putenv / unsetenv); чтение (`echo $RPV_ROLE`) — можно. Второй слой —
 # `project.caller_role`: роль узнаётся и по дереву процессов, стёртое окружение её не прячет.
-_IDENT = r"RPV_(?:ROLE|TICKET)\b"
+_IDENT = r"(?:RPV_(?:ROLE|TICKET|PROJECT)|CLAUDE_PROJECT_DIR)\b"  # кто запущен и где
 IDENTITY_RE = re.compile(
     r"(?:^|[\s;&|(`'\"])(?:export\s+|set\s+|declare\s+(?:-\w+\s+)*|typeset\s+|local\s+|readonly\s+)?" + _IDENT + r"\s*\+?="
     r"|\bunset\b[^;&|\n]*" + _IDENT
@@ -2058,7 +2058,7 @@ IDENTITY_RE = re.compile(
     + r"|SetEnvironmentVariable\s*\(\s*['\"]" + _IDENT
     + r"|\bos\.(?:environ|putenv|unsetenv)\b[^;\n]*" + _IDENT
     + r"|" + _IDENT + r"[^;\n]*\bos\.(?:environ|putenv|unsetenv)\b"
-    + r"|\bprocess\.env\.RPV_(?:ROLE|TICKET)\s*=|\bdelete\s+process\.env\.RPV_",
+    + r"|\bprocess\.env\." + _IDENT + r"\s*=|\bdelete\s+process\.env\." + _IDENT,
     re.I)
 REASON_IDENTITY = ("Запуск роли не меняет и не стирает свою роль и тикет (RPV_ROLE, RPV_TICKET, `env -i`): притвориться CEO "
                    "нельзя (слово владельца 14.10). Нужно действие CEO — `tickets.py result <ID> blocked --why \"...\"` "
@@ -2135,10 +2135,12 @@ def owner_record(t, ctx):
         return False
     if segs[-1] == "claude.md" or (len(segs) >= 2 and segs[-2] == ".claude" and segs[-1] == "decisions.md"):
         return True
+    if segs[-3:] == [".claude", "dispatcher", "state.json"]:  # запись диспетчера «какая роль на каком тикете» — по ней права
+        return True
     return any(segs[i] == ".claude" and segs[i + 1] in ("goals", "errors") for i in range(len(segs) - 1))
 
 
-OWNER_RECORD_NAMES = ("claude.md", ".claude/decisions.md", ".claude/goals", ".claude/errors")
+OWNER_RECORD_NAMES = ("claude.md", ".claude/decisions.md", ".claude/goals", ".claude/errors", "dispatcher/state.json")
 
 
 def owner_record_write(tool, ti):
@@ -2447,7 +2449,7 @@ def check_tool(data, trace=None):
         if ceo_signal_write(tool, ti):
             return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
         if dispatcher_role() and owner_record_write(tool, ti):
-            return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors"))
+            return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors / dispatcher/state.json"))
         if dispatcher_role() and consent_forge(tool, ti):
             return _deny(trace, "publish", REASON_CONSENT)
         if dispatcher_role() and identity_change(tool, ti):
