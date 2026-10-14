@@ -228,3 +228,8 @@ def proc_tree_stats(pid: int) -> dict:
         return {"cpu_ms": secs * 1000, "rss_mib": rss}
     except Exception:
         return {}
+
+
+def role_parallel_config(n: int) -> dict:
+    """Содержимое `.claude/rpv.json`: до n одновременных запусков КАЖДОЙ роли (ключ — объект {роль: предел}, не число)."""
+    return {"role_parallel": {"engineer": n, "researcher": n, "judge": n}}

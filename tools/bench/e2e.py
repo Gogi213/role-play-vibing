@@ -212,7 +212,7 @@ def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | No
         if t.setup:
             ctx.update(t.setup(proj))
     if role_parallel:
-        (proj / ".claude" / "rpv.json").write_text(json.dumps({"role_parallel": role_parallel}), encoding="utf-8")
+        (proj / ".claude" / "rpv.json").write_text(json.dumps(C.role_parallel_config(role_parallel)), encoding="utf-8")
     tids = {}
     t_create0 = time.time()
     for i, t in enumerate(tasks, 1):

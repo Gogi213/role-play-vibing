@@ -157,7 +157,7 @@ def return_cycle() -> dict:
 
 def burst(n: int = 12, delay_s: float = 3.0, role_parallel: int | None = None) -> dict:
     """n тикетов разом; заглушка «думает» delay_s на ход. Сравнение с идеалом: все ходы n·2·delay_s / параллельность."""
-    rpv = {"role_parallel": role_parallel} if role_parallel else None
+    rpv = C.role_parallel_config(role_parallel) if role_parallel else None
     rig = Rig(scenario={"default": {"delay_s": delay_s}}, rpv=rpv)
     try:
         rig.start()
