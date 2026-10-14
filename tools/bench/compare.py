@@ -259,7 +259,8 @@ def _e2e(R: list[dict]) -> str:
         for run in g(r, "e2e", "runs", default=[]):
             for x in run.get("runs", []):
                 t = x.get("transcript") or {}
-                a = agg.setdefault(x["role"], {"model_s": 0, "tool_s": 0, "calls": 0, "hooked": 0, "n": 0})
+                a = agg.setdefault(x["role"], {"model_s": 0, "tool_s": 0, "calls": 0, "hooked": 0, "n": 0, "denials": 0})
+                a["denials"] += t.get("guard_denials", 0)
                 a["model_s"] += t.get("model_s", 0)
                 a["tool_s"] += t.get("tool_s", 0)
                 a["calls"] += t.get("tool_calls_total", 0)
@@ -268,15 +269,16 @@ def _e2e(R: list[dict]) -> str:
         hook_ms = g(r, "micro", "hooks", "PreToolUse Bash (ls)", "wall_ms", "p50")
         for role, a in sorted(agg.items()):
             est = f"≈ {a['hooked'] * hook_ms / 1000:.0f} с" if hook_ms else "—"
-            trows.append([r["label"], role, a["n"], fmt(a["model_s"]), fmt(a["tool_s"]), fmt(a["calls"]), fmt(a["hooked"]), est])
-    out.append(table(["машина", "роль", "запусков", "модель, с", "инструменты, с", "вызовов", "из них под стражем", "оценка цены стража"], trows))
+            trows.append([r["label"], role, a["n"], fmt(a["model_s"]), fmt(a["tool_s"]), fmt(a["calls"]), fmt(a["hooked"]), fmt(a["denials"]), est])
+    out.append(table(["машина", "роль", "запусков", "модель, с", "инструменты, с", "вызовов", "из них под стражем", "отказов стража/устава", "оценка цены стража"], trows))
     out.append("### Фазы тикета (по часам опроса, с)\n")
     prow = []
     for sc in scen:
         for r in R:
             for x in [y for y in g(r, "e2e", "runs", default=[]) if y.get("scenario") == sc]:
                 ph = x.get("phases") or {}
-                prow.append([sc, r["label"], f"#{x.get('repeat')}", fmt(ph.get("wall_s"), 1), fmt(ph.get("queue_s"), 1), fmt(ph.get("runs_busy_s"), 1),
+                prow.append([sc, r["label"], f"#{x.get('repeat')}", fmt(ph.get("wall_s"), 1), fmt(ph.get("queue_s"), 1),
+                             fmt(ph.get("runs_busy_s"), 1) + (f" (×{ph['parallelism']})" if (ph.get("parallelism") or 1) > 1.05 else ""),
                              ", ".join(fmt(v, 0) for v in ph.get("gaps_between_runs_s", [])) or "—", fmt(ph.get("dead_s"), 1),
                              fmt(x.get("goal_to_result_s"), 1), f"{x.get('cost_usd', 0):.2f}",
                              " → ".join(g(x, "tickets", t, "status", default="?") for t in (x.get("tickets") or {})) + ("  ⏱ТАЙМАУТ" if x.get("timed_out") else "")])

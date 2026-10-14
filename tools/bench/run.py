@@ -25,6 +25,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--only", choices=["micro", "stub", "live"], action="append", help="только эти части (можно несколько раз)")
     ap.add_argument("--live", choices=["smoke", "core", "full"], help="набор живых задач (платно)")
+    ap.add_argument("--tasks", help="через запятую: только эти задачи живого набора (guard_trap,@parallel,@crash_engineer …) вместо всего набора")
     ap.add_argument("--repeat", type=int, default=1, help="повторов живого набора")
     ap.add_argument("--budget-usd", type=float, default=10.0, help="потолок трат живого набора: дальше задачи не запускаются")
     ap.add_argument("--timeout-min", type=float, default=20.0, help="потолок одной живой задачи")
@@ -73,7 +74,7 @@ def main(argv=None) -> int:
         import e2e
         log(f"[e2e] набор {a.live}, повторов {a.repeat}, потолок ${a.budget_usd}")
         out["e2e"] = e2e.run({"suite": a.live, "repeat": a.repeat, "budget_usd": a.budget_usd, "timeout_min": a.timeout_min,
-                              "keep": a.keep}, log)
+                              "keep": a.keep, "tasks": a.tasks.split(",") if a.tasks else None}, log)
     out["total_wall_s"] = round(time.time() - t0, 1)
     d = Path(a.out)
     d.mkdir(parents=True, exist_ok=True)

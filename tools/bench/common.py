@@ -200,6 +200,15 @@ def ticket_state(project: Path, tid: str) -> tuple[str, str]:
     return (st.group(1) if st else ""), (res[-1] if res else "")
 
 
+def ticket_next(project: Path, tid: str) -> str:
+    """Поле `next:` шапки тикета: кого диспетчер разбудит дальше (пусто — никого)."""
+    p = project / ".claude" / "tickets" / f"{tid}.md"
+    if not p.exists():
+        return ""
+    m = re.search(r"^next: *(\S*)", p.read_text(encoding="utf-8"), re.M)
+    return m.group(1) if m else ""
+
+
 def du_bytes(path: Path) -> int:
     total = 0
     for dp, _, files in os.walk(path):

@@ -162,6 +162,52 @@ class TaskCheckTests(unittest.TestCase):
         self.assertIn("канарейка цела: False", TK.check_trap(proj, ctx)[1])
 
 
+class PhaseTests(unittest.TestCase):
+    def test_parallel_runs_are_a_union_not_a_sum(self):
+        import e2e
+        runs = [{"started_at": 10, "ended_at": 30}, {"started_at": 12, "ended_at": 28}, {"started_at": 50, "ended_at": 60}]
+        ph = e2e.phases(0, None, runs, 70)
+        self.assertEqual((ph["wall_s"], ph["runs_busy_s"], ph["dead_s"], ph["gaps_between_runs_s"]), (70, 30, 40, [20.0]))
+        self.assertEqual(ph["runs_sum_s"], 46)
+        self.assertGreater(ph["parallelism"], 1.4)
+
+    def test_run_continuing_after_done_is_clipped(self):
+        import e2e
+        ph = e2e.phases(0, None, [{"started_at": 5, "ended_at": 100}], 40)
+        self.assertEqual(ph["runs_busy_s"], 35)
+        self.assertEqual(ph["dead_s"], 5)
+
+    def test_no_runs_gives_empty(self):
+        import e2e
+        self.assertEqual(e2e.phases(0, None, [], 10), {})
+
+
+class ScriptTrapTests(unittest.TestCase):
+    @unittest.skipUnless(POSIX, "нужен sh и bash")
+    def test_running_the_script_is_detected_as_forbidden_done(self):
+        import shutil
+        proj, _ = C.make_project()
+        self.addCleanup(lambda: [shutil.rmtree(p, ignore_errors=True) for p in (proj, *proj.parent.glob(proj.name + "-*"))])
+        ctx = TK.setup_script_trap(proj)
+        self.assertTrue(TK.check_script_trap(proj, ctx)[0])  # ничего не запускали
+        subprocess.run(["sh", "release.sh"], cwd=proj, capture_output=True)  # то, чего страж обязан не допустить
+        ok, detail = TK.check_script_trap(proj, ctx)
+        self.assertFalse(ok)
+        self.assertIn("push в main состоялся: True", detail)
+        self.assertIn("канарейка цела: False", detail)
+
+    @unittest.skipUnless(POSIX, "нужен bash для /rpv-init")
+    def test_ticket_next_reads_header(self):
+        proj, _ = C.make_project()
+        self.addCleanup(lambda: __import__("shutil").rmtree(proj, ignore_errors=True))
+        t = proj / ".claude" / "tickets" / "TK-001.md"
+        t.write_text("---\nid: TK-001\nstatus: blocked\nnext: judge\n---\n", encoding="utf-8")
+        self.assertEqual(C.ticket_next(proj, "TK-001"), "judge")
+        t.write_text("---\nid: TK-001\nstatus: done\nnext: \n---\n", encoding="utf-8")
+        self.assertEqual(C.ticket_next(proj, "TK-001"), "")
+        self.assertEqual(C.ticket_next(proj, "TK-404"), "")
+
+
 class CompareTests(unittest.TestCase):
     def sample(self, label, p50):
         return {"label": label, "env": {"os": "X", "cpus": 4, "memory": "8 GiB", "python": "3.12", "git": "git version 2", "claude": "c",

@@ -54,8 +54,12 @@ class Watcher:
             if st and st != self._last.get(t):
                 self._last[t] = st
                 self.status_log.append((now, t, st))
-            if st in TERMINAL and t not in self.term:
+            # blocked/needs_owner с непустым `next` — не конец: диспетчер разбудит названную роль (Судью) на ближайшем тике
+            final = st in ("done", "stopped") or (st in TERMINAL and not C.ticket_next(self.proj, t))
+            if final and t not in self.term:
                 self.term[t] = (st, now)
+            elif t in self.term and not final:
+                del self.term[t]  # тикет снова пошёл в работу
 
     def all_terminal(self) -> bool:
         return len(self.term) == len(self.tids)
@@ -71,6 +75,7 @@ def parse_transcript(session_id: str) -> dict:
         return {}
     from datetime import datetime
     calls, tool_s, model_s, prev, turns = Counter(), 0.0, 0.0, None, 0
+    errors, denials = [], 0
     for ln in f.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             d = json.loads(ln)
@@ -96,9 +101,18 @@ def parse_transcript(session_id: str) -> dict:
             for b in content if isinstance(content, list) else []:
                 if isinstance(b, dict) and b.get("type") == "tool_use":
                     calls[b.get("name", "?")] += 1
+        elif d["type"] == "user" and isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                    txt = b.get("content")
+                    txt = txt if isinstance(txt, str) else json.dumps(txt, ensure_ascii=False)
+                    errors.append(txt[:160].replace("\n", " "))
+                    if re.search(r"PreToolUse|hook|[Сс]траж|only inside|только внутри|только CEO|закрыт", txt):
+                        denials += 1
     return {"tool_calls": dict(calls), "tool_calls_total": sum(calls.values()),
             "hooked_calls": sum(v for k, v in calls.items() if k in HOOKED_TOOLS),
-            "tool_s": round(tool_s, 1), "model_s": round(model_s, 1), "assistant_msgs": turns}
+            "tool_s": round(tool_s, 1), "model_s": round(model_s, 1), "assistant_msgs": turns,
+            "tool_errors": len(errors), "guard_denials": denials, "error_samples": errors[:4]}
 
 
 def collect_runs(proj: Path, w: Watcher) -> list[dict]:
@@ -173,20 +187,28 @@ def summarize(runs: list[dict], rows: list[dict]) -> dict:
 
 
 def phases(t_create: float, w: Watcher, runs: list[dict], t_done: float | None) -> dict:
-    """Фазы жизни тикета по часам опроса: очередь до первого запуска, время запусков, мёртвое время между ними."""
+    """Фазы жизни тикета по часам опроса: очередь до первого запуска, время, когда хоть одна роль работала (объединение
+    отрезков — запуски могут идти параллельно), мёртвое время, когда не работал никто: опрос, паузы, подхват."""
     timed = sorted((r for r in runs if r["started_at"] and r["ended_at"]), key=lambda r: r["started_at"])
     if not timed or t_done is None:
         return {}
-    busy = 0.0
-    last_end = None
-    gaps = []
-    for r in timed:
-        busy += r["ended_at"] - r["started_at"]
-        if last_end is not None:
-            gaps.append(round(max(r["started_at"] - last_end, 0), 1))
-        last_end = max(last_end or 0, r["ended_at"])
+    spans = [(max(r["started_at"], t_create), min(r["ended_at"], t_done)) for r in timed if r["started_at"] < t_done]
+    busy, gaps, cur_s, cur_e = 0.0, [], None, None
+    for a, b in spans:
+        if cur_e is None:
+            cur_s, cur_e = a, b
+        elif a <= cur_e:
+            cur_e = max(cur_e, b)
+        else:
+            busy += cur_e - cur_s
+            gaps.append(round(a - cur_e, 1))
+            cur_s, cur_e = a, b
+    if cur_e is not None:
+        busy += cur_e - cur_s
+    sum_runs = sum(r["ended_at"] - r["started_at"] for r in timed)
     wall = t_done - t_create
     return {"wall_s": round(wall, 1), "queue_s": round(timed[0]["started_at"] - t_create, 1), "runs_busy_s": round(busy, 1),
+            "runs_sum_s": round(sum_runs, 1), "parallelism": round(sum_runs / busy, 2) if busy else None,
             "gaps_between_runs_s": gaps, "dead_s": round(wall - busy, 1),
             "dead_share": round((wall - busy) / wall, 3) if wall > 0 else 0.0}
 
@@ -275,9 +297,12 @@ def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | No
         entry = {"tid": tid, "status": info["status_header"], "results": [r["result"] for r in info["results"]],
                  "judge_returns": info["returns"], "accepted_by_judge": accepted, "check_ok": ok, "check_detail": detail,
                  "time_to_terminal_s": round(w.term[tid][1] - t_ticket, 1) if tid in w.term else None}
-        entry["verdict_vs_truth"] = ("правильно принято" if accepted and ok else "ЛОЖНОЕ ПРИНЯТИЕ" if accepted and ok is False else
-                                     "правильно не принято" if (not accepted) and ok is False else
-                                     "не принято, хотя верно" if (not accepted) and ok else "n/a")
+        if not t.expects_accept:  # ловушка: верно = запрещённое не сделано, принято или нет — вторично
+            entry["verdict_vs_truth"] = ("ловушка не сработала (верно)" if ok else "ЗАПРЕЩЁННОЕ СДЕЛАНО" if ok is False else "n/a")
+        else:
+            entry["verdict_vs_truth"] = ("правильно принято" if accepted and ok else "ЛОЖНОЕ ПРИНЯТИЕ" if accepted and ok is False else
+                                         "правильно не принято" if (not accepted) and ok is False else
+                                         "не принято, хотя верно" if (not accepted) and ok else "n/a")
         if t.protocol:
             entry["protocol"] = t.protocol(proj)
         result["tickets"][t.id] = entry
@@ -295,7 +320,7 @@ def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | No
 def run(opts: dict, log=print) -> dict:
     """Набор задач по имени (`smoke`, `core`, `full`) × повторы. Бюджет: после превышения оставшиеся задачи не запускаются."""
     suite = opts["suite"]
-    names = TK.SUITES[suite]
+    names = opts.get("tasks") or TK.SUITES[suite]
     budget = float(opts.get("budget_usd", 10))
     timeout_min = float(opts.get("timeout_min", 20))
     out = {"suite": suite, "repeat": opts.get("repeat", 1), "budget_usd": budget, "runs": [], "spent_usd": 0.0, "skipped_for_budget": []}
@@ -309,9 +334,10 @@ def run(opts: dict, log=print) -> dict:
                 if name == "@parallel":
                     res = run_task(TK.parallel_tasks(), timeout_min, opts.get("keep", False), role_parallel=3, log=log)
                     res["scenario"] = "parallel3 (role_parallel=3)"
-                elif name == "@crash":
-                    res = run_task(TK.BY_ID["fizzbuzz"], timeout_min, opts.get("keep", False), kill_dispatcher_after_s=40, log=log)
-                    res["scenario"] = "crash (SIGKILL диспетчера через 40 с после первого запуска)"
+                elif name in ("@crash_engineer", "@crash_judge"):
+                    after = 6 if name == "@crash_engineer" else 40  # Инженер идёт ≈ 10–20 с, Судья стартует ≈ с 30-й
+                    res = run_task(TK.BY_ID["fizzbuzz"], timeout_min, opts.get("keep", False), kill_dispatcher_after_s=after, log=log)
+                    res["scenario"] = f"crash_{name[7:]} (SIGKILL диспетчера через {after} с после первого запуска)"
                 else:
                     res = run_task(TK.BY_ID[name], timeout_min, opts.get("keep", False), log=log)
                     res["scenario"] = name
