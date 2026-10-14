@@ -41,8 +41,8 @@ class Rig:
     def set_scenario(self, scenario: dict) -> None:
         self.cfg.write_text(json.dumps(scenario), encoding="utf-8")
 
-    def ticket(self, title: str = "bench", owner: str = "engineer") -> str:
-        return C.new_ticket(self.proj, owner, title, "G-001", "Сдать файл в out/. Примут, если: файл есть.", env=self.env)
+    def ticket(self, title: str = "bench", owner: str = "engineer", force: bool = False) -> str:
+        return C.new_ticket(self.proj, owner, title, "G-001", "Сдать файл в out/. Примут, если: файл есть.", env=self.env, force=force)
 
     def start(self) -> subprocess.Popen:
         self.logf = open(self.proj / "dispatch.out", "ab")
@@ -163,7 +163,7 @@ def burst(n: int = 12, delay_s: float = 3.0, role_parallel: int | None = None) -
         rig.start()
         time.sleep(2)
         t0 = time.time()
-        tids = [rig.ticket(f"burst {i}") for i in range(n)]
+        tids = [rig.ticket(f"burst {i}", force=True) for i in range(n)]
         t_created = time.time() - t0
         got = rig.wait(tids, timeout=900)
         done = sorted(got[t][1] - t0 for t in got if got[t][0] == "done")
