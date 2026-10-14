@@ -32,6 +32,27 @@ HINT = {
 }
 
 
+PROOF_SHORT = {  # доказательство итога в одну строку — для промпта и вставки хука (полный текст отказа — HINT)
+    "done": "--path <файл или каталог результата>",
+    "pr": "--pr <номер> --sha <голова PR>",
+    "accept": "--path <артефакт проверки> (работа без PR) либо --pr <номер> --sha <голова PR> (работа в PR)",
+    "return": "--path <артефакт проверки> либо --sha <голова>",
+    "wait": "--form <форма wait_for>",
+}
+
+
+def verbs_for(role: str) -> list:
+    """Итоги, которые роль вправе сдавать (по RULES): Инженеру и Исследователю не показываем accept/return, Судье — done/pr/continue.
+    CEO и роль не из таблицы — все (их сессии не запускает диспетчер)."""
+    if role not in ("researcher", "engineer", "judge"):
+        return list(RESULTS)
+    return [r for r in RESULTS if role in RULES[r][0]]
+
+
+def proofs_for(role: str) -> str:
+    return ", ".join(f"{r} — {PROOF_SHORT[r]}" for r in verbs_for(role) if r in PROOF_SHORT)
+
+
 def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = "", form: str = "",
           root: Path = Path("."), owner: str = "", why_owner: str = "") -> str:
     """Пустая строка — команда годна; иначе — что исправить (текст отказа в сессии роли)."""
@@ -70,7 +91,12 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
         return err
     if "|" in need:  # Судья: работа в PR (голова) либо без PR (артефакт проверки)
         pr_form = need.partition("|")[0]
-        if pr or sha:
+        # PR-форма — с номером PR, либо с одним --sha, когда артефакта --path нет. `--sha` рядом с существующим --path без --pr —
+        # приёмка без PR (sha — пометка в журнал): промпт учил `accept --sha`, и в живых прогонах этот отказ был у каждого второго
+        # запуска Судьи (docs/bench/2026-10-14.md)
+        if pr or (sha and not _exists(path)):
+            if result == "accept" and not pr:
+                return f"итог accept требует {HINT[need]} (--sha без --pr и без существующего --path не годится)"
             need = pr_form
         elif _exists(path):
             return ""

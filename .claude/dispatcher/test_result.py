@@ -171,6 +171,28 @@ class ResultTests(unittest.TestCase):
         self.refused("judge", "accept", path="нет-такого.md")
         self.refused("judge", "accept")
 
+    def test_accept_with_sha_and_existing_path_but_no_pr_is_accept_by_artifact(self):
+        """Замер 14.10: промпт учил `accept --sha`, код требовал ещё и --pr — у каждого второго запуска Судьи отказ. Теперь --sha рядом
+        с существующим --path без --pr — приёмка без PR (sha попадает в журнал пометкой); без --path отказ с подсказкой."""
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        self.assertEqual(self.res("judge", "accept", path="review.md", sha=SHA), 0)
+        t = self.tkt()
+        self.assertEqual((t.status, t.header.get("next")), ("done", ""))
+        text = self.path.read_text(encoding="utf-8")
+        self.assertIn("проверка: review.md", text)
+        self.assertIn(f"голова {SHA[:7]}", text)
+        self.assertNotIn("PR #", text.split("[итог: accept]")[-1])
+        import contextlib
+        import io
+        err = io.StringIO()
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        with contextlib.redirect_stderr(err):
+            self.refused("judge", "accept", sha=SHA)             # только sha: артефакта нет, PR нет
+        self.assertIn("--path", err.getvalue())
+        self.assertIn("--sha без --pr", err.getvalue())
+
     def test_accept_refuses_without_repo_or_unknown_pr(self):
         import merge_rule
         self.settings = {}

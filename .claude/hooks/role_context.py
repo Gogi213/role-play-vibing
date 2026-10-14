@@ -227,8 +227,16 @@ def full_context(role, title, source, hook_in):
     else:
         head.append("Работа — тикет `.claude/tickets/<ID>.md`, который назвал владелец или CEO.")
     tcmd = tickets_command()
+    verbs, proofs = "done|pr|accept|return|blocked|ask-owner|wait", ""
+    try:  # итоги и доказательства — свои у каждой роли (таблица routes.RULES); сбой — прежний общий список
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+        import routes
+        if role in ("researcher", "engineer", "judge"):
+            verbs, proofs = "|".join(routes.verbs_for(role)), f" (доказательство: {routes.proofs_for(role)}; --why — не длиннее 200 знаков)"
+    except Exception:
+        pass
     head.append(f"Связь с командой — только лог тикета (готовая команда, путь абсолютный): итог шага — `{tcmd} "
-                "result <ID> <done|pr|accept|return|blocked|ask-owner|wait> --why \"...\"` (кого будить дальше "
+                f"result <ID> <{verbs}> --why \"...\"`{proofs} (кого будить дальше "
                 f"решает таблица маршрутов); промежуточная заметка — `{tcmd} comment <ID> --author {role} --text "
                 "\"...\"` (@упоминания никого не будят)."
                 + (" Остальные подкоманды (`new`, `start`, `stop`, `allow`, `status`) — после `--project \"...\"` той же командой."

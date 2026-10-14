@@ -90,6 +90,20 @@ class SessionStart(unittest.TestCase):
             self.assertIn("fix E-N --check", text)
             self.assertLessEqual(len(text), rc.LIMIT, role)
 
+    def test_startup_lists_only_results_the_role_may_hand_in(self):
+        """Замер 14.10: Инженер в 3 запусках из 25 вызывал `accept`, Судья сдавал `accept --sha` без --pr. Вставка хука даёт роли её итоги
+        и доказательства (по routes.RULES); CEO и неизвестная роль — прежний общий список."""
+        judge, _ = start_text("judge", "startup")
+        self.assertIn("<accept|return|blocked|ask-owner|wait>", judge)
+        self.assertIn("accept — --path <артефакт проверки> (работа без PR)", judge)
+        self.assertIn("не длиннее 200 знаков", judge)
+        for role in ("engineer", "researcher"):
+            text, _ = start_text(role, "startup")
+            self.assertIn("<done|pr|blocked|ask-owner|wait|continue>", text, role)
+            self.assertNotIn("accept|return", text, role)
+        ceo, _ = start_text("ceo", "startup")
+        self.assertIn("<done|pr|accept|return|blocked|ask-owner|wait>", ceo)
+
     def test_resume_and_compact_are_short(self):
         for role in ("researcher", "judge"):
             for source in ("resume", "compact"):

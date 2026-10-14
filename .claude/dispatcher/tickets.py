@@ -218,6 +218,8 @@ def cmd_result(args) -> int:
     role = role or "ceo"  # check() пускает сессию без роли только к done (закрыть тикет)
     why = args.why.strip()
     on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
+    if args.result == "accept" and not args.pr:  # приёмка без PR: артефакт проверки, sha (если дан) — пометка
+        on_head = f" проверка: {args.path}" + (f" голова {args.sha[:7]}" if args.sha else "")
     proof = {"pr": f" PR #{args.pr}@{(args.sha or '')[:7]}", "accept": on_head, "return": on_head,
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}",
              "ask-owner": f" повод: {args.why_owner}" if getattr(args, "why_owner", None) else ""}.get(args.result, "")
@@ -233,9 +235,9 @@ def cmd_result(args) -> int:
             return 1
         ack += nack
         proof += ack
-    if args.result == "accept" and not (args.pr or args.sha) and _regression(args.id, "result"):
+    if args.result == "accept" and not args.pr and _regression(args.id, "result"):
         return 1  # приёмка в PR проходит ту же проверку в cmd_accept
-    if args.result == "accept" and (args.pr or args.sha):
+    if args.result == "accept" and args.pr:
         rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
                                       "repo": getattr(args, "repo", None),
                                       "decisions": getattr(args, "decisions", None),

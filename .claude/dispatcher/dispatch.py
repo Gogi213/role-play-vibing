@@ -37,6 +37,7 @@ import worktree_hygiene as WH  # noqa: E402
 import blind  # noqa: E402
 import downtime  # noqa: E402
 import notify  # noqa: E402
+import routes as ROUTES  # noqa: E402
 import report as REPORT  # noqa: E402
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
@@ -157,12 +158,12 @@ STOP_NOTE = ("Прошлый запуск оборван CEO — проверь 
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
 # В-153 (02.10): все роли — Sonnet 5.5.
 CLAUDE_MODEL = "claude-sonnet-5-5"
-# v2 (02.10): усилие — по виду задачи (статья «spending your effort»): исследователь, инженер и Судья — high;
-# на тикете переопределяется полем `effort: low|medium|high|xhigh` в шапке (`tickets.py new --effort`), см. effort_for().
-# Поле общее для всех ролей тикета: `medium` на тикете понижает и Судью, `xhigh` поднимает.
-# Судья: был xhigh, с 14.10 — high (слово владельца по замеру docs/bench/2026-10-14.md, раздел «A/B Судьи»: Opus high
-# −8% цены запуска против xhigh, 19 верных вердиктов из 19, дефектов поймано 8 из 8; повтор один, сдачи простые).
-ROLE_EFFORT = {"judge": "high", "engineer": "high", "researcher": "high"}
+# Усилие ролей (слово владельца 14.10): Судья — Opus 5.5 high, Инженер — Sonnet 5.5 xhigh, Исследователь — Sonnet 5.5 high.
+# Для Судьи и Инженера усилие ЖЁСТКОЕ: поле `effort:` тикета их не меняет (раньше оно перекрывало усилие всех ролей тикета,
+# и `effort: medium` молча понижал Судью — замер docs/bench/2026-10-14.md). Для Исследователя поле по-прежнему действует
+# (`tickets.py new --effort`), см. effort_for().
+ROLE_EFFORT = {"judge": "high", "engineer": "xhigh", "researcher": "high"}
+FIXED_EFFORT_ROLES = ("judge", "engineer")  # усилие этих ролей не зависит от поля `effort:` тикета
 
 
 # В-153 уточнение (02.10, v1.6.1): на Sonnet 5.5 — только те, кого рационально; Судья (проверяет всех)
@@ -215,9 +216,9 @@ PROMPT_TEMPLATE = (
     "не жди в сессии. Трать минимум: "
     "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
     "результатом. Сделай следующий шаг и сдай итог командой "
-    "`{tickets_cli} result {tid} <done|pr|accept|return|blocked|ask-owner|wait|continue> --why \"что сделал, что "
-    "дальше\"` ДО истечения лимита (доказательство: done — --path, pr — --pr --sha, accept/return — --sha, "
-    "wait — --form; неполная команда — отказ с подсказкой): итог обязателен, частичный прогресс не провал. "
+    "`{tickets_cli} result {tid} <{verbs}> --why \"что сделал, что дальше\"` (--why — не длиннее 200 знаков) "
+    "ДО истечения лимита (доказательство: {proofs}; неполная команда — отказ с подсказкой): итог обязателен, "
+    "частичный прогресс не провал. "
     "Кого будить дальше и status/wait_for ставит таблица маршрутов — --next и шапку руками не правь; "
     "blocked (задача встала) и ask-owner (развилка, вопрос) уходят Судье; владельцу вопрос о содержании "
     "исследования (какие гипотезы, гиперпараметры, метрики, что хотим увидеть) переадресует Судья; CEO не будят. "
@@ -1512,8 +1513,10 @@ def plugin_dir_args() -> list[str]:
 
 
 def effort_for(role: str, tkt=None) -> str:
-    """v2: усилие запуска — поле `effort:` тикета (общее для всех ролей тикета), иначе умолчание роли (ROLE_EFFORT:
-    исследователь, инженер и Судья — high)."""
+    """Усилие запуска. Судья и Инженер — всегда ROLE_EFFORT (поле `effort:` тикета для них не действует: владелец 14.10).
+    Остальные роли — поле `effort:` тикета, иначе умолчание роли (high)."""
+    if role in FIXED_EFFORT_ROLES:
+        return ROLE_EFFORT[role]
     if tkt is not None and getattr(tkt, "effort", ""):
         return tkt.effort
     return ROLE_EFFORT.get(role, "high")
@@ -1531,7 +1534,8 @@ def tickets_cli() -> str:
 
 def build_prompt(role: str, tid: str, extra_note: str = None) -> str:
     prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(RUN_TIMEOUT // 60),
-                                    tickets_cli=tickets_cli())
+                                    tickets_cli=tickets_cli(), verbs="|".join(ROUTES.verbs_for(role)),
+                                    proofs=ROUTES.proofs_for(role))
     if extra_note:
         prompt += " " + extra_note
     return prompt

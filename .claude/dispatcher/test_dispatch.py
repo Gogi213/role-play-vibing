@@ -2183,12 +2183,13 @@ class DispatchRunTests(unittest.TestCase):
             D.RUNNING.clear()
 
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
-        """v2: умолчания — исследователь, инженер и Судья high (Судья с 14.10; был xhigh); `effort:` в шапке тикета — приоритетнее
-        и общее для всех ролей: medium понижает Судью, xhigh поднимает."""
-        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "high", "researcher": "high"})
-        cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "high"),
-                 ("engineer", "low", "low"), ("researcher", "medium", "medium"), ("judge", "high", "high"),
-                 ("judge", "medium", "medium"), ("judge", "xhigh", "xhigh"), ("engineer", "xhigh", "xhigh")]
+        """Слово владельца 14.10: Судья — high, Инженер — xhigh, Исследователь — high. Судья и Инженер жёстко: `effort:` тикета
+        их не меняет (раньше `effort: medium` молча понижал Судью); Исследователю поле по-прежнему действует."""
+        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
+        cases = [("researcher", None, "high"), ("engineer", None, "xhigh"), ("judge", None, "high"),
+                 ("researcher", "medium", "medium"), ("researcher", "xhigh", "xhigh"),
+                 ("engineer", "low", "xhigh"), ("engineer", "medium", "xhigh"), ("engineer", "high", "xhigh"),
+                 ("judge", "medium", "high"), ("judge", "low", "high"), ("judge", "xhigh", "high"), ("judge", "high", "high")]
         for role, effort, expected in cases:
             self.set_fake_bin(FAKE_BIN_SILENT)
             path = T.create_ticket(self.tickets_dir, owner=role, title=f"Усилие {role} {effort}", effort=effort)
@@ -2207,6 +2208,16 @@ class DispatchRunTests(unittest.TestCase):
                         fh.close()
             D.RUNNING.clear()
             path.unlink()
+
+    def test_prompt_lists_only_the_results_the_role_may_hand_in(self):
+        """Замер 14.10: Инженер в 3 запусках из 25 вызывал `accept`, Судья в половине запусков сдавал `accept --sha` без --pr."""
+        judge = D.build_prompt("judge", "TK-9")
+        self.assertIn(" result TK-9 <accept|return|blocked|ask-owner|wait> --why", judge)
+        self.assertIn("accept — --path <артефакт проверки> (работа без PR) либо --pr <номер> --sha <голова PR>", judge)
+        self.assertNotIn("continue", judge.split("итог обязателен")[0])
+        engineer = D.build_prompt("engineer", "TK-9")
+        self.assertIn(" result TK-9 <done|pr|blocked|ask-owner|wait|continue> --why", engineer)
+        self.assertNotIn("accept|return", engineer)
 
     def test_next_launches_role_once_and_clears_field(self):
         self.set_fake_bin(FAKE_BIN_RECORD)
@@ -2327,7 +2338,9 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_prompt_has_next_rules_and_no_mention_encouragement(self):
         prompt = D.build_prompt("researcher", "TK-005")
-        self.assertIn(" result TK-005 <done|pr|accept|return|blocked|ask-owner|wait|continue> --why", prompt)
+        self.assertIn(" result TK-005 <done|pr|blocked|ask-owner|wait|continue> --why", prompt)  # итоги — по роли
+        self.assertNotIn("accept", prompt.split("result TK-005")[1].split("итог обязателен")[0])  # Исследователю accept не показываем
+        self.assertIn("не длиннее 200 знаков", prompt)
         self.assertIn("--next и шапку руками не правь", prompt)
         self.assertIn("только промежуточная заметка", prompt)
         self.assertIn("@упоминания в тексте никого не будят", prompt)
@@ -3426,15 +3439,15 @@ class MoneyControlsTests(unittest.TestCase):
     # --- п.1: модель/усилие ---
 
     def test_role_effort_mapping(self):
-        # v2 (02.10): исследователь/инженер — high; Судья — high с 14.10 (был xhigh)
+        # слово владельца 14.10: Судья high, Инженер xhigh, Исследователь high
         if not P.env("DISPATCH_EFFORT"):
-            self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "high", "researcher": "high"})
+            self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
 
     def test_role_effort_and_model_defaults(self):
         # v1.6.1: Судья — Opus 5.5 (проверка всех не ослабляется; усилие с 14.10 high), остальные — CLAUDE_MODEL high; CP8 — константы
         self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
                                         "researcher": D.CLAUDE_MODEL})
-        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "high", "researcher": "high"})
+        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
 
     def test_expected_model_family_follows_role_model(self):
         orig_role_model = D.ROLE_MODEL
