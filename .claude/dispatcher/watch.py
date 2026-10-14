@@ -419,7 +419,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
             continue
         spec = tkt.header["wait_for"].strip()
         parsed = T.parse_wait_for(spec)
-        if parsed is None and spec.startswith("host:"):  # TK-117 К1.1: форма host: не понята (напр. `host:calc:file:/x`) — диспетчер её не проверит, файл не разбудит никого
+        if parsed is None and spec.startswith("host:"):  # TK-117 К1.1: форма host: не понята (напр. `host:gpu1:file:/x`) — диспетчер её не проверит, файл не разбудит никого
             bad = ws.setdefault("bad_form", {})
             bad_seen.add(tkt.id)
             n = bad.get(tkt.id, {}).get("n", 0) + 1 if bad.get(tkt.id, {}).get("spec") == spec else 1

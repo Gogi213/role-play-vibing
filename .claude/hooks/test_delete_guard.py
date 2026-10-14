@@ -1354,6 +1354,45 @@ class ThirdAudit(unittest.TestCase):
         self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "echo x >> CLAUDE.md"},
                                          "cwd": CWD}))
 
+    def test_errors_registry_closed_to_dispatcher_roles(self):
+        """CP1: `.claude/errors/` пишет только скрипт errors.py; роль напрямую — ни файловым инструментом, ни оболочкой."""
+        for role in ("engineer", "researcher", "judge"):
+            self.as_role(role)
+            for name in ("Write", "Edit", "MultiEdit"):
+                for path in ("C:/visual projects/proj/.claude/errors/E-001.md", ".claude/errors/E-001.md",
+                             "C:\\visual projects\\proj\\.claude\\errors\\E-012.md", "../proj/.claude/errors/E-003.md"):
+                    reason = self.tool(name, path)
+                    self.assertIsNotNone(reason, f"{role} {name} {path}")
+                    self.assertIn("реестр ошибок", reason)
+            for cmd in ("echo 'status: fixed' >> .claude/errors/E-001.md", "echo x > .claude/errors/E-001.md",
+                        "rm .claude/errors/E-001.md", "rm -rf .claude/errors", "rm -rf ./.claude/errors/",
+                        "sed -i 's/open/fixed/' .claude/errors/E-001.md", "cat x | tee .claude/errors/E-002.md",
+                        "cp /tmp/E-001.md .claude/errors/E-001.md", "mv .claude/errors/E-001.md /tmp/x",
+                        "Set-Content .claude\\errors\\E-001.md x", "python -c \"open('.claude/errors/E-001.md','w').write('x')\""):
+                reason = dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
+                self.assertIn("реестр ошибок", reason or "", f"{role}: {cmd}")
+            self.assertIsNone(self.tool("Write", "C:/visual projects/proj/docs/errors/E-001.md"))      # не тот каталог
+            self.assertIsNone(self.tool("Write", "C:/visual projects/proj/.claude/dispatcher/test_errors.py"))
+
+    def test_errors_registry_reading_and_errors_py_stay_open_to_roles(self):
+        """Читать реестр роли можно (в т. ч. с `2>&1`); сам errors.py пишет в него как раньше: страж смотрит на прямые записи
+        инструментов и команд оболочки, а не на работу скрипта плагина."""
+        script = "python C:/visual projects/plugin/.claude/dispatcher/errors.py"
+        for role in ("engineer", "researcher", "judge"):
+            self.as_role(role)
+            for cmd in ("cat .claude/errors/E-001.md", "ls .claude/errors", "grep -l fixed .claude/errors/*.md",
+                        "cat .claude/errors/E-001.md 2>/dev/null", "ls .claude/errors 2>&1 | head",
+                        f'{script} add --title "цена > 0" --ticket TK-5 --what "см. E-001: open(x) вернул None"',
+                        f"{script} fix E-001 --check \"python -m pytest tests/test_x.py\" --before abc1234 2>&1",
+                        f"{script} list", f"{script} run --cwd .claude/worktrees/TK-5", f"{script} show E-001"):
+                self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD}), f"{role}: {cmd}")
+
+    def test_errors_registry_open_to_ceo(self):
+        self.as_role(None)
+        self.assertIsNone(self.tool("Write", "C:/visual projects/proj/.claude/errors/E-001.md"))
+        self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "echo x >> .claude/errors/E-001.md"},
+                                         "cwd": CWD}))
+
     def test_settings_open_to_ceo(self):
         self.as_role(None)
         self.assertIsNone(self.tool("Edit", "C:/visual projects/proj/.claude/settings.json"))
@@ -1696,6 +1735,70 @@ class Publication(unittest.TestCase):
         'pwsh -c "npm publish"', "Set-Location C:\\visual projects\\proj; gh pr merge 5",
         '& "C:\\Program Files\\Git\\bin\\git.exe" push origin main', "if ($?) { git push origin main }",
     )
+    # слияние и выпуск мимо `gh pr merge`/`gh release`: `gh api` с записью и curl/wget/Invoke-WebRequest на api.github.com
+    DENY_API = (
+        "gh api -X PUT repos/o/r/pulls/5/merge", "gh api --method PUT /repos/o/r/pulls/5/merge -f merge_method=squash",
+        "gh api repos/o/r/pulls/5/merge -X PUT", "gh api repos/o/r/pulls/5/merge -f merge_method=squash",   # поле без -X — POST
+        "gh api repos/o/r/pulls/5/merge -F sha=abc", "gh api -XPUT repos/o/r/pulls/5/merge", "gh api --method=PUT repos/o/r/pulls/5/merge",
+        "gh api --method put repos/o/r/pulls/5/merge", "gh -R o/r api -X PUT repos/o/r/pulls/5/merge",
+        "gh.exe api -X PUT repos/{owner}/{repo}/pulls/5/merge", "sudo gh api -X PUT repos/o/r/pulls/5/merge",
+        "gh api -X POST repos/o/r/merges -f base=main -f head=feat", "gh api -X POST repos/o/r/releases -f tag_name=v1",
+        "gh api repos/o/r/releases -f tag_name=v1", "gh api -X PATCH repos/o/r/releases/12 -F draft=false",
+        "gh api --method DELETE repos/o/r/releases/12", "gh api https://api.github.com/repos/o/r/releases -f tag_name=v1",
+        "gh api -X POST repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
+        "gh api -X POST repos/o/r/git/tags -f tag=v1", "gh api -X PUT repos/o/r/contents/README.md -f message=m -f content=Zm9v",
+        "gh api repos/o/r/contents/README.md --input body.json",
+        "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
+        "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge", "curl -XPUT https://api.github.com/repos/o/r/pulls/5/merge",
+        "curl -sSL -X POST -H 'Authorization: token x' https://api.github.com/repos/o/r/releases -d '{\"tag_name\":\"v1\"}'",
+        "curl -d '{}' https://api.github.com/repos/o/r/releases", "curl -sd '{}' https://api.github.com/repos/o/r/releases",
+        "curl --data-binary @a.json https://api.github.com/repos/o/r/releases", "curl --data-raw '{}' https://api.github.com/x",
+        "curl --json '{}' https://api.github.com/repos/o/r/releases",
+        "curl -F file=@a.zip https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip",
+        "curl -T a.zip https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip",
+        "curl --upload-file a.zip https://uploads.github.com/repos/o/r/releases/1/assets",
+        "curl --request DELETE https://api.github.com/repos/o/r/releases/1", "curl --request=PATCH https://api.github.com/repos/o/r/releases/1",
+        "curl https://api.github.com/repos/o/r/releases -X POST", "curl.exe -X POST https://api.github.com/x",
+        "curl -X post -H 'A: b' 'https://api.github.com/x'", "echo ok && curl -X POST https://api.github.com/x",
+        "wget --method=PUT https://api.github.com/repos/o/r/pulls/5/merge", "wget --method PUT https://api.github.com/x",
+        "wget --post-data='{}' https://api.github.com/repos/o/r/releases", "wget --post-file=a.json https://api.github.com/x",
+        "wget --body-data='{}' --method=PATCH https://api.github.com/x",
+        "bash -c 'gh api -X PUT repos/o/r/pulls/5/merge'", "ssh srv@192.0.2.49 'curl -X POST https://api.github.com/x'",
+        "echo 'abc; gh api -X PUT repos/o/r/pulls/5/merge",          # не разобрать — прежний регэксп как страховка
+        "echo 'abc; curl -X POST https://api.github.com/x",
+    )
+    DENY_API_PS = (
+        "Invoke-WebRequest -Method Put -Uri https://api.github.com/repos/o/r/pulls/5/merge",
+        "Invoke-RestMethod -Uri https://api.github.com/repos/o/r/releases -Method Post -Body $b",
+        "Invoke-RestMethod -Method:Post https://api.github.com/repos/o/r/releases", "iwr -Method Delete https://api.github.com/x",
+        "irm -Method PATCH -Uri https://api.github.com/repos/o/r/releases/1", "Invoke-RestMethod https://api.github.com/x -Meth Post",
+        "Invoke-WebRequest -Uri https://uploads.github.com/repos/o/r/releases/1/assets -Method Post -InFile a.zip",
+        "Invoke-RestMethod https://api.github.com/repos/o/r/releases -Body $b",        # тело без -Method — POST
+        "curl -Method Post -Uri https://api.github.com/x", "curl.exe -X POST https://api.github.com/x",
+        "$r = Invoke-RestMethod -Method Put -Uri 'https://api.github.com/repos/o/r/pulls/5/merge'",
+        'powershell -Command "Invoke-RestMethod -Method Put -Uri https://api.github.com/x"',
+        "& gh api -X PUT repos/o/r/pulls/5/merge",
+    )
+    ALLOW_API = (        # чтение, запись не на GitHub и запись GitHub, не похожая на слияние и выпуск (gh api)
+        "gh api repos/o/r/pulls/5", "gh api repos/o/r/releases", "gh api repos/o/r/pulls/5/merge", "gh api user --jq .login",
+        "gh api repos/o/r/commits --paginate", "gh api repos/o/r/pulls/5/merge -X GET",
+        "gh api repos/o/r/releases -X GET -f per_page=5", "gh api --method GET repos/o/r/contents/README.md -f ref=main",
+        "gh api -X POST repos/o/r/issues/5/comments -f body=x", "gh api -X PATCH repos/o/r/pulls/5 -f state=closed",
+        "gh api graphql -f query='query { viewer { login } }'",
+        "curl https://api.github.com/repos/o/r/releases", "curl -s -H 'Accept: x' https://api.github.com/repos/o/r/pulls/5",
+        "curl -I https://api.github.com/x", "curl -X GET https://api.github.com/x",
+        "curl -G -d per_page=5 https://api.github.com/repos/o/r/releases",         # -G: данные уходят в адрес, это GET
+        "curl -X POST https://example.com/hook -d x", "curl -d x=y https://example.com/hook",
+        "curl -X POST https://example.com/api.github.com.txt", "curl -o a.zip -L https://github.com/o/r/archive/main.zip",
+        "wget https://api.github.com/repos/o/r/releases", "wget -q -O - https://api.github.com/x",
+        "wget --post-data=x https://example.com", "wget --method=GET https://api.github.com/x",
+        "Invoke-WebRequest -Uri https://api.github.com/repos/o/r/releases", "Invoke-RestMethod https://api.github.com/x",
+        "Invoke-RestMethod -Method Get -Uri https://api.github.com/x", "iwr https://api.github.com/x",
+        "Invoke-RestMethod -Method Post -Uri https://example.com/hook -Body $b", "curl https://api.github.com/x",
+        'git commit -m "curl -X POST https://api.github.com/x"', 'echo "gh api -X PUT repos/o/r/pulls/5/merge"',
+        "grep -n 'curl -X POST api.github.com' README.md",
+        'python .claude/dispatcher/tickets.py comment TK-7 --author engineer --text "curl -X POST https://api.github.com/x"',
+    )
     ALLOW_OK = (
         "git push -u origin feat/cp2-publish", "git push origin HEAD:feat/x", "git push origin feat/x:feat/y",
         "git push origin v2", "git push origin release/1.2", "git push -o ci.skip origin feat/x",
@@ -1733,14 +1836,14 @@ class Publication(unittest.TestCase):
         return dg.check_tool({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": cwd})
 
     def all_denied(self):
-        for tool, cmds in (("Bash", self.DENY), ("PowerShell", self.DENY_PS)):
+        for tool, cmds in (("Bash", self.DENY + self.DENY_API), ("PowerShell", self.DENY_PS + self.DENY_API_PS)):
             for cmd in cmds:
                 reason = self.reason(cmd, tool)
                 self.assertIsNotNone(reason, f"пропущено: {tool} {cmd!r}")
                 self.assertIn("Публикация", reason, f"{cmd!r}")
 
     def all_allowed(self):
-        for tool, cmds in (("Bash", self.DENY), ("PowerShell", self.DENY_PS)):
+        for tool, cmds in (("Bash", self.DENY + self.DENY_API), ("PowerShell", self.DENY_PS + self.DENY_API_PS)):
             for cmd in cmds:
                 self.assertIsNone(self.reason(cmd, tool), f"ложный отказ: {tool} {cmd!r}")
 
@@ -1759,6 +1862,28 @@ class Publication(unittest.TestCase):
     def test_working_branch_push_and_plain_commands_allowed(self):
         for cmd in self.ALLOW_OK:
             self.assertIsNone(self.reason(cmd), f"ложный отказ: {cmd!r}")
+
+    def test_api_reads_and_other_writes_allowed(self):
+        """gh api без записи, curl GET, запись на чужой адрес и запись GitHub мимо слияния и выпуска (комментарий) — свободны."""
+        for role in ("engineer", "researcher", "judge"):
+            os.environ["RPV_ROLE"] = role
+            for tool in ("Bash", "PowerShell"):
+                for cmd in self.ALLOW_API:
+                    self.assertIsNone(self.reason(cmd, tool), f"ложный отказ: {role} {tool} {cmd!r}")
+
+    def test_api_write_reason_is_the_publication_text(self):
+        for cmd in ("gh api -X PUT repos/o/r/pulls/5/merge", "curl -X POST https://api.github.com/repos/o/r/releases -d '{}'"):
+            reason = self.reason(cmd)
+            self.assertIn("Публикация", reason, cmd)
+            for part in ("TK-7", "tickets.py allow <ID> publish --ref В-N", "ask-owner", "--why-owner необратимое"):
+                self.assertIn(part, reason, cmd)
+        self.assertIn("gh api PUT repos/o/r/pulls/5/merge", self.reason("gh api -X PUT repos/o/r/pulls/5/merge"))
+        self.assertIn("curl: запись на api.github.com", self.reason("curl -X POST https://api.github.com/x"))
+
+    def test_api_write_journal_group(self):
+        tr = []
+        self.assertIsNotNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "gh api -X PUT repos/o/r/pulls/5/merge"}, "cwd": CWD}, tr))
+        self.assertEqual(tr[-1], ("publish", "deny"))
 
     def test_force_push_stays_irreversible_refusal(self):
         for cmd in ("git push --force origin feat/x", "git push -f origin main", "git push origin +feat/x"):

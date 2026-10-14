@@ -254,10 +254,10 @@ class MeasureTests(ReportCase):
 
     def test_jobs_met_and_overdue(self):
         self.assertIn("нет данных", R.m_jobs(self.period()))
-        rows = [{"ts": at(13, 11).isoformat(), "ticket": "TK-001", "wait_for": "host:calc:/x.rc", "outcome": "met", "rc": 0},
-                {"ts": at(13, 12).isoformat(), "ticket": "TK-001", "wait_for": "host:calc:/y.rc", "outcome": "met", "rc": 1},
-                {"ts": at(13, 13).isoformat(), "ticket": "TK-002", "wait_for": "host:calc:/z.rc", "outcome": "overdue", "rc": None},
-                {"ts": at(12, 13).isoformat(), "ticket": "TK-002", "wait_for": "host:calc:/z.rc", "outcome": "overdue", "rc": None}]
+        rows = [{"ts": at(13, 11).isoformat(), "ticket": "TK-001", "wait_for": "host:gpu1:/x.rc", "outcome": "met", "rc": 0},
+                {"ts": at(13, 12).isoformat(), "ticket": "TK-001", "wait_for": "host:gpu1:/y.rc", "outcome": "met", "rc": 1},
+                {"ts": at(13, 13).isoformat(), "ticket": "TK-002", "wait_for": "host:gpu1:/z.rc", "outcome": "overdue", "rc": None},
+                {"ts": at(12, 13).isoformat(), "ticket": "TK-002", "wait_for": "host:gpu1:/z.rc", "outcome": "overdue", "rc": None}]
         self.write(".claude/dispatcher/jobs.jsonl", "\n".join(json.dumps(r) for r in rows) + "\nне json\n")
         self.assertEqual(R.m_jobs(self.period()), "кончились и подхвачены 2, срок вышел без итога 1")
         self.assertEqual(R.m_jobs(self.period(at(20, 1), at(20, 10))), "за период заданий не было")

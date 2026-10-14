@@ -315,7 +315,7 @@ class FakeProject(NoClaude):
         (self.root / ".claude" / "dispatcher" / "runs.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def args(self, out, **kw):
-        d = dict(alpha=str(self.root), out=str(out), tickets="TK-087", group="all", step_min=15, skip_roles="", max_kb=12, ctx_lines=40,
+        d = dict(project=str(self.root), out=str(out), tickets="TK-087", group="all", step_min=15, skip_roles="", max_kb=12, ctx_lines=40,
                  entry_chars=2500, desc_chars=3000, model="claude-haiku-5-5", effort="xhigh", jobs=1, budget=1.0, per_call=0.25,
                  timeout=30, fit="")
         d.update(kw)

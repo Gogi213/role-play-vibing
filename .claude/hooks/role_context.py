@@ -236,8 +236,9 @@ def full_context(role, title, source, hook_in):
     if role == "ceo":
         head.append(f"Реестр владельца (решения В-N, цели G-NNN): `{tickets_command('registry.py')} "
                     "decide|goal|repeat|accept-goal|show|list` — пишет помощник `secretary`; передай ему эту команду.")
-    head.append(f"Ошибки (исправлена — только с проверкой; приёмка Судьи сама гоняет все): `{tickets_command('errors.py')} "
-                "add --title \"...\" --ticket <ID>` · `fix E-N --check \"python tools/x.py\"` · `run` · `list`.")
+    head.append(f"Ошибки (исправленной ошибку объявляет Судья: проверка падала до исправления и зелёная сейчас; приёмка сама "
+                f"гоняет все): `{tickets_command('errors.py')} add --title \"...\" --ticket <ID>` · `fix E-N --check "
+                "\"python tools/x.py\" [--before <коммит>]` (только Судья) · `run` · `list`.")
     if role != "ceo":
         head.append("Общую память проекта (CLAUDE.md, решения и цели владельца, автопамять) пишет только `CEO`; ты "
                     "работаешь по своему тикету.")

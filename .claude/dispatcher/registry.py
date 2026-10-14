@@ -92,7 +92,7 @@ def ref_exists(root: Path, ref: str) -> bool:
 
 
 def _refuse_role() -> str:
-    role = (os.environ.get("RPV_ROLE") or "").strip().lower()
+    role = P.caller_role()  # RPV_ROLE, а стёрта — по дереву процессов: запуск роли CEO не притворится
     return (f"реестр владельца пишет только CEO; запуск роли {role} — только читает (`show`, `list`). Нужна запись — "
             f"`tickets.py result <ID> ask-owner`") if role in DISPATCH_ROLES else ""
 

@@ -133,7 +133,7 @@ class RoleDetection(unittest.TestCase):
                      extra_env or {})
         return json.loads(r.stdout.decode("utf-8"))["hookSpecificOutput"]["additionalContext"]
 
-    def test_rpv_role_only_alpha_role_ignored(self):
+    def test_rpv_role_only_old_role_variable_ignored(self):
         os.environ["ALPHA_ROLE"] = "judge"
         self.assertIsNone(rc.env_role())
         os.environ["RPV_ROLE"] = "engineer"
