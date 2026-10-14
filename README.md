@@ -1,228 +1,126 @@
 # Role Play Vibing
 
-**Команда ИИ-ролей для Claude Code: владелец говорит с CEO, а работу делают Исследователь, Инженер и Судья — по тикетам, под присмотром диспетчера.**
+**A team of AI roles for Claude Code. You talk to the CEO; a Researcher, an Engineer and a Judge do the work through tickets, woken by a dispatcher.**
 
 [![ci](https://github.com/Gogi213/role-play-vibing/actions/workflows/ci.yml/badge.svg)](https://github.com/Gogi213/role-play-vibing/actions/workflows/ci.yml)
-[![версия](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FGogi213%2Frole-play-vibing%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F)](CHANGELOG.md)
-![платформы](https://img.shields.io/badge/%D0%BF%D0%BB%D0%B0%D1%82%D1%84%D0%BE%D1%80%D0%BC%D1%8B-Windows%20%7C%20macOS%20%7C%20Linux-informational)
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FGogi213%2Frole-play-vibing%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version)](CHANGELOG.md)
+![platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-informational)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 
-[Возможности](#возможности) · [Быстрый старт](#быстрый-старт) · [Установка](#установка) · [Как это работает](#как-это-работает) · [Ход работы владельцу](#ход-работы-владельцу) · [Команды](#команды) · [Настройка](#настройка) · [Диагностика](#диагностика) · [Разработка](#разработка-и-тесты) · [История версий](CHANGELOG.md)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands) · [Configuration](#configuration) · [Development](#development) · [Changelog](CHANGELOG.md)
 
-## Зачем
+## Why
 
-Одна длинная сессия с ИИ копит контекст, теряет нить и встаёт, пока вы отошли. Role Play Vibing делит работу между ролями и ведёт её через тикеты: на каждую задачу — свой тикет и короткая сессия подходящей роли, а диспетчер сам будит следующего исполнителя.
+One long AI session piles up context, loses the thread and stalls while you are away. Role Play Vibing splits the work between roles and runs it through tickets: each task is one ticket and one short session of the right role, and a dispatcher wakes the next performer on its own.
 
-- **Контекст не раздувается** — одна задача = один тикет = короткая сессия роли.
-- **Работа не встаёт** — диспетчер будит роль, сторож ловит простои.
-- **Алгоритм оптимальный** — узкое место → лучшие способы → замер на малом → боевой прогон.
-- **Без упрощений ради кода** — упрощение только если замер доказал, что результат тот же.
-- **Выводы проверены** — Судья принимает работу по договору «примут, если …».
+- **Context stays small.** One task, one ticket, one short role session.
+- **Work does not stall.** The dispatcher wakes the next role; the watcher catches stuck tickets.
+- **Results are checked.** The Judge reviews every result against a "will be accepted if …" contract.
+- **No shortcuts for the sake of code.** A simplification is allowed only when a measurement shows the result is the same.
 
-Ядро работает на одной стандартной библиотеке Python: внешних пакетов и сервисов не нужно.
+The core uses only the Python standard library: no packages or services to install.
 
-## Возможности
+## Quick start
 
-- **Диспетчер** (`dispatch.py`) — раз в 15 с читает тикеты и запускает роль (`claude -p`) или будит CEO; пределы параллельности по ролям, паузы между запусками, тормоза циклов, ротация сессий по размеру контекста, пауза до сброса лимита (429), учёт токенов.
-- **Сторож** (`watch.py`) — ищет тикеты-сироты, `blocked`, `needs_owner` и мёртвые цели ожиданий; сигналы пишет в `ceo-wake.log`.
-- **Роли и тикеты** — CEO, Исследователь, Инженер, Судья; тикет — файл `.claude/tickets/TK-NNN.md` с шапкой и журналом; работа передаётся только через `--next`; Судья — ревьюер по умолчанию: исполнитель сдаёт по договору, Судья выносит вердикт по пунктам.
-- **Хуки** — вставка роли, устава и команды тикетов в начале сессии, конспекты сессий и блокнот роли; **страж удаления** (`PreToolUse`) разрешает удалять и перезаписывать только внутри своей папки, не трогает пути, которые проект объявил защищёнными (`.claude/rpv.json`, ключ `protected_paths`), а запускам ролей закрывает публикации без согласия владельца по тикету.
-- **Сигналы CEO** — строка в `ceo-inbox.md` и короткая копия в `ceo-wake.log` (на нём Monitor CEO); новые строки CEO читает командой `tickets.py inbox`; [подробнее](docs/signals.md).
-- **Ожидания `wait_for`** — тикет ждёт файл, другой тикет или задание на любой машине из `~/.ssh/config`: `tools/jobrun.sh` пишет файл итога (успех или код выхода), диспетчер видит его по ssh не позже чем через 5 минут и будит владельца; [подробнее](docs/wait-for.md).
-- **Надёжность** — присмотр ОС за диспетчером и сторожем, счётчик простоя с SLO и тревогой, инвариант «у открытого тикета есть ход», прогон на выносливость; [подробнее](docs/reliability.md).
-- **Ежедневный отчёт владельцу** — одно сообщение в день в Telegram: что принял Судья по каждой цели и одиннадцать измерений «что · сколько · норма»; [подробнее](#ход-работы-владельцу).
-- **Надзиратель** (`overseer.py`, [описание и схема](docs/overseer.md)) — раз в 15 мин, пока тикеты меняются, ловит то, чего тормоза кода не видят: деньги и время идут, а к цели не движемся. Правила кода «дорого» (больше 3×, 6×, 12× медианы цены закрытых тикетов) и «всплеск» (за 6 ч больше 3× обычных трат) плюс Haiku 5.5 xhigh по новым записям лога; находка Haiku принимается только с дословной цитатой из лога. Находка идёт Судье записью в тикете (`next: judge`), он проверяет и отвечает `return`, `blocked` или `ask-owner`; CEO Надзиратель не будит и владельцу не пишет. По тикету и виду — не чаще раза в сутки; число находок и цена — строкой ежедневного отчёта. Замер на истории проекта — `tools/overseer_eval.py`; итоги — CP14 в [docs/v2/checkpoints.md](docs/v2/checkpoints.md).
-- **`/rpv-doctor`** — здоровье команды одной таблицей.
-- **Выпуск плагина** — вручную: `release.py bump` меняет версию и ставит тег, `release.py check` сверяет версии; автовыпуска нет, пользователи обновляются штатно через `/plugin`; [подробнее](docs/release.md).
+Requires Python 3.11 (`python` on `PATH`), git, and the Claude Code CLI `claude` on `PATH`, signed in. Windows, macOS and Linux are supported.
 
-## Быстрый старт
-
-1. Установите плагин в Claude Code:
+1. Install the plugin in Claude Code:
 
    ```
    /plugin marketplace add https://github.com/Gogi213/role-play-vibing
    /plugin install role-play-vibing@role-play-vibing
    ```
 
-2. В корне своего проекта выполните `/rpv-init` — команда создаст `.claude/roles` (уставы из шаблонов), `.claude/tickets`, реестр владельца (`.claude/decisions.md` с подключением в `CLAUDE.md`, `.claude/goals/`) и строки в `.gitignore`. Существующие файлы не перезаписываются.
-3. В основной сессии выполните `/ceo` — сессия получит роль CEO: с ней говорит владелец, она заводит тикеты.
-4. Выполните `/rpv-start` — диспетчер и сторож запустятся в фоне; команда напечатает pid, пути логов (`<проект>/.claude/dispatcher/dispatch.run.log`, `watch.run.log`) и «отвязан: да/нет». Уже запущенные службы (pid-замок) команда останавливает и запускает заново: так подхватывается обновлённый плагин.
-5. Поставьте задачу CEO и проверьте, что всё живо: `/rpv-doctor`.
+2. In your project, run `/rpv-init`. It creates `.claude/roles` (role charters from templates), `.claude/tickets`, the owner's registry (`.claude/decisions.md`, `.claude/goals/`) and `.gitignore` entries. Existing files are not overwritten.
+3. In the main session, run `/ceo`. The session becomes the CEO: it talks to you and files tickets.
+4. Run `/rpv-start`. The dispatcher and the watcher start in the background and keep running after you close the Claude window. Running again restarts them, which picks up an updated plugin.
+5. Give the CEO a task. `/rpv-doctor` shows whether everything is alive.
 
-Команда для заведения тикетов приходит CEO в начале сессии от хука (для сессии, помеченной `/ceo`, — из самой команды `/ceo`): `python "<плагин>/.claude/dispatcher/tickets.py" --project "<проект>" new …`.
+Platform details, manual start and project-root lookup: [docs/install.md](docs/install.md) (Russian).
 
-## Установка
+## How it works
 
-Нужно: Python 3.11 (только stdlib) и команда `python` в `PATH`, git, Claude Code CLI `claude` в `PATH` с выполненным входом. `ssh` и алиасы машин в `~/.ssh/config` — только если тикеты ждут задания на удалённых машинах (`wait_for: host:…`).
+![How Role Play Vibing works: owner, CEO, ticket file, dispatcher, roles, signals to the CEO, watcher, overseer, Telegram](docs/img/workflow.svg)
 
-`/rpv-start` выбирает способ фонового запуска по ОС и отвязывает службы от сессии: закрытие окна Claude их не останавливает.
-
-| | Windows | macOS | Linux |
+| Role | Does | Session | Model |
 |---|---|---|---|
-| Запуск `/rpv-start` | WMI `Win32_Process.Create` | `Popen` в новой сессии | `systemd-run --user`; без systemd — как на macOS |
-| Переживает закрытие Claude | да | да | да |
-| Переживает перезагрузку | нет | нет | нет |
-| Автозапуск после входа или перезагрузки | вручную `/rpv-start` | LaunchAgent | постоянный user-юнит systemd |
-| Подробности | [Windows](docs/install-windows.md) | [macOS](docs/install-macos.md) | [Linux](docs/install-linux.md) |
+| CEO | talks to the owner, files tickets, reads signals | long-lived | your session |
+| Researcher | protocol, calculation, report | one short run per wake | Sonnet 5.5, effort high |
+| Engineer | code, tests, machines | one short run per wake | Sonnet 5.5, effort xhigh |
+| Judge | review and verdict | one short run per wake | Opus 5.5, effort high |
 
-Требования, ручной запуск, поиск корня проекта и таблица платформ целиком — [docs/install.md](docs/install.md). Присмотр, который сам поднимает упавшие службы, — [docs/reliability.md](docs/reliability.md).
+1. You give the CEO a task. The CEO files a ticket, `.claude/tickets/TK-NNN.md`: a header (`status`, `next`) and a log of every step.
+2. Every 15 seconds the dispatcher (`dispatch.py`) reads the tickets and starts the role named in a ticket's `next` field as a short `claude -p` session.
+3. The role reports its step with `tickets.py result <ID> <result> --why "…"`. Results: `done`, `pr`, `accept`, `return`, `blocked`, `ask-owner`, `wait`, `continue`. A routing table (`routes.py`), not the text of the entry, decides who is woken next: an executor's `done` or `pr` goes to the Judge, who answers `accept` (the ticket is done) or `return` (back to the executor).
+4. When a ticket is done or stuck (`blocked`, `needs_owner`, `next: ceo`), the dispatcher writes a line to `ceo-inbox.md` and `ceo-wake.log`; a Monitor on `ceo-wake.log` wakes the CEO. The watcher (`watch.py`) adds orphaned tickets and dead waits. Details: [docs/signals.md](docs/signals.md) (Russian).
+5. The CEO answers you. If Telegram is configured, you also get a daily report, the Judge's questions to you, and a "work stalled" alarm. The bot only sends.
+6. The Overseer (`overseer.py`) checks open tickets every 15 minutes while they change: cost rules plus Haiku reading the ticket logs. A finding goes to the Judge, not to the CEO. Details: [docs/overseer.md](docs/overseer.md) (Russian).
 
-<details>
-<summary>Запуск вручную, без <code>/rpv-start</code></summary>
+Tickets can also wait for a file, another ticket, or a job on a remote machine from `~/.ssh/config` (`wait_for`): [docs/wait-for.md](docs/wait-for.md) (Russian).
 
-Скрипты работают прямо из папки плагина (`<плагин>` — каталог установленного плагина, `${CLAUDE_PLUGIN_ROOT}`), копировать ничего не нужно:
+**Team rules**
 
-```
-python <плагин>/.claude/dispatcher/start.py --project <проект>      # то же, что /rpv-start
-python <плагин>/.claude/dispatcher/dispatch.py --project <проект>
-python <плагин>/.claude/dispatcher/watch.py --project <проект>
-```
+- Only the optimal algorithm; every report has an "Algorithm: …" line.
+- Numbers go to the owner only after the Judge has checked them; an estimate is not a measurement.
+- New tasks only on the owner's word.
+- Work is handed over only with `--next`.
+- Deleting is allowed only inside the project: a `PreToolUse` hook checks Bash, PowerShell and file edits, and also refuses to delete or overwrite paths the project marks as protected (`protected_paths` in `.claude/rpv.json`).
+- Publishing (release, PR merge, push to main/master, tags, packages) only with the owner's consent on the ticket: `tickets.py allow <ID> publish --ref <decision id>`.
+- A bug counts as fixed only with a check attached; the Judge runs the checks of all fixed bugs on every acceptance.
+- The CEO cannot remove the Judge; only the owner can, with a direct quote.
 
-Корень проекта — `--project`, иначе `RPV_PROJECT`, иначе `CLAUDE_PROJECT_DIR`, иначе ближайший каталог вверх от текущего с `.claude/roles`; не нашли — ошибка с подсказкой `--project` / `/rpv-init`, каталоги не создаются. Состояние (`state.json`, логи, `ceo-inbox.md`, `ceo-wake.log`) лежит в `<проект>/.claude/dispatcher/`; тикеты и роли — в проекте.
+Full charter: [`templates/roles/README.md`](templates/roles/README.md) (Russian; `/rpv-init` copies it to `.claude/roles/README.md` in your project).
 
-</details>
+## Commands
 
-## Как это работает
-
-| роль | делает | сессия |
-|---|---|---|
-| CEO | говорит с владельцем, заводит тикеты, читает сигналы | долгая |
-| Исследователь | протокол → счёт → отчёт | на тикет |
-| Инженер | код, тесты, машины | на тикет |
-| Судья | проверка и вердикт | на тикет |
-
-Поток работы: владелец → CEO → тикет → диспетчер → роль → Судья → CEO → владелец.
-
-1. Владелец ставит задачу CEO, CEO заводит тикет `.claude/tickets/TK-NNN.md`; диспетчер `dispatch.py` запускает роль.
-2. Роль сдаёт итог шага: `tickets.py result <ID> <done|pr|accept|return|blocked|ask-owner|wait> --why "…"` (запись в журнал
-   тикета ставит сама команда; `comment` — только промежуточная заметка).
-3. Кого будить дальше — решает таблица маршрутов (`routes.py`): диспетчер будит следующую роль; работу принимает Судья по договору
-   (`reviewer: judge` стоит на каждом тикете, кроме Haiku-задач).
-4. Сторож `watch.py` пишет сигналы в `ceo-wake.log`.
-5. CEO отвечает владельцу.
-
-Статусы тикета, остановка роли (`tickets.py stop`) и переменные диспетчера описаны в [`.claude/dispatcher/README.md`](.claude/dispatcher/README.md).
-
-**Правила команды**
-
-- Только оптимальный алгоритм; в отчёте строка «Алгоритм: …».
-- Данные и модель — как в реальности.
-- Новые задачи — только по слову владельца.
-- Числа владельцу — после Судьи; оценка ≠ замер.
-- Передача работы — только `--next`.
-- Удаление — только внутри проекта.
-- Публикация (выпуск, слияние PR, пуш в main/master и теги, пакеты) — только с согласием владельца по тикету: `tickets.py allow <ID> publish --ref В-N`.
-- Ошибка исправлена, только когда к ней приложена проверка; приёмка Судьи гоняет проверки всех исправленных ошибок кодом.
-- Судью не снимает CEO: он единственный кросс-аудитор и валидатор качества; снять его может только владелец прямой цитатой.
-
-Полный устав — [`templates/roles/README.md`](templates/roles/README.md) (`/rpv-init` копирует его в `.claude/roles/README.md` проекта).
-
-## Ход работы владельцу
-
-Раз в день, в `report_at` из `.claude/rpv.json` (по умолчанию 10:00, местное время машины), диспетчер шлёт владельцу одно сообщение в Telegram: словами результата, до 25 строк, без номеров тикетов. Бот и чат — `RPV_TG_TOKEN` и `RPV_TG_CHAT` ([docs/configuration.md](docs/configuration.md#окружение-машины)); бот только отправляет, тот же — для тревоги «работа стоит» и для ваших вопросов: Судья спросил владельца (деньги, направление, необратимое, бизнес-правило) — сразу одно сообщение с поводом и вопросом, отвечаете CEO. Telegram не настроен — отчёт всё равно пишется в `.claude/dispatcher/reports/<дата>.md` (под текстом — источники: тикеты по целям), в `notify.log` строка «не отправлено».
-
-Отчёт собирает отдельный короткий процесс `report.py`: медленный `claude -p` тик диспетчера не держит. Диспетчер стоял в срок — отчёт уйдёт на первом тике после, один раз; раньше срока не уйдёт. Метка `last_report_at` — в `state.json`; период отчёта — от прошлой метки. Вручную: `python <плагин>/.claude/dispatcher/report.py --project <проект> [--dry-run]`; `--dry-run` только печатает (не шлёт, файла нет, метку не двигает; ручная отправка метку тоже не двигает — плановый отчёт покроет и этот период).
-
-**Принято проверяющим.** Тикеты `done`, закрытые за период, чей последний вердикт Судьи — accept (`[итог: accept]`, «ПРИНЯТО PR»), по целям владельца (`Ссылка на задачу владельца: G-NNN`). Тикеты Судьи и закрытые без него не в счёте. Строку на цель пишет помощник `reporter` (`claude -p --agent reporter`, модель — из `agents/reporter.md`); нет claude, сбой, таймаут (4 мин), номер тикета в ответе или число, которого нет в материале — вместо строки названия тикетов: отчёт уходит всегда.
-
-**Измерения** — кодом, без модели, «что · сколько · норма»; нет источника — «нет данных», не выдумка.
-
-| строка | как считается | норма |
-|---|---|---|
-| Время от цели до принятого результата (3) | `accepted − set` в `goals/G-NNN.md` у целей, принятых за период; рядом — среднее у целей, принятых раньше | падает от цели к цели |
-| Сроки (4) | среди тикетов со сроком, названным владельцу (`due_first`, `tickets.py due`): в срок — принято Судьёй (`done`, последний вердикт accept) не позже срока; не в срок — принято позже, либо срок прошёл, а принятия нет. За всё время | все сбываются |
-| Вопросы вам (5) | записи Судьи `[итог: ask-owner]` за период, по `повод:` (деньги, направление, необратимое, бизнес-правило; без повода — отдельно) | единицы в день |
-| Повторы ваших решений (6) | строки «Повторено владельцем» в `decisions.md` за период (`registry.py repeat`) | 0 |
-| Повторы ошибок (7) | отказы приёмки из-за упавшей проверки исправленной ошибки (`regressions.log`: строку пишет `errors.py` при каждом отказе) + ошибки, заведённые заново (новая запись в `errors/`, чьё название на ≥ 0,8 похоже на более раннюю) | 0 |
-| Простой при готовой работе (10) | минуты `downtime` из `state.json` за календарные дни периода: готовая работа не взята, роль ждёт без условия, диспетчер молчал при работе, тормоз запусков; пауза лимита сессии не в счёте. Дня нет в счёте — «нет данных» | около 0 |
-| Расход (11) | сумма `resolved_cost` из `runs.log` за период (то, что начислено именно запуску; `cost_usd` — итог сессии и при `--resume` считал бы дважды) и доля **механики**: запуски первого подходящего класса — сбой (`status` не `ok`), холостой (`ok`, но роль не оставила записи в логе тикета между концом прошлого запуска и концом этого), повтор (`reason=retry`), переделка (запуск владельца после `[итог: return]` Судьи до его следующего итога, кроме `continue`); остальное — работа | большая часть — работа |
-| Задания на машинах (12) | `jobs.jsonl` за период: `outcome: met` — конец задания подхвачен, `overdue` — срок вышел без итога. Файла нет — «нет данных» | потерь 0 |
-| Столкновения параллельной работы (13) | записи лога тикетов за период со словами «конфликт», «rebase», «merge conflict», если это итог `return`/`blocked` или запись `ci` («PR конфликтует с main»). Счёт по тексту, возможны лишние | около 0 |
-| Правки плагина за неделю (16) | версии плагина, поставленные за 7 дней: соседние каталоги `…/role-play-vibing/X.Y.Z` в кэше Claude Code с изменением за неделю. Запуск не из кэша — «нет данных» | около 0 |
-| Надзиратель (1, 11) | `overseer.log` за период: находки, переданные Судье, по видам (правило «дорого» и находки Haiku, кроме повторов в пределах суток), число взглядов и их цена — механика. Файла нет — «нет данных» | находки по делу, цена — центы в день |
-
-## Команды
-
-| команда | назначение |
+| Command | Does |
 |---|---|
-| `/rpv-init` | Подготовить проект: `.claude/roles` из шаблонов плагина, `notes/`, `tickets/`, реестр владельца (`decisions.md` + `@` в `CLAUDE.md`, `goals/`), реестр ошибок `errors/`, строки в `.gitignore`; существующее не перезаписывает |
-| `/ceo` | Пометить сессию как CEO (метку читают хуки; роль держится и после `/clear` в Desktop) |
-| `/rpv-start` | Запустить или перезапустить диспетчер и сторож в фоне |
-| `/rpv-doctor` | Здоровье команды одной таблицей: диспетчер, сторож, присмотр ОС, очередь, ошибки за сутки; только читает |
+| `/rpv-init` | Prepares a project: `.claude/roles`, `notes/`, `tickets/`, the owner's registry, the error registry `errors/`, `.gitignore` entries. Existing files are kept. |
+| `/ceo` | Marks the session as the CEO (hooks read the mark; it survives `/clear` in Desktop). |
+| `/rpv-start` | Starts or restarts the dispatcher and the watcher in the background. |
+| `/rpv-doctor` | One table with the health of the team: dispatcher, watcher, OS supervision, queue, errors of the last day. Read-only. |
 
-Скрипты плагина (запускаются из его папки, `--project <проект>`):
+Scripts run from the plugin folder with `--project <project>`:
 
-| скрипт | назначение |
+| Script | Does |
 |---|---|
-| `dispatcher/tickets.py` | тикеты: `new`, `comment`, `start`, `stop` (только CEO), `allow <ID> publish --ref В-N` / `--revoke` (только CEO: согласие владельца на публикацию по тикету), `wait`, `status`; `inbox [--peek]` — новые строки `ceo-inbox.md` с прошлого чтения |
-| `dispatcher/registry.py` | реестр владельца: `decide` (решение В-N), `goal` / `accept-goal` / `drop-goal` (цель G-NNN), `show`, `list`; пишет только CEO (помощник `secretary`), роли — только читают |
-| `dispatcher/errors.py` | реестр ошибок `.claude/errors/E-NNN.md`: `add` (любая роль; пишет `added_sha` — коммит, где ошибка есть), `fix E-N --check "<команда>" [--before <коммит>]` (исправленной ошибку объявляет только Судья или сессия без роли — CEO, владелец; ошибка становится исправленной, только когда проверка — тест или скрипт из git — падала на коммите до исправления и зелёная сейчас: `fix` гоняет её в временном `git worktree` на `--before` / `added_sha`, скопировав туда файлы проверки), `run`, `show`, `list`; проверки всех исправленных гоняет приёмка Судьи (`result … accept`, `accept`), перед запуском сверяя файлы проверки с отпечатком `check_hash`, снятым при `fix` (без отпечатка — с версией на `fixed_sha`; нет ни отпечатка, ни коммита — отказ, не пропуск; изменены после исправления — отказ: менять проверку можно только через Судью); записи в `.claude/errors/` роли напрямую не пишут — страж закрывает каталог |
-| `dispatcher/supervise.py` | присмотр ОС за диспетчером и сторожем: `--install` / `--uninstall` |
-| `dispatcher/release.py` | выпуск плагина вручную: `bump` (версия, коммит, тег), `check` |
-| `dispatcher/notify.py` | сообщение владельцу в Telegram: `send "текст"`, `test` (`RPV_TG_TOKEN`, `RPV_TG_CHAT`) |
-| `tools/jobrun.sh` | запуск задания на машине с файлом итога `<unit>.rc` (копируется на машину; [подробнее](docs/wait-for.md#задание-на-машине-jobrunsh)) |
-| `dispatcher/report.py` | ежедневный отчёт владельцу: собрать, записать в `reports/<дата>.md`, отправить; `--dry-run` — только напечатать ([Ход работы владельцу](#ход-работы-владельцу)) |
+| `dispatcher/tickets.py` | tickets: `new`, `comment`, `result`, `start`, `stop` (CEO only), `allow`, `wait`, `status`; `inbox` prints new lines of `ceo-inbox.md` |
+| `dispatcher/registry.py` | the owner's registry of decisions and goals; written by the CEO only |
+| `dispatcher/errors.py` | the error registry `.claude/errors/`: a bug is fixed only when its check failed before the fix and passes now |
+| `dispatcher/report.py` | the daily report to the owner; `--dry-run` only prints ([docs/daily-report.md](docs/daily-report.md), Russian) |
+| `dispatcher/notify.py` | a Telegram message to the owner: `send "text"`, `test` |
+| `dispatcher/supervise.py` | OS supervision of the dispatcher and the watcher: `--install`, `--uninstall` |
+| `dispatcher/release.py` | manual release: `bump` (version, commit, tag), `check` ([docs/release.md](docs/release.md), Russian) |
 
-## Настройка
+## Configuration
 
-Настроек три вида ([docs/configuration.md](docs/configuration.md)):
+Three kinds of settings, all described in [docs/configuration.md](docs/configuration.md) (Russian):
 
-- **Окружение машины** — четыре переменные: `RPV_PROJECT` (корень проекта, если не задан `--project`), `RPV_TG_TOKEN` и `RPV_TG_CHAT` (бот владельца для отчёта и тревоги), `RPV_PLUGIN_DIR` (папка плагина для ролей — проверка рабочей копии). Службе они переносятся при запуске через `/rpv-start`.
-- **Файл проекта `.claude/rpv.json`** — всё, что зависит от проекта и едет вместе с ним: защищённые пути (`protected_paths`), время отчёта (`report_at`), пределы параллели (`max_parallel`, `role_parallel`), MCP ролей (`role_mcp`), автовлив PR (`ci_repo`), машины и адаптеры заданий, каталоги стража на удалённых машинах. Правит CEO по слову владельца; запуску роли файл закрыт.
-- **Константы** — тик, таймауты, тормоза цикла, модели ролей, пороги сторожа; меняются только выпуском плагина.
+- **Machine environment**: `RPV_PROJECT` (project root when `--project` is not given), `RPV_TG_TOKEN` and `RPV_TG_CHAT` (the owner's Telegram bot), `RPV_PLUGIN_DIR`.
+- **Project file `.claude/rpv.json`**: protected paths, report time (`report_at`), parallelism limits, MCP servers per role, PR auto-merge, machines and job adapters. Edited by the CEO on the owner's word; closed to role runs.
+- **Constants**: tick, timeouts, loop brakes, role models, watcher thresholds. Changed only by a plugin release.
 
-Прочее:
-
-- **Сессия CEO** — команда `/ceo` (метка сессии); запасной путь — слово `CEO` в названии сессии Claude Desktop.
-- **Роли и зоны** — уставы и ссылки в `.claude/roles/*.md` проекта.
-- **Хуки** запускает `hooks/run-hook.sh`: `python3`, иначе `python`, иначе `py -3`; в проекте без `.claude/roles` хуки молчат. Страж удаления ловит Bash, PowerShell, Write, Edit, MultiEdit и NotebookEdit (`hooks/hooks.json`); корень проекта — `CLAUDE_PROJECT_DIR`; защищённые пути проекта берёт из `.claude/rpv.json` (битый файл — отказ любому удалению и перезаписи, пока не исправят).
-- **Машины** — любой алиас из `~/.ssh/config` (пользователь, ключ, known_hosts — там же); отдельных переменных для хостов у плагина нет.
-
-## Диагностика
-
-`/rpv-doctor` печатает таблицу `OK / WARN / FAIL / —`: диспетчер и сторож (pid жив, возраст сердцебиения), присмотр ОС, очередь тикетов по статусам, тикеты `waiting` без условия, запуски не `ok` за сутки, сегодняшний простой. Команда только читает; код возврата 1 — есть FAIL, 2 — проект не найден, `--json` — машинный вид.
-
-Диспетчер каждый тик учитывает **счётчик простоя** (`state.json` → `downtime`): минуты в сутки, когда есть готовая работа без исполнителя, роль ждёт без условия (дольше 10 мин) или диспетчер молчит при работе. Минуты идут в [ежедневный отчёт](#ход-работы-владельцу). Готовая работа стоит 15 мин подряд — одна тревога «работа стоит» владельцу в Telegram (`notify.py`) и строкой CEO; пошла — «снова идёт». Остальная механика (слепота к машинам, сверки, сбои снятия и разбора) CEO не будит — строки в `mechanics.log`.
-
-Службы не запущены — `/rpv-start` (он же ставит присмотр ОС; вручную — `supervise.py --install`). Подробнее — [docs/reliability.md](docs/reliability.md).
-
-## Разработка и тесты
+## Development
 
 ```
 python -m pip install pytest
 python -m pytest .claude -q
 ```
 
-Или без pytest — `python -m unittest discover -s .claude/dispatcher`, затем то же для `-s .claude/hooks`.
+Without pytest: `python -m unittest discover -s .claude/dispatcher`, then the same for `-s .claude/hooks`. Under pytest, `.claude/conftest.py` hides `RPV_*` settings and blocks real `ssh`; under `unittest` clear the environment yourself.
 
-**На машине с живой установкой** настройка `RPV_*` (пороги, адаптеры, ключи) лежит в окружении пользователя, и тесты не должны её видеть. Под pytest это делает `.claude/conftest.py` (он же не пускает тесты в настоящий `ssh`: алиасы машин из `~/.ssh/config` живые); под `unittest` очисти окружение сам (PowerShell: `Get-ChildItem Env: | ? Name -match '^(RPV|ALPHA)_' | % { Remove-Item "Env:$($_.Name)" }`). Страж — `test_env_isolation.py` падает, если настройка просочилась.
-
-- **CI** — workflow [`ci`](.github/workflows/ci.yml): тесты на Windows, macOS и Linux × Python 3.11–3.13 на каждый PR и каждый push в `main`; итоговая проверка `ci-ok`.
-- **Версии** — `python .claude/dispatcher/release.py check` проверяет, что версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают.
-
-Структура репозитория:
+- **CI**: [`ci`](.github/workflows/ci.yml) runs the tests on Windows, macOS and Linux with Python 3.11–3.13 for every PR and every push to `main`.
+- **Versions**: `python .claude/dispatcher/release.py check` verifies that `plugin.json`, `marketplace.json` and `CHANGELOG.md` agree.
 
 ```
-commands/            слэш-команды плагина
-agents/              помощники ролей: coder, reader; помощники CEO: secretary, inbox, reporter
-hooks/               hooks.json и запускатель хуков
-tools/               fastcheck.py (быстрый прогон тестов), jobrun.sh (задание на машине с файлом итога)
-templates/roles/     уставы ролей — копируются в проект командой /rpv-init
-.claude/dispatcher/  диспетчер, сторож, тикеты, doctor, присмотр, выпуск
-.claude/hooks/       страж удаления, страж сигналов CEO, контекст и память ролей
-docs/                подробные инструкции
+commands/            slash commands
+agents/              helpers: coder, reader, overseer; CEO helpers: secretary, inbox, reporter
+hooks/               hooks.json and the hook launcher
+tools/               fastcheck.py, jobrun.sh, benchmarks
+templates/roles/     role charters copied into a project by /rpv-init
+.claude/dispatcher/  dispatcher, watcher, tickets, doctor, supervision, release
+.claude/hooks/       delete guard, CEO-signal guard, role context and memory
+docs/                detailed guides (mostly in Russian)
 ```
 
-## Документация
-
-| документ | о чём |
-|---|---|
-| [docs/install.md](docs/install.md) | требования, запуск, корень проекта, платформы |
-| [docs/install-windows.md](docs/install-windows.md), [docs/install-macos.md](docs/install-macos.md), [docs/install-linux.md](docs/install-linux.md) | запуск, остановка и автозапуск по ОС |
-| [docs/configuration.md](docs/configuration.md) | все переменные окружения |
-| [docs/wait-for.md](docs/wait-for.md) | ожидания тикетов: файл, тикет, задание на машине |
-| [docs/signals.md](docs/signals.md) | стандарт сигналов CEO: что будит CEO, что нет, `ceo-inbox.md`, `ceo-wake.log`, `tickets.py inbox` (со схемой) |
-| [docs/overseer.md](docs/overseer.md) | Надзиратель: правила, путь находки к Судье, цена, где смотреть (со схемой) |
-| [docs/reliability.md](docs/reliability.md) | присмотр ОС, счётчик простоя, инвариант хода |
-| [docs/release.md](docs/release.md) | выпуск плагина вручную, обновление через `/plugin` |
-| [CHANGELOG.md](CHANGELOG.md) | история версий |
+More: [docs/reliability.md](docs/reliability.md) (OS supervision, downtime counter, move invariant), [`.claude/dispatcher/README.md`](.claude/dispatcher/README.md) (ticket statuses, dispatcher variables), [CHANGELOG.md](CHANGELOG.md).

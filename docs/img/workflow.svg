@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" width="1100" height="620" role="img" aria-labelledby="t-w d-w">
+<title id="t-w">How Role Play Vibing works</title>
+<desc id="d-w">The owner gives the CEO a task. The CEO files a ticket. The dispatcher reads tickets every 15 seconds and starts the role named in the ticket's next field as a short claude -p session. Roles report with tickets.py result, which sets status and next. Executors hand results to the Judge, who accepts or returns them. Done and stuck tickets, plus watcher findings, are written to ceo-inbox.md and ceo-wake.log, and a Monitor wakes the CEO. The Overseer sends findings to the Judge. Telegram carries the daily report, owner questions and the work-stalled alarm.</desc>
+<style>
+  :root{--bg:#F6F8FA;--surface:#FFFFFF;--fg:#1F2933;--muted:#586471;--line:#AEB9C4;--model-bg:#E1EDFB;--model-line:#3A6EA5;--wake:#B83A08;--wake-bg:#FCEBE2}
+  @media (prefers-color-scheme: dark){:root{--bg:#0E141A;--surface:#161E26;--fg:#E4EAF0;--muted:#98A5B1;--line:#4A5A68;--model-bg:#14283B;--model-line:#6FA8E0;--wake:#FF9A66;--wake-bg:#3B2216}}
+  .bg{fill:var(--bg)}
+  .n-code{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+  .n-model{fill:var(--model-bg);stroke:var(--model-line);stroke-width:1.4}
+  .n-file{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+  .n-fold{fill:none;stroke:var(--line);stroke-width:1.2}
+  .n-group{fill:none;stroke:var(--line);stroke-width:1.2}
+  .n-wake{fill:var(--wake-bg);stroke:var(--wake);stroke-width:1.4}
+  .t{fill:var(--fg);font:600 12px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .s{fill:var(--muted);font:400 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .m{fill:var(--fg);font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+  .l{fill:var(--muted);font:400 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .l-w{fill:var(--wake);font:600 11px system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .e{fill:none;stroke:var(--fg);stroke-width:1.4}
+  .e-w{fill:none;stroke:var(--wake);stroke-width:2.2}
+  .dot{fill:var(--fg)}
+  .mk-e{fill:var(--fg)}
+  .mk-w{fill:var(--wake)}
+</style>
+<defs><marker id="mk-e-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-e" d="M0 0L10 5L0 10z"/></marker><marker id="mk-w-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-w" d="M0 0L10 5L0 10z"/></marker><marker id="mk-b-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="mk-e" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" width="1100" height="620" rx="10"/>
+<rect class="n-code" x="20" y="40" width="130" height="70" rx="6"/>
+<text x="30" y="66" class="t">Owner</text>
+<text x="30" y="84" class="s">you</text>
+<polyline class="e" points="150,75 226,75" marker-start="url(#mk-b-w)" marker-end="url(#mk-b-w)"/>
+<text x="188" y="62" class="l" text-anchor="middle">tasks,</text>
+<text x="188" y="98" class="l" text-anchor="middle">answers</text>
+<rect class="n-model" x="230" y="30" width="190" height="90" rx="6"/>
+<text x="240" y="54" class="t">CEO</text>
+<text x="240" y="72" class="s">long-lived session (/ceo)</text>
+<text x="240" y="86" class="s">talks to you, files tickets</text>
+<polyline class="e" points="420,75 516,75" marker-end="url(#mk-e-w)"/>
+<text x="468" y="62" class="l" text-anchor="middle">tickets.py new</text>
+<path class="n-file" d="M520 40H700L710 50V110H520Z"/>
+<path class="n-fold" d="M700 40V50H710"/>
+<text x="530" y="61" class="m">TK-NNN.md</text>
+<text x="530" y="79" class="s">header: status, next</text>
+<text x="530" y="93" class="s">log of every step</text>
+<rect class="n-code" x="520" y="220" width="190" height="100" rx="6"/>
+<text x="530" y="244" class="t">Dispatcher</text>
+<text x="530" y="262" class="s">dispatch.py, 15 s tick</text>
+<text x="530" y="276" class="s">starts the role named</text>
+<text x="530" y="290" class="s">in the ticket's next</text>
+<polyline class="e" points="615,110 615,218" marker-end="url(#mk-e-w)"/>
+<text x="625" y="160" class="l">reads tickets</text>
+<text x="625" y="174" class="l">every 15 s</text>
+<rect class="n-group" x="800" y="170" width="280" height="244" rx="8"/>
+<text x="812" y="190" class="t">Roles: a short claude -p session per run</text>
+<rect class="n-model" x="812" y="202" width="256" height="62" rx="6"/>
+<text x="822" y="221" class="t">Researcher · Sonnet 5.5 high</text>
+<text x="822" y="237" class="s">protocol, calculation, report</text>
+<text x="822" y="251" class="s">done · pr → next: judge</text>
+<rect class="n-model" x="812" y="270" width="256" height="62" rx="6"/>
+<text x="822" y="289" class="t">Engineer · Sonnet 5.5 xhigh</text>
+<text x="822" y="305" class="s">code, tests, machines</text>
+<text x="822" y="319" class="s">done · pr → next: judge</text>
+<rect class="n-model" x="812" y="338" width="256" height="62" rx="6"/>
+<text x="822" y="357" class="t">Judge · Opus 5.5 high</text>
+<text x="822" y="373" class="s">reviews every result</text>
+<text x="822" y="387" class="s">accept → done · return → executor</text>
+<polyline class="e" points="710,270 796,270" marker-end="url(#mk-e-w)"/>
+<text x="753" y="262" class="l" text-anchor="middle">claude -p</text>
+<polyline class="e" points="940,170 940,75 714,75" marker-end="url(#mk-e-w)"/>
+<text x="827" y="67" class="l" text-anchor="middle">tickets.py result → status, next</text>
+<path class="n-file" d="M230 450H410L420 460V506H230Z"/>
+<path class="n-fold" d="M410 450V460H420"/>
+<text x="240" y="472" class="m">ceo-inbox.md</text>
+<text x="240" y="490" class="m">ceo-wake.log</text>
+<polyline class="e-w" points="615,320 615,478 424,478" marker-end="url(#mk-w-w)"/>
+<text x="605" y="400" class="l-w" text-anchor="end">done · blocked ·</text>
+<text x="605" y="414" class="l-w" text-anchor="end">needs_owner · next: ceo</text>
+<polyline class="e-w" points="325,450 325,124" marker-end="url(#mk-w-w)"/>
+<text x="333" y="300" class="l-w">Monitor on ceo-wake.log</text>
+<text x="333" y="314" class="l-w">wakes the CEO</text>
+<rect class="n-code" x="230" y="530" width="190" height="52" rx="6"/>
+<text x="240" y="550" class="t">Watcher</text>
+<text x="240" y="568" class="s">watch.py: orphan tickets, dead waits</text>
+<polyline class="e-w" points="300,530 300,510" marker-end="url(#mk-w-w)"/>
+<rect class="n-model" x="800" y="460" width="280" height="62" rx="6"/>
+<text x="810" y="479" class="t">Overseer</text>
+<text x="810" y="495" class="s">overseer.py, every 15 min: cost rules</text>
+<text x="810" y="509" class="s">and Haiku reading ticket logs</text>
+<polyline class="e" points="940,460 940,402" marker-end="url(#mk-e-w)"/>
+<text x="950" y="440" class="l">finding → next: judge</text>
+<polyline class="e" points="690,320 690,604 85,604 85,114" marker-end="url(#mk-e-w)"/>
+<text x="390" y="596" class="l" text-anchor="middle">Telegram (send-only bot): daily report, owner questions, work-stalled alarm</text>
+<rect class="n-code" x="800" y="548" width="22" height="14" rx="3"/>
+<text x="830" y="559" class="s">code, free</text>
+<rect class="n-model" x="920" y="548" width="22" height="14" rx="3"/>
+<text x="950" y="559" class="s">model run, paid</text>
+<path class="n-file" d="M800 572H814L822 580V586H800Z"/>
+<text x="830" y="583" class="s">file</text>
+<line class="e-w" x1="920" y1="579" x2="942" y2="579"/>
+<text x="950" y="583" class="s">path that wakes the CEO</text>
+</svg>
