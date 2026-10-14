@@ -1,0 +1,90 @@
+name: bench
+# Замер плагина: одни и те же микробенчи, оркестрация на заглушке и (по желанию) живые задачи с моделями — на Ubuntu и macOS,
+# потом сводка рядом. Только ручной запуск. Бесплатная часть (micro + stub) не нужна секретов; живая тратит подписку
+# владельца (секрет CLAUDE_CODE_OAUTH_TOKEN, `claude setup-token`) и не стартует без секрета.
+on:
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Живой набор задач (платно): none | smoke | core | full"
+        default: none
+        type: choice
+        options: [none, smoke, core, full]
+      repeat:
+        description: "Повторов живого набора"
+        default: "1"
+      budget_usd:
+        description: "Потолок трат живого набора на каждую ОС, $"
+        default: "10"
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  bench:
+    name: замер (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest pytest-xdist
+      - name: git для заглушки и песочниц
+        run: |
+          git config --global user.name bench
+          git config --global user.email bench@example.invalid
+          git config --global init.defaultBranch main
+      - name: Claude Code CLI (только для живой части)
+        if: ${{ inputs.live != 'none' && env.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: npm install -g @anthropic-ai/claude-code
+      - name: замер
+        run: |
+          live="${{ inputs.live }}"
+          args=""
+          if [ "$live" != "none" ]; then
+            if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+              echo "::warning::нет секрета CLAUDE_CODE_OAUTH_TOKEN — живая часть пропущена, бесплатная идёт"
+            else
+              args="--live $live --repeat ${{ inputs.repeat }} --budget-usd ${{ inputs.budget_usd }}"
+            fi
+          fi
+          python tools/bench/run.py $args --out bench-out --label "${{ matrix.os }}"
+      - name: сводка по этой ОС
+        if: always()
+        run: |
+          ls bench-out || true
+          cat "bench-out/bench-${{ matrix.os }}.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench-out/
+  compare:
+    name: сводка Ubuntu против macOS
+    needs: bench
+    if: always() && needs.bench.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: all
+          pattern: bench-*
+          merge-multiple: true
+      - run: |
+          ls all
+          python tools/bench/compare.py all/bench-ubuntu-latest.json all/bench-macos-latest.json | tee comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-comparison
+          path: comparison.md
