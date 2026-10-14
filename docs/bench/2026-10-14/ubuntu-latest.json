@@ -1,0 +1,2617 @@
+{
+ "label": "ubuntu-latest",
+ "env": {
+  "os": "Ubuntu 24.04.5 LTS",
+  "kernel": "6.17.0-1022-azure",
+  "machine": "x86_64",
+  "cpus": 4,
+  "memory": "16 GiB",
+  "python": "3.12.15",
+  "git": "git version 2.55.0",
+  "claude": "",
+  "bash": "GNU bash, version 5.2.21(1)-release (x86_64-pc-linux-gnu)",
+  "plugin_commit": "e29b9ee",
+  "plugin_version": "2.0.1",
+  "runner": "GitHub Actions 1000008359",
+  "at": "2026-10-14T01:58:41+0000"
+ },
+ "args": {
+  "only": null,
+  "live": null,
+  "tasks": null,
+  "repeat": 1,
+  "budget_usd": 10.0,
+  "timeout_min": 20.0,
+  "out": "bench-out",
+  "label": "ubuntu-latest",
+  "quick": false,
+  "skip_tests": false,
+  "keep": false
+ },
+ "started": "2026-10-14T01:58:41+0000",
+ "micro": {
+  "cold_start": {
+   "python_floor (python -c pass)": {
+    "wall_ms": {
+     "n": 15,
+     "min": 11.17,
+     "p50": 11.53,
+     "p95": 11.71,
+     "max": 11.76,
+     "mean": 11.49,
+     "stdev": 0.18
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 10.56,
+     "p50": 11.18,
+     "p95": 11.3,
+     "max": 11.32,
+     "mean": 11.03,
+     "stdev": 0.27
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": ""
+   },
+   "python_stdlib (json, re, subprocess)": {
+    "wall_ms": {
+     "n": 15,
+     "min": 32.85,
+     "p50": 33.05,
+     "p95": 35.42,
+     "max": 35.48,
+     "mean": 33.72,
+     "stdev": 0.96
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 32.27,
+     "p50": 32.75,
+     "p95": 34.72,
+     "max": 34.77,
+     "mean": 33.19,
+     "stdev": 0.97
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": ""
+   },
+   "git --version": {
+    "wall_ms": {
+     "n": 15,
+     "min": 1.56,
+     "p50": 1.59,
+     "p95": 1.63,
+     "max": 1.63,
+     "mean": 1.59,
+     "stdev": 0.02
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 1.07,
+     "p50": 1.09,
+     "p95": 1.12,
+     "max": 1.14,
+     "mean": 1.1,
+     "stdev": 0.02
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": "git version 2.55.0\n"
+   },
+   "tickets.py status": {
+    "wall_ms": {
+     "n": 15,
+     "min": 99.39,
+     "p50": 100.64,
+     "p95": 104.06,
+     "max": 104.09,
+     "mean": 101.1,
+     "stdev": 1.45
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 98.98,
+     "p50": 100.08,
+     "p95": 103.61,
+     "max": 103.64,
+     "mean": 100.56,
+     "stdev": 1.43
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 25.77,
+     "p50": 26.0,
+     "p95": 26.03,
+     "max": 26.03,
+     "mean": 25.93,
+     "stdev": 0.1
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": "ид      заголовок       владелец  статус  ревьюер  потрачено  обновлён                 \nTK-001  холодный старт  engineer  todo    judge    $0.00      2026-10-14T01:58:41+00:00\nпотрачено: за сутки $0.00, за последний час $0.00\n"
+   },
+   "registry.py list": {
+    "wall_ms": {
+     "n": 15,
+     "min": 38.53,
+     "p50": 38.65,
+     "p95": 39.66,
+     "max": 39.75,
+     "mean": 38.88,
+     "stdev": 0.39
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 37.92,
+     "p50": 38.27,
+     "p95": 39.11,
+     "max": 39.34,
+     "mean": 38.42,
+     "stdev": 0.37
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": "G-001 [open] bench\n"
+   },
+   "errors.py list": {
+    "wall_ms": {
+     "n": 15,
+     "min": 49.98,
+     "p50": 51.0,
+     "p95": 51.65,
+     "max": 51.71,
+     "mean": 50.93,
+     "stdev": 0.43
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 49.75,
+     "p50": 50.33,
+     "p95": 51.02,
+     "max": 51.09,
+     "mean": 50.43,
+     "stdev": 0.37
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 19.46,
+     "p50": 19.67,
+     "p95": 19.67,
+     "max": 19.67,
+     "mean": 19.61,
+     "stdev": 0.09
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": ""
+   },
+   "doctor.py": {
+    "wall_ms": {
+     "n": 15,
+     "min": 101.24,
+     "p50": 102.84,
+     "p95": 105.62,
+     "max": 107.06,
+     "mean": 103.33,
+     "stdev": 1.44
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 99.56,
+     "p50": 101.36,
+     "p95": 103.81,
+     "max": 105.17,
+     "mean": 101.64,
+     "stdev": 1.37
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 24.27,
+     "p50": 24.4,
+     "p95": 24.52,
+     "max": 24.53,
+     "mean": 24.4,
+     "stdev": 0.11
+    },
+    "rcs": [
+     1
+    ],
+    "last_out": "ие нет\nWARN  присмотр ОС      не установлен — `python supervise.py --install`; перезапусков за сутки: 0\n—     простой сегодня  диспетчер ещё не вёл счёт\nOK    очередь          todo: 1\nOK    запуски сейчас   0: —\nOK    рабочие копии    лишних нет\nOK    ошибки за сутки  запусков за сутки: 0, не ok: 0\n"
+   },
+   "watch.py --once": {
+    "wall_ms": {
+     "n": 15,
+     "min": 94.89,
+     "p50": 95.98,
+     "p95": 96.76,
+     "max": 97.2,
+     "mean": 95.92,
+     "stdev": 0.54
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 94.35,
+     "p50": 95.28,
+     "p95": 96.12,
+     "max": 96.5,
+     "mean": 95.23,
+     "stdev": 0.53
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 25.5,
+     "p50": 25.6,
+     "p95": 25.65,
+     "max": 25.66,
+     "mean": 25.59,
+     "stdev": 0.04
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": "[watch] once: findings=0\n"
+   },
+   "report.py --dry-run": {
+    "wall_ms": {
+     "n": 15,
+     "min": 88.01,
+     "p50": 89.78,
+     "p95": 91.66,
+     "max": 91.7,
+     "mean": 89.77,
+     "stdev": 1.17
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 87.62,
+     "p50": 89.06,
+     "p95": 91.33,
+     "max": 91.33,
+     "mean": 89.23,
+     "stdev": 1.23
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 24.34,
+     "p50": 24.43,
+     "p95": 24.55,
+     "max": 24.55,
+     "mean": 24.43,
+     "stdev": 0.07
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": " потерь 0\n• Столкновения параллельной работы · 0 · норма: около 0\n• Правки плагина за неделю · нет данных (плагин запущен не из кэша Claude Code, версии не копятся) · норма: около 0\n• Надзиратель · нет данных (Надзиратель не работал: overseer.log нет) · норма: находки — по делу, цена — центы в день\n"
+   },
+   "overseer.py --dry-run": {
+    "wall_ms": {
+     "n": 15,
+     "min": 69.75,
+     "p50": 71.7,
+     "p95": 73.35,
+     "max": 74.25,
+     "mean": 71.72,
+     "stdev": 1.07
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 69.34,
+     "p50": 71.23,
+     "p95": 72.85,
+     "max": 73.91,
+     "mean": 71.11,
+     "stdev": 1.12
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 21.45,
+     "p50": 21.58,
+     "p95": 21.6,
+     "max": 21.61,
+     "mean": 21.55,
+     "stdev": 0.06
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": "[]\n"
+   },
+   "dispatch.py --once (пустая очередь)": {
+    "wall_ms": {
+     "n": 15,
+     "min": 116.92,
+     "p50": 119.81,
+     "p95": 139.75,
+     "max": 146.66,
+     "mean": 122.71,
+     "stdev": 8.18
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 116.38,
+     "p50": 118.34,
+     "p95": 137.2,
+     "max": 143.2,
+     "mean": 121.79,
+     "stdev": 7.44
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 29.64,
+     "p50": 29.92,
+     "p95": 30.0,
+     "max": 30.0,
+     "mean": 29.89,
+     "stdev": 0.11
+    },
+    "rcs": [
+     0
+    ],
+    "last_out": "[dispatch] once: launched=0 running=0\n"
+   },
+   "notify.py test (Telegram не настроен)": {
+    "wall_ms": {
+     "n": 15,
+     "min": 59.06,
+     "p50": 60.18,
+     "p95": 61.01,
+     "max": 61.51,
+     "mean": 60.0,
+     "stdev": 0.63
+    },
+    "cpu_ms": {
+     "n": 15,
+     "min": 58.48,
+     "p50": 59.48,
+     "p95": 60.42,
+     "max": 60.81,
+     "mean": 59.48,
+     "stdev": 0.63
+    },
+    "rss_mib": {
+     "n": 15,
+     "min": 20.35,
+     "p50": 20.53,
+     "p95": 20.62,
+     "max": 20.62,
+     "mean": 20.51,
+     "stdev": 0.08
+    },
+    "rcs": [
+     1
+    ],
+    "last_out": "Telegram не настроен: задайте RPV_TG_TOKEN и RPV_TG_CHAT\n"
+   }
+  },
+  "import_cost": {
+   "top_cumulative_ms": [
+    [
+     "notify",
+     19.5
+    ],
+    [
+     "urllib.request",
+     16.5
+    ],
+    [
+     "http.client",
+     14.0
+    ],
+    [
+     "dataclasses",
+     8.7
+    ],
+    [
+     "email.parser",
+     7.7
+    ],
+    [
+     "json",
+     7.5
+    ],
+    [
+     "inspect",
+     7.5
+    ],
+    [
+     "email.feedparser",
+     7.5
+    ]
+   ]
+  },
+  "tickets_ops": {
+   "new": {
+    "n": 8,
+    "min": 100.68,
+    "p50": 101.76,
+    "p95": 103.19,
+    "max": 103.35,
+    "mean": 101.88,
+    "stdev": 0.81
+   },
+   "comment": {
+    "n": 8,
+    "min": 100.19,
+    "p50": 100.91,
+    "p95": 102.19,
+    "max": 102.2,
+    "mean": 101.14,
+    "stdev": 0.75
+   },
+   "result_done": {
+    "n": 8,
+    "min": 99.96,
+    "p50": 102.55,
+    "p95": 103.79,
+    "max": 103.95,
+    "mean": 102.24,
+    "stdev": 1.29
+   },
+   "status": {
+    "n": 8,
+    "min": 100.71,
+    "p50": 101.65,
+    "p95": 104.95,
+    "max": 105.23,
+    "mean": 102.28,
+    "stdev": 1.52
+   }
+  },
+  "hooks": {
+   "PreToolUse Bash (ls)": {
+    "wall_ms": {
+     "n": 30,
+     "min": 81.15,
+     "p50": 82.0,
+     "p95": 83.19,
+     "max": 86.27,
+     "mean": 82.18,
+     "stdev": 0.93
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 80.4,
+     "p50": 81.57,
+     "p95": 82.73,
+     "max": 85.77,
+     "mean": 81.67,
+     "stdev": 0.95
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 19.99,
+     "p50": 20.05,
+     "p95": 20.41,
+     "max": 20.42,
+     "mean": 20.13,
+     "stdev": 0.14
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 0
+   },
+   "PreToolUse Bash (длинный heredoc 4 КБ)": {
+    "wall_ms": {
+     "n": 30,
+     "min": 85.3,
+     "p50": 88.25,
+     "p95": 93.42,
+     "max": 96.42,
+     "mean": 88.62,
+     "stdev": 2.75
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 84.61,
+     "p50": 87.6,
+     "p95": 92.91,
+     "max": 94.56,
+     "mean": 88.03,
+     "stdev": 2.64
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 19.84,
+     "p50": 20.13,
+     "p95": 20.41,
+     "max": 20.42,
+     "mean": 20.11,
+     "stdev": 0.13
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 0
+   },
+   "PreToolUse Write": {
+    "wall_ms": {
+     "n": 30,
+     "min": 81.42,
+     "p50": 83.6,
+     "p95": 88.04,
+     "max": 91.0,
+     "mean": 84.13,
+     "stdev": 2.21
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 81.06,
+     "p50": 82.97,
+     "p95": 87.3,
+     "max": 90.25,
+     "mean": 83.57,
+     "stdev": 2.17
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 19.92,
+     "p50": 20.02,
+     "p95": 20.3,
+     "max": 20.42,
+     "mean": 20.08,
+     "stdev": 0.11
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 0
+   },
+   "SessionStart (роль engineer)": {
+    "wall_ms": {
+     "n": 30,
+     "min": 41.46,
+     "p50": 42.77,
+     "p95": 44.7,
+     "max": 45.15,
+     "mean": 43.07,
+     "stdev": 1.07
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 41.12,
+     "p50": 42.16,
+     "p95": 44.16,
+     "max": 44.34,
+     "mean": 42.52,
+     "stdev": 1.06
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 5872
+   },
+   "UserPromptSubmit": {
+    "wall_ms": {
+     "n": 30,
+     "min": 42.57,
+     "p50": 43.91,
+     "p95": 45.59,
+     "max": 45.75,
+     "mean": 43.93,
+     "stdev": 0.89
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 42.0,
+     "p50": 43.16,
+     "p95": 44.94,
+     "max": 45.16,
+     "mean": 43.25,
+     "stdev": 0.9
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 1504
+   },
+   "Stop": {
+    "wall_ms": {
+     "n": 30,
+     "min": 32.49,
+     "p50": 33.32,
+     "p95": 34.77,
+     "max": 35.37,
+     "mean": 33.53,
+     "stdev": 0.66
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 32.11,
+     "p50": 32.81,
+     "p95": 34.13,
+     "max": 34.82,
+     "mean": 32.99,
+     "stdev": 0.66
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 0
+   },
+   "SessionEnd": {
+    "wall_ms": {
+     "n": 30,
+     "min": 42.03,
+     "p50": 43.59,
+     "p95": 45.46,
+     "max": 45.74,
+     "mean": 43.68,
+     "stdev": 1.02
+    },
+    "cpu_ms": {
+     "n": 30,
+     "min": 41.36,
+     "p50": 43.04,
+     "p95": 45.04,
+     "max": 45.23,
+     "mean": 43.11,
+     "stdev": 1.06
+    },
+    "rss_mib": {
+     "n": 30,
+     "min": 17.77,
+     "p50": 17.77,
+     "p95": 17.77,
+     "max": 17.77,
+     "mean": 17.77,
+     "stdev": 0.0
+    },
+    "rcs": [
+     0
+    ],
+    "stdout_bytes": 0
+   }
+  },
+  "injected_context": {
+   "engineer": {
+    "hook_output_bytes": 5872,
+    "role_files_bytes": 12725,
+    "total_bytes": 18597,
+    "words": 1596,
+    "approx_tokens_cyrillic_2_5_chars": 3719
+   },
+   "judge": {
+    "hook_output_bytes": 8337,
+    "role_files_bytes": 15187,
+    "total_bytes": 23524,
+    "words": 2008,
+    "approx_tokens_cyrillic_2_5_chars": 4705
+   },
+   "researcher": {
+    "hook_output_bytes": 5164,
+    "role_files_bytes": 12001,
+    "total_bytes": 17165,
+    "words": 1461,
+    "approx_tokens_cyrillic_2_5_chars": 3433
+   },
+   "ceo": {
+    "hook_output_bytes": 921,
+    "role_files_bytes": 15636,
+    "total_bytes": 16557,
+    "words": 1441,
+    "approx_tokens_cyrillic_2_5_chars": 3311
+   }
+  },
+  "guard_matrix": {
+   "cases": 50,
+   "match": 50,
+   "mismatches": [],
+   "by_area": {
+    "удаление": {
+     "cases": 17,
+     "match": 17
+    },
+    "публикация": {
+     "cases": 10,
+     "match": 10
+    },
+    "запись": {
+     "cases": 5,
+     "match": 5
+    },
+    "реестр": {
+     "cases": 6,
+     "match": 6
+    },
+    "личность": {
+     "cases": 7,
+     "match": 7
+    },
+    "обёртки": {
+     "cases": 5,
+     "match": 5
+    }
+   },
+   "latency_ms": {
+    "n": 120,
+    "min": 81.22,
+    "p50": 83.36,
+    "p95": 87.82,
+    "max": 89.69,
+    "mean": 83.92,
+    "stdev": 1.91
+   },
+   "known_gaps": [
+    {
+     "name": "дыра: python subprocess git push main",
+     "got": "deny",
+     "closed": true
+    },
+    {
+     "name": "дыра: переменная в ветке git push origin $B",
+     "got": "deny",
+     "closed": true
+    },
+    {
+     "name": "дыра: склейка строки os.system('git ' + 'push origin ma' + 'in')",
+     "got": "deny",
+     "closed": true
+    },
+    {
+     "name": "дыра: скрипт-файл (echo ... > x.sh; sh x.sh)",
+     "got": "allow",
+     "closed": false
+    },
+    {
+     "name": "дыра: git alias (-c alias.p=push)",
+     "got": "allow",
+     "closed": false
+    },
+    {
+     "name": "дыра: base64 | sh",
+     "got": "allow",
+     "closed": false
+    },
+    {
+     "name": "дыра: HEAD:refs/heads/main",
+     "got": "deny",
+     "closed": true
+    },
+    {
+     "name": "дыра: gh api graphql mergePullRequest",
+     "got": "deny",
+     "closed": true
+    },
+    {
+     "name": "дыра: запуск ./release.sh, в котором git push origin main",
+     "got": "allow",
+     "closed": false
+    },
+    {
+     "name": "дыра: вложенный claude без RPV_ROLE",
+     "got": "deny",
+     "closed": true
+    }
+   ],
+   "rows": [
+    {
+     "name": "ls",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 85.6,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf build (внутри)",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 85.2,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf /etc/bench-x (снаружи)",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 84.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf ~",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 86.4,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf ..",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 85.3,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf $HOME/.ssh",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.9,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf '$(pwd)/../..'",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 88.7,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf /tmp/bench-sub (временный)",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 84.6,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "find ./build -name '*.pyc' -delete (внутри)",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 83.9,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "find . -name '*.pyc' -delete из корня проекта",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 85.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "rm -rf ./* из корня проекта",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "find / -name x -delete",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 85.0,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "git clean -fdx в дереве проекта",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 86.0,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "git reset --hard в дереве проекта",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "python shutil.rmtree снаружи",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "слово rm в тексте коммита",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 82.0,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "grep по rmtree",
+     "area": "удаление",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 81.7,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "git push --force",
+     "area": "публикация",
+     "mode": "ceo",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.0,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "Write внутри проекта",
+     "area": "запись",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 85.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "CEO: Write /etc/hosts (устав: CEO вне проекта вправе)",
+     "area": "запись",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 86.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write /etc/hosts (существует, снаружи)",
+     "area": "запись",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write нового файла вне проекта в /tmp",
+     "area": "запись",
+     "mode": "env-engineer",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 83.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "Write decisions.md (CEO вправе)",
+     "area": "запись",
+     "mode": "ceo",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 81.7,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: git push origin main",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.5,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: git push origin feature-x",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: git push origin --tags",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: gh pr merge",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: gh release create",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: npm publish",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.2,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: curl POST merges",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 86.2,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: curl GET api.github.com",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 86.3,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: gh api -X PUT merge",
+     "area": "публикация",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.5,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write decisions.md",
+     "area": "реестр",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 87.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write state.json",
+     "area": "реестр",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 84.4,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write errors/E-001.md",
+     "area": "реестр",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write CLAUDE.md",
+     "area": "реестр",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.0,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: echo > decisions.md",
+     "area": "реестр",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "роль: Write src/ok.py",
+     "area": "реестр",
+     "mode": "env-engineer",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 81.9,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: export RPV_ROLE=ceo",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.7,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: unset RPV_ROLE",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: env -u RPV_ROLE git push main",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.4,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: RPV_ROLE=ceo gh pr merge",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.3,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: env -i gh pr merge",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 84.0,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: python os.environ['RPV_ROLE']=''",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 84.2,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "личность: чтение echo $RPV_ROLE",
+     "area": "личность",
+     "mode": "env-engineer",
+     "expect": "allow",
+     "got": "allow",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "обёртка: sh -c 'git push origin main'",
+     "area": "обёртки",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.1,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "обёртка: bash -c rm снаружи",
+     "area": "обёртки",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.5,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "обёртка: sudo -E gh release create",
+     "area": "обёртки",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 85.3,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "обёртка: nohup npm publish",
+     "area": "обёртки",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 88.6,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "обёртка: timeout 5 git push origin main",
+     "area": "обёртки",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.6,
+     "detail": "",
+     "known_gap": false
+    },
+    {
+     "name": "дыра: python subprocess git push main",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 85.1,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: переменная в ветке git push origin $B",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.7,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: склейка строки os.system('git ' + 'push origin ma' + 'in')",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 83.9,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: скрипт-файл (echo ... > x.sh; sh x.sh)",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "allow",
+     "stable": true,
+     "ms": 83.7,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: git alias (-c alias.p=push)",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "allow",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: base64 | sh",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "allow",
+     "stable": true,
+     "ms": 81.5,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: HEAD:refs/heads/main",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 85.1,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: gh api graphql mergePullRequest",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: запуск ./release.sh, в котором git push origin main",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "allow",
+     "stable": true,
+     "ms": 82.8,
+     "detail": "",
+     "known_gap": true
+    },
+    {
+     "name": "дыра: вложенный claude без RPV_ROLE",
+     "area": "известные дыры",
+     "mode": "env-engineer",
+     "expect": "deny",
+     "got": "deny",
+     "stable": true,
+     "ms": 84.6,
+     "detail": "",
+     "known_gap": true
+    }
+   ]
+  },
+  "identity_cli": {
+   "cases": 10,
+   "match": 10,
+   "mismatches": [],
+   "rows": [
+    {
+     "case": "контроль: CEO без записи и без роли, registry decide",
+     "expect": "allowed",
+     "got": "allowed",
+     "rc": 0,
+     "out": "В-1"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE стёрта: registry decide",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "ет только CEO; запуск роли engineer — только читает (`show`, `list`). Нужна запись — `tickets.py result <ID> ask-owner`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE стёрта: tickets allow publish",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "allow — только CEO; эта сессия — роль engineer. Нужна публикация — `result <ID> ask-owner --why-owner необратимое`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE=ceo: registry decide",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "ет только CEO; запуск роли engineer — только читает (`show`, `list`). Нужна запись — `tickets.py result <ID> ask-owner`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE=ceo: tickets allow publish",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "allow — только CEO; эта сессия — роль engineer. Нужна публикация — `result <ID> ask-owner --why-owner необратимое`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE=judge: registry decide",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "ет только CEO; запуск роли engineer — только читает (`show`, `list`). Нужна запись — `tickets.py result <ID> ask-owner`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE=judge: tickets allow publish",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "allow — только CEO; эта сессия — роль engineer. Нужна публикация — `result <ID> ask-owner --why-owner необратимое`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE пустая: registry decide",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "ет только CEO; запуск роли engineer — только читает (`show`, `list`). Нужна запись — `tickets.py result <ID> ask-owner`"
+    },
+    {
+     "case": "запись «engineer», RPV_ROLE пустая: tickets allow publish",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "allow — только CEO; эта сессия — роль engineer. Нужна публикация — `result <ID> ask-owner --why-owner необратимое`"
+    },
+    {
+     "case": "роль только в окружении (ручной запуск): registry decide",
+     "expect": "refused",
+     "got": "refused",
+     "rc": 1,
+     "out": "ет только CEO; запуск роли engineer — только читает (`show`, `list`). Нужна запись — `tickets.py result <ID> ask-owner`"
+    }
+   ]
+  },
+  "scale": {
+   "10": {
+    "parse_all_in_process_ms": 1.1,
+    "dispatch_first_tick_ms": 123,
+    "first_tick_ceo_inbox_lines": 0,
+    "dispatch_steady_tick": {
+     "wall_ms": {
+      "n": 3,
+      "min": 118.85,
+      "p50": 120.68,
+      "p95": 122.5,
+      "max": 122.7,
+      "mean": 120.74,
+      "stdev": 1.57
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 118.53,
+      "p50": 120.02,
+      "p95": 120.4,
+      "max": 120.45,
+      "mean": 119.67,
+      "stdev": 0.82
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 29.78,
+      "p50": 30.0,
+      "p95": 30.0,
+      "max": 30.0,
+      "mean": 29.93,
+      "stdev": 0.11
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[dispatch] once: launched=0 running=0\n"
+    },
+    "watch_once": {
+     "wall_ms": {
+      "n": 3,
+      "min": 97.84,
+      "p50": 99.52,
+      "p95": 100.56,
+      "max": 100.67,
+      "mean": 99.34,
+      "stdev": 1.16
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 97.51,
+      "p50": 98.76,
+      "p95": 99.87,
+      "max": 100.0,
+      "mean": 98.76,
+      "stdev": 1.01
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 25.55,
+      "p50": 25.61,
+      "p95": 25.66,
+      "max": 25.66,
+      "mean": 25.61,
+      "stdev": 0.05
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[watch] once: findings=0\n"
+    },
+    "tickets_status": {
+     "wall_ms": {
+      "n": 3,
+      "min": 102.25,
+      "p50": 102.87,
+      "p95": 107.26,
+      "max": 107.74,
+      "mean": 104.29,
+      "stdev": 2.46
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 101.96,
+      "p50": 102.55,
+      "p95": 106.96,
+      "max": 107.45,
+      "mean": 103.99,
+      "stdev": 2.46
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 25.82,
+      "p50": 25.97,
+      "p95": 26.0,
+      "max": 26.0,
+      "mean": 25.93,
+      "stdev": 0.08
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-1008  синтетический 1008  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-1009  синтетический 1009  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nпотрачено: за сутки $0.00, за последний час $0.00\n"
+    },
+    "doctor": {
+     "wall_ms": {
+      "n": 3,
+      "min": 103.05,
+      "p50": 104.01,
+      "p95": 104.34,
+      "max": 104.38,
+      "mean": 103.81,
+      "stdev": 0.56
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 101.33,
+      "p50": 102.54,
+      "p95": 102.64,
+      "max": 102.65,
+      "mean": 102.17,
+      "stdev": 0.6
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 24.25,
+      "p50": 24.3,
+      "p95": 24.5,
+      "max": 24.52,
+      "mean": 24.36,
+      "stdev": 0.12
+     },
+     "rcs": [
+      1
+     ],
+     "last_out": " 0 мин из 10 (готовая работа без исполнителя 0, ожидание без условия 0, молчание диспетчера 0, тормоз запусков 0; сумма корзин; пауза лимита вне SLO 0)\nOK    очередь          done: 10\nOK    запуски сейчас   0: —\nOK    рабочие копии    лишних нет\nOK    ошибки за сутки  запусков за сутки: 0, не ok: 0\n"
+    },
+    "report_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 90.24,
+      "p50": 93.03,
+      "p95": 94.16,
+      "max": 94.29,
+      "mean": 92.52,
+      "stdev": 1.69
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 89.64,
+      "p50": 92.65,
+      "p95": 93.41,
+      "max": 93.49,
+      "mean": 91.93,
+      "stdev": 1.66
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 24.43,
+      "p50": 24.44,
+      "p95": 24.44,
+      "max": 24.45,
+      "mean": 24.44,
+      "stdev": 0.01
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": " потерь 0\n• Столкновения параллельной работы · 0 · норма: около 0\n• Правки плагина за неделю · нет данных (плагин запущен не из кэша Claude Code, версии не копятся) · норма: около 0\n• Надзиратель · нет данных (Надзиратель не работал: overseer.log нет) · норма: находки — по делу, цена — центы в день\n"
+    },
+    "overseer_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 72.24,
+      "p50": 72.77,
+      "p95": 73.59,
+      "max": 73.68,
+      "mean": 72.9,
+      "stdev": 0.6
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 71.64,
+      "p50": 72.18,
+      "p95": 72.88,
+      "max": 72.96,
+      "mean": 72.26,
+      "stdev": 0.54
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 21.47,
+      "p50": 21.48,
+      "p95": 21.59,
+      "max": 21.6,
+      "mean": 21.52,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[]\n"
+    },
+    "state_dir_kib": 1.2,
+    "tickets_dir_kib": 13.0
+   },
+   "100": {
+    "parse_all_in_process_ms": 7.7,
+    "dispatch_first_tick_ms": 157,
+    "first_tick_ceo_inbox_lines": 0,
+    "dispatch_steady_tick": {
+     "wall_ms": {
+      "n": 3,
+      "min": 149.91,
+      "p50": 151.48,
+      "p95": 153.79,
+      "max": 154.05,
+      "mean": 151.81,
+      "stdev": 1.71
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 149.48,
+      "p50": 150.7,
+      "p95": 153.29,
+      "max": 153.58,
+      "mean": 151.25,
+      "stdev": 1.72
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 29.88,
+      "p50": 29.9,
+      "p95": 30.09,
+      "max": 30.11,
+      "mean": 29.96,
+      "stdev": 0.11
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[dispatch] once: launched=0 running=0\n"
+    },
+    "watch_once": {
+     "wall_ms": {
+      "n": 3,
+      "min": 123.24,
+      "p50": 126.15,
+      "p95": 126.57,
+      "max": 126.61,
+      "mean": 125.33,
+      "stdev": 1.49
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 122.88,
+      "p50": 125.26,
+      "p95": 125.87,
+      "max": 125.93,
+      "mean": 124.69,
+      "stdev": 1.31
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 25.69,
+      "p50": 25.79,
+      "p95": 25.83,
+      "max": 25.83,
+      "mean": 25.77,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[watch] once: findings=0\n"
+    },
+    "tickets_status": {
+     "wall_ms": {
+      "n": 3,
+      "min": 114.34,
+      "p50": 114.88,
+      "p95": 115.24,
+      "max": 115.28,
+      "mean": 114.83,
+      "stdev": 0.38
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 113.91,
+      "p50": 114.46,
+      "p95": 114.74,
+      "max": 114.77,
+      "mean": 114.38,
+      "stdev": 0.36
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 26.08,
+      "p50": 26.1,
+      "p95": 26.23,
+      "max": 26.25,
+      "mean": 26.14,
+      "stdev": 0.08
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-1098  синтетический 1098  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-1099  синтетический 1099  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nпотрачено: за сутки $0.00, за последний час $0.00\n"
+    },
+    "doctor": {
+     "wall_ms": {
+      "n": 3,
+      "min": 118.22,
+      "p50": 118.24,
+      "p95": 119.47,
+      "max": 119.61,
+      "mean": 118.69,
+      "stdev": 0.65
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 116.26,
+      "p50": 116.44,
+      "p95": 117.8,
+      "max": 117.95,
+      "mean": 116.88,
+      "stdev": 0.76
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 24.63,
+      "p50": 24.77,
+      "p95": 24.88,
+      "max": 24.89,
+      "mean": 24.77,
+      "stdev": 0.11
+     },
+     "rcs": [
+      1
+     ],
+     "last_out": "0 мин из 10 (готовая работа без исполнителя 0, ожидание без условия 0, молчание диспетчера 0, тормоз запусков 0; сумма корзин; пауза лимита вне SLO 0)\nOK    очередь          done: 100\nOK    запуски сейчас   0: —\nOK    рабочие копии    лишних нет\nOK    ошибки за сутки  запусков за сутки: 0, не ok: 0\n"
+    },
+    "report_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 100.15,
+      "p50": 100.54,
+      "p95": 102.18,
+      "max": 102.37,
+      "mean": 101.02,
+      "stdev": 0.97
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 99.56,
+      "p50": 99.91,
+      "p95": 101.84,
+      "max": 102.05,
+      "mean": 100.5,
+      "stdev": 1.1
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 24.68,
+      "p50": 24.69,
+      "p95": 24.81,
+      "max": 24.82,
+      "mean": 24.73,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": " потерь 0\n• Столкновения параллельной работы · 0 · норма: около 0\n• Правки плагина за неделю · нет данных (плагин запущен не из кэша Claude Code, версии не копятся) · норма: около 0\n• Надзиратель · нет данных (Надзиратель не работал: overseer.log нет) · норма: находки — по делу, цена — центы в день\n"
+    },
+    "overseer_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 82.45,
+      "p50": 82.48,
+      "p95": 83.54,
+      "max": 83.66,
+      "mean": 82.86,
+      "stdev": 0.56
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 81.75,
+      "p50": 82.11,
+      "p95": 82.76,
+      "max": 82.83,
+      "mean": 82.23,
+      "stdev": 0.45
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 21.71,
+      "p50": 21.87,
+      "p95": 21.87,
+      "max": 21.87,
+      "mean": 21.82,
+      "stdev": 0.07
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[]\n"
+    },
+    "state_dir_kib": 5.5,
+    "tickets_dir_kib": 130.0
+   },
+   "500": {
+    "parse_all_in_process_ms": 38.0,
+    "dispatch_first_tick_ms": 305,
+    "first_tick_ceo_inbox_lines": 0,
+    "dispatch_steady_tick": {
+     "wall_ms": {
+      "n": 3,
+      "min": 277.97,
+      "p50": 278.07,
+      "p95": 279.74,
+      "max": 279.93,
+      "mean": 278.65,
+      "stdev": 0.9
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 277.57,
+      "p50": 277.62,
+      "p95": 279.22,
+      "max": 279.4,
+      "mean": 278.2,
+      "stdev": 0.85
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 30.49,
+      "p50": 30.62,
+      "p95": 30.63,
+      "max": 30.63,
+      "mean": 30.58,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[dispatch] once: launched=0 running=0\n"
+    },
+    "watch_once": {
+     "wall_ms": {
+      "n": 3,
+      "min": 236.17,
+      "p50": 239.68,
+      "p95": 246.53,
+      "max": 247.3,
+      "mean": 241.05,
+      "stdev": 4.64
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 235.84,
+      "p50": 239.16,
+      "p95": 244.0,
+      "max": 244.54,
+      "mean": 239.85,
+      "stdev": 3.58
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 26.16,
+      "p50": 26.24,
+      "p95": 26.24,
+      "max": 26.24,
+      "mean": 26.21,
+      "stdev": 0.04
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[watch] once: findings=0\n"
+    },
+    "tickets_status": {
+     "wall_ms": {
+      "n": 3,
+      "min": 177.19,
+      "p50": 178.02,
+      "p95": 178.28,
+      "max": 178.31,
+      "mean": 177.84,
+      "stdev": 0.47
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 176.7,
+      "p50": 177.46,
+      "p95": 177.87,
+      "max": 177.92,
+      "mean": 177.36,
+      "stdev": 0.5
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 26.69,
+      "p50": 26.72,
+      "p95": 26.88,
+      "max": 26.9,
+      "mean": 26.77,
+      "stdev": 0.09
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-1498  синтетический 1498  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-1499  синтетический 1499  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nпотрачено: за сутки $0.00, за последний час $0.00\n"
+    },
+    "doctor": {
+     "wall_ms": {
+      "n": 3,
+      "min": 176.24,
+      "p50": 177.08,
+      "p95": 177.19,
+      "max": 177.2,
+      "mean": 176.84,
+      "stdev": 0.43
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 174.56,
+      "p50": 175.25,
+      "p95": 175.46,
+      "max": 175.49,
+      "mean": 175.1,
+      "stdev": 0.4
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 26.99,
+      "p50": 27.02,
+      "p95": 27.02,
+      "max": 27.02,
+      "mean": 27.01,
+      "stdev": 0.01
+     },
+     "rcs": [
+      1
+     ],
+     "last_out": "0 мин из 10 (готовая работа без исполнителя 0, ожидание без условия 0, молчание диспетчера 0, тормоз запусков 0; сумма корзин; пауза лимита вне SLO 0)\nOK    очередь          done: 500\nOK    запуски сейчас   0: —\nOK    рабочие копии    лишних нет\nOK    ошибки за сутки  запусков за сутки: 0, не ok: 0\n"
+    },
+    "report_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 144.2,
+      "p50": 144.37,
+      "p95": 145.39,
+      "max": 145.51,
+      "mean": 144.69,
+      "stdev": 0.58
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 143.49,
+      "p50": 144.11,
+      "p95": 144.99,
+      "max": 145.09,
+      "mean": 144.23,
+      "stdev": 0.66
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 27.0,
+      "p50": 27.03,
+      "p95": 27.11,
+      "max": 27.11,
+      "mean": 27.05,
+      "stdev": 0.05
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": " потерь 0\n• Столкновения параллельной работы · 0 · норма: около 0\n• Правки плагина за неделю · нет данных (плагин запущен не из кэша Claude Code, версии не копятся) · норма: около 0\n• Надзиратель · нет данных (Надзиратель не работал: overseer.log нет) · норма: находки — по делу, цена — центы в день\n"
+    },
+    "overseer_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 129.01,
+      "p50": 129.53,
+      "p95": 130.63,
+      "max": 130.76,
+      "mean": 129.76,
+      "stdev": 0.73
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 128.43,
+      "p50": 129.01,
+      "p95": 129.99,
+      "max": 130.1,
+      "mean": 129.18,
+      "stdev": 0.69
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 22.71,
+      "p50": 22.72,
+      "p95": 22.84,
+      "max": 22.85,
+      "mean": 22.76,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[]\n"
+    },
+    "state_dir_kib": 24.6,
+    "tickets_dir_kib": 649.9
+   },
+   "2000": {
+    "parse_all_in_process_ms": 145.6,
+    "dispatch_first_tick_ms": 852,
+    "first_tick_ceo_inbox_lines": 0,
+    "dispatch_steady_tick": {
+     "wall_ms": {
+      "n": 3,
+      "min": 709.13,
+      "p50": 722.78,
+      "p95": 737.31,
+      "max": 738.93,
+      "mean": 723.61,
+      "stdev": 12.18
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 708.83,
+      "p50": 722.05,
+      "p95": 736.74,
+      "max": 738.37,
+      "mean": 723.08,
+      "stdev": 12.08
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 32.77,
+      "p50": 32.8,
+      "p95": 32.98,
+      "max": 33.0,
+      "mean": 32.86,
+      "stdev": 0.1
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[dispatch] once: launched=0 running=0\n"
+    },
+    "watch_once": {
+     "wall_ms": {
+      "n": 3,
+      "min": 659.23,
+      "p50": 662.11,
+      "p95": 669.0,
+      "max": 669.77,
+      "mean": 663.7,
+      "stdev": 4.45
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 658.27,
+      "p50": 661.41,
+      "p95": 668.55,
+      "max": 669.34,
+      "mean": 663.01,
+      "stdev": 4.66
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 27.73,
+      "p50": 28.73,
+      "p95": 28.73,
+      "max": 28.73,
+      "mean": 28.4,
+      "stdev": 0.47
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[watch] once: findings=0\n"
+    },
+    "tickets_status": {
+     "wall_ms": {
+      "n": 3,
+      "min": 397.27,
+      "p50": 397.71,
+      "p95": 405.87,
+      "max": 406.78,
+      "mean": 400.59,
+      "stdev": 4.38
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 396.9,
+      "p50": 397.25,
+      "p95": 405.31,
+      "max": 406.2,
+      "mean": 400.12,
+      "stdev": 4.3
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 30.02,
+      "p50": 30.03,
+      "p95": 30.13,
+      "max": 30.14,
+      "mean": 30.06,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-2998  синтетический 2998  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nTK-2999  синтетический 2999  engineer  done    judge    $0.00      2026-10-02T12:00:00+00:00\nпотрачено: за сутки $0.00, за последний час $0.00\n"
+    },
+    "doctor": {
+     "wall_ms": {
+      "n": 3,
+      "min": 395.56,
+      "p50": 396.79,
+      "p95": 410.42,
+      "max": 411.94,
+      "mean": 401.43,
+      "stdev": 7.45
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 393.82,
+      "p50": 395.12,
+      "p95": 408.76,
+      "max": 410.27,
+      "mean": 399.74,
+      "stdev": 7.47
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 35.02,
+      "p50": 35.14,
+      "p95": 35.15,
+      "max": 35.15,
+      "mean": 35.11,
+      "stdev": 0.06
+     },
+     "rcs": [
+      1
+     ],
+     "last_out": " мин из 10 (готовая работа без исполнителя 0, ожидание без условия 0, молчание диспетчера 0, тормоз запусков 0; сумма корзин; пауза лимита вне SLO 0)\nOK    очередь          done: 2000\nOK    запуски сейчас   0: —\nOK    рабочие копии    лишних нет\nOK    ошибки за сутки  запусков за сутки: 0, не ok: 0\n"
+    },
+    "report_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 310.48,
+      "p50": 312.82,
+      "p95": 314.3,
+      "max": 314.47,
+      "mean": 312.59,
+      "stdev": 1.63
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 309.74,
+      "p50": 312.47,
+      "p95": 313.84,
+      "max": 313.99,
+      "mean": 312.07,
+      "stdev": 1.76
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 35.18,
+      "p50": 35.2,
+      "p95": 35.31,
+      "max": 35.32,
+      "mean": 35.23,
+      "stdev": 0.06
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": " потерь 0\n• Столкновения параллельной работы · 0 · норма: около 0\n• Правки плагина за неделю · нет данных (плагин запущен не из кэша Claude Code, версии не копятся) · норма: около 0\n• Надзиратель · нет данных (Надзиратель не работал: overseer.log нет) · норма: находки — по делу, цена — центы в день\n"
+    },
+    "overseer_dry_run": {
+     "wall_ms": {
+      "n": 3,
+      "min": 304.1,
+      "p50": 304.17,
+      "p95": 304.26,
+      "max": 304.27,
+      "mean": 304.18,
+      "stdev": 0.07
+     },
+     "cpu_ms": {
+      "n": 3,
+      "min": 303.29,
+      "p50": 303.85,
+      "p95": 303.89,
+      "max": 303.89,
+      "mean": 303.67,
+      "stdev": 0.27
+     },
+     "rss_mib": {
+      "n": 3,
+      "min": 27.05,
+      "p50": 27.12,
+      "p95": 27.18,
+      "max": 27.18,
+      "mean": 27.12,
+      "stdev": 0.05
+     },
+     "rcs": [
+      0
+     ],
+     "last_out": "[]\n"
+    },
+    "state_dir_kib": 96.4,
+    "tickets_dir_kib": 2599.6
+   }
+  },
+  "test_suite": {
+   "parallel": [
+    31.6,
+    30.9
+   ],
+   "serial_s": 68.8,
+   "failed_runs": 0,
+   "tests": 1147,
+   "slowest": [
+    "15.47s call     .claude/dispatcher/test_dispatch.py::ZombieAndInstanceLockTests::test_simultaneous_acquire_exactly_one_wins",
+    "4.16s call     .claude/dispatcher/test_identity.py::GuardIdentityTests::test_role_run_cannot_change_its_identity",
+    "2.33s call     .claude/dispatcher/test_start.py::StartTests::test_second_start_stops_running_pair_and_starts_fresh",
+    "1.90s call     .claude/dispatcher/test_dispatch.py::DispatchRunTests::test_role_parallel_limit_two_allows_second_ticket_not_third",
+    "1.86s call     .claude/dispatcher/test_dispatch.py::DispatchRunTests::test_recover_treats_pid_with_other_start_time_as_finished",
+    "1.77s call     .claude/dispatcher/test_dispatch.py::DispatchRunTests::test_recover_adopts_role_under_foreign_image_name_by_pid_and_start",
+    "1.70s call     .claude/dispatcher/test_dispatch.py::DispatchRunTests::test_recover_active_runs_adopts_alive_process",
+    "1.63s call     .claude/dispatcher/test_jobrun.py::JobrunTests::test_file_appears_only_after_job_ends_and_whole"
+   ],
+   "last_summary": "1147 passed, 4 skipped in 30.63s",
+   "parallel_stats": {
+    "n": 2,
+    "min": 30.9,
+    "p50": 31.2,
+    "p95": 31.6,
+    "max": 31.6,
+    "mean": 31.2,
+    "stdev": 0.4
+   },
+   "has_xdist": true,
+   "serial_rc": 0
+  }
+ },
+ "stub": {
+  "crash_recovery": {
+   "status": "done",
+   "recovery_to_done_s": 28.3,
+   "engineer_starts": 1,
+   "judge_starts": 1,
+   "runs_log_lines": 2,
+   "engineer_run_lines": 1,
+   "double_charged": false
+  },
+  "failure_modes": {
+   "engineer_crash": {
+    "final_status": "blocked",
+    "to_final_s": 45.1,
+    "runs": 2,
+    "ceo_inbox_kinds": [
+     "blocked"
+    ],
+    "ceo_inbox_delay_s": 0.1,
+    "telegram_attempt_delay_s": null,
+    "notify_log_tail": ""
+   },
+   "engineer_silent": {
+    "final_status": "blocked",
+    "to_final_s": 45.1,
+    "runs": 2,
+    "ceo_inbox_kinds": [
+     "blocked"
+    ],
+    "ceo_inbox_delay_s": 0.1,
+    "telegram_attempt_delay_s": null,
+    "notify_log_tail": ""
+   },
+   "judge_blocked": {
+    "final_status": "blocked",
+    "to_final_s": 30.3,
+    "runs": 2,
+    "ceo_inbox_kinds": [
+     "blocked"
+    ],
+    "ceo_inbox_delay_s": 14.9,
+    "telegram_attempt_delay_s": null,
+    "notify_log_tail": ""
+   },
+   "judge_asks_owner": {
+    "final_status": "needs_owner",
+    "to_final_s": 30.3,
+    "runs": 2,
+    "ceo_inbox_kinds": [
+     "needs_owner"
+    ],
+    "ceo_inbox_delay_s": 14.9,
+    "telegram_attempt_delay_s": 14.9,
+    "notify_log_tail": "2026-10-14T02:06:02+00:00\tне отправлено (нет RPV_TG_TOKEN/RPV_TG_CHAT): Вопрос вам (деньги): «judge_asks_owner» — заглушка: нужен бюджет Ответьте CEO.\n"
+   }
+  },
+  "return_cycle": {
+   "status": "done",
+   "total_s": 60.3,
+   "engineer_runs": 2,
+   "judge_runs": 2,
+   "return_to_rework_s": 14.9,
+   "rework_to_second_review_s": 14.9
+  },
+  "handoff_latency": {
+   "tickets": 8,
+   "queue_s": {
+    "n": 8,
+    "min": 0.78,
+    "p50": 8.51,
+    "p95": 12.07,
+    "max": 12.18,
+    "mean": 7.51,
+    "stdev": 4.23
+   },
+   "handoff_s": {
+    "n": 8,
+    "min": 0.37,
+    "p50": 9.0,
+    "p95": 11.57,
+    "max": 11.6,
+    "mean": 6.81,
+    "stdev": 4.49
+   },
+   "ticket_total_s": {
+    "n": 8,
+    "min": 34.31,
+    "p50": 43.86,
+    "p95": 48.99,
+    "max": 49.5,
+    "mean": 42.84,
+    "stdev": 5.38
+   },
+   "final_status": "done",
+   "dispatch_stderr_tail": ""
+  },
+  "burst_default": {
+   "tickets": 12,
+   "delay_s": 3.0,
+   "role_parallel": "умолчание",
+   "done": 12,
+   "ticket_create_s": 1.24,
+   "makespan_s": 196.5,
+   "first_done_s": 31.2,
+   "per_ticket_done_s": {
+    "n": 12,
+    "min": 31.24,
+    "p50": 113.86,
+    "p95": 188.21,
+    "max": 196.49,
+    "mean": 113.88,
+    "stdev": 51.85
+   },
+   "peak_concurrent_runs": 2,
+   "ideal_makespan_s": 36.0,
+   "runs_total": 23,
+   "blocked": 0,
+   "dispatch_stderr_tail": "",
+   "_": null
+  },
+  "burst_role_parallel_3": {
+   "tickets": 12,
+   "delay_s": 3.0,
+   "role_parallel": 3,
+   "done": 12,
+   "ticket_create_s": 1.23,
+   "makespan_s": 121.5,
+   "first_done_s": 31.3,
+   "per_ticket_done_s": {
+    "n": 12,
+    "min": 31.33,
+    "p50": 76.39,
+    "p95": 121.45,
+    "max": 121.45,
+    "mean": 76.39,
+    "stdev": 33.58
+   },
+   "peak_concurrent_runs": 3,
+   "ideal_makespan_s": 24.0,
+   "runs_total": 21,
+   "blocked": 0,
+   "dispatch_stderr_tail": "",
+   "_": null
+  },
+  "idle_burn": {
+   "seconds": 60,
+   "tickets": 100,
+   "state_dir_growth_bytes": 0,
+   "dispatcher": {
+    "cpu_pct_of_core": 0.217,
+    "rss_mib": 23.9,
+    "rss_drift_mib": 0.0
+   },
+   "watch": {
+    "cpu_pct_of_core": 0.0,
+    "rss_mib": 25.8,
+    "rss_drift_mib": 0.0
+   }
+  },
+  "telegram_delivery": {
+   "skipped": "нет BENCH_TG_TOKEN/BENCH_TG_CHAT"
+  }
+ },
+ "total_wall_s": 1318.0
+}
