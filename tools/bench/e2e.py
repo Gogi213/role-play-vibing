@@ -75,7 +75,7 @@ def parse_transcript(session_id: str) -> dict:
         return {}
     from datetime import datetime
     calls, tool_s, model_s, prev, turns = Counter(), 0.0, 0.0, None, 0
-    errors, denials = [], 0
+    errors, denials, why_long = [], 0, 0
     for ln in f.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             d = json.loads(ln)
@@ -107,12 +107,14 @@ def parse_transcript(session_id: str) -> dict:
                     txt = b.get("content")
                     txt = txt if isinstance(txt, str) else json.dumps(txt, ensure_ascii=False)
                     errors.append(txt[:160].replace("\n", " "))
+                    if "--why длиннее" in txt:
+                        why_long += 1
                     if re.search(r"PreToolUse|hook|[Сс]траж|only inside|только внутри|только CEO|закрыт", txt):
                         denials += 1
     return {"tool_calls": dict(calls), "tool_calls_total": sum(calls.values()),
             "hooked_calls": sum(v for k, v in calls.items() if k in HOOKED_TOOLS),
             "tool_s": round(tool_s, 1), "model_s": round(model_s, 1), "assistant_msgs": turns,
-            "tool_errors": len(errors), "guard_denials": denials, "error_samples": errors[:4]}
+            "tool_errors": len(errors), "guard_denials": denials, "why_too_long": why_long, "error_samples": errors[:4]}
 
 
 def collect_runs(proj: Path, w: Watcher) -> list[dict]:

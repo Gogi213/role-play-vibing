@@ -153,9 +153,18 @@ def init_script() -> str:
     return block.replace("${CLAUDE_PLUGIN_ROOT}", ROOT.as_posix())
 
 
+def bench_home() -> Path:
+    """Где живут песочницы. НЕ во временном каталоге: страж удаления считает любой путь под /tmp (и под `tempfile.gettempdir()`)
+    временным и разрешает там всё, так что проект в /tmp не проверяет защиту от удаления корня проекта; у реальных проектов
+    путь — под домашним каталогом. `RPV_BENCH_HOME` — другое место."""
+    d = Path(os.environ.get("RPV_BENCH_HOME") or (Path.home() / ".rpv-bench"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def make_project(parent: Path | None = None, seed: dict | None = None, prefix: str = "rpv-bench-") -> tuple[Path, float]:
     """Чистый git-проект + `/rpv-init`. → (путь, секунд на init). `seed` — {путь: текст}, коммитятся до init."""
-    proj = Path(tempfile.mkdtemp(prefix=prefix, dir=str(parent) if parent else None)).resolve()
+    proj = Path(tempfile.mkdtemp(prefix=prefix, dir=str(parent or bench_home()))).resolve()
     sh(["git", "init", "-q", "-b", "main"], proj)
     (proj / "README.md").write_text("# bench\n", encoding="utf-8")
     for rel, text in (seed or {}).items():

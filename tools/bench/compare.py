@@ -261,6 +261,8 @@ def _e2e(R: list[dict]) -> str:
                 t = x.get("transcript") or {}
                 a = agg.setdefault(x["role"], {"model_s": 0, "tool_s": 0, "calls": 0, "hooked": 0, "n": 0, "denials": 0})
                 a["denials"] += t.get("guard_denials", 0)
+                a["why_long"] = a.get("why_long", 0) + t.get("why_too_long", 0)
+                a["errors"] = a.get("errors", 0) + t.get("tool_errors", 0)
                 a["model_s"] += t.get("model_s", 0)
                 a["tool_s"] += t.get("tool_s", 0)
                 a["calls"] += t.get("tool_calls_total", 0)
@@ -269,8 +271,8 @@ def _e2e(R: list[dict]) -> str:
         hook_ms = g(r, "micro", "hooks", "PreToolUse Bash (ls)", "wall_ms", "p50")
         for role, a in sorted(agg.items()):
             est = f"≈ {a['hooked'] * hook_ms / 1000:.0f} с" if hook_ms else "—"
-            trows.append([r["label"], role, a["n"], fmt(a["model_s"]), fmt(a["tool_s"]), fmt(a["calls"]), fmt(a["hooked"]), fmt(a["denials"]), est])
-    out.append(table(["машина", "роль", "запусков", "модель, с", "инструменты, с", "вызовов", "из них под стражем", "отказов стража/устава", "оценка цены стража"], trows))
+            trows.append([r["label"], role, a["n"], fmt(a["model_s"]), fmt(a["tool_s"]), fmt(a["calls"]), fmt(a["hooked"]), fmt(a["denials"]), f"{a['errors']} (из них --why>200: {a['why_long']})", est])
+    out.append(table(["машина", "роль", "запусков", "модель, с", "инструменты, с", "вызовов", "из них под стражем", "отказов стража/устава", "ошибок инструментов", "оценка цены стража"], trows))
     out.append("### Фазы тикета (по часам опроса, с)\n")
     prow = []
     for sc in scen:
