@@ -115,7 +115,7 @@ def _micro(R: list[dict]) -> str:
         ]))
         for r in R:
             for m in g(r, "micro", "guard_matrix", "mismatches", default=[]):
-                out.append(f"- ❌ **{r['label']}**: «{m['name']}» — ждали {m['expect']}, получили {m['got']}\n")
+                out.append(f"- ❌ **{r['label']}**: «{m['name']}» — ждали {m['expect']}, получили {m['got']}" + (f". Причина стража: {m['detail']}" if m.get("detail") else "") + "\n")
         gaps = g(R[0], "micro", "guard_matrix", "known_gaps", default=[])
         if gaps:
             out.append("Попытки обхода (документированные дыры): " + "; ".join(

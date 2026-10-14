@@ -258,7 +258,12 @@ def run_guard(proj: Path, tool: str, tool_input: dict, mode: str) -> dict:
         verdict = "allow"
     else:
         verdict = f"rc={r['rc']}"
-    return {"verdict": verdict, "wall_ms": r["wall_ms"], "cpu_ms": r["cpu_ms"], "out": r["out"][:200]}
+    reason = r["out"]
+    try:  # причина отказа — читаемым текстом, а не JSON с \\u-экранированием
+        reason = json.loads(r["out"])["hookSpecificOutput"]["permissionDecisionReason"]
+    except (ValueError, KeyError, TypeError):
+        pass
+    return {"verdict": verdict, "wall_ms": r["wall_ms"], "cpu_ms": r["cpu_ms"], "out": reason[:700]}
 
 
 def guard_matrix(reps: int = 3) -> dict:
@@ -274,7 +279,7 @@ def guard_matrix(reps: int = 3) -> dict:
             lat += [r["wall_ms"] for r in res]
             rows.append({"name": c["name"], "area": c["area"], "mode": c["mode"], "expect": c["expect"],
                          "got": res[0]["verdict"], "stable": len(verdicts) == 1, "ms": round(C.stats([r["wall_ms"] for r in res])["p50"], 1),
-                         "detail": res[0]["out"][:160] if res[0]["verdict"] != c["expect"] else ""})
+                         "detail": res[0]["out"][:700] if res[0]["verdict"] != c["expect"] else ""})
         for r in rows:
             r["known_gap"] = r["area"] == "известные дыры"
         bad = [r for r in rows if (r["got"] != r["expect"] or not r["stable"]) and not r["known_gap"]]
