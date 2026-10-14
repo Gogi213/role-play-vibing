@@ -2,15 +2,15 @@
 """Замер Надзирателя (CP14, `agents/overseer.md`) на истории проекта: ловит ли он эпизоды «деньги и время идут, к цели не
 движемся» заранее и сколько ложных тревог. Только stdlib. Данные проекта читаются, в репозиторий не копируются.
 
-    python tools/overseer_eval.py plan   --alpha <проект> [--tickets TK-087,TK-048 | --group bad|normal|all] [--step-min 15]
+    python tools/overseer_eval.py plan   --project <проект> [--tickets TK-087,TK-048 | --group bad|normal|all] [--step-min 15]
                                           [--skip-roles watch,ci,…] [--fit <итоги>] [--per-call 0.01]
-    python tools/overseer_eval.py run    --alpha <проект> --out <итоги> [--tickets …] [--group …] [--step-min 15]
+    python tools/overseer_eval.py run    --project <проект> --out <итоги> [--tickets …] [--group …] [--step-min 15]
                                           [--jobs 4] [--budget 1.0] [--model claude-haiku-5-5] [--effort xhigh]
     python tools/overseer_eval.py report --out <итоги>
-    python tools/overseer_eval.py regrade --alpha <проект> --out <итоги>   # правило проверки цитаты поправлено — без вызовов
-    python tools/overseer_eval.py prompt --alpha <проект> --ticket TK-087 --window 5   # что увидит Надзиратель
+    python tools/overseer_eval.py regrade --project <проект> --out <итоги>   # правило проверки цитаты поправлено — без вызовов
+    python tools/overseer_eval.py prompt --project <проект> --ticket TK-087 --window 5   # что увидит Надзиратель
 
-Источники (проект, `--alpha`):
+Источники (проект, `--project`):
   - `.claude/tickets/TK-*.md` — шапка (`title`, `status`), описание (цель: слова владельца) и `## Лог`;
   - `.claude/tickets/archive/TK-*-log.md` — старые записи лога; запись — `### <ISO-время> <роль>` и текст;
   - `.claude/dispatcher/runs.log` — запуски: `<ISO> <тикет> <роль> reason=… cost_usd=… resolved_cost=… status=…`.
@@ -89,9 +89,9 @@ def pick_normal(info: list, n: int = NORMAL_N, seed: int = NORMAL_SEED, max_runs
     return sorted(random.Random(seed).sample(pool, min(n, len(pool))))
 
 
-def load_all(alpha: Path) -> tuple:
-    tickets = {tid: load_ticket(alpha, tid) for tid in ticket_ids(alpha)}
-    return tickets, load_runs(alpha)
+def load_all(project: Path) -> tuple:
+    tickets = {tid: load_ticket(project, tid) for tid in ticket_ids(project)}
+    return tickets, load_runs(project)
 
 
 def ticket_info(tickets: dict, runs: dict) -> list:
@@ -156,10 +156,10 @@ def read_rows(out: Path) -> list:
 
 
 def cmd_run(a) -> int:
-    alpha, out = Path(a.alpha).resolve(), Path(a.out).resolve()  # resolve(): короткое имя Windows Claude Code считает подозрительным
+    project, out = Path(a.project).resolve(), Path(a.out).resolve()  # resolve(): короткое имя Windows Claude Code считает подозрительным
     (out / "work").mkdir(parents=True, exist_ok=True)
     (out / "prompts").mkdir(exist_ok=True)
-    tickets, runs = load_all(alpha)
+    tickets, runs = load_all(project)
     only = [x for x in a.tickets.split(",") if x] if a.tickets else None
     chosen = choose(tickets, runs, only, a.group)
     jobs = plan_jobs(tickets, runs, chosen, a)
@@ -213,7 +213,7 @@ def prompt_file(out: Path, r: dict) -> Path:
 
 def cmd_regrade(a) -> int:
     """Проверки заново по сохранённым ответам и промптам (правило цитаты поправлено) — без вызовов модели."""
-    alpha, out = Path(a.alpha).resolve(), Path(a.out).resolve()
+    project, out = Path(a.project).resolve(), Path(a.out).resolve()
     last = {}
     for r in read_rows(out):
         last[r["key"]] = r
@@ -222,7 +222,7 @@ def cmd_regrade(a) -> int:
         if r["outcome"] == "error" and not r.get("answer"):
             continue
         if r["ticket"] not in cache:
-            cache[r["ticket"]] = load_ticket(alpha, r["ticket"])
+            cache[r["ticket"]] = load_ticket(project, r["ticket"])
         pf = prompt_file(out, r)
         r.update(grade(r["answer"], r["ticket"], cache[r["ticket"]].entries, parse_ts(r["end"]),
                        pf.read_text(encoding="utf-8") if pf.exists() else ""))
@@ -250,8 +250,8 @@ def fit_cost(rows: list) -> tuple:
 
 
 def cmd_plan(a) -> int:
-    alpha = Path(a.alpha).resolve()
-    tickets, runs = load_all(alpha)
+    project = Path(a.project).resolve()
+    tickets, runs = load_all(project)
     only = [x for x in a.tickets.split(",") if x] if a.tickets else None
     chosen = choose(tickets, runs, only, a.group)
     jobs = plan_jobs(tickets, runs, chosen, a)
@@ -300,15 +300,15 @@ def cmd_plan(a) -> int:
 
 
 def cmd_prompt(a) -> int:
-    alpha = Path(a.alpha).resolve()
-    t = load_ticket(alpha, a.ticket)
-    rs = load_runs(alpha).get(a.ticket, [])
+    project = Path(a.project).resolve()
+    t = load_ticket(project, a.ticket)
+    rs = load_runs(project).get(a.ticket, [])
     opts = prompt_opts(a)
     wins = make_windows(t.entries, a.step_min, opts["skip_roles"])
     w = next((w for w in wins if w.n == a.window), None)
     if not w:
         raise SystemExit(f"{a.ticket}: окон {len(wins)}, окна {a.window} нет")
-    tickets, runs = load_all(alpha)
+    tickets, runs = load_all(project)
     emit(build_prompt(t, w, stats_at(w.end, t.entries, rs, ticket_start(t.entries, rs)),
                       scale=scale_text(closed_scale(tickets, runs), w.end), **opts))
     return 0
@@ -407,9 +407,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    def common(p, alpha=True):
-        if alpha:
-            p.add_argument("--alpha", required=True, help="каталог проекта (читается, не меняется)")
+    def common(p, with_project=True):
+        if with_project:
+            p.add_argument("--project", required=True, help="каталог проекта (читается, не меняется)")
         p.add_argument("--step-min", type=int, default=15)
         p.add_argument("--skip-roles", default="", help="роли, чьи записи не видны и не открывают окно (через запятую)")
         p.add_argument("--max-kb", type=float, default=12, help="новые записи окна, КБ")
@@ -439,7 +439,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("report")
     p.add_argument("--out", required=True)
     rg = sub.add_parser("regrade", help="проверки заново по сохранённым ответам, без вызовов")
-    rg.add_argument("--alpha", required=True)
+    rg.add_argument("--project", required=True)
     rg.add_argument("--out", required=True)
     pr = sub.add_parser("prompt", help="напечатать промпт окна")
     common(pr)

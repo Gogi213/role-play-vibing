@@ -46,7 +46,7 @@
   "role_parallel": {"engineer": 2},
   "role_mcp": "none",
   "ci_repo": "owner/repo",
-  "watched_aliases": ["calc"],
+  "watched_aliases": ["gpu1"],
   "job_state_cmd": "jobstate {id}",
   "job_owners_cmd": "jobowners",
   "stray_cmd": "jobstrays",

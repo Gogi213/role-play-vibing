@@ -45,10 +45,10 @@ class SignalsTest(unittest.TestCase):
         self.assertTrue(all("текст" not in ln for ln in wake), "деталей в будильнике нет — они в ceo-inbox.md")
 
     def test_mechanics_kinds_go_to_log_only(self):
-        D.append_ceo_inbox("*", "blind", "ssh:calc недоступна")
+        D.append_ceo_inbox("*", "blind", "ssh:gpu1 недоступна")
         self.assertFalse(D.CEO_INBOX.exists())
         self.assertFalse(D.CEO_WAKE_LOG.exists())
-        self.assertIn("[blind] ssh:calc недоступна", (self.d / "mechanics.log").read_text(encoding="utf-8"))
+        self.assertIn("[blind] ssh:gpu1 недоступна", (self.d / "mechanics.log").read_text(encoding="utf-8"))
 
     def test_inbox_prints_new_lines_once(self):
         D.append_ceo_inbox("TK-2", "blocked", "первая")

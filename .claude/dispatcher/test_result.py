@@ -485,9 +485,97 @@ class ResultTests(unittest.TestCase):
                      numbers=table("t2.md", [("287", "`docs/sieve.md:30`")]))          # не в названной строке ±2
         self.refused("judge", "accept", path="out.md", decisions="-",
                      numbers=table("t3.md", [("12", "docs/нет.md")]))                   # источника нет
-        ok = table("t4.md", [("годна 12", "docs/sieve.md"), ("0.072", "docs/sieve.md:3"), ("287", "docs/sieve.md")])
+        ok = table("t4.md", [("годна 12", "docs/sieve.md:1"), ("0.072", "docs/sieve.md:3"), ("287", "docs/sieve.md:2")])
         self.assertEqual(self.res("judge", "accept", path="out.md", decisions="-", numbers=ok), 0)
         self.assertIn("числа: сверено 3 (t4.md)", self.tkt().log[-1].text)
+
+    def test_accept_numbers_row_needs_line_number(self):
+        """CP9: без номера строки короткое «3» нашлось бы где угодно — `файл:строка` обязателен, строка ±2."""
+        import contextlib
+        import io
+        self._registry_with_decision()
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        src = ["строка %d" % i for i in range(1, 21)]
+        src[9] = "годна 3 из 12"   # строка 10
+        (self.base / "src.md").write_text("\n".join(src) + "\n", encoding="utf-8")
+
+        def table(name, rows):
+            (self.base / name).write_text("| число | откуда |\n|---|---|\n" + "".join(f"| {a} | {b} |\n" for a, b in rows),
+                                          encoding="utf-8")
+            return name
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("n0.md", [("3", "src.md")]))
+        self.assertIn("нет номера строки", err.getvalue())
+        self.assertIn("число есть в строках 3, 10", err.getvalue(), "подсказка: где число есть")
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("n1.md", [("3", "`src.md:13`")]))  # дальше ±2
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("n2.md", [("3", "src.md:7")]))
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("n3.md", [("3", "src.md:99")]))    # строки нет
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("n4.md", [("3", "src.md:0")]))
+        self.refused("judge", "accept", path="out.md", decisions="-", numbers=table("n5.md", [("1", "src.md:10")]))    # 1 — не в 12
+        for n, line in (("n6.md", "src.md:8"), ("n7.md", "src.md:12"), ("n8.md", "`src.md:10`")):
+            T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+            self.assertEqual(self.res("judge", "accept", path="out.md", decisions="-", numbers=table(n, [("3", line)])), 0)
+
+    def test_accept_numbers_dash_checked_in_text_artifact(self):
+        """CP9: `--numbers -` при приёмке по --path — код ищет числа в текстовом артефакте; по PR проверки нет."""
+        import contextlib
+        import io
+        self._registry_with_decision()
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        (self.base / "clean.md").write_text(
+            "## 1\n1. TK-236 принят 2026-10-14 в 13:45, PR #7@a1b2c3d, версия 1.8.48, В-12, G-001 (см. src.md:30).\n", encoding="utf-8")
+        (self.base / "dirty.md").write_text("Годна 12 из 287, ΔSR 0,072.\n", encoding="utf-8")
+        (self.base / "data.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        (self.base / "tool.py").write_text("X = 42\n", encoding="utf-8")   # не текстовый артефакт — читать нечем
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.refused("judge", "accept", path="dirty.md", decisions="-", numbers="-")
+        self.assertIn("в сдаче есть числа (первые: 12, 287, 0,072)", err.getvalue())
+        self.assertIn("--numbers", err.getvalue())
+        self.refused("judge", "accept", path="data.csv", decisions="-", numbers="-")
+        self.assertEqual(self.res("judge", "accept", path="tool.py", decisions="-", numbers="-"), 0)
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self.assertEqual(self.res("judge", "accept", path="clean.md", decisions="-", numbers="-"), 0)
+        self.assertIn("числа: нет", self.tkt().log[-1].text)
+        T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
+        self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, path="dirty.md", decisions="-", numbers="-"), 0)  # код — как раньше
+
+    def test_accept_numbers_dash_scans_directory_text_files(self):
+        self._registry_with_decision()
+        (self.base / "rep").mkdir()
+        (self.base / "rep" / "one.md").write_text("чисел нет\n", encoding="utf-8")
+        (self.base / "rep" / "pic.png").write_bytes(b"\x89PNG 12345")
+        self.assertEqual(TK._artifact_numbers(self.base / "rep"), [])
+        (self.base / "rep" / "two.txt").write_text("получили 17 штук\n", encoding="utf-8")
+        self.assertEqual(TK._artifact_numbers(self.base / "rep"), ["17"])
+        self.assertEqual(TK._artifact_numbers(None), [])
+
+    def test_text_numbers_skips_labels_but_not_values(self):
+        """CP9: числом не считаются даты и время, номера TK-/В-/G-/E-/PR #/п., версии X.Y.Z, sha, номера пунктов и заголовков."""
+        labels = [
+            "2026-10-14", "2026-10-14T12:30:00+04:00", "2026-10-14 09:05", "14.10.2026", "14.10", "5.10.2026", "13:45", "9:05:30",
+            "14 октября 2026 г.", "TK-236", "В-12", "В-229 п.4", "G-001", "E-3", "PR #7", "pr 7", "#12", "№5", "п. 4", "пункт 5",
+            "версия 1.8.48", "v2.0.1", "1.2.3.4", "a1b2c3d", "0123456789abcdef0123456789abcdef01234567",
+            "1b4e28ba-2fa1-11d2-883f-b9a761bde3fb", "1. первое", "2) второе", "  - 3. вложенное", "12.1. раздел", "## 1", "### 2.3 Раздел",
+            "docs/sieve.md:30", "test_result.py:447-450", "https://github.com/o/r/pull/123", "CP9", "V2", "sha256", "UTF-8", "python3",
+        ]
+        for s in labels:
+            self.assertEqual(TK._text_numbers(s), [], s)
+        values = {"годна 12 штук": ["12"], "ΔSR 0,072": ["0,072"], "цена 3.5": ["3.5"], "доля 12.5%": ["12.5"],
+                  "## Итоги 12 тестов": ["12"], "в 2026-10-14 было 17 ошибок": ["17"], "шаг 2 из 3": ["2", "3"],
+                  "1234567 строк": ["1234567"], "- 12 тестов": ["12"], "ушло 2.05 с": ["2.05"], "0.072": ["0.072"]}
+        for s, want in values.items():
+            self.assertEqual(TK._text_numbers(s), want, s)
+        self.assertTrue(TK._has_number("ΔSR 0,072", "0.072"))
+        self.assertFalse(TK._has_number("их 13", "3"))
+        self.assertFalse(TK._has_number("их 0,3", "3"))
+        self.assertFalse(TK._has_number("12.5", "12"))
+        self.assertTrue(TK._has_number("итого 12.", "12"))
 
     def test_due_records_first_and_current_deadline_ceo_only(self):
         import contextlib

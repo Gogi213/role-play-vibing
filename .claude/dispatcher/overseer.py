@@ -5,7 +5,7 @@
 
 Один взгляд (`look`):
   1. Правило кода «дорого»: открытый тикет потратил больше 1×, 2×, 4× 90-го процентиля цены закрытых тикетов проекта —
-     по строке CEO на каждую ступень (на истории alpha оно первым ловило TK-049 — на 12 % его цены).
+     по строке CEO на каждую ступень (в замере CP14 на истории проекта оно первым ловило TK-049 — на 12 % его цены).
   2. Haiku 5.5 xhigh (`agents/overseer.md`, без инструментов): по каждому открытому тикету с новыми записями лога (не больше
      MAX_TICKETS самых свежих) — «тихо» или находка из четырёх видов с дословной цитатой. Числа (запуски, $, часы, возвраты
      Судьи, масштаб закрытых тикетов) считает код; цель владельца (G-NNN) и, если в записях вопрос владельцу, реестр решений —
@@ -54,7 +54,7 @@ EVERY_S = 15 * 60          # диспетчер зовёт не чаще
 SUPPRESS_H = 24            # одна находка по тикету — не чаще раза в сутки (без этого модель повторяет её в каждом окне)
 MAX_TICKETS = 12           # тикетов за один взгляд: самые свежие записи и MAX_COSTLY самых дорогих из остальных
 MAX_COSTLY = 2             # дорогой дрейфующий тикет не всегда самый свежий
-MODEL, EFFORT = "claude-haiku-5-5", "xhigh"  # замер 14.10 на истории alpha: xhigh до половины цены ловит 6 из 10, high — 2
+MODEL, EFFORT = "claude-haiku-5-5", "xhigh"  # замер 14.10 (CP14, история проекта): xhigh до половины цены ловит 6 из 10, high — 2
 PER_CALL_USD = 0.05        # потолок цены одного вызова (`--max-budget-usd`); замер: средняя $0.0023
 TIMEOUT_S = 180
 COST_STEPS = (3, 6, 12)    # ступени правила «дорого»: × медиана цены закрытых тикетов проекта
@@ -152,16 +152,16 @@ def merge_entries(*lists) -> list:
     return out
 
 
-def load_ticket(alpha: Path, tid: str) -> Ticket:
-    tdir = alpha / ".claude" / "tickets"
+def load_ticket(project: Path, tid: str) -> Ticket:
+    tdir = project / ".claude" / "tickets"
     head, desc, log = split_ticket((tdir / f"{tid}.md").read_text(encoding="utf-8"))
     arch = tdir / "archive" / f"{tid}-log.md"
     old = parse_log(arch.read_text(encoding="utf-8")) if arch.exists() else []
     return Ticket(tid, head.get("title", tid), head.get("status", "?"), desc, merge_entries(old, parse_log(log)))
 
 
-def ticket_ids(alpha: Path) -> list:
-    return sorted(p.stem for p in (alpha / ".claude" / "tickets").glob("TK-*.md"))
+def ticket_ids(project: Path) -> list:
+    return sorted(p.stem for p in (project / ".claude" / "tickets").glob("TK-*.md"))
 
 
 def _num(s):
@@ -191,8 +191,8 @@ def parse_runs(text: str) -> dict:
     return out
 
 
-def load_runs(alpha: Path) -> dict:
-    p = alpha / ".claude" / "dispatcher" / "runs.log"
+def load_runs(project: Path) -> dict:
+    p = project / ".claude" / "dispatcher" / "runs.log"
     return parse_runs(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
@@ -503,7 +503,7 @@ def log_row(root: Path, row: dict) -> None:
 
 def median_closed(scale: list, now: datetime):
     """Медиана цены тикетов, закрытых к `now`; меньше MIN_CLOSED — None. Медиана, а не 90-й процентиль: дорогие тикеты,
-    закрываясь, поднимают процентиль (история alpha: $23 → $37 → $21 за неделю), медиану — почти нет."""
+    закрываясь, поднимают процентиль (замер CP14, история проекта: $23 → $37 → $21 за неделю), медиану — почти нет."""
     done = [x[1] for x in scale if x[0] <= now]
     return _pct(done, 0.5) if len(done) >= MIN_CLOSED else None
 
@@ -524,7 +524,7 @@ def window_spends(runs: dict, now: datetime, hours: float = SPIKE_H) -> list:
 
 def spike_base(runs: dict, now: datetime):
     """Обычные траты тикета за SPIKE_H ч в проекте — медиана замеров `window_spends`; мало замеров — None. Ловит то, что
-    накопленные траты не видят: тикет вдруг стал тратить в разы быстрее (история alpha: TK-049 — на 7 % его цены)."""
+    накопленные траты не видят: тикет вдруг стал тратить в разы быстрее (замер CP14, история проекта: TK-049 — на 7 % его цены)."""
     xs = window_spends(runs, now)
     return _pct(xs, 0.5) if len(xs) >= SPIKE_MIN else None
 

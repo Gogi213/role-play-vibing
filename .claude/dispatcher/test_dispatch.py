@@ -2800,7 +2800,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(len([e for e in T.read_ticket(path).log if e.author == "dispatcher"]), 1)
 
     def test_successful_job_rc_is_logged_without_failure_mark(self):
-        path, now = self.waiting_on("host:calc:/runs/u1.rc")
+        path, now = self.waiting_on("host:gpu1:/runs/u1.rc")
         self.fake_ssh(b"SERVICE_RESULT=success EXIT_STATUS=0\n")
         self.tick_launches(now)
         text = T.read_ticket(path).log[-1].text
@@ -2809,7 +2809,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(self.jobs()[0]["rc"], "SERVICE_RESULT=success EXIT_STATUS=0")
 
     def test_plain_path_and_unit_waits_count_met_without_rc(self):
-        for spec, body, rc in (("host:calc:/data/x.done", b"", 0), ("host:calc:unit:tk1-run", b"inactive\n", 3)):
+        for spec, body, rc in (("host:gpu1:/data/x.done", b"", 0), ("host:gpu1:unit:tk1-run", b"inactive\n", 3)):
             path, now = self.waiting_on(spec)
             self.fake_ssh(body, rc)
             self.assertEqual(self.tick_launches(now), [("engineer", "wait_for-met")], spec)
@@ -2826,7 +2826,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(self.jobs(), [])
 
     def test_job_still_running_writes_nothing(self):
-        path, now = self.waiting_on("host:calc:/runs/u1.rc")
+        path, now = self.waiting_on("host:gpu1:/runs/u1.rc")
         self.fake_ssh(b"", rc=1)  # файла итога ещё нет
         self.assertEqual(self.tick_launches(now), [])
         self.assertEqual(self.jobs(), [])
@@ -2834,17 +2834,17 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_record_job_outcome_format_and_dedup(self):
         now = dt("2026-10-06T12:00:00+04:00")
-        self.assertTrue(D.record_job_outcome("TK-1", "host:calc:/a.rc", "overdue", now=now))
-        self.assertFalse(D.record_job_outcome("TK-1", "host:calc:/a.rc", "overdue", now=now))
-        self.assertTrue(D.record_job_outcome("TK-1", "host:calc:/a.rc", "met", "SERVICE_RESULT=success EXIT_STATUS=0", now=now),
+        self.assertTrue(D.record_job_outcome("TK-1", "host:gpu1:/a.rc", "overdue", now=now))
+        self.assertFalse(D.record_job_outcome("TK-1", "host:gpu1:/a.rc", "overdue", now=now))
+        self.assertTrue(D.record_job_outcome("TK-1", "host:gpu1:/a.rc", "met", "SERVICE_RESULT=success EXIT_STATUS=0", now=now),
                         "поздний конец после просрочки — тоже исход")
-        self.assertTrue(D.record_job_outcome("TK-1", "host:calc:/b.rc", "met", now=now))
-        self.assertTrue(D.record_job_outcome("TK-2", "host:calc:/a.rc", "met", now=now))
-        self.assertEqual(self.jobs()[0], {"ts": T.now_iso(now), "ticket": "TK-1", "wait_for": "host:calc:/a.rc", "outcome": "overdue", "rc": None})
+        self.assertTrue(D.record_job_outcome("TK-1", "host:gpu1:/b.rc", "met", now=now))
+        self.assertTrue(D.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now))
+        self.assertEqual(self.jobs()[0], {"ts": T.now_iso(now), "ticket": "TK-1", "wait_for": "host:gpu1:/a.rc", "outcome": "overdue", "rc": None})
         self.assertEqual(len(self.jobs()), 4)
         with open(D.DISPATCHER_DIR / D.JOBS_LOG_NAME, "a", encoding="utf-8") as fh:
             fh.write("битая строка\n")
-        self.assertFalse(D.record_job_outcome("TK-2", "host:calc:/a.rc", "met", now=now), "битые строки счёт не ломают")
+        self.assertFalse(D.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now), "битые строки счёт не ломают")
 
 
 class TicketsCliStartTests(unittest.TestCase):
@@ -3757,9 +3757,9 @@ class WaitForHostTests(unittest.TestCase):
             "file:data/x": ("file", "data/x"),
             "ticket:TK-044": ("ticket", "TK-044"),
             "host:deck:~/rpv/q/done": ("host", "deck", "path", "~/rpv/q/done"),
-            "host:calc:/var/rpv/progress/tk044.json": ("host", "calc", "path", "/var/rpv/progress/tk044.json"),
+            "host:gpu1:/var/rpv/progress/tk044.json": ("host", "gpu1", "path", "/var/rpv/progress/tk044.json"),
             "host:vps:/opt/compute/done": ("host", "vps", "path", "/opt/compute/done"),
-            "host:calc:unit:tk044-run3": ("host", "calc", "unit", "tk044-run3"),
+            "host:gpu1:unit:tk044-run3": ("host", "gpu1", "unit", "tk044-run3"),
             "host:vps:unit:tk044.service": ("host", "vps", "unit", "tk044.service"),
             "host:nas:/x": ("host", "nas", "path", "/x"),                                   # CP6: алиас — любое ssh-имя
             "host:gpu-box.lan:/var/lib/rpv/runs/t-1.rc": ("host", "gpu-box.lan", "path", "/var/lib/rpv/runs/t-1.rc"),
@@ -3768,15 +3768,15 @@ class WaitForHostTests(unittest.TestCase):
         for spec, want in ok.items():
             self.assertEqual(T.parse_wait_for(spec), want, spec)
         bad = ["", "mention", "ceo — решение владельца", "прогон окон на сервере счёта (…) — готов, когда done=total",
-               "file:", "ticket:", "ticket:TK 1", "deck:", "host:calc", "host:calc:", "host:calc:unit:",
-               "host:calc:unit:a b", "host:calc/x", "calc:/x", "host:-oProxyCommand=x:/x", "host:a b:/x", "host:.hidden/../x:/y", "job:-v:42",
-               "host:calc:file:/data/x.done", "host:calc:data/x", "deck:rel/path", "deck:~/rpv/q/done"]  # TK-117 К1.1: путь только абсолютный
+               "file:", "ticket:", "ticket:TK 1", "deck:", "host:gpu1", "host:gpu1:", "host:gpu1:unit:",
+               "host:gpu1:unit:a b", "host:gpu1/x", "gpu1:/x", "host:-oProxyCommand=x:/x", "host:a b:/x", "host:.hidden/../x:/y", "job:-v:42",
+               "host:gpu1:file:/data/x.done", "host:gpu1:data/x", "deck:rel/path", "deck:~/rpv/q/done"]  # TK-117 К1.1: путь только абсолютный
         for spec in bad:
             self.assertIsNone(T.parse_wait_for(spec), spec)
 
     # --- путь на машине ---
     def test_host_path_exists_goes_to_the_alias_with_batch_ssh_options(self):
-        for spec, alias in (("host:calc:/var/x/DONE", "calc"), ("host:nas:/opt/x/DONE", "nas"), ("host:gpu-box.lan:~/rpv/x", "gpu-box.lan")):
+        for spec, alias in (("host:gpu1:/var/x/DONE", "gpu1"), ("host:nas:/opt/x/DONE", "nas"), ("host:gpu-box.lan:~/rpv/x", "gpu-box.lan")):
             self.cmds.clear()
             self.reply = (0, b"", b"")
             self.assertTrue(self.met(spec), spec)
@@ -3792,7 +3792,7 @@ class WaitForHostTests(unittest.TestCase):
         self.reply = (1, b"", b"")
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            self.assertFalse(self.met("host:calc:/var/x/DONE"))
+            self.assertFalse(self.met("host:gpu1:/var/x/DONE"))
         self.assertEqual(err.getvalue(), "")  # «файла нет» — штатно, не сбой
 
     # --- файл хода (.json с done/total) ---
@@ -3805,12 +3805,12 @@ class WaitForHostTests(unittest.TestCase):
         for body, want in cases:
             self.cmds.clear()
             self.reply = (0, body, b"")
-            self.assertEqual(self.met("host:calc:/var/rpv/progress/tk044.json"), want, body)
+            self.assertEqual(self.met("host:gpu1:/var/rpv/progress/tk044.json"), want, body)
             self.assertTrue(self.cmds[0][-1].startswith("cat /var/rpv/progress/tk044.json"), self.cmds[0][-1])
 
     def test_progress_json_missing_not_met(self):
         self.reply = (1, b"", b"cat: No such file")
-        self.assertFalse(self.met("host:calc:/var/rpv/progress/tk044.json"))
+        self.assertFalse(self.met("host:gpu1:/var/rpv/progress/tk044.json"))
 
     # --- юнит ---
     def test_unit_met_when_not_active(self):
@@ -3818,16 +3818,16 @@ class WaitForHostTests(unittest.TestCase):
                           (b"unknown\n", True)):
             self.cmds.clear()
             self.reply = (0 if out.startswith(b"active") else 3, out, b"")
-            self.assertEqual(self.met("host:calc:unit:tk044-run3"), want, out)
+            self.assertEqual(self.met("host:gpu1:unit:tk044-run3"), want, out)
             self.assertEqual(self.cmds[0][-1], "systemctl is-active tk044-run3")
-            self.assertEqual(self.cmds[0][-2], "calc")
+            self.assertEqual(self.cmds[0][-2], "gpu1")
 
     def test_unit_ssh_error_is_not_met(self):
         self.reply = (255, b"", b"ssh: connect to host ... timed out\n")
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            self.assertFalse(self.met("host:calc:unit:tk044-run3"))
-        self.assertIn("host:calc:unit:tk044-run3", err.getvalue())
+            self.assertFalse(self.met("host:gpu1:unit:tk044-run3"))
+        self.assertIn("host:gpu1:unit:tk044-run3", err.getvalue())
 
     # --- кэш и частота ошибок ---
     def test_cache_60s_per_condition(self):
@@ -3836,14 +3836,14 @@ class WaitForHostTests(unittest.TestCase):
         D.time.time = lambda: clock[0]
         try:
             self.reply = (3, b"inactive\n", b"")
-            self.assertTrue(D.check_wait_for("host:calc:unit:u1"))
+            self.assertTrue(D.check_wait_for("host:gpu1:unit:u1"))
             clock[0] += 30
-            self.assertTrue(D.check_wait_for("host:calc:unit:u1"))
+            self.assertTrue(D.check_wait_for("host:gpu1:unit:u1"))
             self.assertEqual(len(self.cmds), 1)
-            self.assertTrue(D.check_wait_for("host:calc:unit:u2"))  # другое условие — свой ssh
+            self.assertTrue(D.check_wait_for("host:gpu1:unit:u2"))  # другое условие — свой ssh
             self.assertEqual(len(self.cmds), 2)
             clock[0] += 31
-            self.assertTrue(D.check_wait_for("host:calc:unit:u1"))
+            self.assertTrue(D.check_wait_for("host:gpu1:unit:u1"))
             self.assertEqual(len(self.cmds), 3)
         finally:
             D.time.time = orig_time
@@ -3857,16 +3857,16 @@ class WaitForHostTests(unittest.TestCase):
             self.reply = (255, b"", b"Connection timed out")
             with contextlib.redirect_stderr(err):
                 for _ in range(5):                       # 5 проверок с интервалом 61 с (~5 мин): строка одна
-                    self.assertFalse(D.check_wait_for("host:calc:/var/x/DONE"))
+                    self.assertFalse(D.check_wait_for("host:gpu1:/var/x/DONE"))
                     clock[0] += 61
                 self.assertFalse(D.check_wait_for("host:vps:/var/x/DONE"))  # другое условие — своя строка
                 clock[0] += 600
-                self.assertFalse(D.check_wait_for("host:calc:/var/x/DONE"))  # прошло > 10 мин — снова
+                self.assertFalse(D.check_wait_for("host:gpu1:/var/x/DONE"))  # прошло > 10 мин — снова
         finally:
             D.time.time = orig_time
         lines = [ln for ln in err.getvalue().splitlines() if ln]
         self.assertEqual(len(lines), 3, lines)
-        self.assertEqual(sum("host:calc:/var/x/DONE" in ln for ln in lines), 2)
+        self.assertEqual(sum("host:gpu1:/var/x/DONE" in ln for ln in lines), 2)
 
     def test_ssh_exception_is_not_met_and_logged(self):
         def boom(cmd, **kw):
@@ -3874,7 +3874,7 @@ class WaitForHostTests(unittest.TestCase):
         D.subprocess.run = boom
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            self.assertFalse(self.met("host:calc:unit:u1"))
+            self.assertFalse(self.met("host:gpu1:unit:u1"))
         self.assertIn("TimeoutExpired", err.getvalue())
 
 
@@ -3935,7 +3935,7 @@ class WaitForNoticeTests(unittest.TestCase):
         self.assertEqual(len(self.inbox()), 1)
 
     def test_no_notice_for_valid_forms_other_statuses_next_or_running(self):
-        for spec in ("host:calc:/var/rpv/progress/x.json", "host:vps:unit:u", "host:deck:~/x", "file:x", "ticket:TK-1"):
+        for spec in ("host:gpu1:/var/rpv/progress/x.json", "host:vps:unit:u", "host:deck:~/x", "file:x", "ticket:TK-1"):
             D.notify_wait_for_problem(self.tkt(spec), self.state, self.now)
         D.notify_wait_for_problem(self.tkt("мусор", status="in_progress"), self.state, self.now)
         D.notify_wait_for_problem(self.tkt("мусор", extra="next: judge\n"), self.state, self.now)
@@ -3958,7 +3958,7 @@ class WaitForNoticeTests(unittest.TestCase):
             T.write_header_updates(path, {"status": "waiting", "wait_for": "готов, когда done=total"})
         self.assertIn("host:<ssh-алиас>", str(cm.exception))
         self.assertEqual(T.read_ticket(path).status, "todo")  # ничего не записано
-        T.write_header_updates(path, {"wait_for": "host:calc:/var/rpv/progress/tk044.json"})
+        T.write_header_updates(path, {"wait_for": "host:gpu1:/var/rpv/progress/tk044.json"})
         T.write_header_updates(path, {"status": "in_progress", "wait_for": ""})  # снять ожидание можно
 
     def test_cli_new_refuses_unknown_wait_for_without_creating_file(self):
@@ -3969,20 +3969,20 @@ class WaitForNoticeTests(unittest.TestCase):
         self.assertIn("wait_for не понят", err.getvalue())
         self.assertEqual(list(D.TICKETS_DIR.glob("TK-*.md")) if D.TICKETS_DIR.exists() else [], [])
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "t", "--wait-for", "host:calc:unit:u"]), 0)
+            self.assertEqual(TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "t", "--wait-for", "host:gpu1:unit:u"]), 0)
 
     def test_cli_wait_sets_status_and_checks_form(self):
         path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
         with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(D, "check_wait_for", return_value=False):  # без настоящего ssh
-            self.assertEqual(TK.main(["wait", path.stem, "host:calc:/var/rpv/progress/tk044.json", "--by", "2099-01-01T00:00+04:00"]), 0)
+            self.assertEqual(TK.main(["wait", path.stem, "host:gpu1:/var/rpv/progress/tk044.json", "--by", "2099-01-01T00:00+04:00"]), 0)
         tkt = T.read_ticket(path)
-        self.assertEqual((tkt.status, tkt.header["wait_for"]), ("waiting", "host:calc:/var/rpv/progress/tk044.json"))
+        self.assertEqual((tkt.status, tkt.header["wait_for"]), ("waiting", "host:gpu1:/var/rpv/progress/tk044.json"))
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             self.assertEqual(TK.main(["wait", path.stem, "когда закончится"]), 1)
             self.assertEqual(TK.main(["wait", "TK-777", "file:x"]), 1)
         self.assertIn("host:<ssh-алиас>", err.getvalue())
-        self.assertEqual(T.read_ticket(path).header["wait_for"], "host:calc:/var/rpv/progress/tk044.json")
+        self.assertEqual(T.read_ticket(path).header["wait_for"], "host:gpu1:/var/rpv/progress/tk044.json")
 
 
 HOOKS_DIR = Path(__file__).resolve().parent.parent / "hooks"
@@ -3997,30 +3997,30 @@ class RoleMemoryHookTests(unittest.TestCase):
         sys.path.insert(0, str(HOOKS_DIR))
         import role_memory as rm
         self.rm = rm
-        self._orig_alpha_role = os.environ.get("RPV_ROLE")
+        self._orig_rpv_role = os.environ.get("RPV_ROLE")
         self._orig_host_id = os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")
 
     def tearDown(self):
-        for key, val in (("RPV_ROLE", self._orig_alpha_role), ("CLAUDE_CODE_HOST_SESSION_ID", self._orig_host_id)):
+        for key, val in (("RPV_ROLE", self._orig_rpv_role), ("CLAUDE_CODE_HOST_SESSION_ID", self._orig_host_id)):
             if val is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = val
 
-    def test_alpha_role_wins_even_with_ceo_host_session_id_present(self):
+    def test_rpv_role_wins_even_with_ceo_host_session_id_present(self):
         os.environ["RPV_ROLE"] = "judge"
         os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_ceo-host-id-fake"
         title, role = self.rm.current_role()
         self.assertEqual(role, "judge")
         self.assertIn("judge", title)
 
-    def test_no_alpha_role_falls_back_to_host_session_lookup(self):
+    def test_no_rpv_role_falls_back_to_host_session_lookup(self):
         os.environ.pop("RPV_ROLE", None)
         os.environ.pop("CLAUDE_CODE_HOST_SESSION_ID", None)
         # без host_id find_title() не находит ничего — (None, None), не падает
         self.assertEqual(self.rm.current_role(), (None, None))
 
-    def test_unknown_alpha_role_value_falls_back(self):
+    def test_unknown_rpv_role_value_falls_back(self):
         os.environ["RPV_ROLE"] = "not-a-real-role"
         os.environ.pop("CLAUDE_CODE_HOST_SESSION_ID", None)
         self.assertEqual(self.rm.current_role(), (None, None))
@@ -4532,27 +4532,27 @@ class WaitReconcileTest(unittest.TestCase):
         return calls
 
     def test_main_thread_never_calls_ssh_and_hands_the_condition_to_the_poller(self):
-        self.assertFalse(D.check_wait_for("host:calc:/runs/u1.rc"))  # boom в setUp упал бы
-        self.assertIn(("calc", "path", "/runs/u1.rc"), D._WAIT_WATCH)
+        self.assertFalse(D.check_wait_for("host:gpu1:/runs/u1.rc"))  # boom в setUp упал бы
+        self.assertIn(("gpu1", "path", "/runs/u1.rc"), D._WAIT_WATCH)
 
     def test_reconcile_one_ssh_per_machine_closes_all_waiting(self):
         """Первая проверка сорвана таймаутом — сверка одним ssh закрывает все ждущие условия машины."""
         def timeout(*a, **k):
             raise D.subprocess.TimeoutExpired("ssh", 15)
         D.subprocess.run = timeout
-        D._host_probe("calc", "path", "/data/w/chain.done")
-        for k in (("calc", "path", "/data/w/chain.done"), ("calc", "unit", "u1"), ("calc", "path", "/data/p/x.json")):
+        D._host_probe("gpu1", "path", "/data/w/chain.done")
+        for k in (("gpu1", "path", "/data/w/chain.done"), ("gpu1", "unit", "u1"), ("gpu1", "path", "/data/p/x.json")):
             D._WAIT_WATCH.add(k)
         calls = self._ssh(b"@@0\n{\"done\": 1, \"total\": 5}\n@@rc 0\n@@1\n@@rc 0\n@@2\ninactive\n@@rc 0\n")
         D._reconcile()
         self.assertEqual(len(calls), 1)
-        self.assertTrue(D._WAIT_CACHE[("calc", "path", "/data/w/chain.done")][1])
-        self.assertTrue(D._WAIT_CACHE[("calc", "unit", "u1")][1])
-        self.assertFalse(D._WAIT_CACHE[("calc", "path", "/data/p/x.json")][1])
-        self.assertTrue(D.check_wait_for("host:calc:/data/w/chain.done"))
+        self.assertTrue(D._WAIT_CACHE[("gpu1", "path", "/data/w/chain.done")][1])
+        self.assertTrue(D._WAIT_CACHE[("gpu1", "unit", "u1")][1])
+        self.assertFalse(D._WAIT_CACHE[("gpu1", "path", "/data/p/x.json")][1])
+        self.assertTrue(D.check_wait_for("host:gpu1:/data/w/chain.done"))
 
     def test_recon_script_keeps_tilde_unquoted_and_reads_json_and_rc(self):
-        script = D._recon_script([("calc", "path", "~/x.done"), ("calc", "path", "~/rpv/progress/a.json"), ("calc", "path", "~/runs/u.rc")])
+        script = D._recon_script([("gpu1", "path", "~/x.done"), ("gpu1", "path", "~/rpv/progress/a.json"), ("gpu1", "path", "~/runs/u.rc")])
         self.assertIn("test -e ~/x.done", script)
         self.assertIn("cat ~/rpv/progress/a.json", script)
         self.assertIn("cat ~/runs/u.rc", script)
@@ -4560,25 +4560,25 @@ class WaitReconcileTest(unittest.TestCase):
 
     def test_rc_file_is_read_and_kept_for_the_wake_note(self):
         calls = self._ssh(b"SERVICE_RESULT=exit-code EXIT_STATUS=2\n")
-        self.assertTrue(D._host_probe("calc", "path", "/var/lib/rpv/runs/tk1-0101-ab12.rc"))
+        self.assertTrue(D._host_probe("gpu1", "path", "/var/lib/rpv/runs/tk1-0101-ab12.rc"))
         self.assertEqual(calls, ["cat /var/lib/rpv/runs/tk1-0101-ab12.rc"])
-        self.assertEqual(D.wait_rc("host:calc:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "SERVICE_RESULT=exit-code EXIT_STATUS=2")
+        self.assertEqual(D.wait_rc("host:gpu1:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "SERVICE_RESULT=exit-code EXIT_STATUS=2")
         self.assertEqual(D.wait_rc("host:vps:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "", "это файл другой машины")
         self.assertEqual(D.wait_rc("file:/x.rc"), "")
-        self.assertEqual(D.wait_rc("host:calc:unit:tk1"), "")
+        self.assertEqual(D.wait_rc("host:gpu1:unit:tk1"), "")
 
     def test_reconcile_reads_rc_file_too(self):
-        key = ("calc", "path", "/runs/u1.rc")
+        key = ("gpu1", "path", "/runs/u1.rc")
         D._WAIT_WATCH.add(key)
         self._ssh(b"@@0\nSERVICE_RESULT=success EXIT_STATUS=0\n@@rc 0\n")
         D._reconcile()
         self.assertTrue(D._WAIT_CACHE[key][1])
-        self.assertEqual(D.wait_rc("host:calc:/runs/u1.rc"), "SERVICE_RESULT=success EXIT_STATUS=0")
+        self.assertEqual(D.wait_rc("host:gpu1:/runs/u1.rc"), "SERVICE_RESULT=success EXIT_STATUS=0")
 
     def test_rc_file_not_there_yet_means_job_is_running(self):
         self._ssh(b"", rc=1)
-        self.assertFalse(D._host_probe("calc", "path", "/runs/u1.rc"))
-        self.assertEqual(D.wait_rc("host:calc:/runs/u1.rc"), "")
+        self.assertFalse(D._host_probe("gpu1", "path", "/runs/u1.rc"))
+        self.assertEqual(D.wait_rc("host:gpu1:/runs/u1.rc"), "")
 
     def test_rc_failed(self):
         for rc, bad in (("SERVICE_RESULT=success EXIT_STATUS=0", False), ("SERVICE_RESULT=exit-code EXIT_STATUS=2", True),
@@ -4588,19 +4588,19 @@ class WaitReconcileTest(unittest.TestCase):
             self.assertEqual(D._rc_failed(rc), bad, rc)
 
     def test_reconcile_missing_file_stays_unmet(self):
-        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         self._ssh(b"@@0\n@@rc 1\n")
         D._reconcile()
-        self.assertFalse(D._WAIT_CACHE[("calc", "path", "/data/a.done")][1])
+        self.assertFalse(D._WAIT_CACHE[("gpu1", "path", "/data/a.done")][1])
 
     def test_reconcile_ssh_failure_changes_nothing(self):
-        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         self._ssh(b"", rc=255)
         D._reconcile()
-        self.assertNotIn(("calc", "path", "/data/a.done"), D._WAIT_CACHE)
+        self.assertNotIn(("gpu1", "path", "/data/a.done"), D._WAIT_CACHE)
 
     def test_blind_tick_alert_per_machine_and_recovery(self):
-        """TK-217: ssh 255 к calc дольше порога → ALERT-BLIND.txt с именем машины и строка в mechanics.log; возврат — «зрение
+        """TK-217: ssh 255 к gpu1 дольше порога → ALERT-BLIND.txt с именем машины и строка в mechanics.log; возврат — «зрение
         вернулось», файл снят, сверка запрошена сразу. vps без ожиданий не тревожит."""
         import tempfile as _tf
         old = (D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR)
@@ -4608,33 +4608,33 @@ class WaitReconcileTest(unittest.TestCase):
         D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.TICKETS_DIR = tmp, tmp / "ceo-wake.log", tmp / "tickets"
         D.TICKETS_DIR.mkdir()
         D.BLIND = D.blind.Tracker(alert_s=300, repeat_s=1800)
-        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         try:
-            D.BLIND.record("ssh:calc", False, time.time() - 400)
+            D.BLIND.record("ssh:gpu1", False, time.time() - 400)
             D.BLIND.record("ssh:vps", False, time.time() - 400)
             D.hide.run  # noqa: B018 — звук в тесте не нужен
             orig, D._blind_sound = D._blind_sound, lambda: None
             D._blind_tick()
             D._blind_sound = orig
             alert = (tmp / "ALERT-BLIND.txt").read_text(encoding="utf-8")
-            self.assertIn("ssh:calc", alert)
+            self.assertIn("ssh:gpu1", alert)
             self.assertNotIn("ssh:vps", alert)
-            self.assertIn("диспетчер слеп: ssh:calc", (tmp / "mechanics.log").read_text(encoding="utf-8"))
+            self.assertIn("диспетчер слеп: ssh:gpu1", (tmp / "mechanics.log").read_text(encoding="utf-8"))
             self.assertFalse(D.CEO_WAKE_LOG.exists(), "CP5: механика CEO не будит")
             D._RECON_LAST = time.time()
-            D.BLIND.record("ssh:calc", True, time.time())
+            D.BLIND.record("ssh:gpu1", True, time.time())
             D._blind_tick()
             self.assertFalse((tmp / "ALERT-BLIND.txt").exists())
-            self.assertIn("зрение вернулось: ssh:calc", (tmp / "mechanics.log").read_text(encoding="utf-8"))
+            self.assertIn("зрение вернулось: ssh:gpu1", (tmp / "mechanics.log").read_text(encoding="utf-8"))
             self.assertEqual(D._RECON_LAST, 0.0)
         finally:
-            D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
+            D._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
             D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR = old
 
     def test_reconcile_ssh_255_feeds_blind_tracker(self):
         old = D.BLIND
         D.BLIND = D.blind.Tracker()
-        D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
+        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         try:
             self._ssh(b"", rc=255)
             D._reconcile()
@@ -4643,5 +4643,5 @@ class WaitReconcileTest(unittest.TestCase):
             D._reconcile()
             self.assertFalse(D.BLIND.any_down())
         finally:
-            D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
+            D._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
             D.BLIND = old

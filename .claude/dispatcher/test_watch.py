@@ -54,7 +54,7 @@ class WatchSandbox(unittest.TestCase):
         env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
         env_patch.start()
         self.addCleanup(env_patch.stop)
-        aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"calc"})   # умолчания нет: машины со сторожем задаёт окружение
+        aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"gpu1"})   # умолчания нет: машины со сторожем задаёт окружение
         aliases_patch.start()
         self.addCleanup(aliases_patch.stop)
 
@@ -211,7 +211,7 @@ class TriageWaitsTests(WatchSandbox):
         return p
 
     def test_alive_target_is_not_orphan(self):
-        self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        self._waiting("host:gpu1:/var/rpv/progress/job-a.json")
         ws = {}
         alive = W.triage_waits(ws, self.now, probe=lambda *a: "producer")
         self.assertEqual(len(alive), 1)
@@ -219,7 +219,7 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(len(W.check_orphan_tickets(self.now)), 1)
 
     def test_dead_target_two_strikes_wakes_owner_then_blocks(self):
-        p = self._waiting("host:calc:/var/rpv/progress/rpv-b12flag.json")
+        p = self._waiting("host:gpu1:/var/rpv/progress/rpv-b12flag.json")
         ws = {}
         W.triage_waits(ws, self.now, probe=lambda *a: "dead")
         self.assertEqual(T.read_ticket(p).status, "waiting")
@@ -227,14 +227,14 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
         self.assertEqual(t.log[-1].author, "watch")
-        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/var/rpv/progress/rpv-b12flag.json"})
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:gpu1:/var/rpv/progress/rpv-b12flag.json"})
         W.triage_waits(ws, self.now, probe=lambda *a: "dead")
         W.triage_waits(ws, self.now, probe=lambda *a: "dead")
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("next")), ("in_progress", "judge"))  # повтор — Судье (В-206), не blocked → CEO
 
     def test_unknown_probe_does_not_count(self):
-        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        p = self._waiting("host:gpu1:/var/rpv/progress/job-a.json")
         ws = {}
         for _ in range(4):
             W.triage_waits(ws, self.now, probe=lambda *a: "unknown")
@@ -268,14 +268,14 @@ class TriageWaitsTests(WatchSandbox):
         """Пробуждение по заданию раньше + пустое ожидание теперь = первое пробуждение по этой причине, не blocked."""
         p = self._waiting("")
         tid = T.read_ticket(p).id
-        ws = {"job_wakes": {tid: "job:calc:1"}}
+        ws = {"job_wakes": {tid: "job:gpu1:1"}}
         for _ in range(W.EMPTY_WAIT_STRIKES):
             W.triage_waits(ws, self.now)
         self.assertEqual(T.read_ticket(p).status, "in_progress")
 
     def test_host_path_met_but_not_woken_wakes_owner_after_grace(self):
         """Случай (6): файл на машине есть, а диспетчер не разбудил — через допуск владелец будится сам."""
-        p = self._waiting("host:calc:/data/sched/validity/1008032552475.json")
+        p = self._waiting("host:gpu1:/data/sched/validity/1008032552475.json")
         ws = {}
         W.triage_waits(ws, self.now, probe=lambda *a: "met")
         self.assertEqual(T.read_ticket(p).status, "waiting")
@@ -292,11 +292,11 @@ class TriageWaitsTests(WatchSandbox):
         try:
             W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
-            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "producer")
+            self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.json"), "producer")
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
-            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "met")
+            self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.json"), "met")
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
-            self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.mark"), "met")
+            self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.mark"), "met")
         finally:
             sp.run, W.D._ssh_cmd = orig, orig_ssh
 
@@ -356,7 +356,7 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(W.check_strays({}, self.now, probe=lambda alias: None), [])
 
     def test_ssh_silent_n_checks_wakes_owner_not_ceo(self):
-        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        p = self._waiting("host:gpu1:/var/rpv/progress/job-a.json")
         ws = {}
         for _ in range(W.SSH_FAIL_STRIKES - 1):
             alive = W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
@@ -370,13 +370,13 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_pc_link_down_never_drops_wait_for(self):
         """Обрыв связи ПК (Д-8): ssh молчит у всех, но это не машина — сколько бы проверок ни прошло, wait_for на месте."""
-        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        p = self._waiting("host:gpu1:/var/rpv/progress/job-a.json")
         ws = {}
         for _ in range(W.SSH_FAIL_STRIKES * 3):
             alive = W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: False)
             self.assertEqual(len(alive), 1)
         t = T.read_ticket(p)
-        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "host:calc:/var/rpv/progress/job-a.json"))
+        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "host:gpu1:/var/rpv/progress/job-a.json"))
         self.assertEqual(ws.get("ssh_fail_wait", {}), {})
         # связь вернулась, а ssh всё ещё молчит — счёт идёт с нуля и снимает ожидание только через N проверок
         for _ in range(W.SSH_FAIL_STRIKES - 1):
@@ -393,7 +393,7 @@ class TriageWaitsTests(WatchSandbox):
             cc.assert_called_once()
 
     def test_ssh_answer_resets_the_count(self):
-        p = self._waiting("host:calc:/var/rpv/progress/job-a.json")
+        p = self._waiting("host:gpu1:/var/rpv/progress/job-a.json")
         ws = {}
         for _ in range(W.SSH_FAIL_STRIKES - 1):
             W.triage_waits(ws, self.now, probe=lambda *a: "ssh-error", link_up=lambda: True)
@@ -403,7 +403,7 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
     def test_unknown_probe_is_not_orphan(self):
-        self._waiting("host:calc:unit:rpv-job")
+        self._waiting("host:gpu1:unit:rpv-job")
         alive = W.triage_waits({}, self.now, probe=lambda *a: "unknown")
         self.assertEqual(W.check_orphan_tickets(self.now, alive), [])
 
@@ -420,16 +420,16 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(T.read_ticket(p).status, "in_progress")
 
     # --- сторож жизни (TK-092): форма job:<алиас>:<id> через адаптер проекта ---
-    SPEC = "job:calc:0108041500123"
+    SPEC = "job:gpu1:0108041500123"
 
     def _job(self, state, tail=""):
         return lambda alias, jid: (state, tail)
 
     def test_job_form_parses(self):
-        self.assertEqual(T.parse_wait_for(self.SPEC), ("job", "calc", "0108041500123"))
+        self.assertEqual(T.parse_wait_for(self.SPEC), ("job", "gpu1", "0108041500123"))
         self.assertEqual(T.parse_wait_for("job:nas.lan:1"), ("job", "nas.lan", "1"))  # CP6: алиас — любое ssh-имя
         self.assertIsNone(T.parse_wait_for("job:-v:1"))
-        self.assertIsNone(T.parse_wait_for("job:calc:"))
+        self.assertIsNone(T.parse_wait_for("job:gpu1:"))
 
     def test_job_failed_wakes_owner_at_once_with_tail_and_reason(self):
         p = self._waiting(self.SPEC)
@@ -449,7 +449,7 @@ class TriageWaitsTests(WatchSandbox):
         ws = {}
         with mock.patch.object(W.LW, "reason", return_value=""):
             W.triage_waits(ws, self.now, job_probe=self._job("failed"))
-            T.write_header_updates(p, {"status": "waiting", "wait_for": "job:calc:other2"})
+            T.write_header_updates(p, {"status": "waiting", "wait_for": "job:gpu1:other2"})
             W.triage_waits(ws, self.now, job_probe=self._job("failed"))
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("next")), ("in_progress", "judge"))  # повтор — Судье (В-206), не blocked → CEO
@@ -470,9 +470,9 @@ class TriageWaitsTests(WatchSandbox):
         p = self._waiting(self.SPEC)
         ws = {}
         self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("running"))), 1)
-        self.assertFalse(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
+        self.assertFalse(lifewatch.job_done(D.DISPATCHER_DIR, "gpu1", "0108041500123"))
         W.triage_waits(ws, self.now, job_probe=self._job("done"))
-        self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "calc", "0108041500123"))
+        self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "gpu1", "0108041500123"))
         self.assertTrue(D.check_wait_for(self.SPEC))
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
@@ -490,7 +490,7 @@ class TriageWaitsTests(WatchSandbox):
         return lambda alias: [{"id": jid, "ticket": tid, "unit": "tk0s-x-" + jid, "state": state}]
 
     def test_owned_running_job_is_a_producer_not_a_dead_target(self):
-        p = self._waiting("host:calc:/data/x/other-name.done")
+        p = self._waiting("host:gpu1:/data/x/other-name.done")
         tid = T.read_ticket(p).id
         ws = {}
         for _ in range(W.DEAD_WAIT_STRIKES + 1):
@@ -500,29 +500,29 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_owned_failed_job_wakes_owner_once_and_owners_file_is_published(self):
         import json
-        p = self._waiting("host:calc:/data/x/other-name.done")
+        p = self._waiting("host:gpu1:/data/x/other-name.done")
         tid = T.read_ticket(p).id
         ws = {}
         W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", "")), ("in_progress", ""))
         self.assertIn("упало", t.log[-1].text)
-        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/data/x/other-name.done"})
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:gpu1:/data/x/other-name.done"})
         W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
         self.assertEqual(T.read_ticket(p).status, "waiting")  # то же упавшее задание второй раз не будит
         data = json.loads((D.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
-        self.assertEqual(data["calc"][0]["ticket"], tid)
+        self.assertEqual(data["gpu1"][0]["ticket"], tid)
 
     def test_old_failed_job_after_job_form_wake_does_not_block_for_ceo(self):
         """Судья 08.10: ждали job:A → A упало → владелец разбужен; поставил host:-ожидание другого задания; A (упало < 1 ч) не будит снова."""
-        p = self._waiting("job:calc:A")
+        p = self._waiting("job:gpu1:A")
         tid = T.read_ticket(p).id
         ws = {}
         owners = lambda alias: [{"id": "A", "ticket": tid, "unit": "tk0s-x-A", "state": "failed"}]
         with mock.patch.object(W.LW, "reason", return_value=""):
             W.triage_waits(ws, self.now, job_probe=self._job("failed"), owners_probe=owners)
         self.assertEqual(T.read_ticket(p).status, "in_progress")
-        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:calc:/data/x/b.done"})
+        T.write_header_updates(p, {"status": "waiting", "wait_for": "host:gpu1:/data/x/b.done"})
         W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=owners)
         self.assertEqual(T.read_ticket(p).status, "waiting")
         owners2 = lambda alias: [{"id": "A", "ticket": tid, "unit": "u", "state": "failed"},
@@ -534,7 +534,7 @@ class TriageWaitsTests(WatchSandbox):
     # --- TK-117 П-1: ждёт, а работающих заданий нет ---
     def test_idle_wait_wakes_owner_after_grace_with_reason(self):
         """TK-114/115: цель не лежит, заданий тикета running/queued нет — через IDLE_WAIT_MIN владелец будится с причиной."""
-        p = self._waiting("host:calc:/data/x/tier1.done")  # TK-114: файл не ляжет, задания tier1 кончились
+        p = self._waiting("host:gpu1:/data/x/tier1.done")  # TK-114: файл не ляжет, задания tier1 кончились
         tid = T.read_ticket(p).id
         ws, owners = {}, self._jobs(tid, ("a", "tk0s-tk114-w", "done"))
         W.triage_waits(ws, self.now, probe=lambda *a: "producer", owners_probe=owners)
@@ -547,7 +547,7 @@ class TriageWaitsTests(WatchSandbox):
         self.assertIn("tk0s-tk114-w done", t.log[-1].text)
 
     def test_idle_wait_silent_with_running_job_or_without_adapter(self):
-        p = self._waiting("host:calc:/data/x/tier1.done")
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
         tid = T.read_ticket(p).id
         later = self.now + timedelta(minutes=60)
         ws = {}
@@ -560,7 +560,7 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
     def test_idle_wait_timer_resets_when_job_appears(self):
-        p = self._waiting("host:calc:/data/x/tier1.done")
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
         tid = T.read_ticket(p).id
         ws = {}
         W.triage_waits(ws, self.now, probe=lambda *a: "producer", owners_probe=self._jobs(tid))
@@ -570,9 +570,9 @@ class TriageWaitsTests(WatchSandbox):
 
     # --- TK-117: «поймала бы» на копиях TK-114 / TK-115 ---
     def test_replay_tk114_bad_form_wakes_within_three_cycles(self):
-        """TK-114: wait_for `host:calc:file:/…` (файл лёг 05:58, никто не проверял) — тревога владельцу за EMPTY_WAIT_STRIKES циклов."""
-        p = self._waiting("host:calc:/data/tk114/tier1.done")
-        p.write_text(p.read_text(encoding="utf-8").replace("host:calc:/data", "host:calc:file:/data"), encoding="utf-8")  # старая запись, до проверки формы
+        """TK-114: wait_for `host:gpu1:file:/…` (файл лёг 05:58, никто не проверял) — тревога владельцу за EMPTY_WAIT_STRIKES циклов."""
+        p = self._waiting("host:gpu1:/data/tk114/tier1.done")
+        p.write_text(p.read_text(encoding="utf-8").replace("host:gpu1:/data", "host:gpu1:file:/data"), encoding="utf-8")  # старая запись, до проверки формы
         ws = {}
         for i in range(W.EMPTY_WAIT_STRIKES - 1):
             W.triage_waits(ws, self.now + timedelta(minutes=2 * i), probe=lambda *a: "unknown", owners_probe=lambda al: None)
@@ -584,7 +584,7 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_replay_tk115_oom_wave_dead_jobs_wakes_owner(self):
         """TK-115: 11 заданий rc 143 (oom), ждущий юнит жив (producer), работающих 0 — владелец будится через IDLE_WAIT_MIN с последними rc."""
-        p = self._waiting("host:calc:/data/tk115/out/wave.done")
+        p = self._waiting("host:gpu1:/data/tk115/out/wave.done")
         tid = T.read_ticket(p).id
         rows = [(f"j{i}", f"tk115-w{i}", "failed") for i in range(11)]
         ws = {}
@@ -595,12 +595,12 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_failed_job_reason_reaches_owner_log(self):
         """Судья TK-117: причина падения (5-е поле адаптера заданий) — в записи пробуждения и у П-1."""
-        p = self._waiting("host:calc:/data/x/tier1.done")
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
         tid = T.read_ticket(p).id
         rows = lambda al: [{"id": "a", "ticket": tid, "unit": "tk0s-tk115-w1-a", "state": "failed", "reason": "rc 143: oom-kill (cgroup)"}]
         W.triage_waits({}, self.now, probe=lambda *a: "producer", owners_probe=rows)
         self.assertIn("[rc 143: oom-kill (cgroup)]", T.read_ticket(p).log[-1].text)
-        p2 = self._waiting("host:calc:/data/y/tier1.done")
+        p2 = self._waiting("host:gpu1:/data/y/tier1.done")
         tid2 = T.read_ticket(p2).id
         done = lambda al: [{"id": "b", "ticket": tid2, "unit": "tk0s-tk116-w-b", "state": "done", "reason": ""}]
         ws = {}
@@ -613,7 +613,7 @@ class TriageWaitsTests(WatchSandbox):
             returncode = 0
             stdout = "a\tTK-1\tu1\tfailed\trc 143: oom-kill\nb\tTK-1\tu2\trunning\t\nc\tTK-1\tu3\tdone\n".encode()
         with mock.patch.object(W.LW.hide, "run", return_value=R()), mock.patch.object(W.LW.P, "settings", return_value={"job_owners_cmd": "x"}):
-            got = W.LW.fetch_owners("calc", lambda a, c: ["ssh"])
+            got = W.LW.fetch_owners("gpu1", lambda a, c: ["ssh"])
         self.assertEqual([j["reason"] for j in got], ["rc 143: oom-kill", "", ""])
 
     # --- TK-117: срок ожидания ---
@@ -624,10 +624,10 @@ class TriageWaitsTests(WatchSandbox):
         for bad in ("25:00", "завтра", "2020-01-01T00:00+04:00"):
             with self.assertRaises(ValueError):
                 T.parse_by(bad, now)
-        self.assertTrue(T.wait_needs_by("host:calc:/x/y.done") and T.wait_needs_by("file:x") and not T.wait_needs_by("at:2026-10-10T02:00+04:00"))
+        self.assertTrue(T.wait_needs_by("host:gpu1:/x/y.done") and T.wait_needs_by("file:x") and not T.wait_needs_by("at:2026-10-10T02:00+04:00"))
 
     def test_deadline_passed_wakes_owner_only_after_grace(self):
-        p = self._waiting("host:calc:/data/x/tier1.done")
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
         by = self.now + timedelta(hours=1)
         T.write_header_updates(p, {"wait_by": by.isoformat(timespec="seconds")})
         ws = {}
@@ -640,10 +640,10 @@ class TriageWaitsTests(WatchSandbox):
         self.assertIn("срок ожидания", t.log[-1].text)
         rows = [json.loads(ln) for ln in (D.DISPATCHER_DIR / "jobs.jsonl").read_text(encoding="utf-8").splitlines()]  # CP6: счёт для отчёта
         self.assertEqual(rows, [{"ts": T.now_iso(by + timedelta(minutes=W.BY_GRACE_MIN + 1)), "ticket": t.id,
-                                 "wait_for": "host:calc:/data/x/tier1.done", "outcome": "overdue", "rc": None}])
+                                 "wait_for": "host:gpu1:/data/x/tier1.done", "outcome": "overdue", "rc": None}])
 
     def test_deadline_ignored_when_target_met(self):
-        p = self._waiting("host:calc:/data/x/tier1.done")
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
         T.write_header_updates(p, {"wait_by": (self.now - timedelta(hours=3)).isoformat(timespec="seconds")})
         W.triage_waits({}, self.now, probe=lambda *a: "met", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")  # цель выполнена — будит диспетчер, не срок
@@ -656,7 +656,7 @@ class TriageWaitsTests(WatchSandbox):
     def test_failed_job_with_resubmit_of_same_name_does_not_wake(self):
         """п.1: волна пересдана под тем же именем (старая упала/снята, новая идёт или done) — владельца не будим."""
         for new_state in ("running", "queued", "done"):
-            p = self._waiting("host:calc:/data/x/other-name.done")
+            p = self._waiting("host:gpu1:/data/x/other-name.done")
             tid = T.read_ticket(p).id
             W.triage_waits({}, self.now, probe=lambda *a: "unknown",
                            owners_probe=self._jobs(tid, ("a", "tk065-w1", "failed"), ("b", "tk065-w1", new_state)))
@@ -665,18 +665,18 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_failed_job_next_to_live_job_of_ticket_keeps_wait_for(self):
         """п.4: пока у тикета есть живое задание, упавшее соседнее wait_for не снимает."""
-        p = self._waiting("host:calc:/data/x/other-name.done")
+        p = self._waiting("host:gpu1:/data/x/other-name.done")
         tid = T.read_ticket(p).id
         ws = {}
         for _ in range(3):
             W.triage_waits(ws, self.now, probe=lambda *a: "dead",
                            owners_probe=self._jobs(tid, ("a", "u-a", "failed"), ("c", "u-c", "running")))
         t = T.read_ticket(p)
-        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "host:calc:/data/x/other-name.done"))
+        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "host:gpu1:/data/x/other-name.done"))
 
     def test_failure_beside_live_job_is_deferred_not_forgotten(self):
         """Судья TK-101: сосед доделал, упавшее не пересдано — владелец будится."""
-        p = self._waiting("host:calc:/data/x/other-name.done")
+        p = self._waiting("host:gpu1:/data/x/other-name.done")
         tid = T.read_ticket(p).id
         ws = {}
         W.triage_waits(ws, self.now, probe=lambda *a: "unknown",
@@ -687,7 +687,7 @@ class TriageWaitsTests(WatchSandbox):
         self.assertEqual(T.read_ticket(p).status, "in_progress")
 
     def test_job_form_failed_with_live_sibling_stays_waiting(self):
-        p = self._waiting("job:calc:A")
+        p = self._waiting("job:gpu1:A")
         tid = T.read_ticket(p).id
         alive = W.triage_waits({}, self.now, job_probe=self._job("failed"),
                                owners_probe=self._jobs(tid, ("A", "u-a", "failed"), ("B", "u-b", "queued")))
@@ -695,7 +695,7 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_resubmitted_wave_scenario_zero_blocks_and_lone_failure_still_wakes(self):
         """Сценарий TK-065: волна пересдана, старые сняты — за все проходы ни одного blocked/next judge; одиночное падение будит."""
-        p = self._waiting("host:calc:/data/x/other-name.done")
+        p = self._waiting("host:gpu1:/data/x/other-name.done")
         tid = T.read_ticket(p).id
         ws = {}
         wave = [("o1", "w-1", "failed"), ("o2", "w-2", "failed"), ("n1", "w-1", "running"), ("n2", "w-2", "done")]
@@ -708,12 +708,12 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_ceo_not_woken_by_watch_repeat(self):
         """п.3: повтор падения — next: judge, статус не blocked (на blocked диспетчер будит CEO)."""
-        p = self._waiting("job:calc:A")
+        p = self._waiting("job:gpu1:A")
         tid = T.read_ticket(p).id
         ws = {}
         with mock.patch.object(W.LW, "reason", return_value=""):
             W.triage_waits(ws, self.now, job_probe=self._job("failed"))
-            T.write_header_updates(p, {"status": "waiting", "wait_for": "job:calc:A"})
+            T.write_header_updates(p, {"status": "waiting", "wait_for": "job:gpu1:A"})
             W.triage_waits(ws, self.now, job_probe=self._job("failed"))
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("next")), ("in_progress", "judge"))
