@@ -2516,7 +2516,7 @@ _OVERSEER_PROC = None  # процесс Надзирателя (overseer.py): к
 
 def _overseer(state: dict, now) -> None:
     """CP14 (критерии 1, 3, 4, 10): раз в OVERSEER_EVERY_S, если с прошлого взгляда менялся хоть один тикет, — один взгляд
-    Надзирателя отдельным процессом (`overseer.py`: правило «дорого» и Haiku по новым записям; находки — строкой CEO).
+    Надзирателя отдельным процессом (`overseer.py`: правила «дорого» и «всплеск» и Haiku по новым записям; находки — Судье записью тикета).
     Первый тик только ставит метку `overseer_at`; прошлый взгляд ещё идёт — ждём его."""
     global _OVERSEER_PROC
     if _OVERSEER_PROC is not None and _OVERSEER_PROC.poll() is None:

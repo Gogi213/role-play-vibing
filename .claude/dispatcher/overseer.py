@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Надзиратель (CP14; критерии 1, 3, 4, 5, 6, 10, 11): ловит то, что тормозам кода не видно, — деньги и время идут, а к цели
 не движемся. Только stdlib. Его зовёт диспетчер отдельным коротким процессом не чаще раза в EVERY_S и только когда тикеты
-менялись; владельцу Надзиратель не пишет — находки идут CEO строкой `ceo-inbox.md` (вид «надзиратель»).
+менялись. Находка идёт Судье: запись «надзиратель» в логе тикета и `next: judge` (`to_judge`). CEO и владельца Надзиратель
+не будит: о стоящей работе CEO узнаёт от Судьи (`blocked`), цена и находки — строкой ежедневного отчёта.
 
 Один взгляд (`look`):
-  1. Правило кода «дорого»: открытый тикет потратил больше 1×, 2×, 4× 90-го процентиля цены закрытых тикетов проекта —
-     по строке CEO на каждую ступень (в замере CP14 на истории проекта оно первым ловило TK-049 — на 12 % его цены).
+  1. Правило кода «дорого»: открытый тикет потратил больше 3×, 6×, 12× медианы цены закрытых тикетов проекта (от MIN_CLOSED
+     закрытых) — находка Судье на каждую ступень (в замере CP14 на истории проекта оно первым ловило TK-049 — на 12 % его цены).
   2. Haiku 5.5 xhigh (`agents/overseer.md`, без инструментов): по каждому открытому тикету с новыми записями лога (не больше
      MAX_TICKETS самых свежих) — «тихо» или находка из четырёх видов с дословной цитатой. Числа (запуски, $, часы, возвраты
      Судьи, масштаб закрытых тикетов) считает код; цель владельца (G-NNN) и, если в записях вопрос владельцу, реестр решений —
@@ -608,25 +609,22 @@ def _key(tid: str, kind: str) -> str:
     return f"{tid}|{kind}"
 
 
-def look(root: Path, now: datetime | None = None, call=None, notify=None, route=None, dry: bool = False) -> list:
+def look(root: Path, now: datetime | None = None, call=None, route=None, dry: bool = False) -> list:
     """Один взгляд по проекту → строки итогов (они же в `overseer.log`). `call(prompt)` → ответ как у `call_overseer`;
-    `notify(тикет, текст)` — строка CEO; `route(тикет, текст)` → передано ли Судье (`to_judge`; занят — повтор на
-    следующем взгляде). Ошибка вызова не двигает «прочитано»: тикет посмотрим в следующий раз. `dry` — ни лога, ни
-    состояния, ни записей в тикеты."""
+    `route(тикет, текст)` → передано ли Судье (`to_judge`; занят — повтор на следующем взгляде). Ошибка вызова не двигает
+    «прочитано»: тикет посмотрим в следующий раз. `dry` — ни лога, ни состояния, ни записей в тикеты."""
     root = Path(root)
     now = now or datetime.now().astimezone()
     if call is None:
         work = Path(tempfile.gettempdir()) / "rpv-overseer"
         af = agents_file(work)
         call = lambda prompt: call_overseer(prompt, af, work, MODEL, EFFORT, PER_CALL_USD, TIMEOUT_S)  # noqa: E731
-    notify = notify or (lambda tid, text: None)
     route = route or (lambda tid, text: True if dry else to_judge(root, tid, text, now))
     st = load_state(root)
     seen, found, steps = st.setdefault("seen", {}), st.setdefault("found", {}), st.setdefault("cost_step", {})
     st["pending"] = [p for p in st.get("pending", []) if not route(p["ticket"], p["text"])]  # прошлые, не переданные
 
     def emit(tid, text):
-        notify(tid, text)
         if not route(tid, text):
             st["pending"].append({"ticket": tid, "text": text})
 
@@ -723,13 +721,10 @@ def main(argv=None) -> int:
             pass
     root = Path(a.project).expanduser().resolve()
     if a.dry_run:
-        rows = look(root, notify=lambda tid, text: print(text), dry=True)
+        rows = look(root, route=lambda tid, text: print(text) or True, dry=True)
         print(json.dumps(rows, ensure_ascii=False, indent=1))
         return 0
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import dispatch as D
-    D.configure_project(root)
-    look(root, notify=lambda tid, text: D.append_ceo_inbox(tid, "надзиратель", text))
+    look(root)
     return 0
 
 

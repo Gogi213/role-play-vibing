@@ -450,8 +450,8 @@ def m_plugin(p: Period) -> str:
 
 
 def m_overseer(p: Period) -> str:
-    """CP14, критерии 1 и 11. Находки Надзирателя, ушедшие CEO за период (правило «дорого» и находки Haiku, кроме
-    повторов в пределах суток), и цена его вызовов — механика — из `overseer.log`."""
+    """CP14, критерии 1 и 11. Находки Надзирателя, переданные Судье за период (правила «дорого» и «всплеск» и находки
+    Haiku, кроме повторов в пределах суток), и цена его вызовов — механика — из `overseer.log`."""
     lines = _read_lines(_dispatcher_dir(p.root) / "overseer.log")
     if lines is None:
         return _nodata("Надзиратель не работал: overseer.log нет")
@@ -471,7 +471,7 @@ def m_overseer(p: Period) -> str:
         if j.get("outcome") == "accepted" and not j.get("suppressed"):
             kinds[j.get("kind") or "?"] += 1
     found = sum(kinds.values())
-    return (f"находок CEO {found}" + (f" ({', '.join(f'{k} {v}' for k, v in kinds.most_common())})" if found else "")
+    return (f"находок Судье {found}" + (f" ({', '.join(f'{k} {v}' for k, v in kinds.most_common())})" if found else "")
             + f", взглядов {looks}, ${cost:.2f}")
 
 
