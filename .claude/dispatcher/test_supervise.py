@@ -18,11 +18,10 @@ class _Started:
 
 
 class SuperviseTest(unittest.TestCase):
-    def setUp(self):  # другие тесты набора ставят RPV_CI_REPO на уровне модуля — здесь ci_watch по умолчанию не нужен
+    def setUp(self):
         p = mock.patch.dict(os.environ)
         p.start()
         self.addCleanup(p.stop)
-        os.environ.pop("RPV_CI_REPO", None)
 
     def test_decide(self):
         self.assertEqual(V.decide(5, True), "ok")
@@ -60,7 +59,7 @@ class SuperviseTest(unittest.TestCase):
             S.is_ours_state = lambda pid, script: pid > 0   # оба «живы»
             try:
                 out = V.run_once(project, now.timestamp(), stop=lambda p, s, unit=None: stopped.append(s) or 1,
-                                 spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+                                 spawn=lambda script, proj, log: spawned.append(script.name) or _Started(7))
             finally:
                 S.is_ours_state = real
             self.assertEqual(out, {"dispatch": "ok", "watch": "restart"})
@@ -73,10 +72,29 @@ class SuperviseTest(unittest.TestCase):
             (project / ".claude" / "dispatcher").mkdir(parents=True)
             spawned = []
             out = V.run_once(project, stop=lambda p, s, unit=None: 0,
-                             spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
+                             spawn=lambda script, proj, log: spawned.append(script.name) or _Started(7))
             self.assertEqual(out, {"dispatch": "start", "watch": "start"})
             self.assertEqual(spawned, ["dispatch.py", "watch.py"])
 
+
+    def test_alarm_when_service_stays_dead_after_restart(self):  # CP5: одна тревога владельцу, пока не оживёт
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d)
+            sd = project / ".claude" / "dispatcher"
+            sd.mkdir(parents=True)
+            kw = dict(stop=lambda p, s, unit=None: 0, spawn=lambda script, proj, log: _Started(7))
+            V.run_once(project, **kw)  # поднял — тревоги нет
+            self.assertFalse((sd / "notify.log").exists())
+            V.run_once(project, **kw)  # снова мёртв — тревога
+            V.run_once(project, **kw)  # всё ещё мёртв — повтора нет
+            log = (sd / "notify.log").read_text(encoding="utf-8")
+            self.assertEqual(log.count("Работа стоит: диспетчер, сторож команды падает и не поднимается"), 1)
+            beat = datetime.now().astimezone().isoformat(timespec="seconds")
+            (sd / "state.json").write_text(json.dumps({"last_tick": beat}), encoding="utf-8")
+            (sd / "watch-heartbeat.json").write_text(json.dumps({"ts": beat}), encoding="utf-8")
+            with mock.patch.object(V.S, "is_ours_state", lambda *a: True):
+                V.run_once(project, **kw)  # ожили — «снова работает»
+            self.assertIn("Команда снова работает", (sd / "notify.log").read_text(encoding="utf-8"))
 
     def test_ci_watch_supervised_only_with_repo(self):  # TK-090 Д-1
         with tempfile.TemporaryDirectory() as d:
@@ -84,9 +102,9 @@ class SuperviseTest(unittest.TestCase):
             (project / ".claude" / "dispatcher").mkdir(parents=True)
             spawned = []
             kw = dict(stop=lambda p, s, unit=None: 0,
-                      spawn=lambda script, proj, log, extra=(): spawned.append(script.name) or _Started(7))
-            with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
-                out = V.run_once(project, **kw)
+                      spawn=lambda script, proj, log: spawned.append(script.name) or _Started(7))
+            (project / ".claude" / "rpv.json").write_text('{"ci_repo": "o/r"}', encoding="utf-8")
+            out = V.run_once(project, **kw)
             self.assertEqual(out, {"dispatch": "start", "watch": "start", "ci_watch": "start"})
             self.assertEqual(spawned, ["dispatch.py", "watch.py", "ci_watch.py"])
 
@@ -96,15 +114,15 @@ class SuperviseTest(unittest.TestCase):
             sd.mkdir(parents=True)
             (sd / "supervise.env.json").write_text(json.dumps({"RPV_X_OLD": "1", "RPV_Y": "old"}), encoding="utf-8")
             (sd.parent / "settings.json").write_text(json.dumps(
-                {"env": {"RPV_Y": "new", "RPV_CI_REPO": "o/r", "RPV_BUS_TOKEN": "s", "PATH": "x"}}), encoding="utf-8")
+                {"env": {"RPV_Y": "new", "RPV_TG_CHAT": "42", "RPV_TG_TOKEN": "s", "PATH": "x"}}), encoding="utf-8")
             with mock.patch.dict(os.environ, {}, clear=False):
-                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO", "RPV_BUS_TOKEN"):
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_TG_CHAT", "RPV_TG_TOKEN"):
                     os.environ.pop(k, None)
                 V.load_env(sd)
-                self.assertEqual((os.environ["RPV_X_OLD"], os.environ["RPV_Y"], os.environ["RPV_CI_REPO"]),
-                                 ("1", "new", "o/r"))
-                self.assertNotIn("RPV_BUS_TOKEN", os.environ)
-                for k in ("RPV_X_OLD", "RPV_Y", "RPV_CI_REPO"):
+                self.assertEqual((os.environ["RPV_X_OLD"], os.environ["RPV_Y"], os.environ["RPV_TG_CHAT"]),
+                                 ("1", "new", "42"))
+                self.assertNotIn("RPV_TG_TOKEN", os.environ)
+                for k in ("RPV_X_OLD", "RPV_Y", "RPV_TG_CHAT"):
                     os.environ.pop(k, None)
 
 
@@ -159,8 +177,8 @@ class InstallFilesTest(unittest.TestCase):
 
     def test_env_snapshot_only_forwarded(self):
         keep = {"RPV_TEST_X": "1", "RPV_DISPATCH_ROTATE_TOKENS": "150000",
-                "RPV_CONTEXT_WARN_TOKENS": "2", "RPV_DECK_KEY": "C:/k/id_rsa", "RPV_BUS_TOKEN_FILE": "/p/tok"}
-        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_BUS_TOKEN": "tok-SECRET",
+                "RPV_CONTEXT_WARN_TOKENS": "2", "RPV_X_KEY_FILE": "C:/k/id_rsa", "RPV_TG_TOKEN_FILE": "/p/tok"}
+        drop = {"ANTHROPIC_API_KEY_TK072": "s", "RPV_TG_TOKEN": "tok-SECRET",
                 "RPV_X_API_KEY": "k", "ALPHA_DISPATCH_X": "1"}
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**keep, **drop}):
             V.snapshot_env(Path(d))
@@ -188,10 +206,12 @@ class InstallFilesTest(unittest.TestCase):
                 self.assertNotIn("RPV_LIVE", os.environ)
                 os.environ.pop("RPV_ONLY_SNAP", None)
 
-    def test_supervise_and_start_share_one_service_list(self):  # TK-090 Д-1: выпуск версии перезапускает и ci_watch
-        with mock.patch.dict(os.environ, {"RPV_CI_REPO": "o/r"}):
-            self.assertEqual(S.services(), ("dispatch", "watch", "ci_watch"))
-            self.assertTrue(all(n in V.BEATS for n in S.services()))
+    def test_supervise_and_start_share_one_service_list(self):  # TK-090 Д-1: start.py и supervise.py ведут одни и те же службы, включая ci_watch
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".claude").mkdir()
+            (Path(d) / ".claude" / "rpv.json").write_text('{"ci_repo": "o/r"}', encoding="utf-8")
+            self.assertEqual(S.services(d), ("dispatch", "watch", "ci_watch"))
+            self.assertTrue(all(n in V.BEATS for n in S.services(d)))
 
     def test_session_env_never_snapshotted_and_install_refused_from_role(self):  # TK-090 г
         sess = {"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1"}

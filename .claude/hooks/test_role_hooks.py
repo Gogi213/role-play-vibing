@@ -21,11 +21,9 @@ PROJECT = os.path.join(TMP, "proj")
 shutil.copytree(os.path.join(PLUGIN, "templates", "roles"), os.path.join(PROJECT, ".claude", "roles"))
 os.makedirs(os.path.join(PROJECT, ".claude", "tickets"))
 os.environ["CLAUDE_PROJECT_DIR"] = PROJECT
-os.environ["RPV_STATE_DIR"] = os.path.join(TMP, "state")
-os.environ["RPV_LOG_DIR"] = os.path.join(TMP, "log")
-os.environ["RPV_DISPATCHER_DIR"] = os.path.join(TMP, "disp")
-os.makedirs(os.environ["RPV_DISPATCHER_DIR"], exist_ok=True)
-for var in ("RPV_ROLE", "RPV_TICKET", "RPV_TICKET_ID", "CLAUDE_CODE_HOST_SESSION_ID"):
+DISP = os.path.join(PROJECT, ".claude", "dispatcher")  # состояние диспетчера пустышки (CP8: каталоги — от проекта)
+os.makedirs(DISP, exist_ok=True)
+for var in ("RPV_ROLE", "RPV_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
     os.environ.pop(var, None)
 sys.path.insert(0, HERE)
 import role_context as rc  # noqa: E402
@@ -80,6 +78,17 @@ class SessionStart(unittest.TestCase):
                                  os.path.normpath(os.path.join(PLUGIN, ".claude", "dispatcher", "tickets.py")))
                 self.assertEqual(os.path.normpath(project), os.path.normpath(PROJECT))
                 self.assertNotIn("python .claude/dispatcher/tickets.py", text)
+
+    def test_startup_gives_errors_command_to_every_role(self):  # V2-3: ошибка исправлена, только когда приложена проверка
+        for role in ("researcher", "engineer", "judge", "ceo"):
+            text, _ = start_text(role, "startup")
+            m = re.search(r'(python|"[^"]+") "([^"]+errors\.py)" --project "([^"]+)" add ', text)
+            self.assertIsNotNone(m, (role, text))
+            self.assertEqual(os.path.normpath(m.group(2)),
+                             os.path.normpath(os.path.join(PLUGIN, ".claude", "dispatcher", "errors.py")))
+            self.assertTrue(os.path.isfile(m.group(2)), m.group(2))
+            self.assertIn("fix E-N --check", text)
+            self.assertLessEqual(len(text), rc.LIMIT, role)
 
     def test_resume_and_compact_are_short(self):
         for role in ("researcher", "judge"):
@@ -401,7 +410,7 @@ class TicketScopedDigests(unittest.TestCase):
 
 
 class RoleInstructionsUseResult(unittest.TestCase):
-    """Под RPV_STOP_STRICT=1 итог шага — только `tickets.py result`: ни одна инструкция роли не велит `comment` для итога."""
+    """Итог шага — только `tickets.py result`: ни одна инструкция роли не велит `comment` для итога (Stop-хук тоже)."""
 
     def test_no_instruction_sends_role_to_comment_for_result(self):
         import delete_guard as dg
@@ -426,8 +435,7 @@ class StopResultTest(unittest.TestCase):
     HEAD = "---\nid: TK-901\ntitle: t\nowner: engineer\nstatus: in_progress\nreviewer: judge\n---\n\nописание\n\n## Лог\n\n"
 
     def _setup(self, launch_keys, log_lines):
-        disp = os.environ["RPV_DISPATCHER_DIR"]
-        with open(os.path.join(disp, "state.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(DISP, "state.json"), "w", encoding="utf-8") as f:
             json.dump({"active_runs": {self.TID: {"log_keys_at_launch": launch_keys}}}, f)
         tdir = os.path.join(PROJECT, ".claude", "tickets")
         with open(os.path.join(tdir, self.TID + ".md"), "w", encoding="utf-8") as f:
@@ -445,20 +453,18 @@ class StopResultTest(unittest.TestCase):
         out = self._stop()
         self.assertEqual(out["decision"], "block")
         self.assertIn(self.TID, out["reason"])
+        self.assertIn("tickets.py result", out["reason"])
+        self.assertNotIn("tickets.py comment", out["reason"])
 
-    def test_new_entry_allows(self):
+    def test_only_result_entry_allows(self):
         self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.NEW])
+        self.assertEqual(self._stop()["decision"], "block")  # заметка без итога — не итог
+        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.RES])
         self.assertIsNone(self._stop())
 
     def test_other_role_entry_does_not_count(self):
         self._setup([], ["### 2026-10-07T02:00:00+04:00 judge\nчужая\n\n".replace("\n", chr(92) + "n")])
         self.assertEqual(self._stop()["decision"], "block")
-
-    def test_strict_needs_result_entry(self):
-        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.NEW])
-        self.assertEqual(self._stop({"RPV_STOP_STRICT": "1"})["decision"], "block")
-        self._setup(["2026-10-07T01:00:00+04:00 engineer"], [self.OLD, self.RES])
-        self.assertIsNone(self._stop({"RPV_STOP_STRICT": "1"}))
 
     def test_second_stop_is_not_blocked(self):
         self._setup([], [])
@@ -468,7 +474,7 @@ class StopResultTest(unittest.TestCase):
         self._setup([], [])
         r = run_hook("stop_result.py", {}, {"RPV_ROLE": "", "RPV_TICKET": ""})
         self.assertEqual((r.returncode, r.stdout.strip()), (0, b""))
-        os.remove(os.path.join(os.environ["RPV_DISPATCHER_DIR"], "state.json"))
+        os.remove(os.path.join(DISP, "state.json"))
         self.assertIsNone(self._stop())
 
 
@@ -538,9 +544,8 @@ class HaikuAbstractTest(unittest.TestCase):
             with open(tr, "w", encoding="utf-8") as f:
                 f.write(json.dumps({"type": "user", "message": {"content": "привет"}, "timestamp": ""}) + "\n")
             out = os.path.join(d, "dg.md")
-            orig_dp, orig_ro = rm.digest_path, os.environ.get("RPV_HAIKU_COMPACT")
+            orig_dp = rm.digest_path
             rm.digest_path = lambda role, cli: out
-            os.environ["RPV_HAIKU_COMPACT"] = "1"
 
             def boom(t, **kw):
                 self.assertIn("привет", open(out, encoding="utf-8").read())      # файл уже на диске до Haiku
@@ -552,30 +557,18 @@ class HaikuAbstractTest(unittest.TestCase):
                     rm.write_digest(tr, "judge", "t", "abcdef123", "why", dispatcher=True)
             finally:
                 haiku_aux.compact, rm.digest_path = orig, orig_dp
-                if orig_ro is None:
-                    os.environ.pop("RPV_HAIKU_COMPACT", None)
-                else:
-                    os.environ["RPV_HAIKU_COMPACT"] = orig_ro
 
-    def test_abstract_on_off_and_failure(self):
+    def test_abstract_and_failure(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
         import haiku_aux
-        orig, old = haiku_aux.compact, os.environ.get("RPV_HAIKU_COMPACT")
+        orig = haiku_aux.compact
         try:
             haiku_aux.compact = lambda t, **kw: "KONSPEKT"
-            os.environ["RPV_HAIKU_COMPACT"] = "1"
             self.assertIn("KONSPEKT", rm.haiku_abstract(["a"]))
-            os.environ["RPV_HAIKU_COMPACT"] = "0"
-            self.assertEqual(rm.haiku_abstract(["a"]), "")
-            os.environ["RPV_HAIKU_COMPACT"] = "1"
             haiku_aux.compact = lambda t, **kw: None
             self.assertEqual(rm.haiku_abstract(["a"]), "")
         finally:
             haiku_aux.compact = orig
-            if old is None:
-                os.environ.pop("RPV_HAIKU_COMPACT", None)
-            else:
-                os.environ["RPV_HAIKU_COMPACT"] = old
 
 
 if __name__ == "__main__":

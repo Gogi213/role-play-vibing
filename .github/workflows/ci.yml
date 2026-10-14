@@ -25,11 +25,58 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest pytest-xdist
-      - run: python -m pytest .claude -q -p no:cacheprovider -n auto --durations=15
+      - run: python -m pytest .claude tools -q -p no:cacheprovider -n auto --durations=15
+  jobrun-systemd:
+    # CP6: итог задания на машине без шины — файл <unit>.rc от ExecStopPost; здесь — настоящий systemd, не подделка
+    name: jobrun на настоящем systemd
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: успех и провал пишут файл итога
+        run: |
+          set -e
+          check() {  # <метка> <ожидаемая строка> -- <команда…>
+            label=$1; want=$2; shift 3
+            out=$(sudo RPV_JOBRUN_MODE=systemd RPV_RUNS_DIR=/var/lib/rpv/runs tools/jobrun.sh "$label" -- "$@")
+            echo "$out"
+            rc=${out##*RC=}
+            for i in $(seq 30); do sudo test -f "$rc" && break; sleep 1; done
+            sudo cat "$rc"
+            sudo grep -qx "$want" "$rc"
+          }
+          check ok "SERVICE_RESULT=success EXIT_STATUS=0" -- /bin/true
+          check bad "SERVICE_RESULT=exit-code EXIT_STATUS=3" -- /bin/sh -c 'exit 3'
+  e2e:
+    # CP11 (критерий 17): чистый проект → /rpv-init → цель → роли под диспетчером → результат, принятый Судьёй; время и
+    # цена. Claude — по подписке владельца: секрет CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token` на его машине). Только
+    # ручной запуск CI; нет секрета — шаг пропускается. Windows — на машине владельца.
+    name: чистый проект (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: замер
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::notice::нет секрета CLAUDE_CODE_OAUTH_TOKEN — замер пропущен"; exit 0; fi
+          npm install -g @anthropic-ai/claude-code
+          git config --global user.name e2e
+          git config --global user.email e2e@example.invalid
+          python tools/e2e_clean_project.py --keep
   ci-ok:
     name: ci-ok
     if: always()
-    needs: test
+    needs: [test, jobrun-systemd]
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test.result }}" = "success"
+      - run: test "${{ needs.test.result }}" = "success" && test "${{ needs.jobrun-systemd.result }}" = "success"

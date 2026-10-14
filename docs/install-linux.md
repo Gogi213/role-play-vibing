@@ -46,7 +46,7 @@ Type=oneshot
 RemainAfterExit=yes
 Environment="PATH=$UNIT_PATH"
 # по необходимости - RPV_* из docs/configuration.md, start.py перенесёт их в службы:
-#Environment="RPV_DISPATCH_ROLE_PARALLEL=engineer:3"
+#Environment="RPV_TG_CHAT=<чат владельца>"
 ExecStart="$PY" "$PLUGIN/.claude/dispatcher/start.py" --project "$PROJECT"
 
 [Install]
@@ -58,7 +58,3 @@ loginctl enable-linger "$USER"           # менеджер пользовате
 ```
 
 Вывод `start.py` — `journalctl --user -u rpv-autostart`; убрать автозапуск — `systemctl --user disable --now rpv-autostart.service` (службы `rpv-*` остановите отдельно).
-
-## Сервер шины и Диспетчерская
-
-Сервер шины событий (необязательно, только Linux) — [bus.md](bus.md#установка-сервера-шины); сервер Диспетчерской с юнитом `rpv-board` — [dashboard.md](dashboard.md#поднять-свою).

@@ -41,8 +41,7 @@ ROLES_DIR = os.path.join(ROOT, ".claude", "roles")
 if not os.path.isdir(ROLES_DIR):  # в проекте нет команды ролей — хуки молчат
     sys.exit(0)
 TICKETS_DIR = os.path.join(ROOT, ".claude", "tickets")
-# каталог меток сессий и состояния хуков; переопределение — `RPV_STATE_DIR` (для проверок хука)
-STATE_DIR = env("STATE_DIR") or os.path.join(ROLES_DIR, ".state")
+STATE_DIR = os.path.join(ROLES_DIR, ".state")  # метки сессий и состояние хуков
 
 LIMIT = 8000          # знаков вставки; больше — Claude Code покажет роли только превью ~2 КБ
 NOTEBOOK_TAIL = 4000  # знаков конца блокнота роли
@@ -96,7 +95,7 @@ def env_role():
 
 def ticket_id():
     """Id тикета запуска диспетчера (`RPV_TICKET`), если передан и безопасен для имени файла."""
-    t = env("TICKET") or env("TICKET_ID")
+    t = env("TICKET")
     return t if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", t) else None
 
 
@@ -144,13 +143,14 @@ def rel(path):
     return os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
-def tickets_command():
-    """Готовая команда тикетов: `python|"<sys.executable>" "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`.
+def tickets_command(name="tickets.py"):
+    """Готовая команда тикетов: `python|"<sys.executable>" "<абс. путь плагина>/.claude/dispatcher/tickets.py" --project "<проект>"`
+    (`name` — другой скрипт диспетчера той же формы, например `registry.py`).
 
     Плагин лежит в своей папке, в проекте `tickets.py` нет — хук знает свой путь и подставляет его сам (слэши прямые:
     работают и в Bash, и в PowerShell на Windows). Подкоманда (`comment`, `new` …) дописывается после `--project`."""
     here = os.path.dirname(os.path.abspath(__file__))                      # <плагин>/.claude/hooks
-    script = os.path.join(os.path.dirname(here), "dispatcher", "tickets.py")
+    script = os.path.join(os.path.dirname(here), "dispatcher", name)
     exe = "python" if shutil.which("python") else '"' + sys.executable.replace(os.sep, "/") + '"'   # TK-110 В-1: путь только без python в PATH
     return f'{exe} "{script.replace(os.sep, "/")}" --project "{ROOT.replace(os.sep, "/")}"'
 
@@ -231,11 +231,16 @@ def full_context(role, title, source, hook_in):
                 "result <ID> <done|pr|accept|return|blocked|ask-owner|wait> --why \"...\"` (кого будить дальше "
                 f"решает таблица маршрутов); промежуточная заметка — `{tcmd} comment <ID> --author {role} --text "
                 "\"...\"` (@упоминания никого не будят)."
-                + (" Остальные подкоманды (`new`, `start`, `stop`, `status`) — после `--project \"...\"` той же командой."
+                + (" Остальные подкоманды (`new`, `start`, `stop`, `allow`, `status`) — после `--project \"...\"` той же командой."
                    if role == "ceo" else ""))
+    if role == "ceo":
+        head.append(f"Реестр владельца (решения В-N, цели G-NNN): `{tickets_command('registry.py')} "
+                    "decide|goal|repeat|accept-goal|show|list` — пишет помощник `secretary`; передай ему эту команду.")
+    head.append(f"Ошибки (исправлена — только с проверкой; приёмка Судьи сама гоняет все): `{tickets_command('errors.py')} "
+                "add --title \"...\" --ticket <ID>` · `fix E-N --check \"python tools/x.py\"` · `run` · `list`.")
     if role != "ceo":
-        head.append("Общую память проекта (CLAUDE.md, автопамять) пишет только `CEO`; ты работаешь по своему "
-                    "тикету.")
+        head.append("Общую память проекта (CLAUDE.md, решения и цели владельца, автопамять) пишет только `CEO`; ты "
+                    "работаешь по своему тикету.")
     try:  # память ролей: догнать конспект прошлой сессии, дать на него ссылку
         from role_memory import on_session_start
         last = on_session_start(hook_in, role, title)

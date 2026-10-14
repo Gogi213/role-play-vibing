@@ -1,4 +1,4 @@
-"""События CI в шину без ИИ (TK-079 п.1, В-195): опрос GitHub раз в CI_WATCH_INTERVAL_S (≤ 60 с, `gh api`, токены — из gh).
+"""События CI без ИИ (TK-079 п.1, В-195): опрос GitHub раз в CI_WATCH_INTERVAL_S (≤ 60 с, `gh api`, токены — из gh).
 Для каждого открытого PR проекта смотрит check-runs головы; когда CI на голове завершён — один раз (по паре PR+sha) пишет
 запись `ci` в тикет этого PR и будит: красный → владелец тикета (имена красных клеток), зелёный → Судья, если вердикта на
 этой голове ещё нет (запись Судьи с началом sha). Тикет PR: поле шапки `pr: 22[, 23]`, иначе TK-<N> в ветке/заголовке.
@@ -20,7 +20,7 @@ import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
 
-INTERVAL_S = min(60.0, float(P.env("CI_WATCH_INTERVAL_S", "60")))
+INTERVAL_S = 60.0
 RED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale")
 GREEN = ("success", "skipped", "neutral")
 _TK_RE = re.compile(r"\bTK-?(\d+)\b", re.I)
@@ -104,15 +104,6 @@ def wake(path, tkt, who: str, text: str, repo: str = "", pr_number: int = 0) -> 
         T.write_header_updates(path, upd, stamp_updated=False)
 
 
-def bus_emit(pr_number: int, sha: str, state: str, red: list, who: str, tid: str) -> None:
-    """Событие `ci.<PR>.<sha7>` в шину (журнал для табло/аудита); шины нет или лежит — молча, тикет уже записан."""
-    try:
-        import busclient
-        busclient.post(f"ci.{pr_number}.{sha[:7]}", {"state": state, "red": red, "woke": who, "ticket": tid}, timeout=3)
-    except Exception:
-        pass
-
-
 ERR_LIMIT = 3          # подряд сбоев опроса CI одного PR, после которых о нём узнаёт владелец тикета
 
 
@@ -156,8 +147,6 @@ def run_once(repo: str, gh=gh_api) -> list:
             if who:
                 wake(tkt.path, tkt, who, text, repo, pr["number"])
                 woke = who
-        if state != "pending":
-            bus_emit(pr["number"], sha, state, red, woke, tkt.id if tkt is not None else "")
         st[key] = {"sha": sha, "state": state, "red": red, "woke": woke}
         out.append((pr["number"], sha[:7], state, woke))
     save_state(st)
@@ -201,9 +190,9 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not D.ensure_project(argv, "ci_watch"):
         return 2
-    repo = next((a.split("=", 1)[1] for a in argv if a.startswith("--repo=")), None) or P.env("CI_REPO", "")
+    repo = next((a.split("=", 1)[1] for a in argv if a.startswith("--repo=")), None) or P.setting("ci_repo", "")
     if not repo:
-        print("ci_watch: нужен --repo=<владелец/репо> или RPV_CI_REPO", file=sys.stderr)
+        print("ci_watch: нужен --repo=<владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 2
     if "--once" not in argv:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра supervise (TK-090 Д-1)
         lock = D.DISPATCHER_DIR / "ci_watch.pid"
@@ -218,8 +207,7 @@ def main(argv=None) -> int:
             for n, s7, state, woke in run_once(repo):
                 print(f"[ci_watch] PR #{n} {s7}: {state}" + (f" → {woke}" if woke else ""))
             import merge_rule
-            import tickets
-            for n, what in merge_rule.merge_once(repo, bus=tickets.bus_emit):
+            for n, what in merge_rule.merge_once(repo):
                 print(f"[merge_rule] PR #{n}: {what}")
         except Exception as e:
             print(f"[ci_watch] цикл: {type(e).__name__}: {e}", file=sys.stderr)

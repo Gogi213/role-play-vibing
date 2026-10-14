@@ -3,6 +3,7 @@ __pycache__/
 state.json
 state.json.tmp
 runs.log
+jobs.jsonl
 ceo-inbox.md
 ceo-wake.log
 .ceo-inbox-seen
@@ -14,6 +15,12 @@ watch-state.json
 watch-state.json.tmp
 watch.pid
 watch.*.log
+mechanics.log
+notify.log
+report.log
+regressions.log
+reports/
+supervise-state.json
 stop/
 runs/*
 !runs/.gitkeep

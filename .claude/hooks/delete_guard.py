@@ -2,10 +2,11 @@
 
 Вызывается PreToolUse-хуком плагина (`hooks/hooks.json`: Bash, PowerShell, Write, Edit, MultiEdit,
 NotebookEdit): точка входа `main()` читает JSON события со stdin, `check(cmd, cwd)` → причина отказа или None. Корень проекта — `CLAUDE_PROJECT_DIR` (иначе cwd); нет `.claude/roles` — молчит.
-Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги из `RPV_GUARD_REMOTE_ROOTS`
-(и `RPV_GUARD_HOST_ROOTS` для своего хоста); оперативная стадия — `RPV_GUARD_STAGE`. Никогда: хосты из
-`RPV_GUARD_FORBIDDEN_HOSTS`, Storage Box (ssh порт 23), записи `root/` и `deep/` (единственные копии). Цель, которую нельзя
-проверить (переменная без буквального префикса, список из конвейера/xargs, путь из кода), — отказ: переписать явным путём.
+Настройки — файл проекта `<проект>/.claude/rpv.json` (что в них вписать, решает проект; плагин своих правил про чужие
+каталоги не несёт). Своя папка: локально — папка проекта и scratchpad сессии; на удалённых машинах — каталоги
+`guard_remote_roots`; оперативная стадия — `guard_stage`. Никогда: хосты `guard_forbidden_hosts` и защищённые пути
+`protected_paths`. Цель, которую нельзя проверить (переменная без буквального префикса, список из конвейера/xargs, путь
+из кода), — отказ: переписать явным путём.
 
 Разбор (02.10, аудит: регэксп по всему тексту давал ~52 ложных отказа за 5 дней — на переменную `rd`, слово «rm» в
 комментарии тикета, `grep 'unlink'`): команда режется на простые команды (`;` `&&` `||` `|` `&`, перевод строки, `$(…)`,
@@ -17,41 +18,42 @@ shred/del/erase/rd/Remove-Item/ri, `find … -delete|-exec rm`, `git clean`, `rs
 не существует (создание нового файла); удалённый хост и непроверяемый путь считаются «существует». `git reset --hard`,
 `git clean -f…`, `git push --force/-f/--force-with-lease` — отказ «только через CEO» в любом каталоге. Исключений по имени
 скрипта нет: строка в тексте команды проверку не отключает.
-Корни хоста `HOST_ROOTS` (`RPV_GUARD_HOST_ROOTS`) действуют, только если команда идёт по ssh на этот хост;
 `git reset --hard` и `git clean -f…` разрешены в каталоге вне основного дерева, заданном явным путём (`cd <путь>`,
-`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `<подкаталог из RPV_GUARD_REMOTE_ROOTS>`, `/tmp/<подкаталог>`, корни
-хоста, связанные worktree внутри папки проекта (`.git` — файл); неизвестная переменная в `cd $W`,
+`git -C <путь>`, рабочий каталог вызова): scratchpad сессии, `<подкаталог из guard_remote_roots>`, `/tmp/<подкаталог>`,
+связанные worktree внутри папки проекта (`.git` — файл); неизвестная переменная в `cd $W`,
 `--git-dir`/`--work-tree`/GIT_DIR, основное дерево и вложенные репозитории — отказ; `git push --force` —
 всегда отказ; перезапись/усечение (не удаление) разрешены в автопамяти `~/.claude/projects/<проект>/memory/`.
-Дыры, закрытые вторым проходом аудита (03.10): (а) `mv` проверяет и ИСТОЧНИК — как удаление источника (`mv …/deep/x ./trash
+Дыры, закрытые вторым проходом аудита (03.10): (а) `mv` проверяет и ИСТОЧНИК — как удаление источника (`mv защищённое ./trash
 && rm -rf ./trash`); то же `Move-Item`/`move`/`ren`; (б) файловые инструменты Write/Edit/MultiEdit/NotebookEdit —
 `check_file(путь, cwd)`: путь вне корней и файл уже есть — отказ (новый файл вне корней — можно, как для Bash); единая точка
 входа хука — `check_tool(событие)`; (д) временные файлы — не данные владельца: запись, перезапись, удаление под `$TMP`/`$TEMP`/`$TMPDIR`/`$env:TEMP`/`%TEMP%`, `/tmp/<путь>`
 (локально и на любой удалённой машине, кроме закрытых узлов), `…/AppData/Local/Temp/<путь>` и результатами `mktemp` без `-p`;
-сам корень временного каталога, `*`, `..`, сегменты root/deep — по-прежнему нет; (в) `tee` без `-a`, `Out-File`/`Set-Content`/`Tee-Object`, `find … -exec cp|mv|tee|…
+сам корень временного каталога, `*`, `..` — по-прежнему нет; (в) `tee` без `-a`, `Out-File`/`Set-Content`/`Tee-Object`, `find … -exec cp|mv|tee|…
 {}` (пути find — цели), `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, `git stash
 clear|drop`, `git push +ref|:ref|--delete|--mirror` — как `git reset --hard` (вне основного дерева разрешено, иначе «только
 через CEO»); (г) fail-closed: сбой самого стража (исключение при разборе, битое событие) — отказ с причиной, не пропуск.
 Третий проход (03.10): (е) Write/Edit/MultiEdit/NotebookEdit вне корней ограничены только для запусков диспетчера
-(`RPV_ROLE`); сессия CEO/владельца правит файлы вне проекта, кроме root/ и deep/ и закрытых узлов; (ж) `.git` — удаление,
+(`RPV_ROLE`); сессия CEO/владельца правит файлы вне проекта, кроме защищённых путей и закрытых узлов; (ж) `.git` — удаление,
 перенос, шаблоны вроде `.*` никому (кроме `*.lock`), запись внутрь — не запускам диспетчера; (з) настройки Claude Code
-`.claude/settings*.json` запуску диспетчера не менять (через них выключаются хуки и плагин).
+`.claude/settings*.json` и настройки плагина `.claude/rpv.json` запуску диспетчера не менять (через них выключаются хуки и
+защита путей).
+Публикации (CP2, критерий 14: необратимое — только с согласия владельца): запуску диспетчера (`RPV_ROLE`) закрыты `gh release
+create|upload|edit`, `gh pr merge` (вливает программа `merge_rule.py` после Судьи), `git push` в main/master, тега, `--all`
+(и пуш без ветки, пока текущая — main/master или не определима), `npm|pnpm|yarn|cargo|poetry|uv publish`, `twine upload`,
+`docker push`, `gem push` — если в шапке тикета запуска (`RPV_TICKET`) нет `allow: publish (В-N)`. Поле ставит только CEO
+(`tickets.py allow`); запуск диспетчера строку `allow:` в файл тикета не пишет; шапка не прочитана — отказ. Сессии CEO и владельца не ограничены.
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
 """
 import ast
 import base64
+import fnmatch
+import json
 import os
 import posixpath
 import re
-import sys
 import textwrap
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:                                   # heavy_guard лежит рядом; страж могли загрузить по пути файла
-    sys.path.insert(0, _HERE)
-import heavy_guard  # noqa: E402
 
 
 def _env(name, default=""):
@@ -59,8 +61,8 @@ def _env(name, default=""):
     return os.environ.get("RPV_" + name) or default
 
 
-def _env_list(name):
-    return tuple(x.strip().lower() for x in _env(name).split(",") if x.strip())
+def norm(p):
+    return p.strip().strip("'\"").replace("\\", "/").lower()
 
 
 def project_roots(project_dir):
@@ -76,67 +78,114 @@ def memory_roots(project_dir):
     return (f".claude/projects/{enc}/memory/",)
 
 
-def _env_host_roots():
-    """`RPV_GUARD_HOST_ROOTS="хост=корень,корень;хост2=корень"` → {хост: (корни…)} строчными."""
-    out = {}
-    for part in _env("GUARD_HOST_ROOTS").split(";"):
-        host, _, roots = part.partition("=")
-        host = host.strip().lower()
-        if host and roots.strip():
-            out[host] = tuple(r.strip().lower() for r in roots.split(",") if r.strip())
-    return out
+def _load_rpv(project_dir):
+    """`<проект>/.claude/rpv.json` → (объект, ошибка). Нет файла — ({}, None)."""
+    try:
+        with open(os.path.join(str(project_dir), ".claude", "rpv.json"), encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}, None
+    except (OSError, ValueError) as e:                      # ValueError — и JSONDecodeError, и UnicodeDecodeError
+        return {}, f"файл не прочитан: {type(e).__name__}: {e}"[:160]
+    return (data, None) if isinstance(data, dict) else ({}, "корень файла — не объект JSON")
+
+
+def _str_list(data, key):
+    """Ключ — список непустых строк (нет ключа — пусто) → (кортеж, ошибка)."""
+    raw = data.get(key)
+    if raw is None:
+        return (), None
+    if not isinstance(raw, list) or not all(isinstance(x, str) and norm(x).rstrip("/") for x in raw):
+        return (), f"{key} — не список непустых строк"
+    return tuple(raw), None
+
+
+def load_protected(project_dir):
+    """Защищённые пути проекта: `<проект>/.claude/rpv.json`, ключ `protected_paths` — список шаблонов путей (glob) →
+    (шаблоны, ошибка). Нет файла или ключа — защиты нет. Файл есть, но не читается, не JSON или ключ не список непустых
+    строк — ошибка: страж отказывает любому удалению и перезаписи (fail-closed), пока файл не исправят. Шаблон приводится
+    к виду путей стража (строчные, `/`, без хвостового `/`); `..` в шаблоне недопустимо."""
+    data, err = _load_rpv(project_dir)
+    if err:
+        return (), err
+    raw, err = _str_list(data, "protected_paths")
+    if err:
+        return (), err
+    out = tuple(norm(x).rstrip("/") for x in raw)
+    bad = [x for x in out if ".." in x.split("/")]
+    return ((), f"шаблон «{bad[0]}» недопустим (`..`)") if bad else (out, None)
+
+
+def machine_rules(data):
+    """Удалённые машины из настроек проекта (объект rpv.json) → (корни, стадия, закрытые хосты как regex, ошибка).
+    `guard_remote_roots` — каталоги, где на любых удалённых машинах можно удалять (нет ключа — нигде); `guard_stage` —
+    оперативная стадия (целиком); `guard_forbidden_hosts` — хосты/IP, где нельзя ничего. Неверный тип — ошибка
+    (fail-closed, как у `protected_paths`)."""
+    roots, e1 = _str_list(data, "guard_remote_roots")
+    hosts, e2 = _str_list(data, "guard_forbidden_hosts")
+    stage = data.get("guard_stage") or ""
+    e3 = None if isinstance(stage, str) else "guard_stage — не строка"
+    hosts = tuple(h.strip().lower() for h in hosts if h.strip())
+    closed = re.compile("|".join(re.escape(h) for h in hosts), re.I) if hosts else None
+    return (tuple(r.strip().lower() for r in roots if r.strip()), (stage if not e3 else "").strip().lower().rstrip("/"),
+            closed, e1 or e2 or e3)
 
 
 def configure(project_dir):
-    global LOCAL_ROOTS, WRITE_HOME_ROOTS
+    global LOCAL_ROOTS, WRITE_HOME_ROOTS, PROJECT_DIR, PROTECTED, PROTECTED_ERROR, REMOTE_ROOTS, STAGE, CLOSED_RE
     LOCAL_ROOTS = project_roots(project_dir)
     WRITE_HOME_ROOTS = memory_roots(project_dir)
+    PROJECT_DIR = str(project_dir)
+    PROTECTED, PROTECTED_ERROR = load_protected(project_dir)
+    REMOTE_ROOTS, STAGE, CLOSED_RE, err = machine_rules(_load_rpv(project_dir)[0])
+    PROTECTED_ERROR = PROTECTED_ERROR or err
 
 
 _PROJECT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-LOCAL_ROOTS = project_roots(_PROJECT)
-WRITE_HOME_ROOTS = memory_roots(_PROJECT)
 SCRATCH = "/appdata/local/temp/claude/"
-# Удалённые машины и закрытые узлы — только из окружения, без умолчаний (через запятую, примеры в README плагина):
-# RPV_GUARD_REMOTE_ROOTS — каталоги, где на любых удалённых машинах можно удалять (нет переменной — нигде);
-# RPV_GUARD_HOST_ROOTS — то же, но только для ssh на конкретный хост; RPV_GUARD_STAGE — оперативная стадия
-# (целиком); RPV_GUARD_FORBIDDEN_HOSTS — хосты/IP, где нельзя вообще.
-REMOTE_ROOTS = _env_list("GUARD_REMOTE_ROOTS")
-HOST_ROOTS = _env_host_roots()
-STAGE = _env("GUARD_STAGE").strip().lower().rstrip("/")
-FORBIDDEN_SEG = ("root", "deep")
-BOX_RE = re.compile("|".join(["storage-?box", "your-storagebox"] + [re.escape(h) for h in _env_list("GUARD_FORBIDDEN_HOSTS")]),
-                    re.I)
+# пути проекта, защищённые пути и удалённые машины — из `<проект>/.claude/rpv.json`; проект сам решает, что в них
+# вписать; нет настройки — защиты и удалённых корней нет. PROJECT_DIR — тикеты запуска (согласие на публикацию).
+LOCAL_ROOTS = WRITE_HOME_ROOTS = REMOTE_ROOTS = PROTECTED = ()
+PROJECT_DIR, STAGE, CLOSED_RE, PROTECTED_ERROR = str(_PROJECT), "", None, None
+configure(_PROJECT)
 REASON = ("Удаление запрещено вне своей папки. Можно только явным путём внутри папки проекта или scratchpad сессии; на "
-          "удалённых машинах — только каталоги из RPV_GUARD_REMOTE_ROOTS и RPV_GUARD_HOST_ROOTS (для этого хоста). "
-          "Закрытые узлы (Storage Box, RPV_GUARD_FORBIDDEN_HOSTS), записи root/ и deep/ — никогда (только владелец "
-          "через CEO). Непроверяемая цель: {t}")
+          "удалённых машинах — только каталоги guard_remote_roots. Закрытые хосты (guard_forbidden_hosts) и "
+          "защищённые пути (protected_paths) из .claude/rpv.json — никогда (только владелец через CEO). "
+          "Непроверяемая цель: {t}")
 REASON_OVERWRITE = ("Перезапись/усечение файла (`> файл`, truncate, dd of=, cp/mv поверх существующего) вне своей папки "
                     "запрещены, как и удаление: внутри папки проекта или scratchpad сессии; на удалённых машинах — "
-                    "только каталоги из RPV_GUARD_REMOTE_ROOTS и RPV_GUARD_HOST_ROOTS; автопамять проекта "
-                    "(~/.claude/projects/<проект>/memory/) — можно. Новый локальный файл вне папки можно создать (его ещё "
-                    "нет). Закрытые узлы, записи root/ и deep/ — никогда. Цель: {t}")
+                    "только каталоги guard_remote_roots (.claude/rpv.json); автопамять проекта (~/.claude/projects/<проект>/memory/) "
+                    "— можно. Новый локальный файл вне папки можно создать (его ещё нет). Закрытые хосты и защищённые "
+                    "пути проекта — никогда. Цель: {t}")
 REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO итогом "
                        "шага (`tickets.py result <ID> blocked --why \"...\"`). `git reset --hard`, "
                        "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
                        "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
-                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни из RPV_GUARD_REMOTE_ROOTS, "
+                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни guard_remote_roots, "
                        "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
                        "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
+REASON_PUBLISH = ("Публикация ({t}) запуску роли закрыта без согласия владельца по тикету {who}: выпуск, слияние PR, пуш в "
+                  "основную ветку (main/master) и теги, публикация пакетов и образов необратимы. Нужна — `tickets.py result <ID> "
+                  "ask-owner --why \"...\" --why-owner необратимое`; слово владельца CEO заносит в реестр (`registry.py decide`) и "
+                  "ставит согласие `tickets.py allow <ID> publish --ref В-N`. Пуш рабочей ветки разрешён (ветку назови явно: "
+                  "`git push origin <ветка>`); PR вливает программа (merge_rule) после приёмки Судьи.")
+REASON_CONSENT = ("Согласие на публикацию запуск диспетчера в шапку тикета не пишет: строку `allow:` ставит только CEO командой "
+                  "`tickets.py allow <ID> publish --ref В-N` после слова владельца. Нужна публикация — `tickets.py result <ID> "
+                  "ask-owner --why \"...\" --why-owner необратимое`.")
 REASON_FILE = ("Запись в файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit/MultiEdit/NotebookEdit "
                "меняют существующие файлы только внутри папки проекта, scratchpad сессии, временного каталога и автопамяти "
-               "проекта (~/.claude/projects/<проект>/memory/). Новый файл вне папки создать можно (его ещё нет). Записи "
-               "root/ и deep/, закрытые узлы — никогда. Нужна правка вне папки — через владельца/CEO.")
-REASON_HEAVY = ("Тяжёлая команда на машине замеров ({h}) вне замка замеров запрещена ({{t}}). Почему: замок не видит "
-                "ssh-сессии и не замораживает их, а du/find/tar/rsync/cp -r/vmtouch, md5sum и cmp по каталогам, cat больших "
-                "файлов и python-скрипты из ssh едят диск и ЦП во время замеров и портят их. Как надо: юнитом — "
-                "ssh … 'systemd-run --unit <имя> --collect -p CPUQuota=<N>% <обёртка замера> <команда>', вывод в файл, затем "
-                "читать его tail/cat. Без юнита можно: короткие cat/tail/head/ls/grep по файлам, systemctl, uptime, "
-                "sha256sum отдельных файлов, python3 -m py_compile, python3 -c до 200 символов, выкладка cat > файл && mv, "
-                "tar x со stdin.{hint}")
+               "проекта (~/.claude/projects/<проект>/memory/). Новый файл вне папки создать можно (его ещё нет). "
+               "Защищённые пути проекта и закрытые хосты — никогда. Нужна правка вне папки — через владельца/CEO.")
 REASON_CRASH = ("Страж удаления упал ({e}) — отказ по умолчанию (fail-closed), а не пропуск. Исправьте "
                 ".claude/hooks/delete_guard.py плагина вручную (вне этой сессии) или отключите плагин; не получилось — "
                 "сообщите владельцу/CEO.")
+REASON_PROTECTED = ("Защищённый путь ({t}): шаблон «{p}» из .claude/rpv.json (protected_paths) — удалять, переносить и "
+                    "перезаписывать нельзя никому, ни роли, ни CEO. Нужно изменить — владелец правит список "
+                    "protected_paths в .claude/rpv.json сам.")
+REASON_PROTECTED_CONFIG = ("Защищённые пути проекта не прочитаны ({e}): .claude/rpv.json, ключ protected_paths — должен быть "
+                           "список шаблонов, например [\"data/raw/**\", \"backups\"]. Пока файл не исправлен, удалять и "
+                           "перезаписывать нельзя ничего (fail-closed); сам .claude/rpv.json править можно. Исправление — "
+                           "через владельца/CEO.")
 UNKNOWN_TARGET = "<цель из кода не видна>"
 # куда писать можно всегда: не файлы (устройства-стоки, пустышка Windows/PowerShell)
 HARMLESS_SINK = re.compile(r"^(?:/dev/(?:null|stdout|stderr|tty|zero|full|fd/\d+)|/proc/self/fd/\d+|nul|con|\$null)$", re.I)
@@ -147,16 +196,13 @@ class Over(str):
     """Цель перезаписи/усечения (не удаления): вне корней отказ, только если файл существует или это неизвестно."""
 
 
-class Heavy(str):
-    """Тяжёлая команда на машине замеров вне замка (heavy_guard): отказ «через systemd-run под обёрткой замера»."""
-
-
 class Forbid(str):
     """Необратимая команда (git reset --hard и т. п.): отказ «только через CEO», путь не при чём."""
 
 
-def norm(p):
-    return p.strip().strip("'\"").replace("\\", "/").lower()
+class Publish(Forbid):
+    """Публикация (выпуск, слияние PR, пуш в main/master или тега, публикация пакета): запуску роли — только с согласием
+    владельца по тикету (`allow: publish` в шапке), сессиям CEO и владельца можно. Подкласс Forbid: те же ветки find/ssh."""
 
 
 def literal_part(p):
@@ -164,14 +210,9 @@ def literal_part(p):
     return re.split(r"\$(?!home\b|\{home\})", p, maxsplit=1)[0] if "$" in p else p
 
 
-def host_root_ok(literal, host):
-    """Путь внутри корня хоста (`HOST_ROOTS`): не сам корень, без сегментов root/deep ниже корня."""
-    for root in HOST_ROOTS.get(host or "", ()):
-        if literal.startswith(root):
-            rest = literal[len(root):]
-            if rest.strip("/*") and not any(s in FORBIDDEN_SEG for s in rest.split("/") if s):
-                return True
-    return False
+def closed_host(text):
+    """В тексте (путь, имя хоста, аргументы ssh) назван закрытый хост из `guard_forbidden_hosts`."""
+    return bool(CLOSED_RE and CLOSED_RE.search(text or ""))
 
 
 TEMP_VARS = ("$tmp", "$temp", "$tmpdir", "${tmp}", "${temp}", "${tmpdir}", "${tmpdir:-/tmp}", "${tmp:-/tmp}",
@@ -221,14 +262,14 @@ def temp_rest(p):
 
 
 def temp_ok(p, ctx):
-    """Путь внутри временного каталога (запись/перезапись/удаление разрешены) — кроме корня каталога, `*`, `..`, root/deep;
+    """Путь внутри временного каталога (запись/перезапись/удаление разрешены) — кроме корня каталога, `*`, `..`;
     на закрытом узле — нет."""
     tr = temp_rest(p)
     if tr is None or getattr(ctx, "host", None) == CLOSED_HOST:
         return False
     rest, from_mktemp = tr
     segs = [x for x in rest.split("/") if x]
-    if ".." in segs or any(x in FORBIDDEN_SEG for x in segs):
+    if ".." in segs:
         return False
     return from_mktemp or bool(rest.strip("/*"))
 
@@ -238,7 +279,7 @@ def allowed(t, ctx=None):
     p = norm(t)
     if not p or p.startswith("<") or "{}" in p:
         return False
-    if BOX_RE.search(p):
+    if closed_host(p):
         return False
     if temp_rest(p) is not None:                          # временные файлы — не данные владельца
         return temp_ok(p, ctx)
@@ -247,10 +288,6 @@ def allowed(t, ctx=None):
         return False
     if STAGE and (literal == STAGE or literal.startswith(STAGE + "/")):
         return True
-    if host_root_ok(literal, getattr(ctx, "host", None)):   # корни выделенного сервера — только при ssh на него
-        return True
-    if any(s in FORBIDDEN_SEG for s in literal.split("/") if s):
-        return False
     for root in LOCAL_ROOTS + REMOTE_ROOTS:
         if literal.startswith(root):
             return bool(literal[len(root):].strip("/*"))  # не саму корневую папку
@@ -284,7 +321,7 @@ def write_only_ok(t, ctx=None):
     if not p or p.startswith("<") or "{}" in p:
         return False
     literal = literal_part(p)
-    if not literal or ".." in literal.split("/") or BOX_RE.search(p):
+    if not literal or ".." in literal.split("/") or closed_host(p):
         return False
     rel = home_relative(literal)
     if rel is not None:
@@ -320,17 +357,17 @@ def linked_worktree(p):
 def scratch_repo_ok(d, ctx):
     """`git reset --hard` / `git clean -f` не трогают основное дерево: каталог репозитория известен явным путём (не
     переменная, не относительный без cwd) и лежит вне папки проекта — scratch (scratchpad сессии, свои удалённые корни
-    вроде <подкаталог из RPV_GUARD_REMOTE_ROOTS>, корни хоста), `/tmp/<подкаталог>` либо связанный worktree внутри папки
-    проекта (`.git` — файл)."""
+    вроде <подкаталог из guard_remote_roots>), `/tmp/<подкаталог>` либо связанный worktree внутри папки проекта
+    (`.git` — файл). Защищённый путь проекта (или настройка защиты не прочитана) — нет."""
     p = norm(d) if d else ""
-    if not p or "$" in p or ".." in p.split("/") or BOX_RE.search(p):
+    if not p or "$" in p or ".." in p.split("/") or closed_host(p):
         return False
     host = getattr(ctx, "host", None)
-    if host == CLOSED_HOST or (host and BOX_RE.search(host)):        # git на закрытом узле — как и удаление там
+    if host == CLOSED_HOST or closed_host(host):                     # git на закрытом узле — как и удаление там
         return False
     if not (p.startswith(("/", "~")) or re.match(r"[a-z]:", p)):
         return False
-    if any(sg in FORBIDDEN_SEG for sg in p.split("/") if sg) and not host_root_ok(p, host):
+    if PROTECTED_ERROR or (PROTECTED and protected_match(p, ctx, True)):
         return False
     probe = p.rstrip("/") + "/"
     if any(probe.startswith(r) for r in LOCAL_ROOTS):                # папка проекта: только связанный worktree
@@ -685,21 +722,20 @@ def tokenize(s, depth=0):
 # ------------------------------------------------------------------------------------------------------------
 
 class Ctx:
-    __slots__ = ("cwd", "remote", "funcs", "host", "exempt", "via")
+    __slots__ = ("cwd", "remote", "funcs", "host", "via")
 
-    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None, exempt=False, via=None):
+    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None, via=None):
         self.cwd = cwd          # нормализованный каталог или None (неизвестен)
         self.remote = remote
         self.funcs = funcs      # имена функций оболочки, объявленных в этой же команде (`rsh() { ssh …; }`)
-        self.host = host        # хост ssh без `user@`, строчными (для HOST_ROOTS) или None
-        self.exempt = exempt    # команда обёрнута в systemd-run: замок замеров (heavy_guard) её не трогает
+        self.host = host        # хост ssh без `user@`, строчными, или None
         self.via = via          # метка группы журнала для целей из кода Python/PowerShell ("py-ast", "ps"); иначе None
 
     def copy(self):
-        return Ctx(self.cwd, self.remote, self.funcs, self.host, self.exempt, self.via)
+        return Ctx(self.cwd, self.remote, self.funcs, self.host, self.via)
 
 
-CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (Storage Box, коллектор, порт 23, хост не определён)
+CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (хост из `guard_forbidden_hosts` или не определён)
 
 
 def host_of(arg):
@@ -968,6 +1004,26 @@ def python_scan(code, ctx, depth):
             yield (v if v is not None else UNKNOWN_TARGET, ctx.copy())
 
 
+PUBLISH_SUBS = {      # публикации, кроме `git push` (его разбирает git_scan): команда → подкоманды среди первых слов без опций
+    "gh": (("release", "create"), ("release", "upload"), ("release", "edit"), ("pr", "merge")),
+    "npm": (("publish",),), "pnpm": (("publish",),), "yarn": (("publish",),), "cargo": (("publish",),),
+    "poetry": (("publish",),), "uv": (("publish",),), "twine": (("upload",),), "gem": (("push",),),
+    "docker": (("push",), ("image", "push")),
+}
+
+
+def publish_label(name, args):
+    """Метка публикации у команды `имя арг…` (таблица PUBLISH_SUBS; `python -m twine upload` — как `twine upload`) либо None."""
+    if PY_NAMES.match(name) and "-m" in args[:-1]:
+        k = args.index("-m")
+        name, args = cmd_name(args[k + 1]), args[k + 2:]
+    pos = [a for a in args if not a.startswith("-")][:4]
+    for sub in PUBLISH_SUBS.get(name, ()):
+        if any(tuple(pos[i:i + len(sub)]) == sub for i in range(len(pos))):
+            return f"{name} {' '.join(sub)}"
+    return None
+
+
 def del_targets(name, args, xargs, piped):
     """Цели команды-удаления; None — это не удаление (справка, сухой прогон)."""
     ps = name in ("remove-item", "ri")
@@ -1028,7 +1084,7 @@ def find_scan(args, ctx, vars_, depth):
                 sub.append(expr[k])
                 k += 1
             inner = list(scan_one(Cmd(sub), ctx, vars_, (), depth + 1))
-            if any(not isinstance(x[0], (Over, Forbid, Heavy)) for x in inner):
+            if any(not isinstance(x[0], (Over, Forbid)) for x in inner):
                 deleting = True                     # внутри -exec удаление: целью становятся и пути find
             for x in inner:
                 if isinstance(x[0], Over) and "{}" in x[0]:
@@ -1050,7 +1106,7 @@ def find_scan(args, ctx, vars_, depth):
             yield (p, ctx.copy())
         yield from extra
     else:
-        yield from (x for x in extra if isinstance(x[0], (Over, Forbid, Heavy)))
+        yield from (x for x in extra if isinstance(x[0], (Over, Forbid)))
 
 
 def rsync_scan(args, ctx):
@@ -1058,8 +1114,6 @@ def rsync_scan(args, ctx):
     remove_src = "--remove-source-files" in args
     if not (delete or remove_src):
         return
-    # транспорт Storage Box — ssh порт 23 (`-e 'ssh -p 23 …'`): весь список аргументов, не только значение -e
-    bad = bool(re.search(r"(?:-p\s*23\b|port[= ]23\b)", " ".join(args), re.I))
     pos = []
     k = 0
     while k < len(args):
@@ -1079,7 +1133,7 @@ def rsync_scan(args, ctx):
         chosen.extend(pos[:-1] if len(pos) > 1 else pos)
     for arg in chosen:
         host, path = split_remote(arg)
-        if host and (bad or BOX_RE.search(host)):
+        if host and closed_host(host):
             yield (f"<rsync: {arg} — закрытый узел>", ctx.copy())
         elif host:
             yield (path, Ctx(None, True, host=host_of(arg)))
@@ -1136,6 +1190,81 @@ def git_discard(sub, rest, ctx, repo):
     return None
 
 
+DEFAULT_BRANCHES = ("main", "master")
+PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+TAG_NAME = re.compile(r"^v?\d+\.\d+(?:\.\d+)*[-+.\w]*$")        # `v1.8.48`, `2.0.0-rc1`: без точки (`v2`) — ветка
+
+
+def head_branch(repo, ctx):
+    """Ветка, на которой стоит репозиторий каталога `repo`, по `.git/HEAD` (у связанного worktree `.git` — файл со ссылкой
+    на gitdir); None — не определить: удалённая машина, неизвестный каталог, отсоединённая HEAD."""
+    cur = (repo or "").rstrip("/")
+    if getattr(ctx, "remote", False):
+        return None
+    for _ in range(40):
+        fp = fs_path(cur + "/.git", None) if cur else None
+        if fp is None:
+            return None
+        try:
+            if os.path.isfile(fp):
+                with open(fp, encoding="utf-8") as f:
+                    m = re.match(r"gitdir:\s*(.+)", f.read().strip())
+                if not m:
+                    return None
+                fp = os.path.join(cur, m.group(1).strip())                  # относительный gitdir — от каталога worktree
+            if os.path.isdir(fp):
+                with open(os.path.join(fp, "HEAD"), encoding="utf-8") as f:
+                    m = re.match(r"ref:\s*refs/heads/(\S+)", f.read().strip())
+                return m.group(1) if m else None
+        except (OSError, ValueError):
+            return None
+        parent = posixpath.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+    return None
+
+
+def push_publication(rest, repo, ctx):
+    """Метка публикации у `git push` — основная ветка (main/master) в любой записи refspec (`HEAD:main`, `refs/heads/main`,
+    `x:main`), тег (`--tags`, `--follow-tags`, `refs/tags/…`, `tag <имя>`, `v1.2.3`), все ветки (`--all`, шаблон `*`); пуш без
+    ветки (`git push`, `origin HEAD`) — по текущей ветке репозитория, не определена — тоже публикация. Рабочая ветка и
+    `--dry-run` — None."""
+    if any(a in ("--dry-run", "-n") for a in rest):
+        return None
+    flag = next((a for a in rest if a in ("--tags", "--all", "--branches") or a.startswith("--follow-tags")), None)
+    if flag:
+        return f"git push {flag}"
+    pos, k = [], 0
+    while k < len(rest):
+        a = rest[k]
+        k += 1
+        if a in PUSH_VALUE_OPTS:
+            k += 1
+        elif not a.startswith("-"):
+            pos.append(a)
+    specs = pos if any(a == "--repo" or a.startswith("--repo=") for a in rest) else pos[1:]    # первое слово — удалённый репозиторий
+    if specs[:1] == ["tag"]:
+        return "git push tag: тег"
+    for spec in specs:
+        src, sep, dst = spec.partition(":")
+        ref = dst if sep and dst else src
+        name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+        if ref.startswith("refs/tags/") or TAG_NAME.match(ref):
+            return f"git push {spec}: тег"
+        if name in DEFAULT_BRANCHES:
+            return f"git push {spec}: основная ветка"
+        if "*" in ref:
+            return f"git push {spec}: все ветки по шаблону"
+    if not specs or "HEAD" in specs or "@" in specs:                  # ветка не названа: уйдёт текущая
+        cur = head_branch(repo, ctx)
+        if cur in DEFAULT_BRANCHES:
+            return f"git push без ветки: текущая — {cur}"
+        if cur is None:
+            return "git push без ветки: текущую не определить"
+    return None
+
+
 def git_scan(args, ctx, vars_, redirected=False):
     """`redirected` — GIT_DIR/GIT_WORK_TREE в окружении команды: каталог репозитория не равен рабочему."""
     j = 0
@@ -1177,6 +1306,8 @@ def git_scan(args, ctx, vars_, redirected=False):
         elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
               or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
             yield (Forbid("git push --delete/--mirror/:ветка (удаление веток на удалённом)"), ctx.copy())
+        elif label := push_publication(rest, repo, ctx):
+            yield (Publish(label), ctx.copy())
         return
     if sub in ("checkout", "switch", "restore", "branch", "stash"):
         label = git_discard(sub, rest, ctx, repo)
@@ -1241,7 +1372,7 @@ def over(t, vars_, ctx):
 
 def cp_scan(args, ctx, vars_, move=False, xargs=False):
     """`cp`/`mv`: цель — существующий файл (или `каталог/имя` существующего каталога); `-n`/`--no-clobber` — не трогает.
-    `mv` (`move=True`) вдобавок УДАЛЯЕТ источники: каждый источник проверяется как цель удаления (`mv …/deep/x ./trash`
+    `mv` (`move=True`) вдобавок УДАЛЯЕТ источники: каждый источник проверяется как цель удаления (`mv защищённое ./trash`
     с последующим `rm -rf ./trash` — отказ на первом шаге); источники из stdin `xargs` не проверить — отказ."""
     pos = []
     dest_opt = None
@@ -1421,7 +1552,6 @@ def dd_scan(args, ctx, vars_):
 
 def ssh_scan(args, ctx, vars_, stdin, depth):
     j = 0
-    port = None
     ident = []
     while j < len(args):
         a = args[j]
@@ -1430,19 +1560,10 @@ def ssh_scan(args, ctx, vars_, stdin, depth):
             break
         if a.startswith("-") and len(a) > 1:
             if a in SSH_VAL:
-                val = args[j + 1] if j + 1 < len(args) else ""
-                if a == "-p":
-                    port = val
-                elif a == "-o" and re.match(r"port\s*[= ]\s*(\d+)", val, re.I):
-                    port = re.match(r"port\s*[= ]\s*(\d+)", val, re.I).group(1)
-                elif a in ("-i", "-F", "-J", "-l"):
-                    ident.append(val)
+                if a in ("-i", "-F", "-J", "-l"):
+                    ident.append(args[j + 1] if j + 1 < len(args) else "")
                 j += 2
                 continue
-            if a.startswith("-p") and a[2:].isdigit():
-                port = a[2:]
-            elif a.lower().startswith("-oport"):
-                port = re.sub(r"\D", "", a)
             j += 1
             continue
         if (re.fullmatch(r"\$\{?\w+(?:\[[@*]\])?\}?", a) and j + 1 < len(args)
@@ -1453,7 +1574,7 @@ def ssh_scan(args, ctx, vars_, stdin, depth):
     host = args[j] if j < len(args) else ""
     rest = args[j + 1:]
     host = expand_vars(host, vars_)
-    bad = (port == "23" or bool(BOX_RE.search(host + " " + " ".join(ident))) or "$" in host)
+    bad = closed_host(host + " " + " ".join(ident)) or "$" in host
     remote = Ctx(None, True, host=CLOSED_HOST if bad else host_of(host))
     if rest:
         found = list(scan_text(" ".join(rest), remote, stdin, depth + 1))
@@ -1461,8 +1582,8 @@ def ssh_scan(args, ctx, vars_, stdin, depth):
         found = []
         for text in stdin:
             found.extend(scan_text(text, remote, (), depth + 1))
-    if found and bad:
-        yield (f"<ssh {host}: удаление на закрытом узле (Storage Box, коллектор, хост не определён)>", ctx.copy())
+    if bad and any(not isinstance(x[0], Publish) for x in found):     # публикация на закрытом узле — не удаление: решает check
+        yield (f"<ssh {host}: удаление на закрытом хосте (`guard_forbidden_hosts`) или хост не определён>", ctx.copy())
     else:
         yield from found
 
@@ -1526,7 +1647,6 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
             record_var(vars_, w, depth)
         return
     xargs = False
-    exempt = False
     i = 0
     for _ in range(40):
         if i >= len(words):
@@ -1544,7 +1664,6 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
             if j is None:
                 return
             xargs = xargs or name == "xargs"
-            exempt = exempt or name == "systemd-run"
             i = j
             continue
         if w.startswith("$") and not w.startswith("$(") and expand_vars(w, vars_) != w:
@@ -1560,13 +1679,9 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     w = words[i]
     name = cmd_name(w)
     args = expand_args(words[i + 1:], vars_)
-    if exempt and not ctx.exempt:                    # `systemd-run … <команда>`: юнит под замком, внутри тоже не трогаем
-        ctx = ctx.copy()
-        ctx.exempt = True
-    if heavy_guard.HEAVY_HOST and ctx.remote and ctx.host == heavy_guard.HEAVY_HOST and not ctx.exempt:
-        label = heavy_guard.heavy_label(name, args, sin, xargs)
-        if label:
-            yield (Heavy(label), ctx.copy())
+    label = publish_label(name, args)                # публикация (CP2): запуску роли — только с согласием, решает check()
+    if label:
+        yield (Publish(label), ctx.copy())
     if name in ("export", "declare", "local", "readonly", "typeset"):
         for a in words[i + 1:]:
             if ASSIGN.match(a):
@@ -1607,7 +1722,7 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     elif name in RUNNERS:                            # `uv run python -c …`, `poetry run rm …`
         for k, a in enumerate(args):
             nm = cmd_name(a)
-            if nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or PY_NAMES.match(nm):
+            if nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or nm in PUBLISH_SUBS or PY_NAMES.match(nm):
                 yield from scan_one(Cmd(args[k:]), ctx, vars_, sin, depth + 1)
                 break
     elif name in OTHER_INTERP:                       # perl/ruby/node/php: вызовы удаления в коде — цель не видна
@@ -1714,6 +1829,10 @@ LEGACY_VERBS = re.compile(
     r"|find\s[^;&|\n]*-delete|rsync\s[^;&|\n]*--delete|git\s+clean|shutil\.rmtree|os\.(?:remove|unlink|rmdir)"
     r"|\.unlink\(|rmtree\(", re.I)
 LEGACY_SEP = re.compile(r"[;&|\n)`]")
+LEGACY_PUBLISH = re.compile(                      # публикации запуску роли и в неразобранной команде (CP2)
+    r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*(?:\b(?:main|master)\b|--(?:tags|all|branches|follow-tags))"
+    r"|\bgh\s+(?:release\s+(?:create|upload|edit)|pr\s+merge)\b|\b(?:npm|pnpm|yarn|cargo|poetry|uv)\s+publish\b"
+    r"|\btwine\s+upload\b|\bdocker\s+push\b|\bgem\s+push\b")
 
 
 def legacy_found(cmd, cwd):
@@ -1740,26 +1859,29 @@ def legacy_found(cmd, cwd):
             ts = [w for w in re.findall(r"\"[^\"]*\"|'[^']*'|\S+", tail)
                   if not w.startswith("-") and w not in (">", "2>")]
         found.extend((t, ctx) for t in ts)
-    if found and BOX_RE.search(cmd):
-        found.append(("<Storage Box/коллектор в команде>", ctx))
+    if found and closed_host(cmd):
+        found.append(("<закрытый хост в команде>", ctx))
+    found.extend((Publish(m.group(0)[:60]), ctx) for m in LEGACY_PUBLISH.finditer(cmd))
     return found
 
 
 # ------------------------------------------------------------------------------------------------------------
-# Аудит-3 (03.10): чьи правила и что защищено всегда
+# Аудит-3 (03.10): чьи правила и что защищено всегда; защищённые пути проекта (CP7)
 # ------------------------------------------------------------------------------------------------------------
 
 DISPATCH_ROLES = ("researcher", "engineer", "judge")
-SETTINGS_NAMES = ("settings.json", "settings.local.json")
+SETTINGS_NAMES = ("settings.json", "settings.local.json", "rpv.json")      # rpv.json — настройки плагина (protected_paths)
 REASON_GIT_DIR = ("Каталог .git ({t}) — история репозитория: удалять или переносить его и файлы внутри нельзя никому "
                   "(`rm -rf .git`, `rm -rf .*`, `mv .git …`); можно только снять зависший замок `*.lock`. Чистка "
                   "истории — только владелец через CEO.")
 REASON_GIT_WRITE = ("Запуск диспетчера не пишет внутрь .git ({t}): состояние репозитория меняют команды git, а не правка "
                     "файлов. Нужно иное — через CEO.")
-REASON_SETTINGS = ("Настройки Claude Code ({t}) запуску диспетчера менять нельзя: через них выключаются хуки и плагин "
-                   "(`disableAllHooks`, `enabledPlugins`), а с ними и этот страж. Правка настроек — через CEO.")
-REASON_FILE_HARD = ("Запись в {t}: записи root/ и deep/ (единственные копии) и закрытые узлы — никогда, в любой сессии. "
-                    "Только владелец через CEO.")
+REASON_SETTINGS = ("Настройки Claude Code и плагина ({t}) запуску диспетчера менять нельзя: через них выключаются хуки и "
+                   "плагин (`disableAllHooks`, `enabledPlugins`) и снимается защита путей (`protected_paths`), а с ними "
+                   "и этот страж. Правка настроек — через CEO.")
+REASON_OWNER_RECORD = ("Слово владельца ({t}) запуск диспетчера не правит: решения и цели пишет только CEO командой "
+                       "`registry.py` (дословно), CLAUDE.md — только CEO. Нужно изменить — "
+                       "`tickets.py result <ID> ask-owner --why \"...\"`.")
 
 
 def dispatcher_role():
@@ -1767,6 +1889,29 @@ def dispatcher_role():
     сессия CEO или владельца."""
     r = _env("ROLE").strip().lower()
     return r if r in DISPATCH_ROLES else None
+
+
+def publish_consent():
+    """Согласие владельца на публикацию по тикету запуска (`RPV_TICKET`) → (есть, тикет для текста отказа). Читается только
+    шапка `<проект>/.claude/tickets/<ID>.md`: строка `allow: publish (В-N)` (ставит `tickets.py allow`, только CEO). Не
+    прочитано — согласия нет (fail-closed)."""
+    tid = _env("TICKET").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", tid):
+        return False, "(тикет запуска RPV_TICKET не определён)"
+    try:
+        with open(os.path.join(PROJECT_DIR, ".claude", "tickets", tid + ".md"), encoding="utf-8") as f:
+            if f.readline().strip() != "---":
+                return False, f"{tid} (в файле нет шапки)"
+            granted = False
+            for line in f:
+                key, _, val = line.partition(":")
+                if line.strip() == "---":
+                    return granted, tid
+                if key.strip() == "allow":                  # как в разборе шапки (ticket.py): последняя строка ключа решает
+                    granted = bool(re.match(r"publish\b", val.strip()))
+    except (OSError, ValueError) as e:                      # ValueError — и UnicodeDecodeError: тикет не читается
+        return False, f"{tid} (шапка не прочитана: {type(e).__name__})"
+    return False, f"{tid} (шапка не закрыта)"
 
 
 def _abs_norm(t, ctx):
@@ -1802,9 +1947,183 @@ def settings_file(t, ctx):
     return len(segs) >= 2 and segs[-2] == ".claude" and segs[-1] in SETTINGS_NAMES
 
 
+def owner_record(t, ctx):
+    """Цель — слово владельца (V2): `CLAUDE.md` в любом каталоге, реестр решений `.claude/decisions.md`, цели
+    `.claude/goals/…`."""
+    segs = [s for s in _abs_norm(t, ctx).split("/") if s]
+    if not segs:
+        return False
+    if segs[-1] == "claude.md" or (len(segs) >= 2 and segs[-2] == ".claude" and segs[-1] == "decisions.md"):
+        return True
+    return any(segs[i] == ".claude" and segs[i + 1] == "goals" for i in range(len(segs) - 1))
+
+
+OWNER_RECORD_NAMES = ("claude.md", ".claude/decisions.md", ".claude/goals")
+
+
+def owner_record_write(tool, ti):
+    """Запись запуска диспетчера в слово владельца через оболочку, в т. ч. дописывание `>>` (его разбор целей не видит);
+    чтение свободно, текст `--text`/`--why` у tickets.py не в счёт."""
+    if tool not in SHELL_TOOLS:
+        return False
+    cmd = str(ti.get("command") or "")
+    if "tickets.py" in cmd:
+        cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
+    return any(CEO_SIGNAL_WRITE.search(part) and any(n in part.lower().replace("\\", "/") for n in OWNER_RECORD_NAMES)
+               for part in re.split(r"\n|&&|\|\||;", cmd))
+
+
+CONSENT_LINE = re.compile(r"(?mi)^[ \t]*allow[ \t]*:")      # строка шапки тикета `allow: publish (В-N)`
+BENIGN_REDIRECT = re.compile(r"\d*>&?\s*(?:/dev/null|\d)")  # `2>/dev/null`, `2>&1` — не запись в файл
+
+
+def _strings(x):
+    """Все строки внутри значения tool_input (Edit: new_string, MultiEdit: edits[].new_string, Write: content)."""
+    if isinstance(x, str):
+        yield x
+    elif isinstance(x, dict):
+        for v in x.values():
+            yield from _strings(v)
+    elif isinstance(x, (list, tuple)):
+        for v in x:
+            yield from _strings(v)
+
+
+def consent_forge(tool, ti):
+    """Запись запуском диспетчера строки `allow:` в файл тикета (`.claude/tickets/…`) мимо `tickets.py allow`: согласие на
+    публикацию ставит только CEO. Файловые инструменты — строка шапки `allow:` в новом тексте; оболочка — команда, которая
+    пишет (как в `owner_record_write`), называет `.claude/tickets/` и `allow:`; чтение и текст `--text`/`--why` не в счёт."""
+    if tool in SHELL_TOOLS:
+        cmd = str(ti.get("command") or "")
+        if "tickets.py" in cmd:
+            cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
+        cmd = BENIGN_REDIRECT.sub("", cmd)
+        return bool(CEO_SIGNAL_WRITE.search(cmd) and ".claude/tickets/" in cmd.replace("\\", "/").lower()
+                    and re.search(r"\ballow[ \t]*:", cmd, re.I))
+    path = file_target(ti) or ""
+    return ".claude/tickets/" in path.replace("\\", "/").lower() and any(CONSENT_LINE.search(s) for s in _strings(ti))
+
+
+def _segs(p):
+    return [s for s in p.split("/") if s and s != "."]
+
+
+def _glob_seg(pseg, tseg):
+    """Сегмент шаблона `pseg` подходит сегменту пути `tseg`; сегмент-маска цели (`rm data/*`) — «может подойти»."""
+    return fnmatch.fnmatchcase(tseg, pseg) or (any(c in tseg for c in "*?[") and fnmatch.fnmatchcase(pseg, tseg))
+
+
+def _glob_covers(pp, ps):
+    """Путь `ps` (сегменты) попадает под шаблон `pp`: равен ему или лежит внутри совпавшего каталога; `**` — любое число
+    сегментов."""
+    if not pp:
+        return True
+    if pp[0] == "**":
+        return any(_glob_covers(pp[1:], ps[k:]) for k in range(len(ps) + 1))
+    return bool(ps) and _glob_seg(pp[0], ps[0]) and _glob_covers(pp[1:], ps[1:])
+
+
+def _glob_contains(pp, ps):
+    """Каталог `ps` может содержать то, что назвал шаблон `pp`: удаление каталога заденет защищённое."""
+    if not ps:
+        return bool(pp)
+    if not pp:
+        return False
+    if pp[0] == "**":
+        return _glob_contains(pp[1:], ps) or _glob_contains(pp, ps[1:])
+    return _glob_seg(pp[0], ps[0]) and _glob_contains(pp[1:], ps[1:])
+
+
+def _canon(p, remote):
+    """Путь для сопоставления с шаблонами: локально `~`/`$home` — домашний каталог, `/c/x` — `c:/x` (Windows); на удалённой
+    машине путь остаётся текстом."""
+    if remote:
+        return p
+    for pre in ("~", "$home", "${home}"):
+        if p == pre or p.startswith(pre + "/"):
+            return norm(os.path.expanduser("~")).rstrip("/") + p[len(pre):]
+    m = re.match(r"^/([a-z])/(.*)$", p)
+    return f"{m.group(1)}:/{m.group(2)}" if m and os.name == "nt" else p
+
+
+def protected_match(t, ctx, deleting):
+    """Шаблон из `PROTECTED`, под который попадает цель, или None. Попадает: сама цель, всё внутри совпавшего каталога, а
+    при удалении — ещё каталог, внутри которого лежит защищённое (`rm -rf data` при `data/raw/**`; шаблоны, начинающиеся с
+    имени или `**`, родителей не закрывают: глубина у них любая). Шаблон без `/` — имя на любой глубине (как в .gitignore);
+    с `/` — путь от корня проекта; с начальным `/`, `~` или диском (`c:/`) — именно этот путь. Маска в цели (`rm data/*`)
+    считается «может задеть». На удалённой машине корень проекта неизвестен: шаблон с `/` ищется на любой глубине. Путь,
+    начало которого — неизвестная переменная, не видно (решают прочие правила); временный каталог (`$TMP/x`) — виден."""
+    remote = bool(getattr(ctx, "remote", False))
+    p = _abs_norm(t, ctx)
+    if not p or p.startswith("<") or "{}" in p:
+        return None
+    lit = literal_part(p)
+    rel = None                                               # путь от корня проекта (только локально)
+    if lit:
+        if lit != p and not lit.endswith("/"):
+            lit += "*"                                       # `data/ra$X` — как `data/ra*`
+        p = _canon(lit, remote)
+        if ".." in p.split("/"):
+            p = posixpath.normpath(p)
+        absolute = p.startswith(("/", "~", "$home", "${home}")) or bool(re.match(r"[a-z]:", p))
+        segs = _segs(p)
+        if not remote:
+            for root in LOCAL_ROOTS:
+                if (p + "/").startswith(root):
+                    rel = _segs(p[len(root):])
+                    break
+            if rel is None and not absolute:
+                rel = segs                                   # относительный путь без известного cwd — от корня проекта
+        name_segs = rel if rel is not None else segs
+        if rel is None and not remote:                       # вне проекта домашний каталог в имена не входит
+            home = _segs(norm(os.path.expanduser("~")))
+            if home and segs[:len(home)] == home:
+                name_segs = segs[len(home):]
+    else:
+        tr = temp_rest(p)                                    # `$TMP/x`, `$(mktemp -d)/x`: известна только часть после корня
+        if tr is None:
+            return None
+        absolute, segs = False, _segs(tr[0])
+        name_segs = segs
+    for pat in PROTECTED:
+        if pat.startswith(("/", "~", "$home", "${home}")) or re.match(r"[a-z]:", pat):
+            pp, subj = _segs(_canon(pat, remote)), (segs if absolute else None)
+        elif "/" in pat and not remote:
+            pp, subj = _segs(pat), rel
+        else:
+            pp, subj = ["**"] + _segs(pat), name_segs
+        if subj is None:
+            continue
+        if _glob_covers(pp, subj) or (deleting and pp[:1] not in (["**"], []) and _glob_contains(pp, subj)):
+            return pat
+    return None
+
+
+def rpv_config(t, ctx):
+    """Цель — файл настроек плагина `.claude/rpv.json`."""
+    return _segs(_abs_norm(t, ctx))[-2:] == [".claude", "rpv.json"]
+
+
+def protected_path(t, ctx, deleting):
+    """Защищённые пути проекта (`.claude/rpv.json` → `protected_paths`) → причина отказа или None. Перезапись (не
+    удаление) — только если файл есть или это неизвестно: новый файл ничего не затирает. Настройка не прочитана — отказ
+    любой цели, кроме самого файла настроек (его и надо исправить)."""
+    if PROTECTED_ERROR:
+        if rpv_config(t, ctx):
+            return None
+        why = REASON_PROTECTED_CONFIG.format(e=PROTECTED_ERROR)
+    else:
+        pat = protected_match(t, ctx, deleting) if PROTECTED else None
+        if pat is None:
+            return None
+        why = REASON_PROTECTED.format(t=t, p=pat)
+    return why if deleting or may_exist(t, ctx) else None
+
+
 def protected(t, ctx, role, deleting):
     """Защищённые места → причина отказа или None. `.git`: удаление и перенос — никому, запись — запускам диспетчера;
-    настройки Claude Code — запускам диспетчера (ни удалить, ни перезаписать)."""
+    настройки Claude Code и плагина и слово владельца (CLAUDE.md, решения, цели) — запускам диспетчера (ни удалить, ни
+    перезаписать); защищённые пути проекта (`protected_paths`) — никому, ни роли, ни CEO."""
     if git_internal(t, ctx):
         if deleting:
             return REASON_GIT_DIR.format(t=t)
@@ -1812,29 +2131,9 @@ def protected(t, ctx, role, deleting):
             return REASON_GIT_WRITE.format(t=t)
     if role and settings_file(t, ctx):
         return REASON_SETTINGS.format(t=t)
-    return None
-
-
-def hard_forbidden_file(path, ctx):
-    """Сессиям вне диспетчера (CEO, владелец) файловые инструменты закрыты только правилом «никогда»: записи root/ и deep/
-    и закрытые узлы. Домашний каталог (`/root` у root на Linux) сегментом не считается; во временном каталоге — сегменты
-    после его корня."""
-    p = norm(fs_path(path, ctx) or path)
-    if BOX_RE.search(p):
-        return True
-    tr = temp_rest(p)
-    if tr is not None:
-        p = tr[0]
-    else:
-        home = norm(os.path.expanduser("~")).rstrip("/") + "/"
-        if p.startswith(home):
-            p = p[len(home):]
-    return any(s in FORBIDDEN_SEG for s in literal_part(p).split("/") if s)
-
-
-def heavy_reason(t):
-    hint = _env("GUARD_HEAVY_HINT").strip()
-    return REASON_HEAVY.format(h=heavy_guard.HEAVY_HOST, hint=(" " + hint) if hint else "").format(t=t)
+    if role and owner_record(t, ctx):
+        return REASON_OWNER_RECORD.format(t=t)
+    return protected_path(t, ctx, deleting)
 
 
 def _deny(trace, group, reason):
@@ -1850,7 +2149,7 @@ def _temp_hit(target, trace):
 
 def check(cmd, cwd, trace=None):
     """Причина отказа или None. Сам не падает: сбой разбора — прежний регэксп, сбой и его — отказ (fail-closed).
-    `trace` — список (группа ветки, deny|allow) для журнала: решающая ветка и разрешающие temp/legacy."""
+    `trace` — список (группа ветки, deny|allow) для журнала: решающая ветка и разрешающие temp/legacy/publish."""
     cmd = cmd or ""
     trace = [] if trace is None else trace
     legacy = False
@@ -1862,13 +2161,15 @@ def check(cmd, cwd, trace=None):
         except ParseError:                          # незакрытая кавычка и т. п. — прежний регэксп как страховка
             found = legacy_found(cmd, cwd)
             legacy = True
-            heavy = heavy_guard.legacy_heavy(cmd)
-            if heavy:
-                return _deny(trace, "heavy", heavy_reason(heavy))
         for target, ctx in found:
             group = "legacy" if legacy else ctx.via or ("ssh" if ctx.remote else None)
-            if isinstance(target, Heavy):
-                return _deny(trace, "heavy", heavy_reason(target))
+            if isinstance(target, Publish):
+                if role:                                    # CEO и владелец публикуют свободно; роль — с согласием по тикету
+                    granted, who = publish_consent()
+                    if not granted:
+                        return _deny(trace, "publish", REASON_PUBLISH.format(t=target, who=who))
+                    trace.append(("publish", "allow"))
+                continue
             if isinstance(target, Forbid):
                 return _deny(trace, "git", REASON_IRREVERSIBLE.format(t=target))
             why = protected(target, ctx, role, deleting=not isinstance(target, Over))
@@ -1907,8 +2208,8 @@ def file_target(tool_input):
 def check_file(path, cwd, trace=None):
     """Запись файловым инструментом. Запуск диспетчера (`RPV_ROLE`) — как перезапись через Bash: путь вне корней (папка
     проекта, scratchpad, temp, автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно.
-    Сессия CEO/владельца (аудит-3) правит файлы вне проекта свободно (настройки, соседние репозитории, планы); для неё
-    остаётся только «никогда»: root/ и deep/, закрытые узлы. Для всех: внутрь .git и в настройки Claude Code — см. protected."""
+    Сессия CEO/владельца (аудит-3) правит файлы вне проекта свободно (настройки, соседние репозитории, планы). Для всех:
+    внутрь .git, в настройки Claude Code и плагина, в защищённые пути проекта существующий файл — см. protected."""
     try:
         trace = [] if trace is None else trace
         ctx = Ctx(norm(cwd).rstrip("/") if cwd else None, False)
@@ -1918,8 +2219,6 @@ def check_file(path, cwd, trace=None):
         if why:
             return _deny(trace, "protected", why)
         if role is None:
-            if hard_forbidden_file(path, ctx) and may_exist(target, ctx):
-                return _deny(trace, "file", REASON_FILE_HARD.format(t=path))
             _temp_hit(target, trace)
             return None
         if allowed(target, ctx) or write_only_ok(target, ctx) or not may_exist(target, ctx):
@@ -1930,12 +2229,12 @@ def check_file(path, cwd, trace=None):
         return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
 
 
-CEO_SIGNAL_NAMES = ("ceo-inbox.md", "ceo-wake.log")   # В-192: сигналы CEO — только через шину; файлы пишет dispatch.append_ceo_inbox
+CEO_SIGNAL_NAMES = ("ceo-inbox.md", "ceo-wake.log")   # сигналы CEO пишет только код диспетчера (dispatch.append_ceo_inbox)
 CEO_SIGNAL_WRITE = re.compile(r"(>|\btee\b|\bsed\b[^|;&]*\s-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b|\bdd\b|\binstall\b|"
                               r"Set-Content|Add-Content|Out-File|Clear-Content|Remove-Item|Move-Item|Copy-Item|\.write|open\()", re.I)
 CEO_SIGNAL_TEXT = re.compile(r"""--(?:text|why)(?:=|\s+)("(?:[^"\\]|\\.)*"|'[^']*')""", re.S)
-REASON_CEO_SIGNAL = ("Сигналы команды идут только через шину: ceo-inbox.md/ceo-wake.log пишет лишь dispatch.append_ceo_inbox "
-                     "(запасной путь). Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; очередь читает `tickets.py inbox` (README «Стандарт сигналов»).")
+REASON_CEO_SIGNAL = ("Сигналы команды пишет только диспетчер: ceo-inbox.md/ceo-wake.log — это dispatch.append_ceo_inbox. "
+                     "Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; новые строки читает `tickets.py inbox` (docs/signals.md).")
 
 
 def ceo_signal_write(tool, ti):
@@ -1965,6 +2264,10 @@ def check_tool(data, trace=None):
     try:
         if ceo_signal_write(tool, ti):
             return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
+        if dispatcher_role() and owner_record_write(tool, ti):
+            return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals"))
+        if dispatcher_role() and consent_forge(tool, ti):
+            return _deny(trace, "publish", REASON_CONSENT)
         if tool in SHELL_TOOLS:
             reason = check(str(ti.get("command") or ""), cwd, trace)
             if tool == "PowerShell" and trace and trace[-1] == ("rm", "deny"):
@@ -1980,7 +2283,7 @@ def check_tool(data, trace=None):
 
 def journal_guard(project, tool, trace, reason):
     """Строки в `<проект>/.claude/dispatcher/guard.log`: время, инструмент, группа ветки, deny|allow, начало причины.
-    Отказы — решающей веткой, разрешения — только у temp/legacy (иначе их нуль ничего не значит): по журналу срез №5
+    Отказы — решающей веткой, разрешения — только у temp/legacy/publish (иначе их нуль ничего не значит): по журналу срез №5
     режет группы с нулём отказов за неделю (решение Судьи). Сбой записи не мешает решению стража."""
     try:
         from datetime import datetime
@@ -1997,7 +2300,6 @@ def journal_guard(project, tool, trace, reason):
 def main():
     """PreToolUse-хук: stdin — JSON события; отказ — JSON с permissionDecision=deny. Fail-closed: битое событие и сбой
     стража — отказ с причиной. Тишина — только если инструмент не наш или в проекте нет команды ролей (`.claude/roles`)."""
-    import json
     import sys
 
     def deny(reason):

@@ -1,8 +1,8 @@
 """Stop: запуск роли диспетчера не кончается без записи в лог тикета (TK-079, В-195).
 
-Роль, запущенная диспетчером (RPV_ROLE + RPV_TICKET), не оставила за запуск ни одной записи своим заголовком —
-Stop блокируется с причиной «сообщи итог». Строгий режим RPV_STOP_STRICT=1 требует именно команду итога
-(запись `[итог: …]`). Повторный Stop после блокировки (stop_hook_active) пропускается — без вечной петли. Не запуск
+Роль, запущенная диспетчером (RPV_ROLE + RPV_TICKET), не записала за запуск итог своим заголовком (запись `[итог: …]`
+командой `tickets.py result`; заметка `comment` итогом не считается — CP8: прежний мягкий режим снят) — Stop
+блокируется с причиной «сдай итог». Повторный Stop после блокировки (stop_hook_active) пропускается — без вечной петли. Не запуск
 диспетчера, нет зеркала запуска в state.json или любой сбой — молча разрешает: хук не должен держать сессию.
 """
 import json
@@ -25,7 +25,7 @@ def main():
     if data.get("stop_hook_active"):
         return
     root = os.path.abspath(os.environ.get("CLAUDE_PROJECT_DIR") or _env("PROJECT") or os.getcwd())
-    disp = _env("DISPATCHER_DIR") or os.path.join(root, ".claude", "dispatcher")
+    disp = os.path.join(root, ".claude", "dispatcher")
     try:
         with open(os.path.join(disp, "state.json"), encoding="utf-8") as f:
             run = (json.load(f).get("active_runs") or {}).get(tid)
@@ -35,14 +35,13 @@ def main():
         import ticket as T
         tkt = T.read_ticket(os.path.join(root, ".claude", "tickets", f"{tid}.md"))
         before = set(run["log_keys_at_launch"])
-        strict = _env("STOP_STRICT") == "1"
         for e in tkt.log:
-            if T.author_is(e.author, role) and f"{e.ts_raw} {e.author}" not in before:
-                if not strict or e.text.lstrip().startswith("[итог:"):
-                    return
+            if (T.author_is(e.author, role) and f"{e.ts_raw} {e.author}" not in before
+                    and e.text.lstrip().startswith("[итог:")):
+                return
     except Exception:
         return
-    how = f"tickets.py result {tid} <итог> --why \"…\"" if strict else f"tickets.py comment {tid} --author {role} --text \"…\""
+    how = f"tickets.py result {tid} <итог> --why \"…\""
     print(json.dumps({"decision": "block",
                       "reason": f"За этот запуск нет записи в логе {tid}. Сообщи итог: {how} — что сделал, что дальше."}))
 

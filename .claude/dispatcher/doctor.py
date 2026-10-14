@@ -1,7 +1,7 @@
-"""/rpv-doctor — здоровье команды одной таблицей (TK-076 п.3): диспетчер, сторож, присмотр ОС, шина, очередь, ошибки за сутки.
+"""/rpv-doctor — здоровье команды одной таблицей (TK-076 п.3): диспетчер, сторож, присмотр ОС, очередь, ошибки за сутки.
 
     python doctor.py [--project P] [--json]      код возврата 0 — нет FAIL, 1 — есть FAIL, 2 — проект не найден
-Только читает: ничего не запускает и не пишет (шина — GET /health и /stats)."""
+Только читает: ничего не запускает и не пишет."""
 from __future__ import annotations
 
 import argparse
@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bus"))
 import project as P  # noqa: E402
 import start as S  # noqa: E402
 import hide  # noqa: E402
@@ -84,31 +83,6 @@ def _log_lines_since(path: Path, since: float) -> list:
     except OSError:
         pass
     return out
-
-
-def check_bus(request=None, state_url: str | None = None) -> tuple:
-    import busclient as B
-    url, tok = B.config()
-    url = state_url if state_url is not None else url  # адрес, с которым живёт диспетчер (state.json), главнее оболочки
-    if not url:
-        return "шина", OFF, "выключена (RPV_BUS_URL не задан) — сигналы идут файлами"
-    if request is None:
-        def request(path, _url=url, _tok=tok):  # B.request берёт адрес оболочки — опрашиваем именно адрес диспетчера
-            import json as _j
-            import urllib.request as _u
-            req = _u.Request(_url + path, headers={"Authorization": "Bearer " + _tok})
-            with _u.urlopen(req, timeout=5) as r:
-                return _j.loads(r.read())
-    try:
-        h = request("/stats")
-    except Exception as e:  # сеть/401/таймаут — сами по себе диагноз
-        return "шина", FAIL, f"{url}: недоступна ({type(e).__name__}: {e})"
-    if not isinstance(h, dict) or not h.get("ok"):
-        return "шина", FAIL, f"{url}: ответ {str(h)[:80]}"
-    q = h.get("queues") or {}
-    blocked = h.get("blocked") or {}
-    msg = f"{url}: ok, событий {h.get('last_seq')}, не доставлено {sum(q.values())}, блоков {len(blocked)}"
-    return "шина", (WARN if blocked else OK), msg
 
 
 def check_queue(project: Path, state_dir: Path) -> list:
@@ -180,31 +154,22 @@ def check_idle(state_dir: Path, now: float, slo_min: float = 10.0) -> tuple:
     return "простой сегодня", (FAIL if m > slo_min else OK), detail
 
 
-def _state_bus_url(sd: Path):
-    try:
-        return json.loads((sd / "state.json").read_text(encoding="utf-8")).get("bus_url")
-    except (OSError, ValueError):
-        return None
-
-
 def check_copies(project: Path, name: str, procs=None) -> tuple | None:
     """Ровно одна копия службы: две — гонка за замок и двойная работа (FAIL); нет копии ловит check_service."""
     n = len(S.find_copies(f"{name}.py", project, procs))
     return (f"копии {name}", FAIL, f"{n} копий вместо одной") if n > 1 else None
 
 
-def run_checks(project: Path, now: float | None = None, installed=scheduler_installed, bus_request=None,
-               alive_only: bool = False, procs=None) -> list:
-    """alive_only — проверка выпуска: накопленный за сутки простой (check_idle) к исправности новой версии не относится."""
+def run_checks(project: Path, now: float | None = None, installed=scheduler_installed,
+               procs=None) -> list:
     now = time.time() if now is None else now
     sd = project / ".claude" / "dispatcher"
-    names = S.services()
+    names = S.services(project)
     procs = S._list_procs() if procs is None else procs   # один снимок на все службы
     rows = [check_service(n, sd, now) for n in names]
     rows += [c for c in (check_copies(project, n, procs) for n in names) if c]
-    rows += [check_supervise(project, sd, now, installed), check_bus(bus_request, _state_bus_url(sd))]
-    if not alive_only:
-        rows.append(check_idle(sd, now, float(P.env("IDLE_SLO_MIN", "10"))))
+    rows.append(check_supervise(project, sd, now, installed))
+    rows.append(check_idle(sd, now))
     rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
 
@@ -219,14 +184,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project")
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--alive", action="store_true", help="проверка выпуска: без накопленного простоя за сутки")
     a, _ = ap.parse_known_args(argv)
     try:
         project = P.resolve_project(["--project", a.project] if a.project else [])
     except P.ProjectNotFound:
         print(P.NOT_FOUND_HINT, file=sys.stderr)
         return 2
-    rows = run_checks(Path(project), alive_only=a.alive)
+    rows = run_checks(Path(project))
     print(json.dumps([dict(zip(("check", "status", "detail"), r)) for r in rows], ensure_ascii=False, indent=1)
           if a.json else render(rows))
     return 1 if any(r[1] == FAIL for r in rows) else 0

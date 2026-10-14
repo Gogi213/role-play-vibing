@@ -3,10 +3,11 @@
 Шапка между строками `---` (простые строки `ключ: значение`, без внешнего YAML):
 `id, title, owner` (researcher|engineer|judge), `status`
 (backlog|todo|in_progress|waiting|in_review|done|blocked|needs_owner|stopped), `reviewer` (опц.),
-`wait_for` (опц.: `file:<путь>` локально, `host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh, `ticket:<ID>`; разбор — `parse_wait_for`),
+`wait_for` (опц.: `file:<путь>` локально, `host:<ssh-алиас>:<путь>` / `host:<…>:unit:<имя>` на машине по ssh, `ticket:<ID>`; разбор — `parse_wait_for`),
 `next` (опц., v2: `researcher|engineer|judge|ceo` — кого запустить один раз; пишет
 `tickets.py comment --next`, диспетчер очищает при запуске), `effort` (опц., v2: `low|medium|high|xhigh`),
-`updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
+`allow` (опц., CP2: `publish (В-N)` — согласие владельца на публикации по тикету; ставит `tickets.py allow` (только CEO), читает
+страж `delete_guard.py`, диспетчер не читает), `updated`. `backlog` — задача перенесена (например из TASKS.md), но ещё не в работе: диспетчер её
 не трогает (`dispatch.decide()`), в `todo` переводит `tickets.py start <ID>`. `stopped` — роль остановлена CEO
 (`tickets.py stop` без `--next`): диспетчер не будит, сторож не считает сиротой; в `todo` — тем же `start`.
 
@@ -62,14 +63,14 @@ _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?
 
 
 # --- wait_for: допустимые формы (одно место правды: диспетчер, tickets.py, проверка записи) --------------------
-# Алиасы машин для `host:<алиас>:...`; адрес ssh — из окружения (RPV_<АЛИАС>_HOST), без умолчаний.
-WAIT_FOR_HOSTS = ("calc", "vps", "deck")
-WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<calc|vps|deck>:<путь> (…/job.json с done/total — готово при "
-                    "done>=total, иначе файл существует) | host:<calc|vps|deck>:unit:<имя юнита> (готово, когда "
+# Алиас машины в `host:<алиас>:...` — любое ssh-имя; адрес, пользователь и ключ берёт сам ssh из ~/.ssh/config.
+WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<ssh-алиас>:<путь> (…/job.json с done/total — готово при "
+                    "done>=total; …/<unit>.rc — файл итога tools/jobrun.sh; иначе файл существует) | host:<ssh-алиас>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
-                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<calc|vps|deck>:<id задания> (готово при done; "
-                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер RPV_JOB_STATE_CMD) | "
+                    "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<ssh-алиас>:<id задания> (готово при done; "
+                    "упало/исчезло — сторож будит владельца; состояние даёт адаптер job_state_cmd в rpv.json) | "
                     "at:<время ISO> (готово по наступлении времени; суточное наблюдение — сторож жизни его не трогает)")
+_HOST_ALIAS_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")  # не с дефиса: ssh принял бы имя за свою опцию
 _UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 _TICKET_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -134,6 +135,11 @@ def by_left_text(tkt, now: datetime | None = None) -> str:
     return f"срок {when} (через {span(mins)})" if mins >= 0 else f"срок {when} прошёл {span(-mins)} назад"
 
 
+def host_alias_ok(alias: str) -> bool:
+    """Алиас машины в `host:`/`job:` — только форма ssh-имени; есть ли такой алиас в ~/.ssh/config, видно по первому ssh."""
+    return bool(_HOST_ALIAS_RE.fullmatch(alias or ""))
+
+
 def host_path_ok(arg: str) -> bool:
     """Путь на машине — только абсолютный (`/…` или `~/…`): `host:calc:file:/x` и относительный путь молча
     ждали бы вечно (TK-117, К1.1). Одна проверка для `wait`, диспетчера и сторожа (все идут через parse_wait_for)."""
@@ -162,14 +168,14 @@ def parse_wait_for(spec: str):
     if spec.startswith("at:"):  # ожидание по времени: без метки-файла и задания планировщика (TK-092)
         at = parse_at(spec[len("at:"):])
         return ("at", at) if at else None
-    if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, RPV_JOB_STATE_CMD)
+    if spec.startswith("job:"):  # задание проекта: состояние даёт адаптер (lifewatch.py, job_state_cmd в rpv.json)
         alias, sep, jid = spec[len("job:"):].partition(":")
         jid = jid.strip()
-        return ("job", alias, jid) if alias in WAIT_FOR_HOSTS and sep and _JOB_ID_RE.match(jid) else None
+        return ("job", alias, jid) if host_alias_ok(alias) and sep and _JOB_ID_RE.match(jid) else None
     if spec.startswith("host:"):
         alias, sep, rest = spec[len("host:"):].partition(":")
         rest = rest.strip()
-        if alias not in WAIT_FOR_HOSTS or not sep or not rest:
+        if not host_alias_ok(alias) or not sep or not rest:
             return None
         if rest.startswith("unit:"):
             unit = rest[len("unit:"):].strip()
@@ -218,17 +224,6 @@ def file_wait_problem(spec: str) -> str:
     return ""
 
 
-def sched_marker_warning(alias: str, path: str) -> str:
-    """TK-218 п.3: для заданий alsched канон — код завершения `/data/sched/rc/<id>` (`job:<алиас>:<id>` / host-путь на него);
-    свой маркер (`done`, `*.done`) сообщает «дошёл до строки», а не «задание кончилось и с каким кодом». Пусто — путь годится."""
-    p = path.strip().replace("\\", "/")
-    base = p.rsplit("/", 1)[-1]
-    if "/sched/rc/" in p or not (base == "done" or base.endswith(".done")):
-        return ""
-    return (f"{alias}:{p} похоже на собственный маркер скрипта. Для задания alsched ждите код завершения: "
-            f"`job:{alias}:<id>` или `host:{alias}:/data/sched/rc/<id>` — маркер не отличит успех от падения до строки с touch")
-
-
 DUP_WINDOW_S = 3600
 DUP_RATIO = 0.8
 
@@ -251,6 +246,14 @@ def similar_recent_ticket(tickets_dir, title: str, now: datetime | None = None) 
         if want and difflib.SequenceMatcher(None, want, have).ratio() >= DUP_RATIO:
             return f"{tkt.id}: {tkt.header.get('title')}"
     return ""
+
+
+def check_header_values(values) -> None:
+    """Значение поля шапки — одна строка: перевод строки в `--title`/`--on-met` дописал бы в шапку чужое поле (`allow: publish`
+    — согласие владельца, которое ставит только CEO). ValueError — до записи."""
+    for v in values:
+        if "\n" in str(v) or "\r" in str(v):
+            raise ValueError("значение поля шапки тикета — одна строка (без перевода строки)")
 
 
 def check_wait_for_format(spec: str) -> None:
@@ -410,7 +413,7 @@ def atomic_write_text(path, text: str, retries: int = 8) -> None:
 
 
 # --- блокировка на тикет (аудит 03.10): диспетчер, tickets.py и роли пишут один файл из разных процессов ------------
-LOCK_TIMEOUT_S = float(P.env("TICKET_LOCK_TIMEOUT", "120"))
+LOCK_TIMEOUT_S = 120.0
 _LOCKS_DIR = Path(tempfile.gettempdir()) / "rpv-ticket-locks"  # вне репозитория: тикетный каталог не засоряется
 _thread_locks: dict = {}
 _thread_locks_guard = threading.Lock()
@@ -542,9 +545,7 @@ def _compact_log_locked(path, keep, limit_bytes) -> int:
 
 
 def _haiku_digest(old_part: str):
-    """TK-087 п.2: конспект (RPV_HAIKU_COMPACT=0 — выкл) переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
-    if os.environ.get("RPV_HAIKU_COMPACT") == "0":
-        return None
+    """TK-087 п.2: конспект переносимых записей от Haiku; нет claude/сбой — None (как раньше)."""
     try:
         import haiku_aux
         return haiku_aux.compact(old_part)
@@ -570,6 +571,7 @@ def read_ticket(path) -> Ticket:
 def write_header_updates(path, updates: dict, now: datetime = None, stamp_updated: bool = True) -> None:
     """Точечно правит строки шапки (значения `updates`), тело файла не трогает. Под блокировкой тикета, запись атомарная."""
     path = Path(path)
+    check_header_values(updates.values())
     if "wait_for" in updates:
         check_wait_for_format(updates["wait_for"])  # неизвестная форма — отказ до записи (иначе тикет ждёт вечно)
     with ticket_lock(path):
@@ -631,6 +633,7 @@ def create_ticket(tickets_dir, owner: str, title: str, reviewer: str = None,
                    description: str = "", wait_for: str = "", now: datetime = None,
                    prefix: str = "TK-", status: str = "todo", executor: str = None,
                    kind: str = None, effort: str = None) -> Path:
+    check_header_values((title, reviewer, executor, kind, effort, wait_for))
     check_wait_for_format(wait_for)
     tickets_dir = Path(tickets_dir)
     tickets_dir.mkdir(parents=True, exist_ok=True)

@@ -10,11 +10,11 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
-os.environ["RPV_CI_REPO"] = "o/r"
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
@@ -28,7 +28,9 @@ SHA = "a" * 40
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone(timedelta(hours=4)))
 
 
-class MergeRuleTests(unittest.TestCase):
+class MergeRuleBase(unittest.TestCase):
+    """Песочница тикетов и подделка GitHub; тестов нет — их наследники здесь и в test_tk109.py."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
@@ -44,6 +46,9 @@ class MergeRuleTests(unittest.TestCase):
         C.save_state({f"{REPO}#7": {"sha": SHA, "state": "success"}})
         self._chk = M.check_pr
         M.check_pr = lambda repo, n, sha, gh=None: ""
+        settings = mock.patch.object(D.P, "settings", return_value={"ci_repo": REPO})  # .claude/rpv.json проекта
+        settings.start()
+        self.addCleanup(settings.stop)
 
     def tearDown(self):
         M.check_pr = self._chk
@@ -61,53 +66,6 @@ class MergeRuleTests(unittest.TestCase):
             return {"merged": True}
         return {"mergeable": self.mergeable, "merged": self.merged and any(c[0] == "PUT" for c in self.calls)}
 
-    def plugin_gh(self, head_v, base_v, tag_exists=False):
-        """gh для PR плагина (repo = release.REPO): версии в plugin.json головы и main, слияние с sha, постановка тега."""
-        import base64
-        import json as _j
-
-        def gh(path, method="GET", **f):
-            self.calls.append((method, path, f))
-            if path == f"repos/{M.R.REPO}":
-                return {"default_branch": "main"}
-            if path.endswith("pulls?state=open&per_page=100"):
-                return [{"number": 7, "title": self.tid, "head": {"sha": self.head, "ref": "feat/x"}, "base": {"ref": "main"}}]
-            if "contents/.claude-plugin/plugin.json" in path:
-                v = base_v if path.endswith("ref=main") else head_v
-                return {"content": base64.b64encode(_j.dumps({"version": v}).encode()).decode()}
-            if path.endswith("/merge"):
-                return {"merged": True, "sha": "m" * 40}
-            if path.endswith("/git/refs"):
-                if tag_exists:
-                    raise RuntimeError("Reference already exists")
-                return {}
-            return {"mergeable": True, "merged": any(c[0] == "PUT" for c in self.calls)}
-        return gh
-
-    def test_plugin_pr_without_bump_is_not_merged_and_owner_told_once(self):
-        C.save_state({f"{M.R.REPO}#7": {"sha": SHA, "state": "success"}})
-        gh = self.plugin_gh("1.8.3", "1.8.3")
-        self.assertEqual(M.merge_once(M.R.REPO, gh=gh), [(7, "без bump → владельцу тикета")])
-        self.assertFalse([c for c in self.calls if c[0] == "PUT"])
-        self.assertEqual(M.merge_once(M.R.REPO, gh=gh), [])  # одна запись на голову
-
-    def test_plugin_pr_with_bump_is_merged_tagged_and_released(self):
-        C.save_state({f"{M.R.REPO}#7": {"sha": SHA, "state": "success"}})
-        spawned = []
-        real, M.R.spawn_auto = M.R.spawn_auto, lambda proj: spawned.append(proj)
-        self.addCleanup(setattr, M.R, "spawn_auto", real)
-        out = M.merge_once(M.R.REPO, gh=self.plugin_gh("1.8.4", "1.8.3"))
-        self.assertEqual(out, [(7, "влит")])
-        tag = [c for c in self.calls if c[1].endswith("/git/refs")]
-        self.assertEqual(tag, [("POST", f"repos/{M.R.REPO}/git/refs", {"ref": "refs/tags/v1.8.4", "sha": "m" * 40})])
-        self.assertEqual(len(spawned), 1)
-
-    def test_existing_tag_is_not_an_error(self):
-        C.save_state({f"{M.R.REPO}#7": {"sha": SHA, "state": "success"}})
-        M.R.spawn_auto, real = (lambda proj: None), M.R.spawn_auto
-        self.addCleanup(setattr, M.R, "spawn_auto", real)
-        self.assertEqual(M.merge_once(M.R.REPO, gh=self.plugin_gh("1.8.4", "1.8.3", tag_exists=True)), [(7, "влит")])
-
     def run_m(self):
         return M.merge_once(REPO, gh=self.gh)
 
@@ -116,6 +74,18 @@ class MergeRuleTests(unittest.TestCase):
 
     def put(self):
         return [c for c in self.calls if c[0] == "PUT"]
+
+
+class MergeRuleTests(MergeRuleBase):
+    def test_plugin_repo_pr_is_ordinary_pr(self):
+        """CP4: PR в репозиторий самого плагина — обычный PR: те же условия, без проверки версии, тега и автовыпуска."""
+        repo = "Gogi213/role-play-vibing"
+        C.save_state({f"{repo}#7": {"sha": SHA, "state": "success"}})
+        gh = lambda path, method="GET", **f: self.gh(path.replace(repo, REPO), method, **f)  # noqa: E731
+        self.assertEqual(M.merge_once(repo, gh=gh), [(7, "влит")])
+        self.assertEqual([c[0] for c in self.calls if c[0] != "GET"], ["PUT"])
+        self.assertFalse([c for c in self.calls if "contents/" in c[1] or c[1].endswith("/git/refs")])
+        self.assertFalse(hasattr(M, "R"))
 
     def test_merges_when_all_conditions_hold(self):
         self.assertEqual(self.run_m(), [(7, "влит")])

@@ -24,8 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from role_context import (ROLE_NAMES, ROLES, ROOT, STATE_DIR, env, env_role, find_title, read_label,  # noqa: E402
                           ticket_id, write_label)
 
-# каталоги можно переопределить окружением — для проверок хука, чтобы не трогать рабочее состояние
-LOG_DIR = env("LOG_DIR") or os.path.join(ROOT, ".claude", "roles", "log")
+LOG_DIR = os.path.join(ROOT, ".claude", "roles", "log")
 GMT4 = datetime.timezone(datetime.timedelta(hours=4))
 REPEAT_EVERY = 10  # сообщений: самое частое повторение одной и той же подсказки
 
@@ -118,9 +117,7 @@ HAIKU_HOOK_S = 20  # SessionEnd: таймаут хука 30 с — Haiku укл�
 
 
 def haiku_abstract(turns):
-    """TK-087 п.2: краткий конспект сверху (Haiku, не источник — ниже дословные сообщения); выкл RPV_HAIKU_COMPACT=0; сбой — ''."""
-    if os.environ.get("RPV_HAIKU_COMPACT") == "0":
-        return ""
+    """TK-087 п.2: краткий конспект сверху (Haiku, не источник — ниже дословные сообщения); сбой — ''."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
         import haiku_aux
@@ -224,7 +221,7 @@ def throttled(state, key, sig, text):
 
 # Судья TK-002 п.2а («кто сторожит сторожа», v1.4): сторож .claude/dispatcher/watch.py пишет отметку
 # сердцебиения на каждый цикл; здесь только её возраст (сам сторож — свой процесс, не этот хук).
-DISPATCHER_DIR = env("DISPATCHER_DIR") or os.path.join(ROOT, ".claude", "dispatcher")  # для проверок
+DISPATCHER_DIR = os.path.join(ROOT, ".claude", "dispatcher")  # для проверок
 WATCH_HEARTBEAT_FILE = os.path.join(DISPATCHER_DIR, "watch-heartbeat.json")
 WATCH_STALE_S = 2 * 120  # 2 интервала сторожа (WATCH_INTERVAL_S по умолчанию в watch.py — 120 с)
 
@@ -317,8 +314,8 @@ def pending_permissions():
 
 
 # Сторож контекста: порог по умолчанию — 45 % окна 1 млн токенов. Только для сессий, где есть владелец, — у запуска
-# диспетчера просить клир некого. Переопределение — RPV_CONTEXT_WARN_TOKENS.
-CONTEXT_WARN_TOKENS = int(env("CONTEXT_WARN_TOKENS", "450000"))
+# диспетчера просить клир некого.
+CONTEXT_WARN_TOKENS = 450000
 
 
 def context_tokens(transcript):

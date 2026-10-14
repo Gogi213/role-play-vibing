@@ -30,7 +30,6 @@ _SANDBOX = tempfile.mkdtemp(prefix="rpv-test-proj-")
 os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
-os.environ["RPV_BUS_DISABLE"] = "1"  # тесты не шлют события на живую шину
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import project as P  # noqa: E402
@@ -709,10 +708,11 @@ class DispatchRunTests(unittest.TestCase):
         self.dispatcher_dir.mkdir(parents=True)
 
         self._orig = {k: getattr(D, k) for k in
-                      ("TICKETS_DIR", "PROJECT_ROOT", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
+                      ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
                        "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
                        "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
-        D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль), независимо от RPV_DISPATCH_ROLE_PARALLEL в окружении
+        D.DISPATCHER_DIR = self.dispatcher_dir  # CP5: mechanics.log и notify.log — не в каталог живого проекта
+        D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль)
         D.TICKETS_DIR = self.tickets_dir
         D.PROJECT_ROOT = self.base
         D.STATE_FILE = self.dispatcher_dir / "state.json"
@@ -780,20 +780,23 @@ class DispatchRunTests(unittest.TestCase):
         t0 = dt("2026-10-06T12:00:00+04:00")
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт", now=t0 - timedelta(hours=1))
         T.write_header_updates(path, {"status": "waiting", "wait_for": ""}, now=t0 - timedelta(hours=1))
-        with mock.patch.dict(os.environ, {"RPV_BUS_DISABLE": "1"}),                 mock.patch.object(D, "enforce_move_invariant", lambda p, t, s, n: t):  # учёт — отдельно от пробуждения п.6
+        with mock.patch.object(D, "enforce_move_invariant", lambda p, t, s, n: t):  # учёт — отдельно от пробуждения п.6
             D.tick(t0)
             D.tick(t0 + timedelta(seconds=300))
             D.tick(t0 + timedelta(seconds=900))  # 15 мин > SLO 10
             D.tick(t0 + timedelta(seconds=1000))
         rec = D.load_state()["downtime"]["2026-10-06"]
         self.assertEqual(rec["wait_s"], 1000)
-        self.assertTrue(rec["alerted"])
-        self.assertEqual(self.dispatcher_dir.joinpath("ceo-inbox.md").read_text(encoding="utf-8").count("[idle-slo]"), 1)
+        inbox = self.dispatcher_dir.joinpath("ceo-inbox.md").read_text(encoding="utf-8")
+        self.assertNotIn("[idle-slo]", inbox, "CP5: суточный SLO CEO не будит — одна тревога «работа стоит»")
+        self.assertEqual(inbox.count("[работа-стоит]"), 1, "15 мин стоит — одна тревога на эпизод")
+        self.assertIn("не отправлено (нет RPV_TG_TOKEN/RPV_TG_CHAT): Работа стоит",
+                      (D.DISPATCHER_DIR / "notify.log").read_text(encoding="utf-8"))
 
     def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         T.create_ticket(self.tickets_dir, owner="engineer", title="Тормоз", now=t0 - timedelta(hours=1))
-        with mock.patch.dict(os.environ, {"RPV_BUS_DISABLE": "1"}), mock.patch.object(D, "_rate_limited", lambda *a: True):
+        with mock.patch.object(D, "_rate_limited", lambda *a: True):
             D.tick(t0)
             D.tick(t0 + timedelta(seconds=300))
             rec = D.load_state()["downtime"]["2026-10-06"]
@@ -822,7 +825,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(late.status, "in_progress")
         self.assertEqual(D.decide(late, state, t0 + timedelta(minutes=11)).role, "engineer")
         self.assertTrue(any(e.author == "dispatcher" and "инвариант" in e.text for e in late.log))
-        self.assertIn("нет-хода", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("нет-хода", (D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8"))
 
     def test_waiting_with_good_wait_for_is_a_move(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
@@ -921,19 +924,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=5), state))
         self.assertFalse(D.CEO_INBOX.exists() and "ждёт-ceo" in D.CEO_INBOX.read_text(encoding="utf-8"))
 
-    def test_open_owner_question_is_a_move_answer_ends_it(self):
-        t0 = dt("2026-10-06T12:00:00+04:00")
-        p = self.mk("engineer", "waiting", now=t0)
-        tid = T.read_ticket(p).id
-        qdir = self.tickets_dir.parent / "pulse" / "questions"
-        qdir.mkdir(parents=True, exist_ok=True)
-        qf = qdir / f"q-{tid}-1.json"
-        qf.write_text(json.dumps({"id": f"q-{tid}-1", "process": tid, "answered_at": None}), encoding="utf-8")
-        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=11), {}))
-        self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), {}, t0 + timedelta(minutes=30)).status, "waiting")
-        qf.write_text(json.dumps({"id": f"q-{tid}-1", "process": tid, "answered_at": "2026-10-06T12:20:00+04:00"}), encoding="utf-8")
-        self.assertIsNotNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=31), {}))
-
     def test_done_and_blocked_are_not_violations(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         for st in ("done", "blocked", "needs_owner", "stopped"):
@@ -965,7 +955,7 @@ class DispatchRunTests(unittest.TestCase):
         state, now = {}, dt("2026-10-06T12:30:00+04:00")
         for p in (b, a, a):
             D.notify_wait_cycle(T.read_ticket(p), state, now)
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
 
     def test_limit_pause_capped_to_one_hour(self):
         self.assertEqual(D.LIMIT_PAUSE_MAX, timedelta(hours=1))
@@ -1235,7 +1225,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(second.stem, D.RUNNING, "роль освободилась — вторая задача берётся")
 
     def test_role_parallel_limit_two_allows_second_ticket_not_third(self):
-        """RPV_DISPATCH_ROLE_PARALLEL=engineer:2 (CEO 05.10): две задачи роли идут параллельно, третья ждёт;
+        """role_parallel {"engineer": 2} (CEO 05.10): две задачи роли идут параллельно, третья ждёт;
         на тот же тикет второй запуск роли не стартует никогда (даже при большом пределе)."""
         self.set_fake_bin(FAKE_BIN_SLOW_OK)
         D.MAX_PARALLEL = 5
@@ -1257,13 +1247,21 @@ class DispatchRunTests(unittest.TestCase):
         self.wait_running()
 
     def test_role_parallel_parse(self):
-        self.assertEqual(D._parse_role_parallel("engineer:3,researcher:1"), {"engineer": 3, "researcher": 1})
-        self.assertEqual(D._parse_role_parallel(""), {})
+        """CP8: `role_parallel` в .claude/rpv.json — объект {роль: целое ≥ 1}; мусор пропускается с предупреждением."""
+        self.assertEqual(D._parse_role_parallel({"engineer": 3, "researcher": 1}), {"engineer": 3, "researcher": 1})
+        self.assertEqual(D._parse_role_parallel({}), {})
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            parsed = D._parse_role_parallel("engineer:abc,judge:0,researcher,:2,engineer:2")
+            parsed = D._parse_role_parallel({"engineer": 2, "judge": 0, "researcher": "3", "": 2, "x": True})
+            self.assertEqual(D._parse_role_parallel("engineer:3"), {})
         self.assertEqual(parsed, {"engineer": 2}, "мусор игнорируется, остальное разбирается")
-        self.assertEqual(err.getvalue().count("RPV_DISPATCH_ROLE_PARALLEL"), 4, "по предупреждению на каждую пару")
+        self.assertEqual(err.getvalue().count("role_parallel"), 5, "по предупреждению на каждую пару и на не-объект")
+
+    def test_parallel_limits_come_from_project_settings(self):
+        with mock.patch.object(D.P, "settings", return_value={"max_parallel": 5, "role_parallel": {"engineer": 3}}):
+            self.assertEqual((D.max_parallel(), D.role_parallel()), (5, {"engineer": 3}))
+        with mock.patch.object(D.P, "settings", return_value={"max_parallel": 0}):
+            self.assertEqual((D.max_parallel(), D.role_parallel()), (D.MAX_PARALLEL, D.ROLE_PARALLEL))
 
     def test_each_wake_starts_new_session(self):
         """TK-232/236: каждое пробуждение — новая сессия (без --resume), даже при малом контексте прошлой."""
@@ -1412,8 +1410,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.RUNNING, {}, "без повтора")
 
     def test_default_idle_limit_is_two_retry_once_then_block(self):
-        if P.env("DISPATCH_MAX_IDLE_RUNS"):
-            self.skipTest("RPV_DISPATCH_MAX_IDLE_RUNS задан в окружении")
         self.assertEqual(D.MAX_IDLE_RUNS, 2)
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Дважды холостой",
                                 now=dt("2026-09-27T12:00:00+04:00"))
@@ -1772,8 +1768,7 @@ class DispatchRunTests(unittest.TestCase):
         (self.tickets_dir / "X5.md").write_text("нет шапки тут\n", encoding="utf-8")
         for i in range(3):
             D.tick(now=dt("2026-09-27T12:00:00+04:00") + timedelta(seconds=15 * i))
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
-        self.assertEqual(inbox.count("parse-error"), 1, "3 тика с одной и той же ошибкой — одна строка")
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 1, "3 тика с одной и той же ошибкой — одна строка")
 
     def test_tick_reports_waiting_with_unknown_wait_for_once_and_launches_nobody(self):
         """v4: свободный текст в wait_for — одна строка CEO за несколько тиков, роль не запускается."""
@@ -1796,10 +1791,10 @@ class DispatchRunTests(unittest.TestCase):
         D.notify_parse_error("X5", "ValueError: тикет без шапки", state, dt("2026-09-27T12:00:15+04:00"))
         D.notify_parse_error("X5", "UnicodeDecodeError: 'utf-8' codec can't decode byte", state,
                               dt("2026-09-27T12:00:30+04:00"))
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("parse-error"), 2)
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 2)
 
     def test_done_without_reviewer_signals_ceo_one_line(self):
-        """v2: done без reviewer (теперь норма) — ровно одна строка CEO «done»; дедуп по `updated`."""
+        """v2: done без reviewer (V2-1: Haiku-задача, тикет Судьи, закрыл CEO) — ровно одна строка CEO «done»; дедуп по `updated`."""
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Без ревью",
                                 now=dt("2026-09-27T12:00:00+04:00"))
         T.write_header_updates(path, {"status": "waiting"}, now=dt("2026-09-27T12:00:10+04:00"))
@@ -1931,7 +1926,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(tid, D.RUNNING)
         self.assertTrue((D.STOP_DIR / f"{tid}.json").exists(), "заявка ждёт следующего тика")
         self.assertEqual(T.read_ticket(path).status, "in_progress")
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[stop-failed]"), 1)
+        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("[stop-failed]"), 1)
         D._kill_tree = real_kill
         D.tick()
         self.assertNotIn(tid, D.RUNNING)
@@ -2189,8 +2184,6 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
         """v2: умолчания — исследователь/инженер high, Судья xhigh; `effort:` в шапке тикета — приоритетнее."""
-        if P.env("DISPATCH_EFFORT"):
-            self.skipTest("RPV_DISPATCH_EFFORT задан в окружении")
         self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
         cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "xhigh"),
                  ("engineer", "low", "low"), ("researcher", "medium", "medium"), ("judge", "high", "high"),
@@ -2346,9 +2339,6 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("status: waiting + wait_for", prompt)
 
     def test_v2_constants(self):
-        for var, expected in (("DISPATCH_MAX_PARALLEL", 3), ("DISPATCH_TIMEOUT", 1200.0)):
-            if P.env(var):
-                self.skipTest(f"{var} задан в окружении")
         self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT), (3, 1200.0))
         self.assertFalse(hasattr(D, "SESSION_SCOPE") or hasattr(D, "ROTATE_TOKENS"))
 
@@ -2428,12 +2418,9 @@ class DispatchRunTests(unittest.TestCase):
         D.MAX_SAME_STATUS_RUNS = max_runs
         self.addCleanup(lambda: setattr(D, "MAX_SAME_STATUS_RUNS", old))
 
-    def test_default_same_status_limit_is_twelve_and_env_name(self):
-        if P.env("DISPATCH_MAX_SAME_STATUS_RUNS"):
-            self.skipTest("порог тормоза цикла задан в окружении")
-        self.assertEqual(D.MAX_SAME_STATUS_RUNS, 12)
+    def test_default_same_status_limit_is_twelve(self):
+        self.assertEqual(D.MAX_SAME_STATUS_RUNS, 12)  # CP8 — константа
         source = Path(D.__file__).read_text(encoding="utf-8")
-        self.assertIn("DISPATCH_MAX_SAME_STATUS_RUNS", source)
         self.assertNotIn("SAME_STATUS_WARN", source, "предупреждение на полпути снято (TK-100 №27)")
 
     def test_silent_until_max_then_block_with_exactly_one_line(self):
@@ -2560,11 +2547,8 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
         return calls
 
-    def test_default_review_returns_limit_is_two_with_env_name(self):
-        if P.env("DISPATCH_MAX_REVIEW_RETURNS"):
-            self.skipTest("порог задан в окружении")
-        self.assertEqual(D.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2
-        self.assertIn("DISPATCH_MAX_REVIEW_RETURNS", Path(D.__file__).read_text(encoding="utf-8"))
+    def test_default_review_returns_limit_is_two(self):
+        self.assertEqual(D.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2; CP8 — константа
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
         path = self.review_setup()
@@ -2758,6 +2742,111 @@ class DispatchRunTests(unittest.TestCase):
         captured = self.killed_run(None, sid="sess-new", stored_sid=None, info_sid="sess-new")
         self.assertNotIn("--resume", captured, "транскрипта нет — резюмировать нечего, новая сессия")
 
+    # --- CP6: исход ожидания внешнего задания (jobs.jsonl) и файл итога .rc, ssh подменён ---
+
+    def waiting_on(self, wait_for: str):
+        now = dt("2026-10-06T12:00:00+04:00")
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Задание на машине", now=now - timedelta(hours=1))
+        T.write_header_updates(path, {"status": "waiting", "wait_for": wait_for, "wait_by": "2026-10-06T18:00:00+04:00"},
+                               now=now - timedelta(minutes=30))
+        return path, now
+
+    def fake_ssh(self, body: bytes, rc: int = 0) -> list:
+        """Подмена ssh: любая проверка отвечает `body`/`rc`; возвращает список выполненных удалённых команд."""
+        calls = []
+
+        class R:
+            returncode, stderr, stdout = rc, b"", body
+        orig_run = D.subprocess.run
+
+        def run(cmd, **kw):
+            if os.path.basename(str(cmd[0])) not in ("ssh", "ssh.exe"):
+                return orig_run(cmd, **kw)  # git тика и прочее — настоящее
+            calls.append(cmd[-1])
+            return R()
+        D.subprocess.run = run
+        D._WAIT_CACHE.clear()
+        D._WAIT_RC.clear()
+
+        def restore():
+            D.subprocess.run = orig_run
+            D._WAIT_CACHE.clear()
+            D._WAIT_RC.clear()
+        self.addCleanup(restore)
+        return calls
+
+    def jobs(self) -> list:
+        f = D.DISPATCHER_DIR / D.JOBS_LOG_NAME
+        return [json.loads(ln) for ln in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+
+    def tick_launches(self, now) -> list:
+        with mock.patch.object(D, "launch_run") as lr:
+            D.tick(now)
+        return [(c.args[1], c.kwargs.get("reason")) for c in lr.call_args_list]
+
+    def test_failed_job_rc_reaches_ticket_log_and_met_is_counted_once(self):
+        path, now = self.waiting_on("host:gpu-box:/var/lib/rpv/runs/tk1-1006120000-ab12.rc")
+        calls = self.fake_ssh(b"SERVICE_RESULT=exit-code EXIT_STATUS=2\n")
+        self.assertEqual(self.tick_launches(now), [("engineer", "wait_for-met")])
+        self.assertEqual(calls, ["cat /var/lib/rpv/runs/tk1-1006120000-ab12.rc"])
+        entry = T.read_ticket(path).log[-1]
+        self.assertEqual(entry.author, "dispatcher")
+        self.assertIn("SERVICE_RESULT=exit-code EXIT_STATUS=2", entry.text)
+        self.assertIn("НЕ успешно", entry.text)
+        self.assertEqual(self.jobs(), [{"ts": T.now_iso(now), "ticket": path.stem, "wait_for": "host:gpu-box:/var/lib/rpv/runs/tk1-1006120000-ab12.rc",
+                                        "outcome": "met", "rc": "SERVICE_RESULT=exit-code EXIT_STATUS=2"}])
+        self.tick_launches(now + timedelta(seconds=20))  # роль ещё не ушла из waiting: ни второй записи, ни второй строки счёта
+        self.assertEqual(len(self.jobs()), 1)
+        self.assertEqual(len([e for e in T.read_ticket(path).log if e.author == "dispatcher"]), 1)
+
+    def test_successful_job_rc_is_logged_without_failure_mark(self):
+        path, now = self.waiting_on("host:calc:/runs/u1.rc")
+        self.fake_ssh(b"SERVICE_RESULT=success EXIT_STATUS=0\n")
+        self.tick_launches(now)
+        text = T.read_ticket(path).log[-1].text
+        self.assertIn("SERVICE_RESULT=success EXIT_STATUS=0", text)
+        self.assertNotIn("НЕ успешно", text)
+        self.assertEqual(self.jobs()[0]["rc"], "SERVICE_RESULT=success EXIT_STATUS=0")
+
+    def test_plain_path_and_unit_waits_count_met_without_rc(self):
+        for spec, body, rc in (("host:calc:/data/x.done", b"", 0), ("host:calc:unit:tk1-run", b"inactive\n", 3)):
+            path, now = self.waiting_on(spec)
+            self.fake_ssh(body, rc)
+            self.assertEqual(self.tick_launches(now), [("engineer", "wait_for-met")], spec)
+            self.assertEqual([e.author for e in T.read_ticket(path).log], [], "итога задания нет — и записи нет")
+            self.assertEqual(self.jobs()[-1]["wait_for"], spec)
+            self.assertEqual((self.jobs()[-1]["outcome"], self.jobs()[-1]["rc"]), ("met", None))
+            T.write_header_updates(path, {"status": "done"}, now=now)
+
+    def test_not_a_job_wait_is_not_counted(self):
+        done = T.create_ticket(self.tickets_dir, owner="engineer", title="Готовый", status="done", now=dt("2026-10-06T10:00:00+04:00"))
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Ждёт тикет", now=dt("2026-10-06T10:00:00+04:00"))
+        T.write_header_updates(path, {"status": "waiting", "wait_for": f"ticket:{done.stem}"})
+        self.assertEqual(self.tick_launches(dt("2026-10-06T12:00:00+04:00"))[0][1], "wait_for-met")
+        self.assertEqual(self.jobs(), [])
+
+    def test_job_still_running_writes_nothing(self):
+        path, now = self.waiting_on("host:calc:/runs/u1.rc")
+        self.fake_ssh(b"", rc=1)  # файла итога ещё нет
+        self.assertEqual(self.tick_launches(now), [])
+        self.assertEqual(self.jobs(), [])
+        self.assertEqual(T.read_ticket(path).log, [])
+
+    def test_record_job_outcome_format_and_dedup(self):
+        now = dt("2026-10-06T12:00:00+04:00")
+        self.assertTrue(D.record_job_outcome("TK-1", "host:calc:/a.rc", "overdue", now=now))
+        self.assertFalse(D.record_job_outcome("TK-1", "host:calc:/a.rc", "overdue", now=now))
+        self.assertTrue(D.record_job_outcome("TK-1", "host:calc:/a.rc", "met", "SERVICE_RESULT=success EXIT_STATUS=0", now=now),
+                        "поздний конец после просрочки — тоже исход")
+        self.assertTrue(D.record_job_outcome("TK-1", "host:calc:/b.rc", "met", now=now))
+        self.assertTrue(D.record_job_outcome("TK-2", "host:calc:/a.rc", "met", now=now))
+        self.assertEqual(self.jobs()[0], {"ts": T.now_iso(now), "ticket": "TK-1", "wait_for": "host:calc:/a.rc", "outcome": "overdue", "rc": None})
+        self.assertEqual(len(self.jobs()), 4)
+        with open(D.DISPATCHER_DIR / D.JOBS_LOG_NAME, "a", encoding="utf-8") as fh:
+            fh.write("битая строка\n")
+        self.assertFalse(D.record_job_outcome("TK-2", "host:calc:/a.rc", "met", now=now), "битые строки счёт не ломают")
+
+
 class TicketsCliStartTests(unittest.TestCase):
     """v1.1: `tickets.py start` — backlog → todo, и только backlog.
     `cmd_status` читает state.json (траты) — песочница и на TK.TICKETS_DIR, и на D.STATE_FILE, иначе тест
@@ -2795,19 +2884,30 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertEqual(len(tickets), 1)
         self.assertEqual(T.read_ticket(tickets[0]).status, "backlog")
 
-    def test_new_has_no_default_reviewer(self):
-        """v2 (02.10): ревьюера по умолчанию нет — Судья только по явному `--reviewer judge`."""
+    def test_new_default_reviewer_is_judge(self):
+        """V2-1: Судья проверяет каждый результат — `new` ставит `reviewer: judge` без всякого флага."""
         TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "А"])
         TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Б"])
         tickets = {t.header["owner"]: t for t in (T.read_ticket(p) for p in T.list_tickets(self.tickets_dir))}
-        self.assertEqual(tickets["researcher"].reviewer, "")
-        self.assertEqual(tickets["engineer"].reviewer, "")
+        self.assertEqual(tickets["researcher"].reviewer, "judge")
+        self.assertEqual(tickets["engineer"].reviewer, "judge")
 
-    def test_new_no_reviewer_flag_is_accepted_noop(self):
-        rc = TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Без ревью", "--no-reviewer"])
+    def test_new_no_reviewer_flag_is_refused_without_haiku(self):
+        """Судью снимает только владелец: `--no-reviewer` на обычной задаче — отказ до создания файла."""
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Без ревью", "--no-reviewer"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--no-reviewer не принимается", err.getvalue())
+        self.assertEqual(T.list_tickets(self.tickets_dir), [])
+
+    def test_new_no_reviewer_flag_with_haiku_is_noop(self):
+        rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Механическая", "--no-reviewer",
+                      "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 0)
-        tkt = T.read_ticket(T.list_tickets(self.tickets_dir)[0])
-        self.assertEqual(tkt.reviewer, "")
+        self.assertEqual(T.read_ticket(T.list_tickets(self.tickets_dir)[0]).reviewer, "")
 
     def test_new_explicit_reviewer_judge_is_written(self):
         TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "С Судьёй", "--reviewer", "judge"])
@@ -2888,11 +2988,12 @@ class TicketsCliStartTests(unittest.TestCase):
         self.assertEqual(T.list_tickets(self.tickets_dir), [])
 
     def test_new_haiku_without_reviewer_flag_is_allowed_but_explicit_judge_is_refused(self):
-        """v2: ревьюера по умолчанию нет, так что `--executor haiku` проходит без `--no-reviewer`; явный
+        """V2-1: у Haiku-задачи ревьюера по умолчанию нет, `--executor haiku` проходит без `--no-reviewer`; явный
         `--reviewer judge` с haiku по-прежнему запрещён (условие г судьи TK-002)."""
         rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Механическая без флага",
                       "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 0)
+        self.assertEqual(T.read_ticket(T.list_tickets(self.tickets_dir)[0]).reviewer, "")
         rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Обход", "--reviewer", "judge",
                       "--executor", "haiku", "--kind", "file-move"])
         self.assertEqual(rc, 1)
@@ -3085,7 +3186,7 @@ def iso(d):
 
 
 class RoleMcpTests(unittest.TestCase):
-    """TK-171: RPV_ROLE_MCP — all (умолчание, без флагов) | none | список имён."""
+    """TK-171: `role_mcp` в .claude/rpv.json — all (умолчание, без флагов) | none | список имён."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -3094,7 +3195,7 @@ class RoleMcpTests(unittest.TestCase):
         home.mkdir()
         proj.mkdir()
         (home / ".claude.json").write_text(json.dumps({
-            "mcpServers": {"figma": {"type": "http", "url": "https://f"}, "pulse": {"command": "p"}},
+            "mcpServers": {"figma": {"type": "http", "url": "https://f"}, "playwright": {"command": "p"}},
             "projects": {str(proj): {"mcpServers": {"local": {"command": "l"}}}}}), encoding="utf-8")
         (proj / ".mcp.json").write_text(json.dumps({"mcpServers": {"xcodebuildmcp": {"command": "x"}}}), encoding="utf-8")
         self.runs = self.tmp / "runs"
@@ -3106,10 +3207,7 @@ class RoleMcpTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def _args(self, mode):
-        env = {"RPV_ROLE_MCP": mode} if mode is not None else {}
-        with mock.patch.dict(os.environ, env):
-            if mode is None:
-                os.environ.pop("RPV_ROLE_MCP", None)
+        with mock.patch.object(D.P, "settings", return_value={} if mode is None else {"role_mcp": mode}):
             return D.role_mcp_args("run1")
 
     def test_default_and_all_have_no_flags(self):
@@ -3120,10 +3218,26 @@ class RoleMcpTests(unittest.TestCase):
         self.assertEqual(self._args("none"), ["--strict-mcp-config"])
 
     def test_list_builds_config_from_user_project_and_mcp_json(self):
-        args = self._args("figma, xcodebuildmcp,local,ghost")
-        self.assertEqual(args[:2], ["--strict-mcp-config", "--mcp-config"])
-        cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
-        self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # pulse не просили, ghost нет
+        for mode in ("figma, xcodebuildmcp,local,ghost", ["figma", "xcodebuildmcp", "local", "ghost"]):
+            args = self._args(mode)
+            self.assertEqual(args[:2], ["--strict-mcp-config", "--mcp-config"])
+            cfg = json.loads(Path(args[2]).read_text(encoding="utf-8"))
+            self.assertEqual(sorted(cfg["mcpServers"]), ["figma", "local", "xcodebuildmcp"])  # playwright не просили, ghost нет
+
+class PluginDirTests(unittest.TestCase):
+    """CP11: RPV_PLUGIN_DIR → `--plugin-dir` у запуска роли; не задана — флага нет."""
+
+    def _args(self, value):
+        with mock.patch.dict(os.environ, {"RPV_PLUGIN_DIR": value}):
+            return D.plugin_dir_args()
+
+    def test_unset_or_blank_has_no_flag(self):
+        self.assertEqual(self._args(""), [])
+        self.assertEqual(self._args("  "), [])
+
+    def test_set_passes_dir(self):
+        self.assertEqual(self._args("/src/rpv"), ["--plugin-dir", "/src/rpv"])
+
 
 class RateLimitTests(unittest.TestCase):
     """v1.1, чистые функции — без процессов и без сети."""
@@ -3138,6 +3252,17 @@ class RateLimitTests(unittest.TestCase):
         self.assertTrue(D._rate_limited(self.state, "TK-1", soon))
         later = self.now + timedelta(seconds=D.MIN_GAP_S + 1)
         self.assertFalse(D._rate_limited(self.state, "TK-1", later))
+
+    def test_min_gap_only_between_runs_of_same_role(self):
+        """CP11: Инженер сдал — Судья идёт на ближайшем тике; тот же Инженер снова — после паузы; часовой предел — на все роли."""
+        D._record_launch(self.state, "TK-1", self.now, "engineer")
+        soon = self.now + timedelta(seconds=10)
+        self.assertFalse(D._rate_limited(self.state, "TK-1", soon, "judge"))
+        self.assertTrue(D._rate_limited(self.state, "TK-1", soon, "engineer"))
+        step = timedelta(seconds=1)
+        for i in range(1, D.MAX_RUNS_PER_TICKET_HOUR):
+            D._record_launch(self.state, "TK-1", self.now + i * step, ("judge", "engineer")[i % 2])
+        self.assertTrue(D._rate_limited(self.state, "TK-1", self.now + timedelta(minutes=5), "judge"))
 
     def test_other_ticket_not_affected(self):
         D._record_launch(self.state, "TK-1", self.now)
@@ -3300,32 +3425,15 @@ class MoneyControlsTests(unittest.TestCase):
     # --- п.1: модель/усилие ---
 
     def test_role_effort_mapping(self):
-        # v2 (02.10): исследователь/инженер — high, Судья — xhigh (тест в окружении без RPV_DISPATCH_EFFORT)
+        # v2 (02.10): исследователь/инженер — high, Судья — xhigh
         if not P.env("DISPATCH_EFFORT"):
             self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
 
-    def test_role_effort_env_override(self):
-        base = {"judge": "xhigh", "engineer": "xhigh", "researcher": "xhigh"}
-        self.assertEqual(D._parse_role_map("judge:xhigh,engineer:high", base),
-                         {"judge": "xhigh", "engineer": "high", "researcher": "xhigh"})
-        self.assertEqual(D._parse_role_map("high", base),
-                         {"judge": "high", "engineer": "high", "researcher": "high"})
-        self.assertEqual(D._parse_role_map("", base), base)
-        self.assertEqual(base["engineer"], "xhigh")  # исходный словарь не меняется
-
-    def test_role_model_defaults_and_env_override(self):
-        # v1.6.1: Судья — Opus 5.5 (проверка всех не ослабляется), остальные — CLAUDE_MODEL
-        if not P.env("DISPATCH_ROLE_MODEL"):
-            self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
-                                            "researcher": D.CLAUDE_MODEL})
-        base = {"judge": "claude-opus-5-5", "engineer": "claude-sonnet-5-5", "researcher": "claude-sonnet-5-5"}
-        self.assertEqual(D._parse_role_map("judge:claude-opus-5-5,engineer:claude-opus-5-5", base),
-                         {"judge": "claude-opus-5-5", "engineer": "claude-opus-5-5",
-                          "researcher": "claude-sonnet-5-5"})
-        self.assertEqual(D._parse_role_map("claude-sonnet-5-5", base),
-                         {"judge": "claude-sonnet-5-5", "engineer": "claude-sonnet-5-5",
-                          "researcher": "claude-sonnet-5-5"})
-        self.assertEqual(base["judge"], "claude-opus-5-5")  # исходный словарь не меняется
+    def test_role_effort_and_model_defaults(self):
+        # v1.6.1: Судья — Opus 5.5 xhigh (проверка всех не ослабляется), остальные — CLAUDE_MODEL high; CP8 — константы
+        self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
+                                        "researcher": D.CLAUDE_MODEL})
+        self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
 
     def test_expected_model_family_follows_role_model(self):
         orig_role_model = D.ROLE_MODEL
@@ -3499,14 +3607,11 @@ class ContextTokensTests(unittest.TestCase):
         self.assertEqual(D._context_tokens_last(result), D._context_tokens_sum(result["usage"]))
 
 
-class DeckSshTests(unittest.TestCase):
-    """v1.1: умолчания ssh на вторую машину (кириллический HOME ломает ~/.ssh по умолчанию)."""
+class HostSshTests(unittest.TestCase):
+    """v1.1: кэш ssh-проверок, тильда в пути. CP6: ssh идёт к алиасу из ~/.ssh/config — своих настроек машин у плагина нет."""
 
     def setUp(self):
         D._WAIT_CACHE.clear()
-        for a in ("CALC", "VPS", "DECK"):  # хосты — только из окружения, умолчаний нет
-            os.environ[f"RPV_{a}_HOST"] = f"user@{a.lower()}-test"
-            self.addCleanup(lambda a=a: os.environ.pop(f"RPV_{a}_HOST", None))
 
     def tearDown(self):
         D._WAIT_CACHE.clear()
@@ -3574,7 +3679,8 @@ class DeckSshTests(unittest.TestCase):
     def test_absolute_path_quoted_as_before(self):
         self.assertIn("'", D._remote_test_arg("/tmp/a b"))
 
-    def test_command_uses_expected_key_host_and_options(self):
+    def test_command_is_plain_ssh_to_the_alias(self):
+        """Любой алиас из ~/.ssh/config: ни хоста, ни ключа, ни known_hosts плагин сам не подставляет."""
         captured = {}
 
         class FakeResult:
@@ -3584,44 +3690,39 @@ class DeckSshTests(unittest.TestCase):
             captured["cmd"] = cmd
             return FakeResult()
 
-        env = {"RPV_DECK_HOST": "deck@test-host", "RPV_DECK_KEY": "/k/id", "RPV_DECK_KNOWN_HOSTS": "/k/known"}
-        for var, val in env.items():
-            os.environ[var] = val
-            self.addCleanup(lambda v=var: os.environ.pop(v, None))
         orig_run = D.subprocess.run
         D.subprocess.run = fake_run
         try:
-            ok = D._host_wait_met("deck", "path", "~/rpv/queue/STATUS")
+            ok = D._host_wait_met("gpu-box.lan", "path", "~/rpv/queue/STATUS")
         finally:
             D.subprocess.run = orig_run
-
         self.assertTrue(ok)
-        cmd = captured["cmd"]
-        self.assertEqual(cmd[0], "ssh")
-        self.assertEqual(cmd[cmd.index("-i") + 1], "/k/id")
-        self.assertIn("UserKnownHostsFile=/k/known", cmd)
-        self.assertIn("BatchMode=yes", cmd)
-        self.assertIn("ConnectTimeout=8", cmd)
-        self.assertEqual(cmd[-2], "deck@test-host")
-        self.assertTrue(cmd[-1].startswith("test -e "))
-        self.assertIn("~/rpv/queue/STATUS", cmd[-1])
+        self.assertEqual(captured["cmd"], ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "gpu-box.lan",
+                                           "test -e ~/rpv/queue/STATUS"])
 
-    def test_without_deck_host_variable_the_check_is_off_and_ssh_not_called(self):
-        for var in ("RPV_DECK_KEY", "RPV_DECK_HOST", "RPV_DECK_KNOWN_HOSTS"):
-            os.environ.pop(var, None)
+    def test_old_machine_variables_are_ignored(self):
+        env = {"RPV_DECK_HOST": "deck@old-host", "RPV_CALC_HOST": "root@old", "RPV_DECK_KEY": "/k/id", "RPV_DECK_KNOWN_HOSTS": "/k/known"}
+        with mock.patch.dict(os.environ, env):
+            cmd = D._ssh_cmd("deck", "true")
+        self.assertEqual(cmd, ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "deck", "true"])
+
+    def test_alias_that_ssh_would_take_for_an_option_is_refused_and_ssh_not_called(self):
+        for bad in ("-oProxyCommand=x", "a b", "a;b", ""):
+            with self.assertRaises(RuntimeError, msg=bad):
+                D._ssh_cmd(bad, "true")
         calls = []
-        orig_run = D.subprocess.run
-        D.subprocess.run = lambda *a, **kw: calls.append(a)
+        orig_run, D.subprocess.run = D.subprocess.run, lambda *a, **kw: calls.append(a)
         try:
-            self.assertFalse(D._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
+            with mock.patch.object(D, "BLIND", D.blind.Tracker()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertFalse(D._host_wait_met("-oProxyCommand=x", "path", "/x"))
         finally:
             D.subprocess.run = orig_run
         self.assertEqual(calls, [])
 
 
 class WaitForHostTests(unittest.TestCase):
-    """v4 (04.10): `wait_for: host:<calc|vps|deck>:<путь>` / `host:<…>:unit:<имя>` (deck: — синоним), прогресс-json,
-    проверка формы. ssh подменён, сети нет."""
+    """v4 (04.10): `wait_for: host:<ssh-алиас>:<путь>` / `host:<…>:unit:<имя>`, прогресс-json, проверка формы.
+    CP6: алиас — любое ssh-имя. ssh подменён, сети нет."""
 
     def setUp(self):
         D._WAIT_CACHE.clear()
@@ -3630,22 +3731,11 @@ class WaitForHostTests(unittest.TestCase):
         self.reply = (0, b"", b"")
         self._orig_run = D.subprocess.run
         D.subprocess.run = self._fake_run
-        self._env = {k: os.environ.pop(k, None) for k in
-                     ("RPV_CALC_HOST", "RPV_VPS_HOST", "RPV_DECK_HOST", "RPV_DECK_KEY", "RPV_DECK_KNOWN_HOSTS")}
-        os.environ.update({"RPV_CALC_HOST": "root@203.0.113.10", "RPV_VPS_HOST": "root@203.0.113.20",
-                           "RPV_DECK_HOST": "deck@203.0.113.30",
-                           "RPV_DECK_KEY": "/home/user/.ssh/id_rsa",
-                           "RPV_DECK_KNOWN_HOSTS": "/home/user/.ssh/known_hosts"})
 
     def tearDown(self):
         D.subprocess.run = self._orig_run
         D._WAIT_CACHE.clear()
         D._WAIT_ERR_LAST.clear()
-        for k, v in self._env.items():
-            if v is not None:
-                os.environ[k] = v
-            else:
-                os.environ.pop(k, None)
 
     def _fake_run(self, cmd, **kwargs):
         self.cmds.append(cmd)
@@ -3671,30 +3761,31 @@ class WaitForHostTests(unittest.TestCase):
             "host:vps:/opt/compute/done": ("host", "vps", "path", "/opt/compute/done"),
             "host:calc:unit:tk044-run3": ("host", "calc", "unit", "tk044-run3"),
             "host:vps:unit:tk044.service": ("host", "vps", "unit", "tk044.service"),
+            "host:nas:/x": ("host", "nas", "path", "/x"),                                   # CP6: алиас — любое ssh-имя
+            "host:gpu-box.lan:/var/lib/rpv/runs/t-1.rc": ("host", "gpu-box.lan", "path", "/var/lib/rpv/runs/t-1.rc"),
+            "job:nas:42": ("job", "nas", "42"),
         }
         for spec, want in ok.items():
             self.assertEqual(T.parse_wait_for(spec), want, spec)
         bad = ["", "mention", "ceo — решение владельца", "прогон окон на сервере счёта (…) — готов, когда done=total",
                "file:", "ticket:", "ticket:TK 1", "deck:", "host:calc", "host:calc:", "host:calc:unit:",
-               "host:calc:unit:a b", "host:nas:/x", "host:calc/x", "calc:/x",
+               "host:calc:unit:a b", "host:calc/x", "calc:/x", "host:-oProxyCommand=x:/x", "host:a b:/x", "host:.hidden/../x:/y", "job:-v:42",
                "host:calc:file:/data/x.done", "host:calc:data/x", "deck:rel/path", "deck:~/rpv/q/done"]  # TK-117 К1.1: путь только абсолютный
         for spec in bad:
             self.assertIsNone(T.parse_wait_for(spec), spec)
 
     # --- путь на машине ---
-    def test_host_path_exists_uses_alias_host_and_same_ssh_options(self):
-        for spec, host in (("host:calc:/var/x/DONE", "root@203.0.113.10"), ("host:vps:/opt/x/DONE", "root@203.0.113.20"),
-                           ("host:deck:~/rpv/x", "deck@203.0.113.30")):
+    def test_host_path_exists_goes_to_the_alias_with_batch_ssh_options(self):
+        for spec, alias in (("host:calc:/var/x/DONE", "calc"), ("host:nas:/opt/x/DONE", "nas"), ("host:gpu-box.lan:~/rpv/x", "gpu-box.lan")):
             self.cmds.clear()
             self.reply = (0, b"", b"")
             self.assertTrue(self.met(spec), spec)
             cmd = self.cmds[0]
             self.assertEqual(cmd[0], "ssh")
-            self.assertEqual(cmd[cmd.index("-i") + 1], r"/home/user/.ssh/id_rsa")
-            self.assertIn("UserKnownHostsFile=/home/user/.ssh/known_hosts", cmd)
+            self.assertNotIn("-i", cmd)  # ключ и known_hosts — в ~/.ssh/config
             self.assertIn("BatchMode=yes", cmd)
             self.assertIn("ConnectTimeout=8", cmd)
-            self.assertEqual(cmd[-2], host, spec)
+            self.assertEqual(cmd[-2], alias, spec)
             self.assertTrue(cmd[-1].startswith("test -e "), cmd[-1])
 
     def test_host_path_missing_is_not_met_and_not_an_error(self):
@@ -3703,11 +3794,6 @@ class WaitForHostTests(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             self.assertFalse(self.met("host:calc:/var/x/DONE"))
         self.assertEqual(err.getvalue(), "")  # «файла нет» — штатно, не сбой
-
-    def test_host_env_override(self):
-        os.environ["RPV_CALC_HOST"] = "me@10.0.0.9"
-        self.met("host:calc:/x")
-        self.assertEqual(self.cmds[0][-2], "me@10.0.0.9")
 
     # --- файл хода (.json с done/total) ---
     def test_progress_json_done_vs_total(self):
@@ -3734,7 +3820,7 @@ class WaitForHostTests(unittest.TestCase):
             self.reply = (0 if out.startswith(b"active") else 3, out, b"")
             self.assertEqual(self.met("host:calc:unit:tk044-run3"), want, out)
             self.assertEqual(self.cmds[0][-1], "systemctl is-active tk044-run3")
-            self.assertEqual(self.cmds[0][-2], "root@203.0.113.10")
+            self.assertEqual(self.cmds[0][-2], "calc")
 
     def test_unit_ssh_error_is_not_met(self):
         self.reply = (255, b"", b"ssh: connect to host ... timed out\n")
@@ -3831,7 +3917,7 @@ class WaitForNoticeTests(unittest.TestCase):
         self.assertEqual(len(lines), 1, lines)
         self.assertIn("TK-9", lines[0])
         self.assertIn("wait_for не понят: прогон окон", lines[0])
-        self.assertIn("host:<calc|vps|deck>", lines[0])  # подсказка форм
+        self.assertIn("host:<ssh-алиас>", lines[0])  # подсказка форм
         D.notify_wait_for_problem(tkt, self.state, self.now + timedelta(hours=25))
         self.assertEqual(len(self.inbox()), 2)           # через сутки — напоминание
         D.notify_wait_for_problem(self.tkt("ещё другой текст"), self.state, self.now + timedelta(hours=26))
@@ -3870,7 +3956,7 @@ class WaitForNoticeTests(unittest.TestCase):
         path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t")
         with self.assertRaises(ValueError) as cm:
             T.write_header_updates(path, {"status": "waiting", "wait_for": "готов, когда done=total"})
-        self.assertIn("host:<calc|vps|deck>", str(cm.exception))
+        self.assertIn("host:<ssh-алиас>", str(cm.exception))
         self.assertEqual(T.read_ticket(path).status, "todo")  # ничего не записано
         T.write_header_updates(path, {"wait_for": "host:calc:/var/rpv/progress/tk044.json"})
         T.write_header_updates(path, {"status": "in_progress", "wait_for": ""})  # снять ожидание можно
@@ -3887,7 +3973,7 @@ class WaitForNoticeTests(unittest.TestCase):
 
     def test_cli_wait_sets_status_and_checks_form(self):
         path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(D, "check_wait_for", return_value=False):  # без настоящего ssh
             self.assertEqual(TK.main(["wait", path.stem, "host:calc:/var/rpv/progress/tk044.json", "--by", "2099-01-01T00:00+04:00"]), 0)
         tkt = T.read_ticket(path)
         self.assertEqual((tkt.status, tkt.header["wait_for"]), ("waiting", "host:calc:/var/rpv/progress/tk044.json"))
@@ -3895,7 +3981,7 @@ class WaitForNoticeTests(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             self.assertEqual(TK.main(["wait", path.stem, "когда закончится"]), 1)
             self.assertEqual(TK.main(["wait", "TK-777", "file:x"]), 1)
-        self.assertIn("host:<calc|vps|deck>", err.getvalue())
+        self.assertIn("host:<ssh-алиас>", err.getvalue())
         self.assertEqual(T.read_ticket(path).header["wait_for"], "host:calc:/var/rpv/progress/tk044.json")
 
 
@@ -4071,7 +4157,7 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
 class ProjectRootTests(unittest.TestCase):
     """Запуск из папки плагина: корень — аргумент/окружение/текущий каталог, не расположение файла."""
 
-    ENV_KEYS = ("RPV_PROJECT", "CLAUDE_PROJECT_DIR", "RPV_DISPATCH_MAX_PARALLEL", "ALPHA_DISPATCH_MAX_PARALLEL")
+    ENV_KEYS = ("RPV_PROJECT", "CLAUDE_PROJECT_DIR", "RPV_TG_CHAT", "ALPHA_TG_CHAT")
 
     def setUp(self):
         self.saved = {k: os.environ.get(k) for k in self.ENV_KEYS}
@@ -4148,10 +4234,10 @@ class ProjectRootTests(unittest.TestCase):
 
     def test_cli_hints_use_sys_executable(self):  # TK-110 В-1
         with mock.patch("shutil.which", return_value="/usr/bin/python"):
-            self.assertTrue(D.tickets_cli().startswith("python ") and D.plan_cli().startswith("python "))
+            self.assertTrue(D.tickets_cli().startswith("python "))
         with mock.patch("shutil.which", return_value=None):
-            for cli in (D.tickets_cli(), D.plan_cli()):
-                self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
+            cli = D.tickets_cli()
+            self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
 
     def test_tickets_cli_from_subfolder_creates_ticket_in_project_root(self):
         proj = self.make_project(self.proj / "work")
@@ -4174,11 +4260,27 @@ class ProjectRootTests(unittest.TestCase):
         self.assertEqual(list(empty.iterdir()), [])
 
     def test_env_reads_rpv_only_else_default(self):
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
-        os.environ["ALPHA_DISPATCH_MAX_PARALLEL"] = "5"
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "3")
-        os.environ["RPV_DISPATCH_MAX_PARALLEL"] = "7"
-        self.assertEqual(P.env("DISPATCH_MAX_PARALLEL", "3"), "7")
+        self.assertEqual(P.env("TG_CHAT", "-"), "-")
+        os.environ["ALPHA_TG_CHAT"] = "5"
+        self.assertEqual(P.env("TG_CHAT", "-"), "-")
+        os.environ["RPV_TG_CHAT"] = "7"
+        self.assertEqual(P.env("TG_CHAT", "-"), "7")
+
+    def test_settings_file_of_project(self):
+        """CP8: настройки проекта — `.claude/rpv.json`; правка видна без перезапуска, битый файл — умолчания."""
+        import time
+        root = self.make_project(self.proj / "s")
+        self.assertEqual((P.settings(root), P.setting("report_at", "10:00", root=root)), ({}, "10:00"))
+        cfg = root / ".claude" / "rpv.json"
+        cfg.write_text('{"report_at": "09:30", "ci_repo": ""}', encoding="utf-8")
+        self.assertEqual((P.setting("report_at", "10:00", root=root), P.setting("ci_repo", "-", root=root)), ("09:30", "-"))
+        time.sleep(0.05)
+        cfg.write_text('{"report_at": "08:00"}', encoding="utf-8")
+        os.utime(cfg, ns=(time.time_ns(), time.time_ns() + 10**9))
+        self.assertEqual(P.setting("report_at", "10:00", root=root), "08:00")
+        cfg.write_text("[1, 2]", encoding="utf-8")
+        os.utime(cfg, ns=(time.time_ns(), time.time_ns() + 2 * 10**9))
+        self.assertEqual(P.settings(root), {})
 
     def test_configure_project_moves_all_state_paths_into_project(self):
         import watch as W
@@ -4209,89 +4311,6 @@ class ProjectRootTests(unittest.TestCase):
                 self.assertEqual(done.returncode, 0, done.stderr)
                 self.assertTrue((self.proj / ".claude" / "dispatcher" / expect).exists(), script)
         self.assertTrue((self.proj / ".claude" / "tickets").is_dir())
-class WaitByEventTest(unittest.TestCase):
-    """TK-055: wait_for host:… закрывается событием шины; в асинхронном режиме основной поток ssh не зовёт."""
-
-    def setUp(self):
-        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
-        self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
-
-        def boom(*a, **k):
-            raise AssertionError("ssh в основном потоке")
-        D.subprocess.run = boom
-
-    def tearDown(self):
-        D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd = self._run, self._async, self._sshcmd
-        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
-
-    def _probe_state(self, state: bytes):
-        class R:
-            returncode, stdout, stderr = 0, state, b""
-        D.subprocess.run = lambda *a, **k: R()
-        D._ssh_cmd = lambda alias, cmd: ["ssh", alias]
-
-    def test_unit_stopped_event(self):
-        """Событие «остановлен» засчитывается только после ssh-подтверждения (поллером) «не active»."""
-        D.WAIT_ASYNC = True
-        self.assertFalse(D.check_wait_for("host:calc:unit:tk1-a"))
-        D.record_wait_event({"addr": "машина.calc.юнит.остановлен", "payload": {"unit": "tk1-a.service", "host": "calc"}})
-        self.assertFalse(D.check_wait_for("host:calc:unit:tk1-a"))  # подтверждения ещё нет
-        self.assertIn(("calc", "unit", "tk1-a"), D._WAIT_WATCH)
-        self._probe_state(b"inactive")
-        D._host_probe("calc", "unit", "tk1-a")  # тело поллера
-        self.assertTrue(D.check_wait_for("host:calc:unit:tk1-a"))
-        self.assertFalse(D.check_wait_for("host:vps:unit:tk1-a"))
-
-    def test_stale_unit_event_before_wait_is_not_met(self):
-        """TK-070 (БАГ 84 побудок): событие от прежнего экземпляра пришло ДО постановки wait_for; юнит снова работает."""
-        D.WAIT_ASYNC = True
-        D.record_wait_event({"addr": "машина.calc.юнит.остановлен", "payload": {"unit": "tk065-gate2.service", "host": "calc"}})
-        for _ in range(5):
-            self.assertFalse(D.check_wait_for("host:calc:unit:tk065-gate2"))
-        self._probe_state(b"active")
-        D._host_probe("calc", "unit", "tk065-gate2")  # поллер увидел работающий юнит → событие сброшено
-        for _ in range(5):
-            self.assertFalse(D.check_wait_for("host:calc:unit:tk065-gate2"))
-        self.assertIsNone(D._event_ts("calc", "unit", "tk065-gate2"))
-        D.record_wait_event({"addr": "машина.calc.юнит.остановлен", "payload": {"unit": "tk065-gate2.service", "host": "calc"}})
-        self._probe_state(b"inactive")
-        D._host_probe("calc", "unit", "tk065-gate2")
-        self.assertTrue(D.check_wait_for("host:calc:unit:tk065-gate2"))
-
-    def test_unit_stop_with_matching_invocation_needs_no_ssh(self):
-        """TK-072: «запущен» (inv A) + «остановлен» (inv A) — wait_for выполнен без ssh; остановка старого запуска (inv A) после
-        нового запуска (inv B) — игнорируется."""
-        D.WAIT_ASYNC = True
-        def boom(*a, **k):
-            raise AssertionError("ssh не нужен")
-        D.subprocess.run = boom
-        ev = lambda kind, inv: D.record_wait_event({"addr": f"машина.calc.юнит.{kind}", "payload": {"unit": "tk9-x.service", "host": "calc", "invocation": inv}})
-        ev("запущен", "A")
-        self.assertFalse(D.check_wait_for("host:calc:unit:tk9-x"))
-        ev("остановлен", "A")
-        self.assertTrue(D.check_wait_for("host:calc:unit:tk9-x"))
-        ev("запущен", "B")  # второй запуск с тем же именем
-        self.assertFalse(D.check_wait_for("host:calc:unit:tk9-x"))
-        ev("остановлен", "A")  # запоздавшее событие старого запуска
-        self.assertFalse(D.check_wait_for("host:calc:unit:tk9-x"))
-        ev("остановлен", "B")
-        self.assertTrue(D.check_wait_for("host:calc:unit:tk9-x"))
-
-    def test_stale_unit_event_sync_mode(self):
-        D.WAIT_ASYNC = False
-        D.record_wait_event({"addr": "машина.calc.юнит.остановлен", "payload": {"unit": "u1.service", "host": "calc"}})
-        self._probe_state(b"active")
-        self.assertFalse(D.check_wait_for("host:calc:unit:u1"))
-        self.assertFalse(D.check_wait_for("host:calc:unit:u1"))
-
-
-    def test_job_done_and_file_events(self):
-        D.WAIT_ASYNC = True
-        D.record_wait_event({"addr": "задача.TK-1.задание.готово", "payload": {"job": "j1", "host": "calc"}})
-        self.assertTrue(D.check_wait_for(f"host:calc:{D.PROGRESS_DIR}/j1.json"))
-        D.record_wait_event({"addr": "машина.vps.файл.появился", "payload": {"path": "/x/DONE", "host": "vps"}})
-        self.assertTrue(D.check_wait_for("host:vps:/x/DONE"))
-        self.assertFalse(D.check_wait_for("host:calc:/x/DONE"))
 
 
 class TokenAccountingTest(unittest.TestCase):
@@ -4488,16 +4507,11 @@ class LimitAndWaitingTK070Test(unittest.TestCase):
 
 
 class WaitReconcileTest(unittest.TestCase):
-    """Сверка wait_for: один ssh на машину, регистрация пути у сторожа, тревога «пропуск»."""
+    """Сверка wait_for: один ssh на машину; в боевом цикле основной поток ssh не зовёт; файл итога задания (.rc) читается целиком."""
 
     def setUp(self):
-        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
-        D._RECON_MISS.clear(); D._WL_REG.clear()
+        D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._WAIT_RC.clear()
         self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
-        self._alarm, self.alarms = D.append_ceo_inbox, []
-        self._link = D._LINK
-        D._LINK = types.SimpleNamespace(down_since=None)  # шина жива: пропуск события сверкой виден
-        D.append_ceo_inbox = lambda *a, **k: self.alarms.append(a)
         D._ssh_cmd = lambda alias, cmd: ["ssh", alias, cmd]
         D.WAIT_ASYNC = True
 
@@ -4507,9 +4521,7 @@ class WaitReconcileTest(unittest.TestCase):
 
     def tearDown(self):
         D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd = self._run, self._async, self._sshcmd
-        D.append_ceo_inbox, D._LINK = self._alarm, self._link
-        D._EVENT_MET.clear(); D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._UNIT_START.clear(); D._EVENT_VERIFIED.clear()
-        D._RECON_MISS.clear(); D._WL_REG.clear()
+        D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._WAIT_RC.clear()
 
     def _ssh(self, out: bytes, rc: int = 0):
         calls = []
@@ -4519,99 +4531,67 @@ class WaitReconcileTest(unittest.TestCase):
         D.subprocess.run = lambda cmd, **k: (calls.append(cmd[-1]), R())[1]
         return calls
 
-    def test_json_outside_progress_is_registered_with_watcher(self):
-        calls = self._ssh(b"")
-        D._host_probe("calc", "path", "/data/work/drill.json")
-        D._host_probe("calc", "path", "/data/progress/j1.json")
-        self.assertIn(D.WATCH_LIST, calls[0])
-        self.assertIn("cat ", calls[0])
-        self.assertIn(D.WATCH_LIST, calls[1])
+    def test_main_thread_never_calls_ssh_and_hands_the_condition_to_the_poller(self):
+        self.assertFalse(D.check_wait_for("host:calc:/runs/u1.rc"))  # boom в setUp упал бы
+        self.assertIn(("calc", "path", "/runs/u1.rc"), D._WAIT_WATCH)
 
-    def test_progress_dir_msys_prefix_stripped(self):
-        """TK-228: Git Bash подменяет env `/data/progress` на `C:/Program Files/Git/data/progress` — watch.list на машине должен остаться `/data/progress/watch.list`."""
-        self.assertEqual(D._unmsys("C:/Program Files/Git/data/progress"), "/data/progress")
-        self.assertEqual(D._unmsys("/data/progress"), "/data/progress")
-        self.assertEqual(D._unmsys("~/rpv/progress"), "~/rpv/progress")
-
-    def test_progress_json_in_default_dir_is_not_registered(self):
-        """Каталог хода по умолчанию плагина (~/rpv/progress): файл хода не попадает в watch.list — иначе «файл появился» закрыл бы ожидание на старте."""
-        self.assertTrue(D.PROGRESS_DIR.startswith("~/"))
-        calls = self._ssh(b"")
-        D._host_probe("calc", "path", "/home/u/rpv/progress/j1.json")
-        D._host_probe("calc", "path", "/home/u/rpv/other/j1.json")
-        self.assertNotIn(D.WATCH_LIST, calls[0])
-        self.assertIn(D.WATCH_LIST, calls[1])
-        self.assertTrue(D._is_progress_json("/home/u/rpv/progress/j1.json"))
-        self.assertFalse(D._is_progress_json("/home/u/rpv/progress/j1.done"))
-
-    def test_progress_json_in_absolute_dir_is_not_registered(self):
-        old = D.PROGRESS_DIR
-        D.PROGRESS_DIR = "/data/progress"
-        try:
-            self.assertTrue(D._is_progress_json("/data/progress/j1.json"))
-            self.assertFalse(D._is_progress_json("/data/work/j1.json"))
-        finally:
-            D.PROGRESS_DIR = old
-
-    def test_probe_wl_marker_confirms_registration(self):
-        self._ssh(b"@@WL\n")
-        self.assertTrue(D._host_probe("calc", "path", "/data/a.done"))
-        self.assertIn(("calc", "/data/a.done"), D._WL_REG)
-
-    def test_reconcile_one_ssh_per_machine_closes_missed_event(self):
-        """Первая проверка сорвана таймаутом, регистрация не дошла, события нет — сверка одним ssh закрывает все ждущие."""
+    def test_reconcile_one_ssh_per_machine_closes_all_waiting(self):
+        """Первая проверка сорвана таймаутом — сверка одним ssh закрывает все ждущие условия машины."""
         def timeout(*a, **k):
             raise D.subprocess.TimeoutExpired("ssh", 15)
         D.subprocess.run = timeout
         D._host_probe("calc", "path", "/data/w/chain.done")
-        self.assertNotIn(("calc", "/data/w/chain.done"), D._WL_REG)
         for k in (("calc", "path", "/data/w/chain.done"), ("calc", "unit", "u1"), ("calc", "path", "/data/p/x.json")):
             D._WAIT_WATCH.add(k)
-        calls = self._ssh(b"@@0\n@@reg\n{\"done\": 1, \"total\": 5}\n@@rc 0\n@@1\n@@reg\n@@rc 0\n@@2\ninactive\n@@rc 0\n")
+        calls = self._ssh(b"@@0\n{\"done\": 1, \"total\": 5}\n@@rc 0\n@@1\n@@rc 0\n@@2\ninactive\n@@rc 0\n")
         D._reconcile()
         self.assertEqual(len(calls), 1)
-        self.assertIn(D.WATCH_LIST, calls[0])
         self.assertTrue(D._WAIT_CACHE[("calc", "path", "/data/w/chain.done")][1])
         self.assertTrue(D._WAIT_CACHE[("calc", "unit", "u1")][1])
         self.assertFalse(D._WAIT_CACHE[("calc", "path", "/data/p/x.json")][1])
-        self.assertIn(("calc", "/data/w/chain.done"), D._WL_REG)
         self.assertTrue(D.check_wait_for("host:calc:/data/w/chain.done"))
 
-    def test_reconcile_miss_alarm_once_per_key_and_none_with_event(self):
-        logged = []
-        orig, D._log_ssh_call = D._log_ssh_call, lambda *a: logged.append(a)
-        self._ssh(b"@@0\n@@reg\n@@rc 0\n@@1\n@@reg\n@@rc 0\n")
-        try:
-            for k in (("calc", "path", "/data/a.done"), ("calc", "path", "/data/b.done")):
-                D._WAIT_WATCH.add(k)
-            D.record_wait_event({"addr": "машина.calc.файл.появился", "payload": {"path": "/data/b.done", "host": "calc"}})
-            D._reconcile()
-            D._reconcile()
-        finally:
-            D._log_ssh_call = orig
-        self.assertEqual([a for a in logged if a[3] == "пропуск"], [("calc", "path", "/data/a.done", "пропуск")])
-        self.assertEqual(len(self.alarms), 1)
-        self.assertEqual(self.alarms[0][1], "recon-miss")
-        self.assertEqual(D.signal_prio("recon-miss"), "urgent")
-
-    def test_reconcile_unwatched_machine_no_miss_alarm(self):
-        D._WAIT_WATCH.add(("vps", "path", "/opt/x.done"))
-        self._ssh(b"@@0\n@@rc 0\n")
-        D._reconcile()
-        self.assertEqual(self.alarms, [])
-
-    def test_recon_script_keeps_tilde_unquoted(self):
-        script = D._recon_script([("calc", "path", "~/x.done"), ("calc", "path", "~/rpv/progress/a.json")])
+    def test_recon_script_keeps_tilde_unquoted_and_reads_json_and_rc(self):
+        script = D._recon_script([("calc", "path", "~/x.done"), ("calc", "path", "~/rpv/progress/a.json"), ("calc", "path", "~/runs/u.rc")])
         self.assertIn("test -e ~/x.done", script)
         self.assertIn("cat ~/rpv/progress/a.json", script)
+        self.assertIn("cat ~/runs/u.rc", script)
         self.assertNotIn("'~/", script)
+
+    def test_rc_file_is_read_and_kept_for_the_wake_note(self):
+        calls = self._ssh(b"SERVICE_RESULT=exit-code EXIT_STATUS=2\n")
+        self.assertTrue(D._host_probe("calc", "path", "/var/lib/rpv/runs/tk1-0101-ab12.rc"))
+        self.assertEqual(calls, ["cat /var/lib/rpv/runs/tk1-0101-ab12.rc"])
+        self.assertEqual(D.wait_rc("host:calc:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "SERVICE_RESULT=exit-code EXIT_STATUS=2")
+        self.assertEqual(D.wait_rc("host:vps:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "", "это файл другой машины")
+        self.assertEqual(D.wait_rc("file:/x.rc"), "")
+        self.assertEqual(D.wait_rc("host:calc:unit:tk1"), "")
+
+    def test_reconcile_reads_rc_file_too(self):
+        key = ("calc", "path", "/runs/u1.rc")
+        D._WAIT_WATCH.add(key)
+        self._ssh(b"@@0\nSERVICE_RESULT=success EXIT_STATUS=0\n@@rc 0\n")
+        D._reconcile()
+        self.assertTrue(D._WAIT_CACHE[key][1])
+        self.assertEqual(D.wait_rc("host:calc:/runs/u1.rc"), "SERVICE_RESULT=success EXIT_STATUS=0")
+
+    def test_rc_file_not_there_yet_means_job_is_running(self):
+        self._ssh(b"", rc=1)
+        self.assertFalse(D._host_probe("calc", "path", "/runs/u1.rc"))
+        self.assertEqual(D.wait_rc("host:calc:/runs/u1.rc"), "")
+
+    def test_rc_failed(self):
+        for rc, bad in (("SERVICE_RESULT=success EXIT_STATUS=0", False), ("SERVICE_RESULT=exit-code EXIT_STATUS=2", True),
+                        ("SERVICE_RESULT=signal EXIT_STATUS=TERM", True), ("SERVICE_RESULT=success EXIT_STATUS=TERM", True),
+                        ("SERVICE_RESULT=oom-kill EXIT_STATUS=", True), ("SERVICE_RESULT=success EXIT_STATUS=", False),
+                        ("чужой формат файла", False)):
+            self.assertEqual(D._rc_failed(rc), bad, rc)
 
     def test_reconcile_missing_file_stays_unmet(self):
         D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
-        self._ssh(b"@@0\n@@reg\n@@rc 1\n")
+        self._ssh(b"@@0\n@@rc 1\n")
         D._reconcile()
         self.assertFalse(D._WAIT_CACHE[("calc", "path", "/data/a.done")][1])
-        self.assertIn(("calc", "/data/a.done"), D._WL_REG)
 
     def test_reconcile_ssh_failure_changes_nothing(self):
         D._WAIT_WATCH.add(("calc", "path", "/data/a.done"))
@@ -4620,7 +4600,7 @@ class WaitReconcileTest(unittest.TestCase):
         self.assertNotIn(("calc", "path", "/data/a.done"), D._WAIT_CACHE)
 
     def test_blind_tick_alert_per_machine_and_recovery(self):
-        """TK-217: ssh 255 к calc дольше порога → ALERT-BLIND.txt с именем машины и строка в ceo-wake.log; возврат — «зрение
+        """TK-217: ssh 255 к calc дольше порога → ALERT-BLIND.txt с именем машины и строка в mechanics.log; возврат — «зрение
         вернулось», файл снят, сверка запрошена сразу. vps без ожиданий не тревожит."""
         import tempfile as _tf
         old = (D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR)
@@ -4634,18 +4614,18 @@ class WaitReconcileTest(unittest.TestCase):
             D.BLIND.record("ssh:vps", False, time.time() - 400)
             D.hide.run  # noqa: B018 — звук в тесте не нужен
             orig, D._blind_sound = D._blind_sound, lambda: None
-            D._blind_tick(None)
+            D._blind_tick()
             D._blind_sound = orig
             alert = (tmp / "ALERT-BLIND.txt").read_text(encoding="utf-8")
             self.assertIn("ssh:calc", alert)
             self.assertNotIn("ssh:vps", alert)
-            self.assertIn("диспетчер слеп: ssh:calc", D.CEO_INBOX.read_text(encoding="utf-8"))
-            self.assertIn(" * blind", D.CEO_WAKE_LOG.read_text(encoding="utf-8"))
+            self.assertIn("диспетчер слеп: ssh:calc", (tmp / "mechanics.log").read_text(encoding="utf-8"))
+            self.assertFalse(D.CEO_WAKE_LOG.exists(), "CP5: механика CEO не будит")
             D._RECON_LAST = time.time()
             D.BLIND.record("ssh:calc", True, time.time())
-            D._blind_tick(None)
+            D._blind_tick()
             self.assertFalse((tmp / "ALERT-BLIND.txt").exists())
-            self.assertIn("зрение вернулось: ssh:calc", D.CEO_INBOX.read_text(encoding="utf-8"))
+            self.assertIn("зрение вернулось: ssh:calc", (tmp / "mechanics.log").read_text(encoding="utf-8"))
             self.assertEqual(D._RECON_LAST, 0.0)
         finally:
             D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
@@ -4659,27 +4639,9 @@ class WaitReconcileTest(unittest.TestCase):
             self._ssh(b"", rc=255)
             D._reconcile()
             self.assertTrue(D.BLIND.any_down())
-            self._ssh(b"@@0\n@@reg\n@@rc 1\n")
+            self._ssh(b"@@0\n@@rc 1\n")
             D._reconcile()
             self.assertFalse(D.BLIND.any_down())
         finally:
             D._WAIT_WATCH.discard(("calc", "path", "/data/a.done"))
             D.BLIND = old
-
-    def test_ssh_calls_are_logged_with_reason(self):
-        import tempfile as _tf
-        old = D.DISPATCHER_DIR
-        D.DISPATCHER_DIR = Path(_tf.mkdtemp())
-        try:
-            self._ssh(b"")
-            D._host_probe("calc", "path", "/data/a.done")
-            line = (D.DISPATCHER_DIR / D.SSH_CALLS_LOG_NAME).read_text(encoding="utf-8").splitlines()[0].split("\t")
-            self.assertEqual(line[1:], ["calc", "path", "/data/a.done", "первая"])
-        finally:
-            D.DISPATCHER_DIR = old
-
-    def test_needs_probe_only_first(self):
-        key = ("calc", "path", "/data/a.done")
-        self.assertTrue(D._needs_probe(key))  # первая проверка нового условия
-        D._WAIT_CACHE[key] = (time.time(), False)
-        self.assertFalse(D._needs_probe(key))  # дальше — события и сверка, не ssh

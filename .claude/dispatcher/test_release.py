@@ -1,34 +1,15 @@
-"""Выпуск и откат (TK-076 п.5): версии согласованы, bump/update/rollback — по последовательности команд claude."""
+"""Выпуск плагина вручную (CP4): версии согласованы, bump правит версии и требует запись в CHANGELOG; автовыпуска, update и
+rollback нет."""
+import contextlib
+import io
 import json
-import os
 import re
 import subprocess
-import sys
-import time
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
 
 import release
-
-
-class FakeClaude:
-    def __init__(self, versions, fail_on=None, tags=("1.7.1",), pinned=None):
-        self.versions, self.calls, self.fail_on, self.tags, self.pinned = list(versions), [], fail_on, tags, pinned
-
-    def __call__(self, cmd, **kw):
-        self.calls.append(cmd[1:])
-        if cmd[1:3] == ["plugin", "list"]:
-            v = self.versions[0] if len(self.versions) == 1 else self.versions.pop(0)
-            return subprocess.CompletedProcess(cmd, 0, f"  ❯ {release.NAME}@{release.NAME}\n    Version: {v}\n", "")
-        if cmd[0] == "git":
-            out = "".join(f"abc\trefs/tags/v{t}\n" for t in self.tags if cmd[-1] == f"refs/tags/v{t}")
-            return subprocess.CompletedProcess(cmd, 0, out, "")
-        if cmd[1:4] == ["plugin", "marketplace", "list"]:
-            ref = f"@{self.pinned}" if self.pinned else ""
-            return subprocess.CompletedProcess(cmd, 0, f"  ❯ {release.NAME}\n    Source: GitHub ({release.REPO}{ref})\n", "")
-        return subprocess.CompletedProcess(cmd, 1 if cmd[1:4] == self.fail_on else 0, "", "boom")
 
 
 def make_root(d: Path, version="1.0.0", changelog="## 1.0.0\n"):
@@ -39,13 +20,6 @@ def make_root(d: Path, version="1.0.0", changelog="## 1.0.0\n"):
 
 
 class ReleaseTests(unittest.TestCase):
-    def setUp(self):  # клоны цели — в каталог рядом с STATE, не в настоящий ~/.claude
-        self._st = tempfile.TemporaryDirectory()
-        patcher = mock.patch.object(release, "STATE", Path(self._st.name) / "s.json")
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.addCleanup(self._st.cleanup)
-
     def test_repo_versions_consistent(self):
         self.assertIsNone(release.check())
 
@@ -61,314 +35,31 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 release.bump("v1.2", root)
 
-    def test_update_records_previous_version(self):
+    def test_check_reports_divergence(self):
         with tempfile.TemporaryDirectory() as t:
-            st = Path(t) / "s.json"
-            fake = FakeClaude(["1.7.1", "1.8.0"])
-            self.assertEqual(release.update(fake, st), 0)
-            self.assertEqual(json.loads(st.read_text())["previous"], "1.7.1")
-            self.assertIn(["plugin", "update", f"{release.NAME}@{release.NAME}"], fake.calls)
+            root = Path(t)
+            make_root(root)
+            self.assertIsNone(release.check(root))
+            (root / "CHANGELOG.md").write_text("# C\n\n## 1.0.1\n\n## 1.0.0\n", encoding="utf-8")
+            self.assertIn("расходятся", release.check(root))
 
-    def test_rollback_uses_recorded_previous_and_tag_ref(self):
-        with tempfile.TemporaryDirectory() as t:
-            st = Path(t) / "s.json"
-            st.write_text(json.dumps({"previous": "1.7.1"}))
-            fake = FakeClaude(["1.8.0", "1.7.1"])
-            self.assertEqual(release.rollback(None, fake, st), 0)
-            self.assertIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"], fake.calls)
-            self.assertEqual(json.loads(st.read_text())["previous"], "1.8.0")  # откат обратим
+    def test_only_manual_commands_remain(self):
+        """CP4 (критерий 16): автовыпуск, update и rollback удалены — осталось то, что делает мейнтейнер руками."""
+        for cmd in ("auto", "update", "rollback"):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(release.main([cmd, "--project", "."]), 2, cmd)
+            self.assertIn("bump X.Y.Z", out.getvalue())
+        for name in ("autorelease", "run_auto_locked", "spawn_auto", "update", "rollback", "bump_problem", "tag_release"):
+            self.assertFalse(hasattr(release, name), name)
 
-    def test_rollback_without_target_refuses_and_failure_reported(self):
-        with tempfile.TemporaryDirectory() as t:
-            st = Path(t) / "none.json"
-            self.assertEqual(release.rollback(None, FakeClaude(["1"]), st), 2)
-
-    def test_rollback_missing_tag_touches_nothing(self):
-        with tempfile.TemporaryDirectory() as t:
-            fake = FakeClaude(["1.8.0"], tags=())
-            self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 3)
-            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
-
-    def test_rollback_failure_restores_previous_marketplace(self):
-        with tempfile.TemporaryDirectory() as t:
-            fake = FakeClaude(["1.8.0"], fail_on=["plugin", "install", f"{release.NAME}@{release.NAME}"])
-            self.assertEqual(release.rollback("1.7.1", fake, Path(t) / "s.json"), 1)
-            adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"] and c[3].startswith(release.REPO)]
-            self.assertEqual(adds[0], ["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"])
-            self.assertEqual(adds[1:], [["plugin", "marketplace", "add", release.REPO]] * 3)   # возврат прежнего — с повторами
-
-    def test_update_failure_restores_pinned_marketplace(self):  # add после remove упал — прежний маркетплейс возвращается
-        fake = FakeClaude(["1.8.0"], fail_on=["plugin", "marketplace", "add"], pinned="v1.8.0")
-        self.assertEqual(release.update(fake, Path(tempfile.gettempdir()) / "x.json"), 1)
-        adds = [c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"] and c[3].startswith(release.REPO)]
-        self.assertEqual(adds, [["plugin", "marketplace", "add", release.REPO]] + [["plugin", "marketplace", "add", f"{release.REPO}#v1.8.0"]] * 3)
-
-    def test_github_down_during_reinstall_adds_from_local_clone(self):  # TK-105 п.1: плагин остаётся установленным
-        fake = FakeClaude(["1.8.0"])
-        base = fake.__call__
-
-        def run(cmd, **kw):
-            if cmd[0] == "git" and "clone" in cmd:
-                Path(cmd[-1]).mkdir(parents=True, exist_ok=True)
-            if cmd[0] != "git" and cmd[1:4] == ["plugin", "marketplace", "add"] and cmd[4].startswith(release.REPO):
-                return subprocess.CompletedProcess(cmd, 1, "", "github down")
-            return base(cmd, **kw)
-        self.assertEqual(release._reinstall(f"{release.REPO}#v1.8.0", run), 0)
-        local = [c[-1] for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]][-1]
-        self.assertTrue(local.startswith(str(release.STATE.parent)) and Path(local).exists())   # источник жив, не в %TEMP%
-        self.assertTrue(any(c[:3] == ["plugin", "install", f"{release.NAME}@{release.NAME}"] for c in fake.calls))
-
-    def test_restart_and_verify_hidden_and_timeout_caught(self):  # TK-105 п.3/п.4
-        seen = []
-
-        def run(cmd, **kw):
-            seen.append(kw)
-            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
-        with tempfile.TemporaryDirectory() as t:
-            self.assertFalse(release.restart_services(Path(t), Path(t), run))
-            self.assertFalse(release.verify_alive(Path(t), Path(t), run, wait_s=0))
-        self.assertTrue(seen and all(k["timeout"] == release.CLAUDE_TIMEOUT_S for k in seen))
-        if os.name == "nt":
-            self.assertTrue(all(k["creationflags"] & release.CREATE_NO_WINDOW for k in seen))
-
-    def test_install_uses_project_scope_when_installed_there(self):
-        with tempfile.TemporaryDirectory() as t:
-            reg = Path(t) / "r.json"
-            reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [{"scope": "project"}]}}))
-            self.assertEqual(release._scope_args(reg), ["--scope", "project"])
-            reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [{"scope": "user"}]}}))
-            self.assertEqual(release._scope_args(reg), [])
-
-    def test_update_unpins_marketplace_from_tag(self):
-        with tempfile.TemporaryDirectory() as t:
-            fake = FakeClaude(["1.7.1", "1.8.0"], pinned="v1.7.1")
-            self.assertEqual(release.update(fake, Path(t) / "s.json"), 0)
-            self.assertIn(["plugin", "marketplace", "add", release.REPO], fake.calls)
-            self.assertNotIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.7.1"], fake.calls)
-
-    def test_update_on_main_does_not_reinstall(self):
-        with tempfile.TemporaryDirectory() as t:
-            fake = FakeClaude(["1.7.1", "1.8.0"])
-            release.update(fake, Path(t) / "s.json")
-            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
-
-
-class AutoReleaseTests(unittest.TestCase):
-    """TK-094: автовыпуск — update, службы заново, проверка; провал → откат + сигнал владельцу."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.proj = Path(self.tmp.name)
-        self.st = self.proj / "s.json"
-        self.reg = self.proj / "installed.json"
-        self.reg.write_text(json.dumps({"plugins": {f"{release.NAME}@{release.NAME}": [
-            {"scope": "project", "projectPath": str(self.proj), "installPath": str(self.proj / "plug")}]}}), encoding="utf-8")
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def journal(self):
-        f = self.proj / ".claude" / "dispatcher" / "release-journal.jsonl"
-        return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
-
-    def notices(self):
-        qs = sorted((self.proj / ".claude" / "pulse" / "questions").glob("q-release-*.json"))
-        return [json.loads(p.read_text(encoding="utf-8")) for p in qs]
-
-    def test_notice_visible_on_dispatcher_and_answerable(self):  # сигнал выпуска виден на Диспетчерской, снимается ответом
-        self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
-        import view2, ask
-        qs = self.notices()
-        v = view2.make({}, {}, qs, time.time())
-        self.assertIn("rolled-back", v["questions"][0]["text"])
-        qdir = self.proj / ".claude" / "pulse" / "questions"
-        with mock.patch.object(ask.P, "questions_dir", return_value=qdir):
-            ok, msg, _ = ask.answer_question(qs[0]["id"], "a")
-        self.assertTrue(ok)
-        self.assertFalse(view2.make({}, {}, self.notices(), time.time())["questions"])
-
-    def auto(self, versions, alive, **kw):
-        restarts = []
-        fake = FakeClaude(versions, **kw)
-        rc = release.autorelease(self.proj, fake, self.st, self.reg,
-                                 restart=lambda p, d, run: restarts.append(d) or True, verify=lambda p, d, run: alive)
-        return rc, fake, restarts
-
-    def test_ok_restarts_services_and_journals(self):
-        rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=True)
-        self.assertEqual((rc, len(restarts), [j["result"] for j in self.journal()]), (0, 1, ["ok"]))
-        self.assertEqual(self.notices(), [])
-
-    def test_same_version_is_not_silent(self):  # влит PR без bump: службы не трогаем, но журнал и «ждёт вас»
-        rc, fake, restarts = self.auto(["1.8.3"], alive=True)
-        self.assertEqual((rc, restarts, [j["result"] for j in self.journal()]), (0, [], ["no-bump"]))
-        self.assertIn("no-bump", self.notices()[0]["text"])
-
-    def test_failed_check_rolls_back_and_tells_owner(self):
-        rc, fake, restarts = self.auto(["1.8.3", "1.8.4", "1.8.4"], alive=False, tags=("1.8.3",))
-        self.assertEqual(rc, 2)  # проверка не прошла и после отката (verify всегда False)
-        self.assertIn(["plugin", "marketplace", "add", f"{release.REPO}#v1.8.3"], fake.calls)
-        self.assertEqual(len(restarts), 2)  # службы подняты заново и после отката
-        self.assertEqual(self.journal()[-1]["result"], "rolled-back")
-        self.assertIn("rolled-back", self.notices()[0]["text"])
-
-    def test_rollback_failure_is_reported(self):
-        rc, fake, restarts = self.auto(["1.8.3", "1.8.4"], alive=False, tags=())  # тега прошлой версии нет
-        self.assertEqual((rc, self.journal()[-1]["result"]), (2, "rollback-failed"))
-
-    def test_clean_env_drops_session_keeps_service_settings(self):
-        env = release.clean_env({"RPV_ROLE": "engineer", "RPV_TICKET": "TK-1", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "HOST_SESSION": "1", "PATH": "p",
-                                 "RPV_DISPATCH_MAX_PARALLEL": "8", "RPV_DISPATCH_ROLE_PARALLEL": "engineer:6",
-                                 "RPV_DISPATCH_X": "1"})
-        self.assertEqual(env, {"PATH": "p", "RPV_DISPATCH_MAX_PARALLEL": "8", "RPV_DISPATCH_ROLE_PARALLEL": "engineer:6",
-                               "RPV_DISPATCH_X": "1"})
-
-    def test_clean_env_matches_supervise_session_env(self):  # supervise отказывает ровно по SESSION_ENV — чистим их
-        import supervise
-        self.assertTrue(set(supervise.SESSION_ENV) <= set(__import__("start").SESSION_ENV + release.SESSION_DROP_EXTRA))
-
-    def test_parallel_auto_serialized_by_lock(self):  # второй выпуск при живом первом — пометка, держатель доделает
-        runs = []
-        lock, pending = release._auto_paths(self.proj)
-        lock.parent.mkdir(parents=True, exist_ok=True)
-
-        def first(p):
-            runs.append("a")
-            if len(runs) == 1:
-                self.assertEqual(release.run_auto_locked(p, lambda q: runs.append("nested") or 0), 0)  # занят → в очередь
-                self.assertTrue(pending.exists())
-            return 0
-
-        self.assertEqual(release.run_auto_locked(self.proj, first), 0)
-        self.assertEqual(runs, ["a", "a"])  # держатель прошёл ещё раз; вложенный сам update не запускал
-        self.assertFalse(lock.exists() or pending.exists())
-
-    def test_stale_lock_is_taken_over(self):
-        lock, _ = release._auto_paths(self.proj)
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.touch()
-        old = lock.stat().st_mtime - release.LOCK_STALE_S - 1
-        os.utime(lock, (old, old))
-        self.assertTrue(release._lock_acquire(lock))
-
-    def test_pin_file_blocks_autorelease(self):
-        """TK-232 п.6: проект закрепил версию — автовыпуск не обновляет."""
-        pin = release.pin_file(self.proj)
-        pin.parent.mkdir(parents=True, exist_ok=True)
-        pin.write_text("", encoding="utf-8")   # содержимое не читается: закрепление = «никаких обновлений»
-        runs = []
-        self.assertEqual(release.run_auto_locked(self.proj, lambda q: runs.append(1) or 0, idle=lambda *a: True), 0)
-        self.assertEqual(runs, [])
-
-    def test_waits_for_idle_before_release(self):
-        """TK-232 п.6: пока идут запуски ролей, выпуск ждёт; тишина — выпускает."""
-        counts, naps = [2, 1, 0], []
-        lock, _ = release._auto_paths(self.proj)
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.touch()
-        self.assertTrue(release.wait_idle(self.proj, lock, count=lambda p: counts.pop(0), sleep=naps.append))
-        self.assertEqual(len(naps), 2)
-
-    def test_wait_idle_gives_up_after_limit(self):
-        """Тишина не наступила за срок — False (выпуск принудительный), не вечное ожидание."""
-        lock, _ = release._auto_paths(self.proj)
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.touch()
-        t = [0.0]
-        with mock.patch.dict(os.environ, {"RPV_RELEASE_WAIT_S": "100"}):
-            self.assertFalse(release.wait_idle(self.proj, lock, count=lambda p: 1,
-                                               sleep=lambda s: t.__setitem__(0, t[0] + 60), now=lambda: t[0]))
-
-    def test_auto_release_runs_after_wait_and_journals_forced(self):
-        runs = []
-        self.assertEqual(release.run_auto_locked(self.proj, lambda q: runs.append(1) or 0, idle=lambda *a: False), 0)
-        self.assertEqual(runs, [1])
-        rec = json.loads((self.proj / ".claude" / "dispatcher" / "release-journal.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-        self.assertEqual(rec["result"], "forced")
-
-    def test_active_runs_counts_live_pids_only(self):
-        d = self.proj / ".claude" / "dispatcher"
-        d.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.Popen([sys.executable, "-c", "pass"])
-        proc.wait()   # завершённый подпроцесс: ненулевой мёртвый pid (застрявшая запись упавшего запуска)
-        runs = {"TK-1": {"pid": os.getpid(), "pstart": __import__("dispatch")._proc_start(os.getpid())},
-                "TK-2": {"pid": 0}, "TK-3": {"pid": proc.pid}, "TK-4": {"pid": proc.pid, "pstart": "чужой-старт"},
-                "TK-5": {"pid": os.getpid(), "pstart": "чужой-старт"}}
-        (d / "state.json").write_text(json.dumps({"active_runs": runs}), encoding="utf-8")
-        self.assertEqual(release.active_runs(self.proj), 1)
-
-    def test_installed_dir_prefers_project_scope(self):
-        self.assertEqual(release.installed_dir(self.proj, self.reg), self.proj / "plug")
-        self.assertIsNone(release.installed_dir(self.proj, self.proj / "none.json"))
-
-    def test_spawn_auto_detached_and_switchable(self):
-        calls = []
-        env = {k: v for k, v in os.environ.items() if k != "RPV_AUTORELEASE"}   # тест не зависит от env ПК
-        patcher = mock.patch.dict(os.environ, env, clear=True)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.assertTrue(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append((a, k))))
-        self.assertIn("auto", calls[0][0][0])
-        if os.name == "nt":
-            fl = calls[0][1]["creationflags"]
-            self.assertTrue(fl & release.CREATE_NO_WINDOW and not fl & subprocess.DETACHED_PROCESS)
-        old = os.environ.get("RPV_AUTORELEASE")
-        os.environ["RPV_AUTORELEASE"] = "0"
-        try:
-            self.assertFalse(release.spawn_auto(self.proj, popen=lambda *a, **k: calls.append(1)))
-        finally:
-            os.environ.pop("RPV_AUTORELEASE") if old is None else os.environ.update(RPV_AUTORELEASE=old)
-        self.assertEqual(len(calls), 1)
-
-
-class VerifyAliveTests(unittest.TestCase):
-    ROWS = [{"check": "диспетчер", "status": "OK", "detail": "x"},
-            {"check": "простой сегодня", "status": "FAIL", "detail": "84 мин из 10"}]
-
-    def fake_doctor(self, rows):
-        return lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, json.dumps(rows), "")
-
-    def test_idle_fail_alone_does_not_fail_release(self):
-        """Б1: doctor любой версии (и старый, без --alive) может вернуть FAIL по простою — выпуск от этого не откатывается."""
-        self.assertTrue(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(self.ROWS), wait_s=0))
-
-    def test_bus_queue_errors_fail_does_not_fail_release(self):
-        """В-209 п.1: шина/очередь/ошибки за сутки — не повод откатывать исправный выпуск."""
-        rows = self.ROWS + [{"check": c, "status": "FAIL", "detail": "x"} for c in ("шина", "очередь ceo", "ошибки за сутки")]
-        self.assertTrue(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))
-
-    def test_extra_copy_fails_release(self):
-        rows = self.ROWS + [{"check": "копии dispatch", "status": "FAIL", "detail": "2 копий вместо одной"}]
-        self.assertFalse(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))
-
-    def test_service_fail_fails_release(self):
-        rows = self.ROWS + [{"check": "сторож", "status": "FAIL", "detail": "не запущен"}]
-        self.assertFalse(release.verify_alive(Path("."), Path("."), run=self.fake_doctor(rows), wait_s=0))
-        self.assertFalse(release.verify_alive(Path("."), Path("."), run=lambda c, **k: subprocess.CompletedProcess(c, 1, "boom", ""), wait_s=0))
-
-
-class TimeoutAndAtomicRollbackTests(unittest.TestCase):
     def test_run_timeout_returns_124_not_hang(self):
-        """Б3: git/claude без предела держали клон часами."""
+        """Б3: git без предела держал процесс часами."""
         def hang(cmd, **kw):
             self.assertIn("timeout", kw)
             raise subprocess.TimeoutExpired(cmd, kw["timeout"])
-        r = release._run(["git", "clone", "x"], hang)
+        r = release._run(["git", "push", "x"], hang)
         self.assertEqual(r.returncode, 124)
-
-    def test_rollback_touches_nothing_when_target_not_fetchable(self):
-        """Б2: сбой GitHub при добыче цели — маркетплейс и плагин не тронуты (не remove)."""
-        class NoClone(FakeClaude):
-            def __call__(self, cmd, **kw):
-                if cmd[:2] == ["git", "clone"]:
-                    self.calls.append(cmd[1:])
-                    return subprocess.CompletedProcess(cmd, 128, "", "fetch failed")
-                return super().__call__(cmd, **kw)
-        with tempfile.TemporaryDirectory() as t:
-            fake = NoClone(["1.8.4"], tags=("1.8.3",))
-            self.assertEqual(release.rollback("1.8.3", fake, Path(t) / "s.json"), 1)
-            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "remove"]])
-            self.assertFalse([c for c in fake.calls if c[:3] == ["plugin", "marketplace", "add"]])
 
 
 class ChangelogTagTests(unittest.TestCase):

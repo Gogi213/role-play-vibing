@@ -20,7 +20,7 @@ RULES = {
     "wait": ({"researcher", "engineer", "judge"}, "form"),
     "continue": ({"researcher", "engineer"}, ""),  # TK-090 в: длинная работа кусками — следующий запуск той же роли
 }
-OWNER_REASONS = ("деньги", "видимое", "необратимое", "бизнес-правило")  # TK-233 п.4: поводы вопроса владельцу (В-229)
+OWNER_REASONS = ("деньги", "направление", "необратимое", "бизнес-правило")  # V2-1: поводы вопроса владельцу (TK-233 п.4; «направление» вместо «видимого»)
 CONTINUE_MAX = 5  # подряд идущих continue у одной роли в тикете; дальше — wait/blocked/pr/done
 HINT = {
     "path": "--path <файл или каталог с результатом, существует на диске>",
@@ -49,7 +49,7 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
     if not why:
         return "нужен --why «зачем/почему» (≤ 200 знаков)"
     if result == "ask-owner" and role == "judge" and why_owner not in OWNER_REASONS:
-        # TK-233 п.4: владельцу — только деньги/видимое/необратимое/бизнес-правило; остальное Судья решает сам (blocked, если встал)
+        # V2-1: владельцу — только деньги/направление/необратимое/бизнес-правило; остальное Судья решает сам (blocked, если встал)
         return (f"ask-owner к владельцу — только с --why-owner {'|'.join(OWNER_REASONS)}; другой повод владельцу не "
                 f"уходит: реши сам по методике либо blocked")
     if len(why) > WHY_MAX:
@@ -140,19 +140,30 @@ def continue_streak(tkt, role: str) -> int:
     return n
 
 
-def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "") -> dict:
-    """Правки шапки по итогу. accept и wait правит своя команда (accepted / wait_for), здесь — только ход."""
+def default_reviewer(executor: str = "") -> str:
+    """V2-1: Судья проверяет каждый результат — ревьюер по умолчанию; без него только механические задачи Haiku
+    (приёмка кодом, не Судьёй)."""
+    return "" if (executor or "").strip().lower() == "haiku" else "judge"
+
+
+def route(role: str, result: str, owner: str, reviewer: str = "", owner_last: str = "", executor: str = "") -> dict:
+    """Правки шапки по итогу. accept и wait правит своя команда (accepted / wait_for), здесь — только ход.
+    Тикет без ревьюера в шапке (заведён до V2-1): done/pr исполнителя идут Судье, кроме executor: haiku, и
+    `reviewer: judge` дописывается в шапку — вся остальная логика диспетчера видит ревьюера."""
     rev = (reviewer or "").strip()
+    fill = {}
+    if not rev and (default := default_reviewer(executor)):
+        rev = fill["reviewer"] = default
     if result == "continue":
         return {"status": "in_progress", "next": role}
     if result == "done":
         if role == "ceo":  # ceo закрывает сам
             return {"status": "done", "next": ""}
         if rev and rev != role and role != "judge":
-            return {"status": "in_review", "next": rev}
+            return {"status": "in_review", "next": rev, **fill}
         return {"status": "done", "next": ""}
     if result == "pr":
-        return {"status": "in_review", "next": rev or "judge"}
+        return {"status": "in_review", "next": rev or "judge", **fill}
     if result == "accept" and owner == "judge" and role == "judge":  # TK-225: тикет Судьи — проверка уже по артефакту
         return {"status": "done", "next": ""}
     if result == "accept":  # без PR; с PR — cmd_accept. Закрываем, только если владелец сдавал done; иначе проверка

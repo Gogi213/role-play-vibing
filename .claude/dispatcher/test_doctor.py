@@ -25,9 +25,6 @@ class DoctorTests(unittest.TestCase):
         (self.project / ".claude" / "tickets").mkdir()
         self.sd = self.project / ".claude" / "dispatcher"
         self.sd.mkdir()
-        self.env = mock.patch.dict(os.environ, {k: "" for k in ("RPV_BUS_URL",)})
-        self.env.start()
-        self.addCleanup(self.env.stop)
 
     def rows(self, **kw):
         kw.setdefault("installed", lambda p: True)
@@ -37,7 +34,7 @@ class DoctorTests(unittest.TestCase):
         rows = self.rows()
         self.assertEqual(rows["диспетчер"][1], D.FAIL)
         self.assertEqual(rows["сторож"][1], D.FAIL)
-        self.assertEqual(rows["шина"][1], D.OFF)
+        self.assertNotIn("шина", rows)
         self.assertEqual(rows["присмотр ОС"][1], D.OK)
         self.assertIn("тикетов нет", rows["очередь"][2])
         self.assertEqual(rows["ошибки за сутки"][1], D.OK)
@@ -79,56 +76,23 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(r[1], D.WARN)
         self.assertIn("запусков за сутки: 2, не ok: 1", r[2])
 
-    def test_bus_states(self):
-        with mock.patch.dict(os.environ, {"RPV_BUS_URL": "http://x:1"}):
-            ok = D.check_bus(lambda path: {"ok": True, "last_seq": 7, "queues": {"ceo.pending": 2}, "blocked": {}})
-            self.assertEqual(ok[1], D.OK)
-            self.assertIn("не доставлено 2", ok[2])
-            blk = D.check_bus(lambda path: {"ok": True, "last_seq": 7, "queues": {}, "blocked": {"TK-1": "r"}})
-            self.assertEqual(blk[1], D.WARN)
-
-            def boom(path):
-                raise OSError("refused")
-            self.assertEqual(D.check_bus(boom)[1], D.FAIL)
-
     def test_prints_in_cp1252_environment(self):
         import subprocess
-        env = {**os.environ, "PYTHONIOENCODING": "cp1252", "RPV_BUS_URL": "", "ALPHA_BUS_URL": ""}
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
         done = subprocess.run([sys.executable, str(Path(D.__file__)), "--project", str(self.project)],
                               capture_output=True, env=env, timeout=60)
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("диспетчер", done.stdout.decode("utf-8"))
 
-    def test_idle_row_and_bus_url_from_dispatcher_state(self):
+    def test_idle_row(self):
         now = time.time()
         day = datetime.fromtimestamp(now).date().isoformat()
         (self.sd / "state.json").write_text(json.dumps({
-            "last_tick": iso(now), "bus_url": "http://disp:1",
+            "last_tick": iso(now),
             "downtime": {day: {"idle_s": 900, "wait_s": 0, "stall_s": 0, "alerted": True}}}), encoding="utf-8")
-        rows = self.rows(now=now, bus_request=lambda path: (_ for _ in ()).throw(OSError("x")))
+        rows = self.rows(now=now)
         self.assertEqual(rows["простой сегодня"][1], D.FAIL)
         self.assertIn("15 мин из 10", rows["простой сегодня"][2])
-        self.assertIn("http://disp:1", rows["шина"][2])  # адрес диспетчера, а не оболочки (в ней RPV_BUS_URL пуст)
-
-    def test_bus_polled_at_dispatcher_address_when_shell_env_empty(self):
-        import io
-        seen = []
-
-        class R(io.BytesIO):
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
-        def fake_urlopen(req, timeout=0):
-            seen.append(req.full_url)
-            return R(b'{"ok": true, "last_seq": 3, "queues": {}, "blocked": {}}')
-
-        with mock.patch.dict(os.environ, {"RPV_BUS_URL": "", "ALPHA_BUS_URL": ""}),                 mock.patch("urllib.request.urlopen", fake_urlopen):
-            row = D.check_bus(None, "http://disp:9")
-        self.assertEqual(seen, ["http://disp:9/stats"])
-        self.assertEqual(row[1], D.OK)
 
     def test_idle_row_shows_throttle_and_limit_buckets(self):
         now = time.time()
@@ -150,15 +114,6 @@ class DoctorTests(unittest.TestCase):
                 self.assertEqual(D.main([]), 2)
             finally:
                 os.chdir(cwd)
-
-    def test_alive_only_ignores_accumulated_idle(self):
-        """№13: накопленный за сутки простой не откатывает исправный выпуск (verify_alive зовёт doctor --alive)."""
-        now = time.time()
-        today = datetime.fromtimestamp(now).date().isoformat()
-        (self.sd / "state.json").write_text(json.dumps({"last_tick": iso(now - 5), "downtime": {
-            today: {"idle_s": 99999, "wait_s": 0, "stall_s": 0, "throttle_s": 0, "limit_s": 0}}}), encoding="utf-8")
-        self.assertEqual(self.rows(now=now)["простой сегодня"][1], D.FAIL)
-        self.assertNotIn("простой сегодня", self.rows(now=now, alive_only=True))
 
     def test_all_services_checked_and_duplicate_copy_fails(self):
         """№12: проверяются все S.services(); две копии одной службы — FAIL."""

@@ -1,30 +1,39 @@
-"""Тесты не видят настройку живой установки: RPV_*/ALPHA_* (шина, машины, ключи ssh, лимиты) убираются из окружения
-до сбора тестов. Иначе pytest на машине с проектом пишет фикстуры в живую шину и в очередь CEO (TK-077, 08.10).
-Без URL post шины уходит в spool, а он по умолчанию общий — ~/.rpv/outbox.jsonl, его сливает живой диспетчер:
-поэтому spool тестов — файл во временном каталоге сессии (тесты шины задают свой RPV_BUS_SPOOL сами)."""
+"""Тесты не видят настройку живой установки: RPV_*/ALPHA_* (машины, ключи, лимиты) убираются из окружения до сбора тестов.
+Иначе pytest на машине с проектом читает чужие пороги и пишет фикстуры в живую очередь CEO (TK-077, 08.10)."""
 import atexit
 import os
 import shutil
+import subprocess
 import tempfile
 
 import pytest
 
 _PREFIXES = ("RPV_", "ALPHA_")
-_SPOOL_DIR = tempfile.mkdtemp(prefix="rpv-test-spool-")
-_SPOOL = os.path.join(_SPOOL_DIR, "spool.jsonl")
-atexit.register(shutil.rmtree, _SPOOL_DIR, True)
+_TMP_DIR = tempfile.mkdtemp(prefix="rpv-test-")
+atexit.register(shutil.rmtree, _TMP_DIR, True)
 
 
 def _strip_live_env():
     for k in [k for k in os.environ if k.startswith(_PREFIXES)]:
         del os.environ[k]
-    os.environ["RPV_BUS_SPOOL"] = _SPOOL
-    # токен шины читается ещё и из ~/.rpv-bus-token владельца: без отключения на его ПК тесты находят «шину» и пишут
-    # сигналы в очередь, а не в ceo-inbox.md (красные test_watch локально при зелёном CI, TK-101 п.5)
-    os.environ["RPV_BUS_DISABLE"] = "1"
+    # настоящий `claude` тестам не нужен и стоит денег: без этого сжатие конспекта (haiku_aux) звало живой `claude -p`
+    os.environ["CLAUDE_BIN"] = os.path.join(_TMP_DIR, "no-claude")
 
 
 _strip_live_env()
+
+# Алиасы машин живут в ~/.ssh/config, а не в окружении, которое чистится выше: тест, не подменивший subprocess.run, ходил бы
+# по ssh на настоящую машину. Настоящий ssh из тестов — OSError; тесты ожиданий подменяют subprocess.run сами.
+_REAL_RUN = subprocess.run
+
+
+def _no_real_ssh(cmd, *args, **kwargs):
+    if isinstance(cmd, (list, tuple)) and cmd and os.path.basename(str(cmd[0])).lower() in ("ssh", "ssh.exe"):
+        raise OSError("тест вызвал настоящий ssh: подмени subprocess.run (алиасы машин из ~/.ssh/config живые)")
+    return _REAL_RUN(cmd, *args, **kwargs)
+
+
+subprocess.run = _no_real_ssh
 
 
 def pytest_sessionstart(session):
@@ -33,10 +42,9 @@ def pytest_sessionstart(session):
 
 @pytest.fixture(autouse=True)
 def _isolated_environ():
-    # снимок окружения до теста и полный возврат после: тест шины, оставивший RPV_BUS_URL/TOKEN, не течёт в следующие
-    # (и страж test_env_isolation не зависит от порядка файлов); спул сессии снова на месте, если тест его снял
+    # снимок окружения до теста и полный возврат после: тест, оставивший RPV_*, не течёт в следующие
+    # (и страж test_env_isolation не зависит от порядка файлов)
     saved = dict(os.environ)
-    os.environ.setdefault("RPV_BUS_SPOOL", _SPOOL)
     yield
     os.environ.clear()
     os.environ.update(saved)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import shutil
 import sys
@@ -53,8 +54,9 @@ class WatchSandbox(unittest.TestCase):
         env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
         env_patch.start()
         self.addCleanup(env_patch.stop)
-        for name in ("RPV_JOB_OWNERS_CMD", "RPV_JOB_STATE_CMD", "RPV_STRAY_CMD"):
-            os.environ.pop(name, None)
+        aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"calc"})   # умолчания нет: машины со сторожем задаёт окружение
+        aliases_patch.start()
+        self.addCleanup(aliases_patch.stop)
 
     def tearDown(self):
         for k, v in self._orig.items():
@@ -286,17 +288,17 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_probe_progress_json_in_flight_is_producer_not_met(self):
         import subprocess as sp
-        orig, orig_ssh = W.subprocess.run, W.D._ssh_cmd
+        orig, orig_ssh = sp.run, W.D._ssh_cmd
         try:
-            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]  # хост из среды на раннере не задан
-            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
+            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
+            sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "producer")
-            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
+            sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.json"), "met")
-            W.subprocess.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
+            sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
             self.assertEqual(W.probe_wait_target("calc", "path", "/data/sched/job-a.mark"), "met")
         finally:
-            W.subprocess.run, W.D._ssh_cmd = orig, orig_ssh
+            sp.run, W.D._ssh_cmd = orig, orig_ssh
 
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch
@@ -425,7 +427,8 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_job_form_parses(self):
         self.assertEqual(T.parse_wait_for(self.SPEC), ("job", "calc", "0108041500123"))
-        self.assertIsNone(T.parse_wait_for("job:nohost:1"))
+        self.assertEqual(T.parse_wait_for("job:nas.lan:1"), ("job", "nas.lan", "1"))  # CP6: алиас — любое ssh-имя
+        self.assertIsNone(T.parse_wait_for("job:-v:1"))
         self.assertIsNone(T.parse_wait_for("job:calc:"))
 
     def test_job_failed_wakes_owner_at_once_with_tail_and_reason(self):
@@ -482,7 +485,7 @@ class TriageWaitsTests(WatchSandbox):
             self.assertEqual(lifewatch.reason("j1", "OSError"), "")
         self.assertEqual(lifewatch.reason("j1", "  "), "")
 
-    # --- общее сопоставление «задание → тикет» (сторож и табло) ---
+    # --- общее сопоставление «задание → тикет» ---
     def _owned(self, tid, state, jid="j1"):
         return lambda alias: [{"id": jid, "ticket": tid, "unit": "tk0s-x-" + jid, "state": state}]
 
@@ -609,7 +612,7 @@ class TriageWaitsTests(WatchSandbox):
         class R:
             returncode = 0
             stdout = "a\tTK-1\tu1\tfailed\trc 143: oom-kill\nb\tTK-1\tu2\trunning\t\nc\tTK-1\tu3\tdone\n".encode()
-        with mock.patch.object(W.LW.hide, "run", return_value=R()), mock.patch.dict(os.environ, {"RPV_JOB_OWNERS_CMD": "x"}):
+        with mock.patch.object(W.LW.hide, "run", return_value=R()), mock.patch.object(W.LW.P, "settings", return_value={"job_owners_cmd": "x"}):
             got = W.LW.fetch_owners("calc", lambda a, c: ["ssh"])
         self.assertEqual([j["reason"] for j in got], ["rc 143: oom-kill", "", ""])
 
@@ -635,12 +638,16 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", ""), t.header.get("wait_by", "")), ("in_progress", "", ""))
         self.assertIn("срок ожидания", t.log[-1].text)
+        rows = [json.loads(ln) for ln in (D.DISPATCHER_DIR / "jobs.jsonl").read_text(encoding="utf-8").splitlines()]  # CP6: счёт для отчёта
+        self.assertEqual(rows, [{"ts": T.now_iso(by + timedelta(minutes=W.BY_GRACE_MIN + 1)), "ticket": t.id,
+                                 "wait_for": "host:calc:/data/x/tier1.done", "outcome": "overdue", "rc": None}])
 
     def test_deadline_ignored_when_target_met(self):
         p = self._waiting("host:calc:/data/x/tier1.done")
         T.write_header_updates(p, {"wait_by": (self.now - timedelta(hours=3)).isoformat(timespec="seconds")})
         W.triage_waits({}, self.now, probe=lambda *a: "met", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")  # цель выполнена — будит диспетчер, не срок
+        self.assertFalse((D.DISPATCHER_DIR / "jobs.jsonl").exists())
 
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
@@ -822,50 +829,6 @@ class WatchInstanceLockTests(WatchSandbox):
             holder.wait(timeout=10)
 
 
-class ServerIdleTK070Tests(WatchSandbox):
-    """TK-070 п.1: сервер простаивает, задания ждут замка > 20 мин → будим владельца тикета держателя."""
-
-    PROBE_IDLE = ("load 0.8\n"
-                  "100 1 5000 bash /data/benchrun.sh wave systemd-run tk065-gate2 x\n"
-                  "200 1 1900 bash /data/benchrun.sh stand tk071-job\n"
-                  "201 200 1900 flock -x 9\n")
-
-    def _ticket(self):
-        (self.tickets_dir / "TK-065.md").write_text(
-            "---\nid: TK-065\ntitle: t\nowner: engineer\nstatus: waiting\nwait_for: \nupdated: 2026-09-27T11:00:00+04:00\n---\n\nd\n\n## Лог\n",
-            encoding="utf-8")
-
-    def test_analyze(self):
-        info = W.analyze_server(self.PROBE_IDLE)
-        self.assertEqual(info["load"], 0.8)
-        self.assertEqual(info["wait_s"], 1900)
-        self.assertIn("tk065-gate2", info["holder"])
-
-    def test_wakes_owner_of_holder_ticket(self):
-        self._ticket()
-        ws = {}
-        self.assertEqual(W.check_server_idle(ws, self.now, ssh_run=lambda c: self.PROBE_IDLE), [])
-        tkt = T.read_ticket(self.tickets_dir / "TK-065.md")
-        self.assertEqual(tkt.next_role, "engineer")
-        self.assertIn("простаивает", tkt.log_raw)
-        T.write_header_updates(self.tickets_dir / "TK-065.md", {"next": ""}, stamp_updated=False)
-        W.check_server_idle(ws, self.now + timedelta(minutes=10), ssh_run=lambda c: self.PROBE_IDLE)
-        self.assertEqual(T.read_ticket(self.tickets_dir / "TK-065.md").next_role, "")
-
-    def test_busy_server_or_short_wait_is_quiet(self):
-        self._ticket()
-        busy = self.PROBE_IDLE.replace("load 0.8", "load 9.0")
-        self.assertEqual(W.check_server_idle({}, self.now, ssh_run=lambda c: busy), [])
-        short = self.PROBE_IDLE.replace("1900 flock", "100 flock")
-        self.assertEqual(W.check_server_idle({}, self.now, ssh_run=lambda c: short), [])
-        self.assertEqual(T.read_ticket(self.tickets_dir / "TK-065.md").next_role, "")
-
-    def test_unknown_holder_escalates_to_ceo(self):
-        probe = "load 0.5\n300 1 5000 bash /data/benchrun.sh wave foo\n301 1 1900 bash /data/benchrun.sh stand bar\n302 301 1900 flock -x 9\n"
-        f = W.check_server_idle({}, self.now, ssh_run=lambda c: probe)
-        self.assertEqual([x.kind for x in f], ["server-idle"])
-
-
 class WatchLogTests(WatchSandbox):
     def test_watch_plan_reminder_keeps_ceo_handoff_alive(self):
         # напоминание сторожа не считается ответом CEO: метка передачи жива, «ждёт-ceo» придёт (ревью #27)
@@ -913,23 +876,6 @@ class WatchLogTests(WatchSandbox):
             D.notify_wait_for_problem(T.read_ticket(p), state, self.now)
         self.assertEqual(inbox.call_count, 1)
         self.assertIn("posix-путь на Windows", inbox.call_args[0][2])
-
-
-class HostAlertsAdapterTests(WatchSandbox):
-    """№17: RPV_HOST_ALERTS_CMD → строки «ждёт вас» через ask.new_notice."""
-
-    def test_lines_become_notices_without_duplicates(self):
-        root = Path(self.tmp.name) / "proj"
-        out = types.SimpleNamespace(stdout="диск 95 %\n\nсвязь пропала\n")
-        with mock.patch.dict(os.environ, {"RPV_HOST_ALERTS_CMD": "x"}), mock.patch.object(W.D, "PROJECT_ROOT", root):
-            self.assertEqual(W.check_host_alerts(run=lambda *a, **k: out), 2)
-            W.check_host_alerts(run=lambda *a, **k: out)
-        qs = sorted((root / ".claude" / "pulse" / "questions").glob("q-host-*.json"))
-        self.assertEqual(len(qs), 2)
-
-    def test_no_setting_is_silent(self):
-        with mock.patch.dict(os.environ, {"RPV_HOST_ALERTS_CMD": ""}):
-            self.assertEqual(W.check_host_alerts(run=lambda *a, **k: 1 / 0), 0)
 
 
 if __name__ == "__main__":

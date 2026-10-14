@@ -14,8 +14,8 @@ import tempfile
 
 import hide
 
-MODEL = os.environ.get("RPV_HAIKU_MODEL") or "claude-haiku-5-5"
-EFFORT = os.environ.get("RPV_HAIKU_EFFORT") or "xhigh"
+MODEL = "claude-haiku-5-5"
+EFFORT = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
 TIMEOUT_S = 90
 MAX_IN = 12000  # знаков входа: хвост, не начало
 

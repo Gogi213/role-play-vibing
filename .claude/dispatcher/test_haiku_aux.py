@@ -30,11 +30,10 @@ class HaikuAux(unittest.TestCase):
         self.assertIsNone(H.ask("s", "t", runner=lambda *a, **k: (_ for _ in ()).throw(subprocess.TimeoutExpired("c", 1)), claude="c"))
         self.assertIsNone(H.ask("s", "  ", runner=lambda *a, **k: R(), claude="c"))
 
-    def test_compact_log_adds_digest_when_enabled(self):
-        import os, tempfile
+    def test_compact_log_adds_digest(self):
+        import tempfile
         import ticket as T
         nl = chr(10)
-        os.environ["RPV_HAIKU_COMPACT"] = "1"
         orig, H.compact = H.compact, lambda t: "KONSPEKT"
         try:
             p = Path(tempfile.mkdtemp()) / "TK-9.md"
@@ -45,7 +44,6 @@ class HaikuAux(unittest.TestCase):
             self.assertIn("KONSPEKT", p.read_text(encoding="utf-8"))
         finally:
             H.compact = orig
-            del os.environ["RPV_HAIKU_COMPACT"]
 
 
 if __name__ == "__main__":

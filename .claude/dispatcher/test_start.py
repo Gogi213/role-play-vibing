@@ -50,31 +50,15 @@ def wait_alive(pid, want=True, timeout=10.0):
     return False
 
 
-_OPTIONAL_ENV = ("RPV_CI_REPO",)
-_saved_optional = {}
-
-
-def setUpModule():  # необязательные службы (TK-090 Д-1) включаются средой; другие модули ставят RPV_CI_REPO при импорте
-    for k in _OPTIONAL_ENV:
-        if k in os.environ:
-            _saved_optional[k] = os.environ.pop(k)
-
-
-def tearDownModule():
-    os.environ.update(_saved_optional)
-
-
 class StartTests(unittest.TestCase):
-    def test_board_service_only_with_rpv_board(self):
-        old = os.environ.pop("RPV_BOARD", None)
-        try:
-            self.assertEqual(S.services(), S.SERVICES)
-            os.environ["RPV_BOARD"] = "http://x/#k"
-            self.assertEqual(S.services(), S.SERVICES + ("board_push",))
-        finally:
-            os.environ.pop("RPV_BOARD", None)
-            if old is not None:
-                os.environ["RPV_BOARD"] = old
+    def test_optional_service_only_with_setting(self):
+        """TK-090 Д-1, CP8: автовлив PR (ci_watch) — только если в `.claude/rpv.json` проекта есть `ci_repo`."""
+        with tempfile.TemporaryDirectory() as d:
+            proj = Path(d)
+            (proj / ".claude").mkdir()
+            self.assertEqual(S.services(proj), S.SERVICES)
+            (proj / ".claude" / "rpv.json").write_text('{"ci_repo": "o/r"}', encoding="utf-8")
+            self.assertEqual(S.services(proj), S.SERVICES + ("ci_watch",))
 
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)   # Popen-объекты фоновых процессов не ждём — они живут дальше

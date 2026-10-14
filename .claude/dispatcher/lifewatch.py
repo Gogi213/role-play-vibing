@@ -1,10 +1,10 @@
 """Сторож жизни ожиданий (TK-092): форма `wait_for: job:<алиас>:<id>` и состояние задания через адаптер проекта.
 
-Плагин не знает, чем проект запускает задания: команда состояния — настройка `RPV_JOB_STATE_CMD` (шаблон с `{id}`),
+Плагин не знает, чем проект запускает задания: команда состояния — настройка `job_state_cmd` (`.claude/rpv.json`) (шаблон с `{id}`),
 выполняется по ssh на машине алиаса. Договор адаптера: первая строка вывода — `running|queued|done|failed|missing`,
 остальные строки — хвост лога задания. Другое первой строкой или код ssh 255 — `ssh-error` (не проверить).
 Снятое владельцем задание (cancel-метка планировщика, rc=143 при снятии) адаптер отдаёт как `done`, не `failed` — это не падение
-(TK-101 п.2); так же и в `RPV_JOB_OWNERS_CMD`. Пересдача под тем же именем юнита или живое задание того же тикета гасят «упало» (watch.py).
+(TK-101 п.2); так же и в `job_owners_cmd`. Пересдача под тем же именем юнита или живое задание того же тикета гасят «упало» (watch.py).
 Сторож (watch.py) пишет состояние в `job-state.json`; диспетчер условие `job:` по нему и проверяет — без своего ssh."""
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ STATE_NAME = "job-state.json"
 
 def probe_job(alias: str, jid: str, ssh_cmd, timeout: float = 25.0):
     """(состояние, хвост лога). `ssh_cmd(alias, remote)` — как `dispatch._ssh_cmd`; адаптер не задан — `ssh-error`."""
-    tpl = P.env("JOB_STATE_CMD")
+    tpl = P.setting("job_state_cmd")
     if not tpl or "{id}" not in tpl:
         return "ssh-error", ""
     try:
@@ -70,14 +70,14 @@ def reason(jid: str, tail: str) -> str:
     return out.splitlines()[0][:300] if out else ""
 
 
-# --- сопоставление «задание → тикет» (одно на сторож и табло) -------------------------------------------------
+# --- сопоставление «задание → тикет» (одно на сторож) ----------------------------------------------------------
 OWNERS_NAME = "job-owners.json"
 
 
 def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
-    """Адаптер `RPV_JOB_OWNERS_CMD` (по ssh на машине алиаса): строка на задание, поля через TAB — id, тикет (или пусто),
+    """Адаптер `job_owners_cmd` (по ssh на машине алиаса): строка на задание, поля через TAB — id, тикет (или пусто),
     юнит, состояние running|queued|done|failed, необязательно 5-е — причина падения (TK-117). Список dict или None (адаптер не задан / не ответил)."""
-    cmd = P.env("JOB_OWNERS_CMD")
+    cmd = P.setting("job_owners_cmd")
     if not cmd:
         return None
     try:
@@ -95,16 +95,16 @@ def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
 
 
 def save_owners(dispatcher_dir, owners: dict) -> None:
-    """`{алиас: [задания]}` — это читает и табло проекта (кто хозяин юнита)."""
+    """`{алиас: [задания]}` — снимок «кто хозяин юнита» в `job-owners.json`."""
     p = Path(dispatcher_dir) / OWNERS_NAME
     T.atomic_write_text(p, json.dumps(owners, ensure_ascii=False, sort_keys=True))
 
 
 # --- прогоны мимо планировщика поверх чужих (п.5 CEO 05:45) -----------------------------------------------------
 def fetch_strays(alias: str, ssh_cmd, timeout: float = 25.0):
-    """Адаптер `RPV_STRAY_CMD` (по ssh на машине алиаса): строка на прогон мимо планировщика поверх чужого задания,
+    """Адаптер `stray_cmd` (по ssh на машине алиаса): строка на прогон мимо планировщика поверх чужого задания,
     поля через TAB — тикет-нарушитель (или пусто), описание. Список (тикет, описание) или None (адаптер не задан / не ответил)."""
-    cmd = P.env("STRAY_CMD")
+    cmd = P.setting("stray_cmd")
     if not cmd:
         return None
     try:

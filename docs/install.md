@@ -17,11 +17,11 @@
 
 - Python 3.11 (только stdlib) и команда `python` в `PATH`: роли получают команды вида `python <плагин>/.claude/dispatcher/tickets.py …`. Хуки плагина ищут `python3`, затем `python`, затем `py -3`.
 - git и Claude Code CLI `claude` в `PATH` службы (или `CLAUDE_BIN=<полный путь>`), с выполненным входом под тем же пользователем: роли запускаются как `claude -p … --permission-mode bypassPermissions`. Служба получает от `start.py` только `RPV_*`, `CLAUDE_BIN`, `CLAUDE_PROJECT_DIR`, `CLAUDE_CONFIG_DIR` и `PATH` (на POSIX); секреты (`ANTHROPIC_*`, токены) не переносятся — если службе нужен такой ключ, задайте его в её окружении сами.
-- ssh-клиент и ключ — только если в тикетах есть `wait_for: host:<алиас>:…`. Хост берётся из `RPV_CALC_HOST` / `RPV_VPS_HOST` / `RPV_DECK_HOST` (что понимает `ssh`: `user@host` или алиас из `~/.ssh/config`), ключ — `RPV_DECK_KEY`, `RPV_DECK_KNOWN_HOSTS`. Вызов идёт с `BatchMode=yes` — пароль не спрашивается, нужен ключ без парольной фразы (или ssh-agent). Удалённая сторона — Linux: проверки выполняются командами `test`, `cat`, `systemctl`, `grep`.
+- ssh-клиент и алиасы машин в `~/.ssh/config` — только если в тикетах есть `wait_for: host:<алиас>:…` (адрес, пользователь, ключ и `known_hosts` — там же, переменных для хостов нет). Вызов идёт с `BatchMode=yes` — пароль не спрашивается, нужен ключ без парольной фразы (или ssh-agent). Удалённая сторона — Linux или macOS: проверки выполняются командами `test`, `cat`, `systemctl`, `grep`; задания запускает `tools/jobrun.sh` ([wait-for.md](wait-for.md#задание-на-машине-jobrunsh)).
 
 ## Что делает `/rpv-start`
 
-Запускает диспетчер и сторож и печатает pid и пути логов (`<проект>/.claude/dispatcher/dispatch.run.log`, `watch.run.log`). Уже запущены (pid-замок) — останавливает и запускает заново: так подхватывается обновлённый плагин. Службы отвязаны от сессии (Windows — WMI, вне job-объекта приложения; Linux — юнит `systemd-run --user`, чтобы пережил выход из системы: `loginctl enable-linger $USER`), в конце печатается «отвязан: да/нет». Если задан `RPV_BOARD`, третьей службой стартует отправка сводки на табло ([dashboard.md](dashboard.md)).
+Запускает диспетчер и сторож и печатает pid и пути логов (`<проект>/.claude/dispatcher/dispatch.run.log`, `watch.run.log`). Уже запущены (pid-замок) — останавливает и запускает заново: так подхватывается обновлённый плагин. Службы отвязаны от сессии (Windows — WMI, вне job-объекта приложения; Linux — юнит `systemd-run --user`, чтобы пережил выход из системы: `loginctl enable-linger $USER`), в конце печатается «отвязан: да/нет».
 
 ## Запуск вручную
 
