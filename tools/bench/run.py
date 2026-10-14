@@ -57,7 +57,8 @@ def main(argv=None) -> int:
                 ("handoff_latency", lambda: O.handoff_latency(n=3 if a.quick else 8)),
                 ("burst_default", lambda: O.burst(n=6 if a.quick else 12)),
                 ("burst_role_parallel_3", lambda: O.burst(n=6 if a.quick else 12, role_parallel=3)),
-                ("idle_burn", lambda: O.idle_burn(seconds=20 if a.quick else 60, tickets=20 if a.quick else 100))]
+                ("idle_burn", lambda: O.idle_burn(seconds=20 if a.quick else 60, tickets=20 if a.quick else 100)),
+                ("telegram_delivery", O.telegram_delivery)]  # без BENCH_TG_TOKEN/BENCH_TG_CHAT — пропуск
         for name, fn in plan:
             t = time.time()
             log(f"[stub] {name} …")

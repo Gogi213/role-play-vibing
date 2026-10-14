@@ -307,3 +307,37 @@ def _synth_closed(proj: Path, n: int) -> None:
             f"---\nid: {tid}\ntitle: синтетический {i}\nowner: engineer\nstatus: done\nreviewer: judge\neffort: medium\n"
             f"wait_for: \nupdated: 2026-10-02T12:00:00+00:00\nnext: \n---\n\nСсылка на задачу владельца: G-001\n\n"
             f"Описание синтетического тикета {i}: " + "слово " * 60 + "\n\n## Лог\n\n" + "\n".join(log), encoding="utf-8")
+
+
+def telegram_delivery() -> dict:
+    """Вопрос Судьи владельцу доходит до настоящего Telegram: от статуса `needs_owner` до записи «отправлено» в notify.log, и
+    круг напрямую через `notify.py send`. Токен и чат — только из окружения процесса (`BENCH_TG_TOKEN`, `BENCH_TG_CHAT`), в
+    файлы замера не попадают; сообщения помечены «[замер]». Нет переменных — раздел пропускается."""
+    token, chat = os.environ.get("BENCH_TG_TOKEN"), os.environ.get("BENCH_TG_CHAT")
+    if not (token and chat):
+        return {"skipped": "нет BENCH_TG_TOKEN/BENCH_TG_CHAT"}
+    rig = Rig(scenario={"default": {"judge": "ask-owner"}})
+    rig.env.update(RPV_TG_TOKEN=token, RPV_TG_CHAT=chat)
+    try:
+        direct = C.run_measured([C.PY, str(C.DISP / "notify.py"), "--project", str(rig.proj), "send", "[замер] прямая отправка notify.py"],
+                                cwd=rig.proj, env=rig.env, timeout=60)
+        rig.start()
+        t0 = time.time()
+        tid = rig.ticket("[замер] вопрос владельцу")
+        got = rig.wait(tid, states=("needs_owner",), timeout=240)
+        t_ask = got[tid][1] if tid in got else None
+        notify = rig.proj / ".claude" / "dispatcher" / "notify.log"
+        sent_at = None
+        while t_ask and time.time() - t_ask < 40:
+            txt = notify.read_text(encoding="utf-8") if notify.exists() else ""
+            if "отправлено: Вопрос вам" in txt:
+                sent_at = time.time() - t_ask
+                break
+            time.sleep(0.25)
+        log = notify.read_text(encoding="utf-8")[-300:] if notify.exists() else ""
+        return {"direct_send_ms": round(direct["wall_ms"]), "direct_rc": direct["rc"], "direct_out": direct["out"].strip()[-80:],
+                "needs_owner_after_s": round(t_ask - t0, 1) if t_ask else None,
+                "question_delivered_after_s": None if sent_at is None else round(sent_at, 1),
+                "notify_log_tail": log.replace(token, "<токен>")}
+    finally:
+        rig.close()
