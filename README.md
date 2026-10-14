@@ -15,7 +15,7 @@ One long AI session piles up context, loses the thread and stalls while you are 
 
 - **Context stays small.** One task, one ticket, one short role session.
 - **Work does not stall.** The dispatcher wakes the next role; the watcher catches stuck tickets.
-- **Results are checked.** The Judge reviews every result against a "will be accepted if …" contract.
+- **Results are checked.** The Judge reviews every result against a "will be accepted if …" contract; only mechanical Haiku tasks are accepted by code instead.
 - **No shortcuts for the sake of code.** A simplification is allowed only when a measurement shows the result is the same.
 
 The core uses only the Python standard library: no packages or services to install.
@@ -45,16 +45,19 @@ Platform details, manual start and project-root lookup: [docs/install.md](docs/i
 | Role | Does | Session | Model |
 |---|---|---|---|
 | CEO | talks to the owner, files tickets, reads signals | long-lived | your session |
-| Researcher | protocol, calculation, report | one short run per wake | Sonnet 5.5, effort high |
+| Researcher | protocol, calculation, report | one short run per wake | Sonnet 5.5, effort high (can be set per ticket) |
 | Engineer | code, tests, machines | one short run per wake | Sonnet 5.5, effort xhigh |
 | Judge | review and verdict | one short run per wake | Opus 5.5, effort high |
+| Overseer | every 15 minutes, while tickets change: cost rules and a model reading the ticket logs; a finding goes to the Judge | a short process on a timer, no ticket | Haiku 5.5, effort xhigh |
+
+Helper subagents are not roles: the CEO uses `secretary` (records the owner's words verbatim into the registry), `inbox` (triages signals) and `reporter` (status answers and daily-report lines); roles use `coder` and `reader`.
 
 1. You give the CEO a task. The CEO files a ticket, `.claude/tickets/TK-NNN.md`: a header (`status`, `next`) and a log of every step.
-2. Every 15 seconds the dispatcher (`dispatch.py`) reads the tickets and starts the role named in a ticket's `next` field as a short `claude -p` session.
+2. Every 15 seconds the dispatcher (`dispatch.py`) reads the tickets and starts the role each one calls for (the owner of a new ticket, the role named in `next`, the Judge for finished work) as a short `claude -p` session.
 3. The role reports its step with `tickets.py result <ID> <result> --why "…"`. Results: `done`, `pr`, `accept`, `return`, `blocked`, `ask-owner`, `wait`, `continue`. A routing table (`routes.py`), not the text of the entry, decides who is woken next: an executor's `done` or `pr` goes to the Judge, who answers `accept` (the ticket is done) or `return` (back to the executor).
 4. When a ticket is done or stuck (`blocked`, `needs_owner`, `next: ceo`), the dispatcher writes a line to `ceo-inbox.md` and `ceo-wake.log`; a Monitor on `ceo-wake.log` wakes the CEO. The watcher (`watch.py`) adds orphaned tickets and dead waits. Details: [docs/signals.md](docs/signals.md) (Russian).
 5. The CEO answers you. If Telegram is configured, you also get a daily report, the Judge's questions to you, and a "work stalled" alarm. The bot only sends.
-6. The Overseer (`overseer.py`) checks open tickets every 15 minutes while they change: cost rules plus Haiku reading the ticket logs. A finding goes to the Judge, not to the CEO. Details: [docs/overseer.md](docs/overseer.md) (Russian).
+6. The Overseer (`overseer.py`) sends its findings to the Judge, not to the CEO. Details: [docs/overseer.md](docs/overseer.md) (Russian).
 
 Tickets can also wait for a file, another ticket, or a job on a remote machine from `~/.ssh/config` (`wait_for`): [docs/wait-for.md](docs/wait-for.md) (Russian).
 

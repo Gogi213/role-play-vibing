@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" width="1100" height="620" role="img" aria-labelledby="t-w d-w">
 <title id="t-w">How Role Play Vibing works</title>
-<desc id="d-w">The owner gives the CEO a task. The CEO files a ticket. The dispatcher reads tickets every 15 seconds and starts the role named in the ticket's next field as a short claude -p session. Roles report with tickets.py result, which sets status and next. Executors hand results to the Judge, who accepts or returns them. Done and stuck tickets, plus watcher findings, are written to ceo-inbox.md and ceo-wake.log, and a Monitor wakes the CEO. The Overseer sends findings to the Judge. Telegram carries the daily report, owner questions and the work-stalled alarm.</desc>
+<desc id="d-w">The owner gives the CEO a task. The CEO files a ticket. The dispatcher reads tickets every 15 seconds and starts the role each ticket calls for as a short claude -p session. Roles report with tickets.py result, which sets status and next. Executors hand results to the Judge, who accepts or returns them. Done and stuck tickets, plus watcher findings, are written to ceo-inbox.md and ceo-wake.log, and a Monitor wakes the CEO. The Overseer sends findings to the Judge. Telegram carries the daily report, owner questions and the work-stalled alarm.</desc>
 <style>
   :root{--bg:#F6F8FA;--surface:#FFFFFF;--fg:#1F2933;--muted:#586471;--line:#AEB9C4;--model-bg:#E1EDFB;--model-line:#3A6EA5;--wake:#B83A08;--wake-bg:#FCEBE2}
   @media (prefers-color-scheme: dark){:root{--bg:#0E141A;--surface:#161E26;--fg:#E4EAF0;--muted:#98A5B1;--line:#4A5A68;--model-bg:#14283B;--model-line:#6FA8E0;--wake:#FF9A66;--wake-bg:#3B2216}}
@@ -44,8 +44,8 @@
 <rect class="n-code" x="520" y="220" width="190" height="100" rx="6"/>
 <text x="530" y="244" class="t">Dispatcher</text>
 <text x="530" y="262" class="s">dispatch.py, 15 s tick</text>
-<text x="530" y="276" class="s">starts the role named</text>
-<text x="530" y="290" class="s">in the ticket's next</text>
+<text x="530" y="276" class="s">starts the role each</text>
+<text x="530" y="290" class="s">ticket calls for</text>
 <polyline class="e" points="615,110 615,218" marker-end="url(#mk-e-w)"/>
 <text x="625" y="160" class="l">reads tickets</text>
 <text x="625" y="174" class="l">every 15 s</text>
