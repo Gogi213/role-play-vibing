@@ -1,7 +1,9 @@
 """V2-3: реестр ошибок — ошибка исправлена, только когда проверка зелёная; `run` и приёмка гоняют проверки всех исправленных.
 CP1 (критерий 7): исправленной объявляет только Судья; проверка обязана падать до исправления и проходить после; файлы проверки
-при приёмке сверяются с версией на fixed_sha."""
+при приёмке сверяются с отпечатком check_hash, а без него — с версией на fixed_sha; нет ни того, ни другого — FAIL, не пропуск."""
+import hashlib
 import io
+import json
 import os
 import re
 import subprocess
@@ -109,7 +111,7 @@ class ErrorsTests(unittest.TestCase):
         text = (E.errors_dir(self.root) / "E-001.md").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\nid: E-001\ntitle: Цена считается с ошибкой\nticket: TK-236\nfound: "), text)
         self.assertIn(f"added_sha: {self.git('rev-parse', '--short', 'HEAD')}\nstatus: open\ncheck:\nfixed:\nfixed_sha:\n"
-                      "timeout:\n---\n## Что случилось\nцена 0 вместо 10\nпараметр check: x\n", text)
+                      "check_hash:\ntimeout:\n---\n## Что случилось\nцена 0 вместо 10\nпараметр check: x\n", text)
         self.assertIn("не описано", (E.errors_dir(self.root) / "E-002.md").read_text(encoding="utf-8"))
 
     def test_add_continues_numbering_after_max(self):
@@ -519,7 +521,7 @@ class ErrorsTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn(f"{eid} FAIL — Цена: проверка изменена после исправления", out)
         self.assertIn("только через Судью (`errors.py fix` заново)", out)
-        self.assertIn("tools/flag.py отличается от версии на " + self.head(eid)["fixed_sha"], out)
+        self.assertIn("tools/flag.py отличается от отпечатка, снятого при исправлении", out)
         msg = E.gate(self.root, "TK-5")                                          # приёмка идёт в worktree тикета
         self.assertIn("регрессия", msg)
         self.assertIn("проверка изменена после исправления", msg)
@@ -542,14 +544,17 @@ class ErrorsTests(unittest.TestCase):
         self.assertIn("tests/test_good.py удалён", out)
 
     def test_directory_target_compares_every_file_that_was_there(self):
+        """Запись без отпечатка (до 2.0.1): сверка через `git show` по файлам, что лежали на fixed_sha под целью-каталогом."""
         eid = self.fixed("python -m unittest tests.test_good", "Каталог")
-        self.assertEqual(E.tampered(self.root, self.root, self.head(eid), ["python", "-m", "unittest", "tests"]), ("", ""))
+        old = dict(self.head(eid), check_hash="")
+        argv = ["python", "-m", "unittest", "tests"]
+        self.assertEqual(E.tampered(self.root, self.root, old, argv), ("", ""))
         new = self.root / "tests" / "test_extra.py"                              # новый файл рядом — не ослабление
         new.write_text("x = 1\n", encoding="utf-8")
-        self.assertEqual(E.tampered(self.root, self.root, self.head(eid), ["python", "-m", "unittest", "tests"]), ("", ""))
+        self.assertEqual(E.tampered(self.root, self.root, old, argv), ("", ""))
         (self.root / "tests" / "test_good.py").write_text("x = 1\n", encoding="utf-8")   # файл каталога правили
-        why, _ = E.tampered(self.root, self.root, self.head(eid), ["python", "-m", "unittest", "tests"])
-        self.assertIn("tests/test_good.py отличается", why)
+        why, _ = E.tampered(self.root, self.root, old, argv)
+        self.assertIn("tests/test_good.py отличается от версии на " + old["fixed_sha"], why)
 
     def test_line_endings_alone_are_not_a_change(self):
         self.fixed("python tools/flag.py")
@@ -560,22 +565,110 @@ class ErrorsTests(unittest.TestCase):
         p.write_bytes(raw)
         self.assertEqual(self.run_cli("run")[0], 0)
 
-    def test_run_skips_comparison_for_old_records_and_says_so(self):
+    def test_run_skips_comparison_only_when_old_record_commit_exists_without_the_file(self):
+        """Запись без отпечатка: коммит fixed_sha есть, а файла проверки на нём нет — сверка пропущена, `run` говорит об этом."""
         self.script("tools/late.py", "import sys\nfrom pathlib import Path\n"
                     "sys.exit(0 if Path('fixed.txt').exists() else 1)")           # на C0 такого файла нет
         eid = self.fixed("python tools/late.py", "Старая")
-        path = E.errors_dir(self.root) / f"{eid}.md"
-        for sha, note in (("", "в записи нет fixed_sha"), (self.c0[:7], f"на {self.c0[:7]} файла проверки нет"),
-                          ("0123abc", "коммита 0123abc нет в репозитории")):
-            E._set_header(path, {"fixed_sha": sha})
-            code, out, _ = self.run_cli("run")
-            self.assertEqual(code, 0, out)
-            self.assertEqual(out, f"{eid} ok — Старая (сверка файла проверки пропущена: {note})")
+        E._set_header(E.errors_dir(self.root) / f"{eid}.md", {"check_hash": "", "fixed_sha": self.c0[:7]})
+        code, out, _ = self.run_cli("run")
+        self.assertEqual((code, out), (0, f"{eid} ok — Старая (сверка файла проверки пропущена: на {self.c0[:7]} файла проверки нет)"))
         self.assertEqual(E.gate(self.root, "TK-1"), "", "пропуск сверки приёмку не блокирует")
+
+    def test_fix_records_fingerprint_of_check_files(self):
+        eid = self.fixed("python tools/flag.py")
+        body = (self.root / "tools" / "flag.py").read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(json.loads(self.head(eid)["check_hash"]), {"tools/flag.py": hashlib.sha256(body).hexdigest()})
+        eid2 = self.fixed("python -m unittest tests.test_good", "Тест")
+        self.assertEqual(list(json.loads(self.head(eid2)["check_hash"])), ["tests/test_good.py"])
+        self.assertEqual(sorted(json.loads(E.fingerprint(self.root, ["tests"]))), ["tests/__init__.py", "tests/test_good.py"],
+                         "цель-каталог — все её файлы")
+        self.assertEqual(E.fingerprint(self.root, ["нет/такого"]), "")
+
+    def test_fingerprint_is_checked_without_git_and_without_the_commit(self):
+        eid = self.fixed("python tools/flag.py", "Цена")
+        E._set_header(E.errors_dir(self.root) / f"{eid}.md", {"fixed_sha": "0123abc"})    # коммит пропал (rebase + gc)
+        with mock.patch.object(E, "_git", side_effect=AssertionError("git не нужен")):
+            self.assertEqual(E.tampered(self.root, self.root, self.head(eid), ["python", "tools/flag.py"]), ("", ""))
+        code, out, _ = self.run_cli("run")
+        self.assertEqual((code, out), (0, f"{eid} ok — Цена"), "по отпечатку проверка сверена — пометки о пропуске нет")
+        self.assertEqual(E.gate(self.root, "TK-1"), "")
+
+    def test_changed_or_deleted_check_file_fails_when_the_commit_is_gone(self):
+        eid = self.fixed("python tools/flag.py", "Цена")
+        E._set_header(E.errors_dir(self.root) / f"{eid}.md", {"fixed_sha": "0123abc"})
+        p = self.root / "tools" / "flag.py"
+        orig = p.read_bytes()
+        p.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")                      # зелёная, но не та
+        with mock.patch.object(E, "run_check", side_effect=AssertionError("запускать нельзя")):
+            code, out, _ = self.run_cli("run")
+            msg = E.gate(self.root, "TK-1")
+        self.assertEqual(code, 1)
+        self.assertIn(f"{eid} FAIL — Цена: проверка изменена после исправления", out)
+        self.assertIn("tools/flag.py отличается от отпечатка", out)
+        self.assertIn("регрессия", msg)
+        p.unlink()                                                                        # в индексе есть, в рабочей копии нет
+        with mock.patch.object(E, "run_check", side_effect=AssertionError("запускать нельзя")):
+            code, out, _ = self.run_cli("run")
+        self.assertEqual(code, 1)
+        self.assertIn("tools/flag.py удалён", out)
+        p.write_bytes(orig)                                                               # вернули как было — сверка проходит
+        self.assertEqual(self.run_cli("run")[0], 0)
+
+    def test_real_lost_commit_after_reset_and_gc(self):
+        """Rebase + gc: коммита fixed_sha в репозитории нет по-настоящему."""
+        self.git("checkout", "-q", "-b", "work")
+        eid = self.added("e")
+        self.fix_commit()
+        self.assertEqual(self.run_cli("fix", eid, "--check", "python tools/flag.py")[0], 0)
+        h = self.head(eid)
+        self.git("reset", "-q", "--hard", self.c0)                                        # коммит исправления «съеден»
+        self.git("reflog", "expire", "--expire=now", "--all")
+        self.git("gc", "-q", "--prune=now")
+        gone = subprocess.run(["git", "-C", str(self.root), "cat-file", "-e", h["fixed_sha"]], capture_output=True)
+        self.assertNotEqual(gone.returncode, 0, "коммита правда нет")
+        argv = ["python", "tools/flag.py"]
+        self.assertEqual(E.tampered(self.root, self.root, h, argv), ("", ""), "по отпечатку — сверено")
+        self.assertEqual(E.tampered(self.root, self.root, dict(h, check_hash=""), argv), (E.NOT_VERIFIED, ""),
+                         "без отпечатка сверять нечем — не пропуск, а FAIL")
+
+    def test_old_record_without_fingerprint_and_commit_fails_with_that_reason(self):
+        eid = self.fixed("python tools/flag.py", "Цена")
+        path = E.errors_dir(self.root) / f"{eid}.md"
+        reason = ("проверка исправленной ошибки не сверена: нет ни отпечатка, ни коммита — Судья, "
+                  "`errors.py fix` заново")
+        for fields in ({"check_hash": "", "fixed_sha": ""}, {"check_hash": "", "fixed_sha": "0123abc"},
+                       {"check_hash": "{не json", "fixed_sha": "0123abc"}, {"check_hash": "[]", "fixed_sha": ""}):
+            E._set_header(path, fields)
+            with mock.patch.object(E, "run_check", side_effect=AssertionError("запускать нельзя")):
+                code, out, _ = self.run_cli("run")
+                msg = E.gate(self.root, "TK-5")
+            self.assertEqual(code, 1, fields)
+            self.assertIn(f"{eid} FAIL — Цена: {reason}", out, fields)
+            self.assertIn("регрессия", msg)
+            self.assertIn(reason, msg)
+        text = path.read_text(encoding="utf-8")                                           # запись 2.0.0: поля check_hash нет вовсе
+        path.write_text(re.sub(r"^check_hash:.*\n", "", text, flags=re.M), encoding="utf-8")
+        self.assertNotIn("check_hash", self.head(eid))
+        with mock.patch.dict(os.environ, {"RPV_ROLE": "judge"}):                          # Судья заново — запись снова сверяется
+            code, _, err = self.run_cli("fix", eid, "--check", "python tools/flag.py", "--before", self.c0)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(self.head(eid)["check_hash"]))
+        self.assertEqual(self.run_cli("run")[0], 0)
+
+    def test_set_header_appends_a_field_the_record_does_not_have_yet(self):
+        eid = self.added("e", what="check_hash: в теле не трогаем")
+        path = E.errors_dir(self.root) / f"{eid}.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("check_hash:\n", "", 1), encoding="utf-8")
+        self.assertNotIn("check_hash", self.head(eid))
+        E._set_header(path, {"check_hash": '{"a":"b"}', "status": "fixed"})
+        h = self.head(eid)
+        self.assertEqual((h["check_hash"], h["status"], h["timeout"]), ('{"a":"b"}', "fixed", ""))
+        self.assertTrue(path.read_text(encoding="utf-8").endswith("## Что случилось\ncheck_hash: в теле не трогаем\n"))
 
     def test_fix_again_after_a_legitimate_change_moves_fixed_sha(self):
         eid = self.fixed("python tools/flag.py")
-        old = self.head(eid)["fixed_sha"]
+        old, old_hash = self.head(eid)["fixed_sha"], self.head(eid)["check_hash"]
         p = self.root / "tools" / "flag.py"
         p.write_text(p.read_text(encoding="utf-8") + "# пояснение\n", encoding="utf-8")
         self.git("add", "tools/flag.py")
@@ -587,6 +680,7 @@ class ErrorsTests(unittest.TestCase):
             code, _, err = self.run_cli("fix", eid, "--check", "python tools/flag.py")
         self.assertEqual(code, 0, err)
         self.assertNotEqual(self.head(eid)["fixed_sha"], old)
+        self.assertNotEqual(self.head(eid)["check_hash"], old_hash, "отпечаток снят заново с новой версии")
         self.assertEqual(self.run_cli("run")[0], 0)
 
     # --- gate: то, что зовёт приёмка Судьи

@@ -19,11 +19,14 @@
 исправления» — должна упасть. Коммит «до» — `--before <коммит>`, иначе `added_sha` записи (HEAD проекта в момент `add`); ни того, ни
 другого (старая запись) или не git-репозиторий — отказ. «До» идёт во временном `git worktree add --detach` (каталог ОС), в который
 копируются файлы проверки из текущего дерева: новой проверки на старом коммите нет, и без копирования она «упала» бы от отсутствия
-файла, а не от ошибки. Файлы проверки в `fix` обязаны быть закоммичены: `fixed_sha` — коммит, где они лежат в проверенном виде.
-Приёмка (`run`, `gate`) перед запуском каждой проверки сверяет её файлы в каталоге запуска с версией на `fixed_sha`: отличаются или
-удалены — FAIL («менять проверку можно только через Судью, `fix` заново»); файлов на `fixed_sha` нет (старая запись) — сверка
-пропущена, и `run` пишет это в строке ошибки.
-Файлы: `<проект>/.claude/errors/E-NNN.md` (шапка `id/title/ticket/found/added_sha/status/check/fixed/fixed_sha/timeout` +
+файла, а не от ошибки. Файлы проверки в `fix` обязаны быть закоммичены: `fixed_sha` — коммит, где они лежат в проверенном виде,
+а `check_hash` — отпечаток их содержимого (JSON `{путь: sha256}`, концы строк приведены к LF).
+Приёмка (`run`, `gate`) перед запуском каждой проверки сверяет её файлы в каталоге запуска: с отпечатком `check_hash` (git не нужен —
+отпечаток переживает rebase и gc); нет отпечатка (запись до 2.0.1) — с версией на `fixed_sha` (`git show`). Отличаются или удалены —
+FAIL («менять проверку можно только через Судью, `fix` заново»). Нет ни отпечатка, ни коммита `fixed_sha` — тоже FAIL, не пропуск
+(«не сверена … `fix` заново»); коммит есть, а файла проверки на нём нет (старая запись) — сверка пропущена, `run` пишет это в
+строке ошибки.
+Файлы: `<проект>/.claude/errors/E-NNN.md` (шапка `id/title/ticket/found/added_sha/status/check/fixed/fixed_sha/check_hash/timeout` +
 `## Что случилось`). Номер — следующий после наибольшего. Время — `ГГГГ-ММ-ДД ЧЧ:ММ` (местное). Повторный `fix` заменяет проверку.
 Записи в `.claude/errors/` напрямую роли запуска (`RPV_ROLE`) не пишут — страж (`delete_guard.py`) закрывает каталог; пишет скрипт.
 Отказ приёмки из-за упавшей проверки (регресс) дописывает строку в `<проект>/.claude/dispatcher/regressions.log`: время, тикет,
@@ -32,6 +35,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -84,7 +89,9 @@ def _set_header(path: Path, updates: dict) -> None:
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     head = m.group(1)
     for k, v in updates.items():
-        head = re.sub(rf"^{k}:.*$", lambda _: f"{k}: {v}", head, count=1, flags=re.M)
+        head, n = re.subn(rf"^{k}:.*$", lambda _: f"{k}: {v}", head, count=1, flags=re.M)
+        if not n:                                      # запись прежней версии без этого поля — дописываем в конец шапки
+            head += f"\n{k}: {v}"
     path.write_text(f"---\n{head}\n---\n" + text[m.end():], encoding="utf-8")
 
 
@@ -262,16 +269,61 @@ def _eol(b: bytes) -> bytes:
     return b.replace(b"\r\n", b"\n")   # autocrlf: рабочая копия может быть с CRLF, в git — LF
 
 
+def _digest(b: bytes) -> str:
+    return hashlib.sha256(_eol(b)).hexdigest()
+
+
+def fingerprint(cwd: Path, targets) -> str:
+    """Отпечаток файлов проверки — отслеживаемые git файлы целей в `cwd`: JSON `{путь: sha256 содержимого}` (концы строк — LF).
+    Идёт в поле `check_hash` записи; пусто, если читать нечего."""
+    out = {}
+    for rel in _git_lines(_git(cwd, "ls-files", "-z", "--", *targets)):
+        try:
+            out[rel] = _digest((cwd / rel).read_bytes())
+        except OSError:
+            continue
+    return json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(",", ":")) if out else ""
+
+
+def _parse_fingerprint(raw: str) -> dict:
+    """Поле `check_hash` → {путь: sha256}; пусто или не разобралось — {} (отпечатка нет)."""
+    try:
+        d = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    return {k: v for k, v in d.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(d, dict) else {}
+
+
+NOT_VERIFIED = "проверка исправленной ошибки не сверена: нет ни отпечатка, ни коммита — Судья, `errors.py fix` заново"
+
+
+def _changed(f: str, what: str) -> str:
+    return (f"проверка изменена после исправления — менять её можно только через Судью (`errors.py fix` заново): "
+            f"{f} {what}")
+
+
 def tampered(root: Path, cwd: Path, h: dict, argv) -> tuple[str, str]:
-    """Файлы проверки в `cwd` против версии на `fixed_sha` записи (`git show` из корня проекта) → (причина FAIL, пометка).
-    Отличается или удалён — причина (проверку не запускаем). Сверить нечем (нет `fixed_sha`, нет коммита или файла на нём —
-    старые записи) — сверка пропущена, пометка уходит в отчёт."""
+    """Файлы проверки в `cwd` против записи → (причина FAIL, пометка). Первым — отпечаток `check_hash` (git не нужен: он переживает
+    rebase и gc). Нет отпечатка (запись до 2.0.1) — версия на `fixed_sha` (`git show` из корня проекта). Отличается или удалён —
+    причина (проверку не запускаем). Нет ни отпечатка, ни коммита (поле пусто или коммит пропал) — причина `NOT_VERIFIED`: сверить
+    нечем, а тихо пропускать нельзя. Коммит есть, а файла проверки на нём нет (старые записи) — сверка пропущена, пометка уходит
+    в отчёт."""
+    prints = _parse_fingerprint(h.get("check_hash", ""))
+    if prints:
+        for f, digest in sorted(prints.items()):
+            try:
+                now = (cwd / f).read_bytes() if (cwd / f).is_file() else None
+            except OSError:
+                now = None
+            if now is None:
+                return _changed(f, "удалён"), ""
+            if _digest(now) != digest:
+                return _changed(f, "отличается от отпечатка, снятого при исправлении"), ""
+        return "", ""
     sha = h.get("fixed_sha", "")
-    if not sha:
-        return "", "сверка файла проверки пропущена: в записи нет fixed_sha"
-    files = _files_at(root, sha, check_targets(argv, cwd))
+    files = _files_at(root, sha, check_targets(argv, cwd)) if sha else None
     if files is None:
-        return "", f"сверка файла проверки пропущена: коммита {sha} нет в репозитории"
+        return NOT_VERIFIED, ""
     if not files:
         return "", f"сверка файла проверки пропущена: на {sha} файла проверки нет"
     for f in files:
@@ -288,8 +340,7 @@ def tampered(root: Path, cwd: Path, h: dict, argv) -> tuple[str, str]:
             what = f"отличается от версии на {sha}"
         else:
             continue
-        return (f"проверка изменена после исправления — менять её можно только через Судью (`errors.py fix` заново): "
-                f"{f} {what}"), ""
+        return _changed(f, what), ""
     return "", ""
 
 
@@ -405,7 +456,7 @@ def cmd_add(a, root: Path) -> int:
         n += 1
         eid = f"E-{n:03d}"
         text = "\n".join(["---", f"id: {eid}", f"title: {title}", f"ticket: {ticket}", f"found: {_now()}",
-                          f"added_sha: {added}", "status: open", "check:", "fixed:", "fixed_sha:", "timeout:", "---",
+                          f"added_sha: {added}", "status: open", "check:", "fixed:", "fixed_sha:", "check_hash:", "timeout:", "---",
                           "## Что случилось", (a.what or "").strip() or "не описано", ""])
         try:
             with (d / f"{eid}.md").open("x", encoding="utf-8") as w:   # номер занят другой ролью одновременно — следующий
@@ -484,6 +535,7 @@ def cmd_fix(a, root: Path) -> int:
         print(f"fix: файлы проверки ({', '.join(targets)}) не закоммичены в {cwd}: закоммить их — приёмка сверяет проверку "
               f"с версией на коммите исправления (fixed_sha), а не с рабочей копией; {eid} остаётся открытой", file=sys.stderr)
         return 1
+    prints = fingerprint(cwd, targets)   # файлы чисты относительно HEAD: отпечаток снят с того, что лежит в fixed_sha
     red, note = run_before(argv, cwd, before, a.timeout or CHECK_TIMEOUT_S)
     if red is None:
         print(f"fix: прогон проверки на коммите «до» {before[:10]} не удался — {note}; {eid} остаётся открытой", file=sys.stderr)
@@ -494,7 +546,7 @@ def cmd_fix(a, root: Path) -> int:
               f"(другой коммит «до» — --before <коммит>)", file=sys.stderr)
         return 1
     _set_header(path, {"status": "fixed", "check": spec, "fixed": _now(), "fixed_sha": _head_sha(cwd),
-                       "timeout": f"{a.timeout:g}" if a.timeout else ""})
+                       "check_hash": prints, "timeout": f"{a.timeout:g}" if a.timeout else ""})
     print(f"{eid}: fixed, проверка: {spec} (падала на {before[:10]}, проходит на {_head_sha(cwd) or 'рабочей копии'})")
     return 0
 
