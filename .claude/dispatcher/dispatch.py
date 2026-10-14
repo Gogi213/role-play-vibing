@@ -157,14 +157,16 @@ STOP_NOTE = ("Прошлый запуск оборван CEO — проверь 
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
 # В-153 (02.10): все роли — Sonnet 5.5.
 CLAUDE_MODEL = "claude-sonnet-5-5"
-# v2 (02.10): усилие — по виду задачи (статья «spending your effort»): исследователь и инженер — high, Судья
-# (вердикт) — xhigh; на тикете переопределяется полем `effort: low|medium|high|xhigh` в шапке
-# (`tickets.py new --effort`), см. effort_for().
-ROLE_EFFORT = {"judge": "xhigh", "engineer": "high", "researcher": "high"}
+# v2 (02.10): усилие — по виду задачи (статья «spending your effort»): исследователь, инженер и Судья — high;
+# на тикете переопределяется полем `effort: low|medium|high|xhigh` в шапке (`tickets.py new --effort`), см. effort_for().
+# Поле общее для всех ролей тикета: `medium` на тикете понижает и Судью, `xhigh` поднимает.
+# Судья: был xhigh, с 14.10 — high (слово владельца по замеру docs/bench/2026-10-14.md, раздел «A/B Судьи»: Opus high
+# −8% цены запуска против xhigh, 19 верных вердиктов из 19, дефектов поймано 8 из 8; повтор один, сдачи простые).
+ROLE_EFFORT = {"judge": "high", "engineer": "high", "researcher": "high"}
 
 
 # В-153 уточнение (02.10, v1.6.1): на Sonnet 5.5 — только те, кого рационально; Судья (проверяет всех)
-# остаётся на Opus 5.5 xhigh. Роль вне словаря и executor haiku — см. launch_run.
+# остаётся на Opus 5.5 (усилие — ROLE_EFFORT: с 14.10 high). Роль вне словаря и executor haiku — см. launch_run.
 ROLE_MODEL = {"judge": "claude-opus-5-5", "engineer": CLAUDE_MODEL, "researcher": CLAUDE_MODEL}
 
 
@@ -1510,8 +1512,8 @@ def plugin_dir_args() -> list[str]:
 
 
 def effort_for(role: str, tkt=None) -> str:
-    """v2: усилие запуска — поле `effort:` тикета, иначе умолчание роли (ROLE_EFFORT: исследователь/инженер
-    high, Судья xhigh)."""
+    """v2: усилие запуска — поле `effort:` тикета (общее для всех ролей тикета), иначе умолчание роли (ROLE_EFFORT:
+    исследователь, инженер и Судья — high)."""
     if tkt is not None and getattr(tkt, "effort", ""):
         return tkt.effort
     return ROLE_EFFORT.get(role, "high")

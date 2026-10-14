@@ -1094,7 +1094,7 @@ class DispatchRunTests(unittest.TestCase):
             D._popen = orig_popen
         # v1.6.1: модель — по роли (ROLE_MODEL[judge], по умолчанию opus), не общий CLAUDE_MODEL
         self.assertEqual(captured_cmd[captured_cmd.index("--model") + 1], D.ROLE_MODEL["judge"])
-        self.assertEqual(captured_cmd[captured_cmd.index("--effort") + 1], "xhigh")  # ROLE_EFFORT[judge]
+        self.assertEqual(captured_cmd[captured_cmd.index("--effort") + 1], "high")  # ROLE_EFFORT[judge]
         self.assertNotIn("--strict-mcp-config", captured_cmd)  # TK-171: умолчание RPV_ROLE_MCP=all — как до 1.8.26
         self.assertNotIn("--mcp-config", captured_cmd)
         self.assertNotIn("--max-budget-usd", captured_cmd)
@@ -2183,11 +2183,12 @@ class DispatchRunTests(unittest.TestCase):
             D.RUNNING.clear()
 
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
-        """v2: умолчания — исследователь/инженер high, Судья xhigh; `effort:` в шапке тикета — приоритетнее."""
-        self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
-        cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "xhigh"),
+        """v2: умолчания — исследователь, инженер и Судья high (Судья с 14.10; был xhigh); `effort:` в шапке тикета — приоритетнее
+        и общее для всех ролей: medium понижает Судью, xhigh поднимает."""
+        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "high", "researcher": "high"})
+        cases = [("researcher", None, "high"), ("engineer", None, "high"), ("judge", None, "high"),
                  ("engineer", "low", "low"), ("researcher", "medium", "medium"), ("judge", "high", "high"),
-                 ("engineer", "xhigh", "xhigh")]
+                 ("judge", "medium", "medium"), ("judge", "xhigh", "xhigh"), ("engineer", "xhigh", "xhigh")]
         for role, effort, expected in cases:
             self.set_fake_bin(FAKE_BIN_SILENT)
             path = T.create_ticket(self.tickets_dir, owner=role, title=f"Усилие {role} {effort}", effort=effort)
@@ -3425,15 +3426,15 @@ class MoneyControlsTests(unittest.TestCase):
     # --- п.1: модель/усилие ---
 
     def test_role_effort_mapping(self):
-        # v2 (02.10): исследователь/инженер — high, Судья — xhigh
+        # v2 (02.10): исследователь/инженер — high; Судья — high с 14.10 (был xhigh)
         if not P.env("DISPATCH_EFFORT"):
-            self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
+            self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "high", "researcher": "high"})
 
     def test_role_effort_and_model_defaults(self):
-        # v1.6.1: Судья — Opus 5.5 xhigh (проверка всех не ослабляется), остальные — CLAUDE_MODEL high; CP8 — константы
+        # v1.6.1: Судья — Opus 5.5 (проверка всех не ослабляется; усилие с 14.10 high), остальные — CLAUDE_MODEL high; CP8 — константы
         self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
                                         "researcher": D.CLAUDE_MODEL})
-        self.assertEqual(D.ROLE_EFFORT, {"judge": "xhigh", "engineer": "high", "researcher": "high"})
+        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "high", "researcher": "high"})
 
     def test_expected_model_family_follows_role_model(self):
         orig_role_model = D.ROLE_MODEL
