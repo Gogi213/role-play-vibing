@@ -67,7 +67,7 @@ def main() -> int:
     sid = arg("--resume") or arg("--session-id") or str(uuid.uuid4())
     cfg = scenario(tid)
     t0 = time.time()
-    event(proj, tid=tid, role=role, at="start", t=t0, pid=os.getpid())
+    event(proj, tid=tid, role=role, at="start", t=t0, pid=os.getpid(), model=model, effort=arg("--effort"))
     d = cfg.get("delay_s", 0)
     if isinstance(d, list):  # [от, до]: случайное, но одно и то же для (тикет, роль, номер запуска) — прогон воспроизводим
         d = random.Random(f"{tid}{role}{count_prior(proj, tid, role)}").uniform(d[0], d[1])

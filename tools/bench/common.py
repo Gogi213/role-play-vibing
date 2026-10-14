@@ -191,7 +191,7 @@ def cli(script: str, project: Path, *args, env=None, cwd=None, timeout=120):
 
 def new_ticket(project: Path, owner: str, title: str, ref: str, desc: str, effort: str = "medium", env=None, force: bool = False) -> str:
     """`force` — без него `new` отказывает в «похожем» тикете за последний час (защита от дублей), а пачке нужны похожие."""
-    r = cli("tickets.py", project, "new", "--owner", owner, "--title", title, "--ref", ref, "--effort", effort,
+    r = cli("tickets.py", project, "new", "--owner", owner, "--title", title, "--ref", ref, *(["--effort", effort] if effort else []),
             "--desc", desc, *(["--force"] if force else []), env=env)
     tid = Path(r.stdout.strip().splitlines()[-1]).stem if r.stdout.strip() else ""
     if not tid.startswith("TK-"):

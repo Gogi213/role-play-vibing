@@ -208,6 +208,31 @@ class ScriptTrapTests(unittest.TestCase):
         self.assertEqual(C.ticket_next(proj, "TK-404"), "")
 
 
+class JudgeAbTests(unittest.TestCase):
+    @unittest.skipUnless(POSIX, "нужен bash для /rpv-init")
+    def test_every_submission_matches_its_intended_truth(self):
+        """Иначе A/B Судьи мерит не Судью: верные сдачи обязаны проходить договор, с дефектом — нет; тикет — in_review без effort."""
+        import shutil
+        import judge_ab as J
+        for case in J.CASES:
+            proj, tid, _ = J.prepare(case, {})
+            self.addCleanup(shutil.rmtree, proj, True)
+            head = (proj / ".claude" / "tickets" / f"{tid}.md").read_text(encoding="utf-8").split("---")[1]
+            self.assertNotIn("effort:", head, case.id)
+            self.assertIn("status: in_review", head, case.id)
+            self.assertEqual(J.contract_ok(case, proj), case.expect == "accept", case.id)
+
+    def test_variants_and_render(self):
+        import judge_ab as J
+        self.assertEqual(J.VARIANTS["opus-xhigh"], ("claude-opus-5-5", "xhigh"))
+        data = {"variants": {"opus-xhigh": J.VARIANTS["opus-xhigh"]}, "repeat": 1, "budget_usd": 5, "spent_usd": 1.0,
+                "skipped_for_budget": [], "results": [{"variant": "opus-xhigh", "case": "G1-hello", "rep": 1, "expect": "accept",
+                "label": "верно", "verdict": "accept", "judge_cost_usd": 0.3, "turns": 5, "duration_s": 20, "out_tokens": 100, "entry": ""}]}
+        md = J.render(data)
+        self.assertIn("opus-xhigh", md)
+        self.assertIn("$0.300", md)
+
+
 class CompareTests(unittest.TestCase):
     def sample(self, label, p50):
         return {"label": label, "env": {"os": "X", "cpus": 4, "memory": "8 GiB", "python": "3.12", "git": "git version 2", "claude": "c",
