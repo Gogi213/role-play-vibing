@@ -439,7 +439,7 @@ def _before_commit(a, rec: dict, cwd: Path) -> tuple[str, str]:
 
 
 def cmd_fix(a, root: Path) -> int:
-    role = (P.env("ROLE", "") or "").strip().lower()
+    role = P.caller_role(root)  # RPV_ROLE, а стёрта — по дереву процессов: запуск роли CEO не притворится
     if role and role != "judge":
         print(f"fix: исправленной ошибку объявляет Судья (запуск роли {role} — не может): сдай работу "
               f"`tickets.py result <ID> pr|done --why \"...\"` с указанием проверки (`--check` и, если ошибка заведена до "

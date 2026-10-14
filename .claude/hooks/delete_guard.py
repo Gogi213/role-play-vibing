@@ -2042,6 +2042,34 @@ def dispatcher_role():
     return r if r in DISPATCH_ROLES else None
 
 
+# CP1/CP2 (слово владельца 14.10: «нельзя притворяться CEO»): запуск роли не меняет и не стирает свою роль и тикет —
+# иначе `RPV_ROLE= python errors.py fix …` выглядит как CEO. Ловится запись (присваивание, unset, env -u/-i, $env:…=,
+# Remove-Item Env:, SetEnvironmentVariable, os.environ / putenv / unsetenv); чтение (`echo $RPV_ROLE`) — можно. Второй слой —
+# `project.caller_role`: роль узнаётся и по дереву процессов, стёртое окружение её не прячет.
+_IDENT = r"RPV_(?:ROLE|TICKET)\b"
+IDENTITY_RE = re.compile(
+    r"(?:^|[\s;&|(`'\"])(?:export\s+|set\s+|declare\s+(?:-\w+\s+)*|typeset\s+|local\s+|readonly\s+)?" + _IDENT + r"\s*\+?="
+    r"|\bunset\b[^;&|\n]*" + _IDENT
+    + r"|\bexport\s+-n\b[^;&|\n]*" + _IDENT
+    + r"|\benv\b[^;&|\n]*(?:-u\s*|--unset[= ])" + _IDENT
+    + r"|\benv\s+(?:-\w*i\w*|--ignore-environment|-)(?=\s|$)"
+    + r"|\$env:" + _IDENT + r"\s*="
+    + r"|\b(?:Remove-Item|Set-Item|Clear-Item|New-Item|Rename-Item|ri|si|ni|del|rm|erase)\b[^;\n]*\benv:\\?" + _IDENT
+    + r"|SetEnvironmentVariable\s*\(\s*['\"]" + _IDENT
+    + r"|\bos\.(?:environ|putenv|unsetenv)\b[^;\n]*" + _IDENT
+    + r"|" + _IDENT + r"[^;\n]*\bos\.(?:environ|putenv|unsetenv)\b"
+    + r"|\bprocess\.env\.RPV_(?:ROLE|TICKET)\s*=|\bdelete\s+process\.env\.RPV_",
+    re.I)
+REASON_IDENTITY = ("Запуск роли не меняет и не стирает свою роль и тикет (RPV_ROLE, RPV_TICKET, `env -i`): притвориться CEO "
+                   "нельзя (слово владельца 14.10). Нужно действие CEO — `tickets.py result <ID> blocked --why \"...\"` "
+                   "или ask-owner через Судью.")
+
+
+def identity_change(tool, ti) -> bool:
+    """Команда оболочки запуска роли меняет или стирает `RPV_ROLE`/`RPV_TICKET` (или всё окружение)."""
+    return tool in SHELL_TOOLS and bool(IDENTITY_RE.search(str(ti.get("command") or "")))
+
+
 def publish_consent():
     """Согласие владельца на публикацию по тикету запуска (`RPV_TICKET`) → (есть, тикет для текста отказа). Читается только
     шапка `<проект>/.claude/tickets/<ID>.md`: строка `allow: publish (В-N)` (ставит `tickets.py allow`, только CEO). Не
@@ -2422,6 +2450,8 @@ def check_tool(data, trace=None):
             return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors"))
         if dispatcher_role() and consent_forge(tool, ti):
             return _deny(trace, "publish", REASON_CONSENT)
+        if dispatcher_role() and identity_change(tool, ti):
+            return _deny(trace, "identity", REASON_IDENTITY)
         if tool in SHELL_TOOLS:
             reason = check(str(ti.get("command") or ""), cwd, trace)
             if tool == "PowerShell" and trace and trace[-1] == ("rm", "deny"):

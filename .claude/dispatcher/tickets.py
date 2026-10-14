@@ -266,8 +266,9 @@ def cmd_result(args) -> int:
 
 
 def _caller_role() -> str:
-    """Роль вызывающей сессии: диспетчер ставит `RPV_ROLE` запускам ролей; у CEO и владельца её нет."""
-    return (D.P.env("ROLE", "") or "").strip().lower()
+    """Роль вызывающей сессии: `RPV_ROLE` запуска роли, а стёрта — по дереву процессов (`project.caller_role`); у CEO и
+    владельца её нет."""
+    return D.P.caller_role(D.PROJECT_ROOT)
 
 
 def _decisions_ack(args) -> tuple[str, str]:

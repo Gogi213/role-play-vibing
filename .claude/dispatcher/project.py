@@ -83,6 +83,100 @@ def setting(key: str, default=None, root=None):
     return default if value is None or value == "" else value
 
 
+ROLES = ("researcher", "engineer", "judge")
+
+
+def _parent_map() -> dict:
+    """{pid: ppid} всех процессов, только stdlib: Windows — снимок Toolhelp32, Linux — /proc, иначе `ps`. Сбой — {}."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes as w
+
+            class PE(ctypes.Structure):
+                _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("th32ProcessID", w.DWORD),
+                            ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", w.DWORD), ("cntThreads", w.DWORD),
+                            ("th32ParentProcessID", w.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", w.DWORD),
+                            ("szExeFile", ctypes.c_wchar * 260)]
+            k = ctypes.windll.kernel32
+            k.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+            snap = k.CreateToolhelp32Snapshot(0x2, 0)
+            if not snap or snap == ctypes.c_void_p(-1).value:
+                return {}
+            out, pe = {}, PE()
+            pe.dwSize = ctypes.sizeof(PE)
+            try:
+                ok = k.Process32FirstW(ctypes.c_void_p(snap), ctypes.byref(pe))
+                while ok:
+                    out[int(pe.th32ProcessID)] = int(pe.th32ParentProcessID)
+                    ok = k.Process32NextW(ctypes.c_void_p(snap), ctypes.byref(pe))
+            finally:
+                k.CloseHandle(ctypes.c_void_p(snap))
+            return out
+        except Exception:
+            return {}
+    out = {}
+    if os.path.isdir("/proc"):
+        for d in os.listdir("/proc"):
+            if d.isdigit():
+                try:
+                    with open(f"/proc/{d}/stat", encoding="utf-8", errors="replace") as f:
+                        out[int(d)] = int(f.read().rsplit(")", 1)[1].split()[1])
+                except (OSError, IndexError, ValueError):
+                    continue
+        if out:
+            return out
+    try:
+        import subprocess
+        r = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10)
+        for ln in r.stdout.splitlines():
+            f = ln.split()
+            if len(f) == 2 and f[0].isdigit() and f[1].isdigit():
+                out[int(f[0])] = int(f[1])
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def ancestor_pids(pid: int | None = None, parents: dict | None = None) -> list:
+    """Предки процесса (родитель, его родитель, …) по карте {pid: ppid}; цикл и глубина ограничены."""
+    parents = _parent_map() if parents is None else parents
+    out, cur = [], os.getpid() if pid is None else pid
+    for _ in range(64):
+        cur = parents.get(cur)
+        if not cur or cur in out:
+            break
+        out.append(cur)
+    return out
+
+
+def caller_role(root=None, ancestors=None) -> str:
+    """Роль вызывающего процесса: `RPV_ROLE`, а без неё — по дереву процессов. Процесс внутри запуска роли (предок —
+    pid из `state.json` → `active_runs` диспетчера проекта) — это роль, даже если её окружение стёрто или подменено:
+    притвориться CEO запуск роли не может (слово владельца 14.10). Иначе — '' (CEO или владелец)."""
+    env = (os.environ.get("RPV_ROLE") or "").strip().lower()
+    if env:
+        return env
+    root = Path(root) if root else _ROOT
+    if root is None:
+        try:
+            root = resolve_project()
+        except ProjectNotFound:
+            return ""
+    try:
+        runs = json.loads((Path(root) / ".claude" / "dispatcher" / "state.json").read_text(encoding="utf-8"))
+        runs = runs.get("active_runs") or {}
+    except (OSError, ValueError, AttributeError):
+        return ""
+    by_pid = {int(r["pid"]): str(r.get("role") or "") for r in runs.values() if isinstance(r, dict) and r.get("pid")}
+    if not by_pid:
+        return ""
+    for pid in (ancestor_pids() if ancestors is None else ancestors):
+        if pid in by_pid:
+            return by_pid[pid].strip().lower() or "engineer"
+    return ""
+
+
 def project_arg(argv) -> str | None:
     """Значение `--project <путь>` / `--project=<путь>` из аргументов (None — флага нет)."""
     argv = list(argv)
