@@ -3,6 +3,10 @@ name: bench
 # потом сводка рядом. Только ручной запуск. Бесплатная часть (micro + stub) не нужна секретов; живая тратит подписку
 # владельца (секрет CLAUDE_CODE_OAUTH_TOKEN, `claude setup-token`) и не стартует без секрета.
 on:
+  # ВРЕМЕННО: пока файла нет в main, ручной запуск (workflow_dispatch) GitHub не видит; push в эту ветку при правке файла = бесплатный прогон
+  push:
+    branches: [claude/sweet-clarke-nnwk5y]
+    paths: [.github/workflows/bench.yml]
   workflow_dispatch:
     inputs:
       live:
@@ -42,17 +46,17 @@ jobs:
           git config --global user.email bench@example.invalid
           git config --global init.defaultBranch main
       - name: Claude Code CLI (только для живой части)
-        if: ${{ inputs.live != 'none' && env.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        if: ${{ (inputs.live || 'none') != 'none' && env.CLAUDE_CODE_OAUTH_TOKEN != '' }}
         run: npm install -g @anthropic-ai/claude-code
       - name: замер
         run: |
-          live="${{ inputs.live }}"
+          live="${{ inputs.live || 'none' }}"
           args=""
           if [ "$live" != "none" ]; then
             if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
               echo "::warning::нет секрета CLAUDE_CODE_OAUTH_TOKEN — живая часть пропущена, бесплатная идёт"
             else
-              args="--live $live --repeat ${{ inputs.repeat }} --budget-usd ${{ inputs.budget_usd }}"
+              args="--live $live --repeat ${{ inputs.repeat || '1' }} --budget-usd ${{ inputs.budget_usd || '10' }}"
             fi
           fi
           python tools/bench/run.py $args --out bench-out --label "${{ matrix.os }}"
