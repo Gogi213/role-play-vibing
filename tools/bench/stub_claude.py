@@ -97,7 +97,7 @@ def main() -> int:
             elif mode == "blocked":
                 r = tickets("result", tid, "blocked", "--why", "заглушка: встали")
             else:
-                r = tickets("result", tid, "accept", "--path", art, "--decisions", "-", "--numbers", "-", "--why",
+                r = tickets("result", tid, "accept", "--path", art, "--decisions", "-", "--numbers", "-", "--tail", "-", "--why",
                             "заглушка: принято")
         else:
             r = None

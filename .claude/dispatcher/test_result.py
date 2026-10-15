@@ -58,8 +58,8 @@ class ResultTests(unittest.TestCase):
     def res(self, role, result, **kw):
         os.environ.pop("RPV_ROLE", None)
         os.environ["RPV_ROLE"] = role
-        a = dict(id=self.tid, result=result, why="потому что", pr=None, sha=None, path=None, form=None)
-        a.update(kw)
+        a = dict(id=self.tid, result=result, why="потому что", pr=None, sha=None, path=None, form=None, tail="-")
+        a.update(kw)  # tail="-" по умолчанию: ворота хвостов проверяются отдельными тестами ниже
         return TK.cmd_result(type("A", (), a)())
 
     def tkt(self):
@@ -484,6 +484,53 @@ class ResultTests(unittest.TestCase):
         self.assertIn("--decisions", err.getvalue())
         self.assertEqual(self.res("judge", "accept", pr=7, sha=SHA, decisions="В-1", numbers="-"), 0)
         self.assertIn("решения: сверено В-1", self.tkt().log[-1].text)
+
+    # --- «принято с хвостом» (разбор alpha 14–16.10): приёмка — с явным ответом про хвосты
+    def _v2_done(self, text):
+        self._registry_with_decision()
+        (self.base / "out.md").write_text("готово", encoding="utf-8")
+        (self.base / "review.md").write_text("вердикт", encoding="utf-8")
+        self.assertEqual(self.res("engineer", "done", path="out.md", why=text), 0)
+
+    def test_accept_needs_tail_answer_in_v2(self):
+        self._v2_done("хук и тест 13/13 зелёные")
+        self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail=None)
+        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-", tail="-"), 0)
+        self.assertIn("хвосты: нет", self.tkt().log[-1].text)
+
+    def test_no_tail_claim_checked_against_executor_submission(self):
+        """TK-240/TK-245 альфы: исполнитель сам написал «не сделано / не достигнуто», Судья принял — теперь отказ."""
+        for text in ("Хук + тест 13/13 зелёные. Не сделано (закрыто ролям): регистрация в settings.json",
+                     "Выложено. Не достигнуто: вкладка Летопись 435–578 мс",
+                     "сделал, остальное отдельным тикетом"):
+            with self.subTest(text=text):
+                T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
+                self._v2_done(text)
+                self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail="-")
+
+    def test_tail_tickets_must_exist_and_differ(self):
+        self._v2_done("Готово. Не сделано: метрики у 431 строки")
+        for tail in ("TK-999", self.tid, "хвост", "TK-1x"):
+            self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail=tail)
+        other = T.create_ticket(TK.TICKETS_DIR, owner="engineer", title="Хвост: метрики 431 строки").stem
+        self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-", tail=other), 0)
+        self.assertIn(f"хвосты: {other}", self.tkt().log[-1].text)
+
+    def test_tail_for_ceo_goes_to_ceo_signal(self):
+        """Хвост, который ролям не сделать (TK-240: регистрация хука в settings.json), — строкой CEO."""
+        self._v2_done("Хук готов. Не сделано (закрыто ролям): регистрация в settings.json")
+        self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail="ceo:")
+        with mock.patch.object(TK.D, "append_ceo_inbox") as sig:
+            self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-",
+                                      tail='ceo:"вписать хук в settings.json"'), 0)
+        sig.assert_called_once_with(self.tid, "хвост", "вписать хук в settings.json")
+        self.assertIn("хвост CEO: вписать хук в settings.json", self.tkt().log[-1].text)
+
+    def test_tail_gate_off_without_registry(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md", why="не сделано: всё")
+        self.assertEqual(self.res("judge", "accept", path="review.md", tail=None), 0, "до V2 (без реестра) ворот нет")
 
     def test_accept_numbers_must_be_in_their_sources(self):
         """CP9: в V2-проекте приёмка — с таблицей «число · файл»; число, которого нет в источнике, — отказ."""

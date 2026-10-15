@@ -228,13 +228,15 @@ def cmd_result(args) -> int:
         head, _ = routes.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
     ack = ""
+    tail_ceo = ""
     if args.result == "accept":
         err, ack = _decisions_ack(args)
         nerr, nack = _numbers_ack(args, args.id)
-        if err or nerr:
-            print(f"result: {err or nerr}", file=sys.stderr)
+        terr, tack, tail_ceo = _tail_ack(args, args.id)
+        if err or nerr or terr:
+            print(f"result: {err or nerr or terr}", file=sys.stderr)
             return 1
-        ack += nack
+        ack += nack + tack
         proof += ack
     if args.result == "accept" and not args.pr and _regression(args.id, "result"):
         return 1  # приёмка в PR проходит ту же проверку в cmd_accept
@@ -242,7 +244,8 @@ def cmd_result(args) -> int:
         rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
                                       "repo": getattr(args, "repo", None),
                                       "decisions": getattr(args, "decisions", None),
-                                      "numbers": getattr(args, "numbers", None)})())
+                                      "numbers": getattr(args, "numbers", None),
+                                      "tail": getattr(args, "tail", None)})())
         if rc == 0:  # запись итога — иначе Stop-хук (stop_result.py) не видит сдачи шага и блокирует Судью
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
@@ -261,6 +264,8 @@ def cmd_result(args) -> int:
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
+    if tail_ceo:
+        D.append_ceo_inbox(args.id, "хвост", tail_ceo)
     upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                        owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
@@ -290,6 +295,51 @@ def _decisions_ack(args) -> tuple[str, str]:
     if missing:
         return f"--decisions: {', '.join(missing)} — таких решений в реестре нет (`registry.py list`)", ""
     return "", f" решения: сверено {', '.join(refs)}"
+
+
+# «Принято с хвостом» (разбор alpha 14–16.10: TK-240, TK-245, TK-257 — исполнитель сам написал «не сделано / не достигнуто»,
+# Судья принял). Приёмка в V2-проекте — с явным ответом про хвосты; «хвостов нет» сверяется с последней сдачей исполнителя.
+TAIL_WORDS = re.compile(r"не\s+сделан|не\s+достигнут|не\s+доделан|не\s+выполнен|не\s+реализован|не\s+закончен|не\s+действует|"
+                        r"не\s+работает|\bхвост|\bосталось\b|отдельн\w*\s+тикет", re.I)
+TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
+             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
+
+
+def _owner_submission(tkt) -> str:
+    """Текст последней сдачи исполнителя (`[итог: done|pr]` владельца тикета) — то, что принимает Судья."""
+    for e in reversed(tkt.log):
+        if T.author_is(e.author, tkt.owner or "") and re.match(r"\[итог:\s*(done|pr)\]", e.text.strip()):
+            return e.text
+    return ""
+
+
+def _tail_ack(args, tid: str) -> tuple[str, str, str]:
+    """Приёмка Судьи в V2-проекте — с ответом про хвосты (`--tail`). «Не сделано / не достигнуто» в сдаче исполнителя при
+    `--tail -` — отказ: недоделанное либо `return`, либо хвост заведён тикетом, либо передан CEO. → (отказ, пометка, текст CEO)."""
+    if not registry_mod.decisions_file(PROJECT_ROOT).exists():
+        return "", "", ""
+    raw = (getattr(args, "tail", None) or "").strip()
+    if not raw:
+        return f"приёмка — с ответом про хвосты: {TAIL_HINT}; не сделано то, что в заказе или договоре, — не принимать, а вернуть", "", ""
+    if raw in ("-", "—"):
+        path = TICKETS_DIR / f"{tid}.md"
+        sub = _owner_submission(T.read_ticket(path)) if path.exists() else ""
+        hit = TAIL_WORDS.search(sub)
+        if hit:
+            return (f"--tail -: в сдаче исполнителя «{sub[max(0, hit.start() - 40):hit.end() + 60].strip()}» — это хвост. "
+                    f"Не сделано из заказа или договора — `return`; иначе {TAIL_HINT}"), "", ""
+        return "", " хвосты: нет", ""
+    if raw.lower().startswith("ceo:"):
+        what = " ".join(raw[4:].split()).strip("\"' ")
+        if len(what) < 5:
+            return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
+        return "", f" хвост CEO: {what[:120]}", what
+    ids = [x for x in re.split(r"[,\s]+", raw) if x]
+    bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
+           or not any((d / f"{x}.md").exists() for d in (TICKETS_DIR, TICKETS_DIR / "archive"))]
+    if bad:
+        return f"--tail: {', '.join(bad)} — нужен номер другого, уже заведённого тикета на хвост ({TAIL_HINT})", "", ""
+    return "", f" хвосты: {', '.join(ids)}", ""
 
 
 NUMBER = re.compile(r"[-+−]?\d+(?:[.,]\d+)?")
@@ -481,12 +531,15 @@ def cmd_accept(args) -> int:
         return 1
     derr, ack = _decisions_ack(args)
     nerr, nack = _numbers_ack(args, args.id)
-    if derr or nerr:
-        print(f"accept: {derr or nerr}", file=sys.stderr)
+    terr, tack, tail_ceo = _tail_ack(args, args.id)
+    if derr or nerr or terr:
+        print(f"accept: {derr or nerr or terr}", file=sys.stderr)
         return 1
-    ack += nack
+    ack += nack + tack
     if _regression(args.id, "accept"):
         return 1
+    if tail_ceo:
+        D.append_ceo_inbox(args.id, "хвост", tail_ceo)
     tkt = T.read_ticket(path)
     prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))} | {int(args.pr)}
     if (routes.last_owner_result(tkt) == "done" and prs <= merge_rule.landed_prs(tkt) | {int(args.pr)}
@@ -796,6 +849,7 @@ def main(argv=None) -> int:
     p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе ci_repo в .claude/rpv.json)")
     p_accept.add_argument("--decisions", default=None, help="решения владельца, с которыми сверено: В-N[,В-M] или - (связанных нет)")
     p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл:строка |» или - (чисел нет)")
+    p_accept.add_argument("--tail", default=None, help="хвосты: - (нет) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_accept.set_defaults(func=cmd_accept)
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
@@ -815,6 +869,8 @@ def main(argv=None) -> int:
                           help="accept: решения владельца, с которыми сверена сдача: В-N[,В-M] или - (связанных нет)")
     p_result.add_argument("--numbers", default=None,
                           help="accept: файл с таблицей ключевых чисел «| число | файл:строка |» или - (чисел нет; код проверяет по --path)")
+    p_result.add_argument("--tail", default=None,
+                          help="accept: хвосты — - (нет; сверяется со сдачей исполнителя) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_result.set_defaults(func=cmd_result)
 
     p_start = sub.add_parser("start")
