@@ -239,7 +239,7 @@ def full_context(role, title, source, hook_in):
                 f"result <ID> <{verbs}> --why \"...\"`{proofs} (кого будить дальше "
                 f"решает таблица маршрутов); промежуточная заметка — `{tcmd} comment <ID> --author {role} --text "
                 "\"...\"` (@упоминания никого не будят)."
-                + (" Остальные подкоманды (`new`, `start`, `stop`, `allow`, `status`) — после `--project \"...\"` той же командой."
+                + (" Остальные подкоманды (`new`, `start`, `stop`, `allow`, `allow-delete`, `status`) — после `--project \"...\"` той же командой."
                    if role == "ceo" else ""))
     if role == "ceo":
         head.append(f"Реестр владельца (решения В-N, цели G-NNN): `{tickets_command('registry.py')} "

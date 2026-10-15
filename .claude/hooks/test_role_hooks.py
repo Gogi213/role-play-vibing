@@ -318,13 +318,13 @@ class Prompts(unittest.TestCase):
         return path
 
     def test_context_watchdog_threshold_and_repeat(self):
-        self.assertEqual(rm.CONTEXT_WARN_TOKENS, 450_000)  # 45 % окна Opus 1 млн (владелец 03.10)
-        small = {"transcript_path": self.transcript(440_000)}
-        big = {"transcript_path": self.transcript(460_000)}
+        self.assertEqual(rm.CONTEXT_WARN_TOKENS, 400_000)  # 40 % окна Opus 1 млн (владелец 15.10; было 450 000 — 03.10)
+        small = {"transcript_path": self.transcript(390_000)}
+        big = {"transcript_path": self.transcript(410_000)}
         self.assertIsNone(rm.context_advice(small, {"n": 1}))
         state = {"n": 1}
         text = rm.context_advice(big, state)
-        self.assertEqual(text, "контекст ≈ 460 тыс. — закончи шаг, обнови блокнот и попроси владельца сделать клир")
+        self.assertEqual(text, "контекст ≈ 410 тыс. — закончи шаг, обнови блокнот и попроси владельца сделать клир")
         state["n"] = 5
         self.assertIsNone(rm.context_advice(big, state))   # повтор не чаще раза в 10 сообщений
         state["n"] = 11

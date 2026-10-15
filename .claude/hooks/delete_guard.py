@@ -168,6 +168,11 @@ REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): тол�
                        "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни guard_remote_roots, "
                        "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
                        "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
+REASON_BRANCH_DELETE = ("Удаление веток на удалённом ({t}) без слова владельца закрыто и для CEO: {why}. Слово владельца дословно — "
+                        "`registry.py decide` (его пишет `secretary`), затем `tickets.py allow-delete <ветка>… --ref В-N`: согласие на "
+                        "названные ветки действует час; main/master удалять нельзя. Запуску роли — только через CEO.")
+REASON_BRANCH_CONSENT_FILE = ("Согласия на удаление веток пишет только команда `tickets.py allow-delete` после слова владельца: файл "
+                              "branch-delete.json руками не правится (ни ролью, ни CEO).")
 REASON_PUBLISH = ("Публикация ({t}) запуску роли закрыта без согласия владельца по тикету {who}: выпуск, слияние PR, пуш в "
                   "основную ветку (main/master) и теги, публикация пакетов и образов необратимы. Нужна — `tickets.py result <ID> "
                   "ask-owner --why \"...\" --why-owner необратимое`; слово владельца CEO заносит в реестр (`registry.py decide`) и "
@@ -207,6 +212,17 @@ class Forbid(str):
 class Publish(Forbid):
     """Публикация (выпуск, слияние PR, пуш в main/master или тега, публикация пакета): запуску роли — только с согласием
     владельца по тикету (`allow: publish` в шапке), сессиям CEO и владельца можно. Подкласс Forbid: те же ветки find/ssh."""
+
+
+class BranchDelete(Forbid):
+    """Удаление веток на удалённом с названными ветками (`git push --delete <ветка>…` / `:<ветка>`): запуску роли — никогда;
+    сессии CEO/владельца — с согласием владельца на каждую ветку (`tickets.py allow-delete`, файл dispatcher/branch-delete.json,
+    на час). Ветки не названы (`--mirror`, `--prune`, маска, переменная) — обычный Forbid для всех."""
+
+    def __new__(cls, label, branches=()):
+        self = super().__new__(cls, label)
+        self.branches = tuple(branches)
+        return self
 
 
 def literal_part(p):
@@ -1332,6 +1348,49 @@ def git_discard(sub, rest, ctx, repo):
 
 
 DEFAULT_BRANCHES = ("main", "master")
+
+
+def delete_branch_names(rest, pos):
+    """Ветки, которые удаляет `git push <удалённый> --delete <ветка>…` или `<удалённый> :<ветка>…`. Не определить (маска,
+    переменная, пустое имя, обычный пуш рядом с удалением, удалённый не назван) — None: команда остаётся запрещённой."""
+    flagged = any(a == "--delete" or (a.startswith("-") and not a.startswith("--") and "d" in a[1:]) for a in rest)
+    names = []
+    for a in pos[1:]:                                   # pos[0] — удалённый репозиторий
+        if not flagged and not a.startswith(":"):
+            return None
+        name = (a[1:] if a.startswith(":") else a).removeprefix("refs/heads/")
+        if not name or name.startswith(("-", "refs/")) or ".." in name or any(c in name for c in "*?[]{}\\$`'\" \t"):
+            return None
+        names.append(name)
+    return tuple(names) or None
+
+
+BRANCH_CONSENT_NAMES = ("branch-delete.json",)       # согласия на удаление веток: пишет только `tickets.py allow-delete`
+
+
+def branch_delete_consent(branches):
+    """Согласие владельца на удаление веток → (есть, пояснение для отказа). Файл `<проект>/.claude/dispatcher/branch-delete.json`:
+    {ветка: {"ref": "В-N", "until": время}} (ставит `tickets.py allow-delete`, только CEO). Нужно на КАЖДУЮ ветку; main/master —
+    никогда; срок вышел, файла нет, не читается — согласия нет (fail-closed)."""
+    from datetime import datetime
+    try:
+        with open(os.path.join(PROJECT_DIR, ".claude", "dispatcher", "branch-delete.json"), encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False, "файл согласий не читается (не объект JSON)"
+        now = datetime.now().astimezone()
+        bad = []
+        for b in branches:
+            e = data.get(b)
+            until = datetime.fromisoformat(str(e.get("until", ""))).astimezone() if isinstance(e, dict) and e.get("until") else None
+            if b in DEFAULT_BRANCHES or not (isinstance(e, dict) and re.fullmatch(r"В-\d+", str(e.get("ref", ""))) and until and until > now):
+                bad.append(b)
+        if bad:
+            return False, "нет действующего согласия владельца на ветки: " + ", ".join(bad) + (
+                " (main/master удалять нельзя)" if any(b in DEFAULT_BRANCHES for b in bad) else "")
+        return True, ""
+    except (OSError, ValueError) as e:                  # ValueError — и битый JSON, и время
+        return False, f"согласия не прочитаны ({type(e).__name__})"
 PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 TAG_NAME = re.compile(r"^v?\d+\.\d+(?:\.\d+)*[-+.\w]*$")        # `v1.8.48`, `2.0.0-rc1`: без точки (`v2`) — ветка
 
@@ -1446,7 +1505,9 @@ def git_scan(args, ctx, vars_, redirected=False):
             yield (Forbid("git push +ветка (принудительное обновление)"), ctx.copy())
         elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
               or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
-            yield (Forbid("git push --delete/--mirror/:ветка (удаление веток на удалённом)"), ctx.copy())
+            label = "git push --delete/--mirror/:ветка (удаление веток на удалённом)"
+            names = None if any(a in ("--mirror", "--prune") for a in rest) else delete_branch_names(rest, pos)
+            yield (BranchDelete(label, names) if names else Forbid(label), ctx.copy())
         elif label := push_publication(rest, repo, ctx):
             yield (Publish(label), ctx.copy())
         return
@@ -2354,6 +2415,12 @@ def check(cmd, cwd, trace=None):
                         return _deny(trace, "publish", REASON_PUBLISH.format(t=target, who=who))
                     trace.append(("publish", "allow"))
                 continue
+            if isinstance(target, BranchDelete) and not role:       # CEO/владелец: только с согласием на каждую ветку
+                granted, why = branch_delete_consent(target.branches)
+                if granted:
+                    trace.append(("branch-delete", "allow"))
+                    continue
+                return _deny(trace, "git", REASON_BRANCH_DELETE.format(t=target, why=why))
             if isinstance(target, Forbid):
                 return _deny(trace, "git", REASON_IRREVERSIBLE.format(t=target))
             why = protected(target, ctx, role, deleting=not isinstance(target, Over))
@@ -2421,16 +2488,18 @@ REASON_CEO_SIGNAL = ("Сигналы команды пишет только ди
                      "Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; новые строки читает `tickets.py inbox` (docs/signals.md).")
 
 
-def ceo_signal_write(tool, ti):
-    """Запись в ceo-inbox.md/ceo-wake.log из сессии (Write/Edit/Bash) — отказ; чтение свободно; текст `--text`/`--why` у tickets.py не в счёт."""
+def ceo_signal_write(tool, ti, names=None):
+    """Запись в ceo-inbox.md/ceo-wake.log (или в файлы `names`) из сессии (Write/Edit/Bash) — отказ; чтение свободно; текст
+    `--text`/`--why` у tickets.py не в счёт."""
+    names = names or CEO_SIGNAL_NAMES
     if tool in SHELL_TOOLS:
         cmd = str(ti.get("command") or "")
         if "tickets.py" in cmd:
             cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)  # и --why (TK-110 Ж-3)
-        return any(CEO_SIGNAL_WRITE.search(part) and any(n in part.lower() for n in CEO_SIGNAL_NAMES)
+        return any(CEO_SIGNAL_WRITE.search(part) and any(n in part.lower() for n in names)
                    for part in re.split(r"\n|&&|\|\||;", cmd))
     path = file_target(ti)
-    return bool(path) and path.replace("\\", "/").lower().rsplit("/", 1)[-1] in CEO_SIGNAL_NAMES
+    return bool(path) and path.replace("\\", "/").lower().rsplit("/", 1)[-1] in names
 
 
 def check_tool(data, trace=None):
@@ -2448,6 +2517,8 @@ def check_tool(data, trace=None):
     try:
         if ceo_signal_write(tool, ti):
             return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
+        if ceo_signal_write(tool, ti, BRANCH_CONSENT_NAMES):
+            return _deny(trace, "ceo-signal", REASON_BRANCH_CONSENT_FILE)
         if dispatcher_role() and owner_record_write(tool, ti):
             return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors / dispatcher/state.json"))
         if dispatcher_role() and consent_forge(tool, ti):

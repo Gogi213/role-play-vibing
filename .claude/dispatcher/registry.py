@@ -98,9 +98,21 @@ def _refuse_role() -> str:
 
 
 def _read_quote(a) -> None:
-    """`--quote -` — цитата из stdin как есть (кавычки и переносы владельца в аргументе оболочки ломаются)."""
-    if getattr(a, "quote", None) == "-":
+    """`--quote -` — цитата из stdin как есть (кавычки и переносы владельца в аргументе оболочки ломаются). Читаем байты и
+    декодируем как UTF-8 (BOM снимаем): текстовый stdin на Windows берёт кодировку локали (cp1251, cp866) и портит кириллицу.
+    Не UTF-8 — ошибка, а не молчаливая порча цитаты (реестр хранит слова владельца дословно)."""
+    if getattr(a, "quote", None) != "-":
+        return
+    raw = getattr(sys.stdin, "buffer", None)
+    if raw is None:  # stdin подменён текстовым потоком без байтов (тест, встраивание)
         a.quote = sys.stdin.read().strip("\n")
+        return
+    try:
+        a.quote = raw.read().decode("utf-8-sig").strip("\n")
+    except UnicodeDecodeError as e:
+        raise ValueError("цитата из stdin не в UTF-8 — запись не сделана (кириллица порвалась бы). Передайте stdin в UTF-8: "
+                         "в bash/Git Bash — как есть, в PowerShell — `[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)`; "
+                         "или короткую цитату — аргументом `--quote \"…\"`") from e
 
 
 def _need_quote(quote: str) -> str:

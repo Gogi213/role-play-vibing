@@ -2356,5 +2356,93 @@ class GuardGroups(unittest.TestCase):
         self.assertEqual(tr, [])
 
 
+class BranchDeleteConsentTests(unittest.TestCase):
+    """Удаление веток на удалённом: роли — никогда; CEO — только с согласием владельца на каждую названную ветку
+    (`tickets.py allow-delete` → dispatcher/branch-delete.json, на час); main/master — никогда; остальные необратимые команды git
+    по-прежнему закрыты всем."""
+
+    def setUp(self):
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory(prefix="dg-bd-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.file = self.root / ".claude" / "dispatcher" / "branch-delete.json"
+        self.file.parent.mkdir(parents=True)
+        for p in (mock.patch.dict(os.environ), mock.patch.object(dg, "PROJECT_DIR", str(self.root))):
+            p.start()
+            self.addCleanup(p.stop)
+        os.environ.pop("RPV_ROLE", None)
+        os.environ.pop("RPV_TICKET", None)
+
+    def grant(self, *branches, hours=1, ref="В-3"):
+        import json
+        from datetime import datetime, timedelta
+        until = (datetime.now().astimezone() + timedelta(hours=hours)).isoformat(timespec="seconds")
+        self.file.write_text(json.dumps({b: {"ref": ref, "until": until} for b in branches}), encoding="utf-8")
+
+    def reason(self, cmd, tool="Bash"):
+        return dg.check_tool({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(self.root)})
+
+    def test_ceo_without_consent_is_refused_with_the_way_out(self):
+        for cmd in ("git push origin --delete feat/x", "git push origin :feat/x", "git push -d origin feat/x"):
+            why = self.reason(cmd)
+            self.assertIsNotNone(why, cmd)
+            self.assertIn("allow-delete", why)
+
+    def test_ceo_with_consent_deletes_the_named_branch_in_every_spelling(self):
+        self.grant("feat/x")
+        for cmd in ("git push origin --delete feat/x", "git push --delete origin feat/x", "git push origin :feat/x",
+                    "git push -d origin feat/x", "git push origin --delete refs/heads/feat/x", "git push origin :refs/heads/feat/x"):
+            self.assertIsNone(self.reason(cmd), cmd)
+
+    def test_consent_is_per_branch_and_all_named_must_have_it(self):
+        self.grant("feat/x")
+        self.assertIsNotNone(self.reason("git push origin --delete feat/y"))
+        self.assertIsNotNone(self.reason("git push origin --delete feat/x feat/y"))
+        self.grant("feat/x", "feat/y")
+        self.assertIsNone(self.reason("git push origin --delete feat/x feat/y"))
+        self.assertIsNone(self.reason("git push origin :feat/x :feat/y"))
+
+    def test_expired_missing_or_broken_consent_is_no_consent(self):
+        self.grant("feat/x", hours=-1)
+        self.assertIsNotNone(self.reason("git push origin --delete feat/x"))
+        for text in ("", "{", "[]", '{"feat/x": "да"}', '{"feat/x": {"ref": "В-1"}}', '{"feat/x": {"ref": "слово", "until": "2999-01-01T00:00:00+00:00"}}',
+                     '{"feat/x": {"ref": "В-1", "until": "когда-нибудь"}}'):
+            self.file.write_text(text, encoding="utf-8")
+            self.assertIsNotNone(self.reason("git push origin --delete feat/x"), text)
+        self.file.unlink()
+        self.assertIsNotNone(self.reason("git push origin --delete feat/x"))
+
+    def test_role_run_never_deletes_even_with_consent(self):
+        self.grant("feat/x")
+        for role in ("engineer", "researcher", "judge"):
+            os.environ["RPV_ROLE"] = role
+            self.assertIsNotNone(self.reason("git push origin --delete feat/x"), role)
+
+    def test_default_branches_are_never_deleted(self):
+        self.grant("main", "master")
+        for cmd in ("git push origin --delete main", "git push origin :master", "git push origin --delete refs/heads/main"):
+            self.assertIsNotNone(self.reason(cmd), cmd)
+
+    def test_other_irreversible_commands_stay_closed_for_ceo(self):
+        self.grant("feat/x")
+        for cmd in ("git push --force origin feat/x", "git push origin +feat/x", "git push --mirror origin", "git push --prune origin",
+                    "git push origin --delete 'feat/*'", "git push origin --delete $BRANCH", "git push origin --delete",
+                    "git push origin feat/y :feat/x", "git push --delete feat/x"):
+            self.assertIsNotNone(self.reason(cmd), cmd)
+
+    def test_consent_file_cannot_be_written_by_anyone_but_the_command(self):
+        for role in (None, "engineer"):
+            if role:
+                os.environ["RPV_ROLE"] = role
+            for cmd in ("echo '{}' > .claude/dispatcher/branch-delete.json", "rm .claude/dispatcher/branch-delete.json",
+                        "python -c \"open('.claude/dispatcher/branch-delete.json','w').write('{}')\""):
+                self.assertIsNotNone(self.reason(cmd), (role, cmd))
+            self.assertIsNotNone(dg.check_tool({"tool_name": "Write", "tool_input": {"file_path": str(self.file)}, "cwd": str(self.root)}), role)
+            self.assertIsNone(self.reason("cat .claude/dispatcher/branch-delete.json"), "чтение свободно")
+        os.environ.pop("RPV_ROLE", None)
+        self.assertIsNone(self.reason("python .claude/dispatcher/tickets.py allow-delete feat/x --ref В-1"), "сама команда проходит")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -121,6 +121,12 @@ def max_parallel() -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else MAX_PARALLEL
 
 
+def max_runs_per_ticket_hour() -> int:
+    """Запусков одного тикета за час: `max_runs_per_ticket_hour` из `.claude/rpv.json`, иначе MAX_RUNS_PER_TICKET_HOUR."""
+    v = P.setting("max_runs_per_ticket_hour")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else MAX_RUNS_PER_TICKET_HOUR
+
+
 def role_parallel() -> dict:
     """Пределы запусков по ролям: `role_parallel` из `.claude/rpv.json`, иначе ROLE_PARALLEL."""
     v = P.setting("role_parallel")
@@ -134,7 +140,7 @@ RUN_TIMEOUT = 20 * 60.0
 # они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
 # В-173 (03.10) — на тикет, владелец 03.10 («бюджет до конца убирай») — и потолок запуска; траты только считаются
 # (runs.log, state.json).
-MAX_RUNS_PER_TICKET_HOUR = 6
+MAX_RUNS_PER_TICKET_HOUR = 6  # умолчание; проект меняет `max_runs_per_ticket_hour` в `.claude/rpv.json` (целое ≥ 1)
 MIN_GAP_S = 60.0
 # Тормоза цикла (аудит 03.10) — по ЧИСЛУ запусков подряд на (тикет, роль), не по деньгам. Числа НАЗНАЧЕНЫ CEO 03.10,
 # не измерены: MAX_SAME_STATUS_RUNS (12) — роль пишет запись, а статус (in_progress; waiting при выполненном wait_for) не
@@ -1059,13 +1065,13 @@ def _record_launch(state: dict, tid: str, now, role: str = "") -> None:
 
 
 def _rate_limited(state: dict, tid: str, now, role: str = "") -> bool:
-    """MAX_RUNS_PER_TICKET_HOUR / MIN_GAP_S — троттлинг решений (а)-(г); ретраи (д) их не проходят. CP11: пауза
+    """max_runs_per_ticket_hour() / MIN_GAP_S — троттлинг решений (а)-(г); ретраи (д) их не проходят. CP11: пауза
     MIN_GAP_S — между запусками ОДНОЙ роли; передача другой роли (Инженер сдал → Судья) идёт на ближайшем тике
     (на чистом проекте пауза съедала ~40 с из 135); часовой предел считает все роли."""
     hist = [T.parse_dt(t) for t in state.get("launch_history", {}).get(tid, [])]
     if not hist:
         return False
-    if len([t for t in hist if (now - t) < timedelta(hours=1)]) >= MAX_RUNS_PER_TICKET_HOUR:
+    if len([t for t in hist if (now - t) < timedelta(hours=1)]) >= max_runs_per_ticket_hour():
         return True
     last_role = state.get("launch_role", {}).get(tid, "")
     if role and last_role and role != last_role:

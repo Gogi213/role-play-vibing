@@ -44,10 +44,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -644,6 +645,71 @@ def cmd_allow(args) -> int:
     return 0
 
 
+BRANCH_DELETE_TTL_S = 3600  # срок согласия на удаление ветки: час (читает страж по полю `until`)
+BRANCH_CONSENT_FILE = "branch-delete.json"
+DEFAULT_BRANCHES = ("main", "master")
+
+
+def cmd_allow_delete(args) -> int:
+    """CEO: согласие владельца на удаление веток на удалённом (`git push --delete`, `:ветка`) — без него страж отказывает всем,
+    и CEO тоже. Основание — решение владельца В-N из реестра, занесённое ДО согласия. Согласие — на названные ветки и на час
+    (`until` в `dispatcher/branch-delete.json`, читает страж); main/master не удаляются никогда; `--revoke` снимает."""
+    role = _caller_role()
+    if role and role != "ceo":
+        print(f"allow-delete — только CEO; эта сессия — роль {role}. Нужно удалить ветку — `result <ID> blocked --why \"...\"`",
+              file=sys.stderr)
+        return 1
+    names = []
+    for raw in args.branches:
+        name = raw.strip().removeprefix("refs/heads/")
+        if not name or name.startswith(("-", ":", "refs/")) or ".." in name or any(c in name for c in "*?[]{}\\$`'\" \t"):
+            print(f"allow-delete: ветка {raw!r} — нужно точное имя (без маски, пробелов и «:»)", file=sys.stderr)
+            return 1
+        if name in DEFAULT_BRANCHES:
+            print(f"allow-delete: {name} — основную ветку удалять нельзя никому", file=sys.stderr)
+            return 1
+        names.append(name)
+    path = D.DISPATCHER_DIR / BRANCH_CONSENT_FILE
+    now = datetime.now().astimezone()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        data = data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        data = {}                                        # битый файл не копим: начинаем заново
+    data = {b: e for b, e in data.items()
+            if isinstance(e, dict) and e.get("until") and _consent_alive(e["until"], now)}   # просроченное убираем
+    if args.revoke:
+        gone = [n for n in names if data.pop(n, None) is not None]
+        _write_consents(path, data)
+        print("снято: " + (", ".join(gone) if gone else "ничего (согласия не было)"))
+        return 0
+    ref = (args.ref or "").strip()
+    if not re.fullmatch(r"В-\d+", ref) or not registry_mod.ref_exists(PROJECT_ROOT, ref):
+        print(f"allow-delete: --ref {ref or '(пусто)'} — нужно решение владельца В-N, уже занесённое в реестр (`registry.py list`). "
+              f"Сначала слово владельца дословно — `registry.py decide`, потом согласие", file=sys.stderr)
+        return 1
+    until = (now + timedelta(seconds=BRANCH_DELETE_TTL_S)).isoformat(timespec="seconds")
+    for n in names:
+        data[n] = {"ref": ref, "until": until}
+    _write_consents(path, data)
+    print(f"удаление на удалённом разрешено до {until} ({ref}): " + ", ".join(names))
+    return 0
+
+
+def _consent_alive(until: str, now) -> bool:
+    try:
+        return datetime.fromisoformat(str(until)).astimezone() > now
+    except ValueError:
+        return False
+
+
+def _write_consents(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def cmd_status(args) -> int:
     state = D.load_state()
     rows = []
@@ -784,6 +850,11 @@ def main(argv=None) -> int:
     p_allow.add_argument("--ref", default="", help="решение владельца В-N из реестра (`registry.py decide`)")
     p_allow.add_argument("--revoke", action="store_true", help="снять согласие")
     p_allow.set_defaults(func=cmd_allow)
+    p_alld = sub.add_parser("allow-delete", help="только CEO: согласие владельца на удаление веток на удалённом (на час; main/master — никогда)")
+    p_alld.add_argument("branches", nargs="+", help="точные имена веток")
+    p_alld.add_argument("--ref", default="", help="решение владельца В-N из реестра (`registry.py decide`)")
+    p_alld.add_argument("--revoke", action="store_true", help="снять согласие")
+    p_alld.set_defaults(func=cmd_allow_delete)
 
     p_inbox = sub.add_parser("inbox", help="CEO: новые строки ceo-inbox.md с прошлого чтения")
     p_inbox.add_argument("--peek", action="store_true", help="только показать, не считать прочитанным")

@@ -3291,6 +3291,17 @@ class RateLimitTests(unittest.TestCase):
         far_later = self.now + timedelta(hours=2)
         self.assertFalse(D._rate_limited(self.state, "TK-1", far_later), "час прошёл — лимит снят")
 
+    def test_max_runs_per_hour_is_a_project_setting(self):
+        """`max_runs_per_ticket_hour` в rpv.json меняет предел; мусор (не целое ≥ 1, bool) — умолчание."""
+        step = timedelta(seconds=D.MIN_GAP_S + 1)
+        n = D.MAX_RUNS_PER_TICKET_HOUR
+        for i in range(n):
+            D._record_launch(self.state, "TK-1", self.now + i * step)
+        probe = self.now + n * step
+        for value, limited in ((None, True), (n + 4, False), (n - 2, True), (0, True), (-1, True), ("12", True), (True, True), (2.5, True)):
+            with mock.patch.object(D.P, "setting", lambda key, default=None, root=None, v=value: v if key == "max_runs_per_ticket_hour" else default):
+                self.assertEqual(D._rate_limited(self.state, "TK-1", probe), limited, f"значение {value!r}")
+
     def test_daily_cost_is_only_accounted_per_day(self):
         """Суточный учёт — по календарной дате; никакого «превышено» нет (В-149)."""
         D._add_cost(self.state, self.now, 12.5)

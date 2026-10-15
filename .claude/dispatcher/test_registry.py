@@ -1,5 +1,6 @@
 """V2: реестр владельца — решения В-N и цели G-NNN пишет только CEO, номер ставит команда, роли только читают."""
 import io
+import subprocess
 import os
 import sys
 import tempfile
@@ -103,6 +104,39 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(self.run_cli("decide", "--quote", "-", "--gist", "сначала макет")[0], 0)
         self.assertIn('> нет "не надо" сразу.\n> сначала макет покажи\n',
                       R.decisions_file(self.root).read_text(encoding="utf-8"))
+
+    def stdin_bytes(self, data: bytes, encoding: str):
+        """stdin как у Windows с не-UTF-8 локалью: байты — UTF-8 владельца, текстовая обёртка — кодировка локали."""
+        return io.TextIOWrapper(io.BytesIO(data), encoding=encoding)
+
+    def test_quote_from_stdin_is_utf8_whatever_the_locale(self):
+        quote = "их когда-то посчитали и это никогда не выводится"
+        for locale_encoding in ("cp1251", "cp866", "cp1252"):
+            with self.subTest(locale=locale_encoding), mock.patch("sys.stdin", self.stdin_bytes(quote.encode("utf-8") + b"\n", locale_encoding)):
+                self.assertEqual(self.run_cli("decide", "--quote", "-", "--gist", f"проба {locale_encoding}")[0], 0)
+        text = R.decisions_file(self.root).read_text(encoding="utf-8")
+        self.assertEqual(text.count(f"> {quote}\n"), 3, text)
+
+    def test_quote_from_stdin_drops_bom(self):
+        with mock.patch("sys.stdin", self.stdin_bytes(b"\xef\xbb\xbf" + "слово владельца".encode("utf-8"), "cp1251")):
+            self.assertEqual(self.run_cli("decide", "--quote", "-", "--gist", "bom")[0], 0)
+        self.assertIn("> слово владельца\n", R.decisions_file(self.root).read_text(encoding="utf-8"))
+
+    def test_quote_from_stdin_not_utf8_is_refused_not_garbled(self):
+        with mock.patch("sys.stdin", self.stdin_bytes("слово владельца".encode("cp1251"), "cp1251")):
+            code, _, err = self.run_cli("decide", "--quote", "-", "--gist", "не utf-8")
+        self.assertEqual(code, 1)
+        self.assertIn("не в UTF-8", err)
+        self.assertFalse(R.decisions_file(self.root).exists(), "порванная цитата в реестр не попала")
+
+    def test_real_process_with_windows_like_locale(self):
+        """Настоящий процесс: stdin по умолчанию читается в cp1251 (как на Windows), цитата в реестре — без порчи."""
+        quote = "пересчитать нельзя с нашего веба"
+        env = dict(os.environ, PYTHONIOENCODING="cp1251", PYTHONUTF8="0")
+        out = subprocess.run([sys.executable, str(Path(R.__file__)), "--project", str(self.root), "decide", "--quote", "-", "--gist", "веб"],
+                             input=quote.encode("utf-8"), capture_output=True, env=env, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr.decode("utf-8", "replace"))
+        self.assertIn(f"> {quote}\n", R.decisions_file(self.root).read_text(encoding="utf-8"))
 
     def test_repeat_marks_existing_decision_without_new_number(self):
         self.run_cli("decide", "--quote", "первое", "--gist", "г1", "--at", "2026-10-14 10:00")

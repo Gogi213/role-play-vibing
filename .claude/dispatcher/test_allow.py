@@ -174,5 +174,109 @@ class AllowTests(unittest.TestCase):
         self.assertEqual(consent(), [False, self.tid])
 
 
+class AllowDeleteTests(unittest.TestCase):
+    """`tickets.py allow-delete` — согласие владельца на удаление веток на удалённом: только CEO, основание — решение В-N из реестра,
+    на названные ветки и на час, main/master никогда; страж читает то, что пишет команда."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.file = self.root / ".claude" / "dispatcher" / "branch-delete.json"
+        for p in (mock.patch.object(TK, "TICKETS_DIR", self.root / ".claude" / "tickets"), mock.patch.object(TK, "PROJECT_ROOT", self.root),
+                  mock.patch.object(TK.D, "DISPATCHER_DIR", self.root / ".claude" / "dispatcher"), mock.patch.dict(os.environ)):
+            p.start()
+            self.addCleanup(p.stop)
+        os.environ.pop("RPV_ROLE", None)
+
+    def registry(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return R.main(["--project", str(self.root), *args])
+
+    def decide(self):
+        self.assertEqual(self.registry("decide", "--quote", "удали ветки feat/x и feat/y на гитхабе", "--gist", "удалить ветки"), 0)
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = TK.main(list(args))
+        return code, out.getvalue().strip(), err.getvalue().strip()
+
+    def consents(self):
+        return json.loads(self.file.read_text(encoding="utf-8"))
+
+    def test_ceo_grants_named_branches_for_an_hour(self):
+        from datetime import datetime
+        self.decide()
+        code, out, _ = self.run_cli("allow-delete", "feat/x", "refs/heads/feat/y", "--ref", "В-1")
+        self.assertEqual(code, 0, out)
+        data = self.consents()
+        self.assertEqual(sorted(data), ["feat/x", "feat/y"])
+        for entry in data.values():
+            self.assertEqual(entry["ref"], "В-1")
+            left = (datetime.fromisoformat(entry["until"]) - datetime.now().astimezone()).total_seconds()
+            self.assertTrue(3500 < left <= 3600, left)
+
+    def test_ref_must_be_an_existing_owner_decision(self):
+        for ref in ("В-1", "", "G-001", "удали ветку"):                       # реестра ещё нет
+            self.assertEqual(self.run_cli("allow-delete", "feat/x", "--ref", ref)[0], 1, ref)
+        self.decide()
+        for ref in ("В-9", "", "G-001", "удали ветку", "В-1 и ещё"):
+            code, _, err = self.run_cli("allow-delete", "feat/x", "--ref", ref)
+            self.assertEqual(code, 1, ref)
+            self.assertIn("registry.py decide", err)
+        self.assertFalse(self.file.exists())
+
+    def test_default_branches_and_masks_are_refused(self):
+        self.decide()
+        for name in ("main", "master", "refs/heads/main", "feat/*", "a b", ":x", "x..y", "$B", ""):
+            self.assertEqual(self.run_cli("allow-delete", name, "--ref", "В-1")[0], 1, name)
+        self.assertEqual(self.run_cli("allow-delete", "feat/x", "main", "--ref", "В-1")[0], 1)       # одна плохая — не пишем ничего
+        self.assertFalse(self.file.exists())
+
+    def test_role_session_is_refused(self):
+        self.decide()
+        for role in ("engineer", "researcher", "judge"):
+            os.environ["RPV_ROLE"] = role
+            code, _, err = self.run_cli("allow-delete", "feat/x", "--ref", "В-1")
+            self.assertEqual(code, 1, role)
+            self.assertIn("только CEO", err)
+        self.assertFalse(self.file.exists())
+
+    def test_revoke_and_expired_entries_are_dropped(self):
+        self.decide()
+        self.run_cli("allow-delete", "feat/x", "feat/y", "--ref", "В-1")
+        self.assertEqual(self.run_cli("allow-delete", "feat/x", "--revoke")[0], 0)
+        self.assertEqual(sorted(self.consents()), ["feat/y"])
+        self.assertIn("ничего", self.run_cli("allow-delete", "feat/zzz", "--revoke")[1])
+        data = self.consents()
+        data["feat/old"] = {"ref": "В-1", "until": "2020-01-01T00:00:00+00:00"}
+        self.file.write_text(json.dumps(data), encoding="utf-8")
+        self.run_cli("allow-delete", "feat/z", "--ref", "В-1")
+        self.assertEqual(sorted(self.consents()), ["feat/y", "feat/z"], "просроченное убрано при следующей записи")
+
+    def test_guard_reads_what_allow_delete_writes(self):
+        """Страж — отдельным процессом: CEO без согласия отказ, с согласием — можно, другая ветка и роль — отказ."""
+        self.decide()
+
+        def verdict(cmd, role=None):
+            code = ("import delete_guard as d, json, sys; d.configure(sys.argv[1]); print(json.dumps(d.check(sys.argv[2], sys.argv[1]) is None))")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_")}
+            if role:
+                env["RPV_ROLE"] = role
+            r = subprocess.run([sys.executable, "-c", code, str(self.root), cmd], cwd=HOOKS, env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+
+        delete = "git push origin --delete feat/x"
+        self.assertFalse(verdict(delete))
+        self.run_cli("allow-delete", "feat/x", "--ref", "В-1")
+        self.assertTrue(verdict(delete))
+        self.assertFalse(verdict("git push origin --delete feat/other"))
+        self.assertFalse(verdict(delete, role="engineer"))
+        self.run_cli("allow-delete", "feat/x", "--revoke")
+        self.assertFalse(verdict(delete))
+
+
 if __name__ == "__main__":
     unittest.main()

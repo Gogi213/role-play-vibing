@@ -69,7 +69,7 @@ Tickets can also wait for a file, another ticket, or a job on a remote machine f
 - New tasks only on the owner's word.
 - Work is handed over only with `--next`.
 - Deleting is allowed only inside the project: a `PreToolUse` hook checks Bash, PowerShell and file edits, and also refuses to delete or overwrite paths the project marks as protected (`protected_paths` in `.claude/rpv.json`).
-- Publishing (release, PR merge, push to main/master, tags, packages) only with the owner's consent on the ticket: `tickets.py allow <ID> publish --ref <decision id>`.
+- Publishing (release, PR merge, push to main/master, tags, packages) only with the owner's consent on the ticket: `tickets.py allow <ID> publish --ref <decision id>`. Deleting remote branches needs the owner's word too, even for the CEO: `tickets.py allow-delete <branch> --ref <decision id>` (one hour, never main/master).
 - A bug counts as fixed only with a check attached; the Judge runs the checks of all fixed bugs on every acceptance.
 - The CEO cannot remove the Judge; only the owner can, with a direct quote.
 
@@ -88,7 +88,7 @@ Scripts run from the plugin folder with `--project <project>`:
 
 | Script | Does |
 |---|---|
-| `dispatcher/tickets.py` | tickets: `new`, `comment`, `result`, `start`, `stop` (CEO only), `allow`, `wait`, `status`; `inbox` prints new lines of `ceo-inbox.md` |
+| `dispatcher/tickets.py` | tickets: `new`, `comment`, `result`, `start`, `stop` (CEO only), `allow`, `allow-delete`, `wait`, `status`; `inbox` prints new lines of `ceo-inbox.md` |
 | `dispatcher/registry.py` | the owner's registry of decisions and goals; written by the CEO only |
 | `dispatcher/errors.py` | the error registry `.claude/errors/`: a bug is fixed only when its check failed before the fix and passes now |
 | `dispatcher/report.py` | the daily report to the owner; `--dry-run` only prints ([docs/daily-report.md](docs/daily-report.md), Russian) |
