@@ -2,7 +2,7 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
-## Не выпущено
+## 2.0.4 — 2026-10-15
 
 ### Добавлено
 - `tickets.py allow-delete <ветка>… --ref В-N` (только CEO): согласие владельца на удаление веток на удалённом (`git push --delete`, `:ветка`). Раньше страж
