@@ -45,14 +45,15 @@ Platform details, manual start and project-root lookup: [docs/install.md](docs/i
 | Role | Does | Session | Model |
 |---|---|---|---|
 | CEO | talks to the owner, files tickets, reads signals | long-lived | your session |
+| Secretary | the CEO hands it your words verbatim; it records them in the owner's registry as a decision (`В-N`), a goal (`G-NNN`), both, or nothing (a question, a status request, a one-off command) | one short run per call from the CEO | Haiku 5.5, effort xhigh |
 | Researcher | protocol, calculation, report | one short run per wake | Sonnet 5.5, effort high (can be set per ticket) |
 | Engineer | code, tests, machines | one short run per wake | Sonnet 5.5, effort xhigh |
 | Judge | review and verdict | one short run per wake | Opus 5.5, effort high |
 | Overseer | every 15 minutes, while tickets change: cost rules and a model reading the ticket logs; a finding goes to the Judge | a short process on a timer, no ticket | Haiku 5.5, effort xhigh |
 
-Helper subagents are not roles: the CEO uses `secretary` (records the owner's words verbatim into the registry), `inbox` (triages signals) and `reporter` (status answers and daily-report lines); roles use `coder` and `reader`.
+Other helper subagents are not roles: the CEO uses `inbox` (triages signals) and `reporter` (status answers and daily-report lines); roles use `coder` and `reader`.
 
-1. You give the CEO a task. The CEO files a ticket, `.claude/tickets/TK-NNN.md`: a header (`status`, `next`) and a log of every step.
+1. You tell the CEO what you want. The CEO hands your words, verbatim, to the Secretary, which records them in the registry. Then the CEO files a ticket, `.claude/tickets/TK-NNN.md` (a header with `status` and `next`, and a log of every step); `tickets.py new` refuses a ticket without `--ref` to a registry entry, so no work starts that the owner did not order.
 2. Every 15 seconds the dispatcher (`dispatch.py`) reads the tickets and starts the role each one calls for (the owner of a new ticket, the role named in `next`, the Judge for finished work) as a short `claude -p` session.
 3. The role reports its step with `tickets.py result <ID> <result> --why "…"`. Results: `done`, `pr`, `accept`, `return`, `blocked`, `ask-owner`, `wait`, `continue`. A routing table (`routes.py`), not the text of the entry, decides who is woken next: an executor's `done` or `pr` goes to the Judge, who answers `accept` (the ticket is done) or `return` (back to the executor).
 4. When a ticket is done or stuck (`blocked`, `needs_owner`, `next: ceo`), the dispatcher writes a line to `ceo-inbox.md` and `ceo-wake.log`; a Monitor on `ceo-wake.log` wakes the CEO. The watcher (`watch.py`) adds orphaned tickets and dead waits. Details: [docs/signals.md](docs/signals.md) (Russian).
