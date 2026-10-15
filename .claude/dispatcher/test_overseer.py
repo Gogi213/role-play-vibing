@@ -209,7 +209,10 @@ class ToJudgeTests(unittest.TestCase):
         self.assertEqual(self.ceo_files(), [])
 
     def test_main_runs_without_dispatcher_and_does_not_wake_ceo(self):
-        """Живой запуск `overseer.py --project` — без `dispatch` (он нужен был только для строки CEO)."""
+        """Живой запуск `overseer.py --project` — без `dispatch` (он нужен был только для строки CEO). `main` берёт настоящие часы,
+        поэтому запись в тикете — «час назад» от них, а не фиксированная дата (старше суток Надзиратель тикет не смотрит)."""
+        now = datetime.now(TZ)
+        self.path.write_text(ticket_text("TK-200", "in_progress", [(now - timedelta(hours=1), "engineer", QUOTE)]), encoding="utf-8")
         with mock.patch.object(O, "call_overseer", lambda *a, **kw: finding()):
             self.assertEqual(O.main(["--project", str(self.root)]), 0)
         self.assertEqual(T.read_ticket(self.path).header.get("next"), "judge")
