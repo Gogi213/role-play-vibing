@@ -1337,12 +1337,14 @@ class ThirdAudit(unittest.TestCase):
                     self.assertIsNotNone(reason, f"{role} {name} {path}")
                     self.assertIn("Слово владельца", reason)
             for cmd in ("echo x >> CLAUDE.md", "echo '## В-9' >> .claude/decisions.md", "rm .claude/goals/G-001.md",
+                        """python -c "open('.claude/decisions.md', 'a').write('## В-9')" """,
                         "cat x | tee -a .claude/decisions.md", "sed -i 's/a/b/' CLAUDE.md",
                         "Add-Content .claude\\decisions.md x", "mv .claude/goals/G-001.md /tmp/x"):
                 reason = dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
                 self.assertIn("Слово владельца", reason or "", f"{role}: {cmd}")
             for cmd in ("cat CLAUDE.md", "grep В-12 .claude/decisions.md", "ls .claude/goals",
-                        'python registry.py show В-3', 'python tickets.py result TK-1 done --why "в CLAUDE.md > x"'):
+                        'python registry.py show В-3', 'python tickets.py result TK-1 done --why "в CLAUDE.md > x"',
+                        """python -c "print(open('.claude/decisions.md', encoding='utf-8').read().count('В-') >= 3)" """):
                 self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD}), cmd)
             self.assertIsNone(self.tool("Write", "C:/visual projects/proj/.claude/roles/notes/engineer.md"))
             self.assertIsNone(self.tool("Write", "C:/visual projects/proj/docs/goals.md"))

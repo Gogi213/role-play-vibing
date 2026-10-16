@@ -294,16 +294,19 @@ def _past_deadline(path, tkt, ws: dict, spec: str, now) -> bool:
     return True
 
 
-def _idle_wait(path, tkt, ws: dict, spec: str, parsed, owners: dict, now) -> bool:
+def _idle_wait(path, tkt, ws: dict, spec: str, parsed, owners: dict, now, st: str = "") -> bool:
     """П-1 (TK-117): тикет waiting с `host:<алиас>:<путь>`, цель не выполнена и у тикета нет ни одного задания машины в
-    running/queued дольше IDLE_WAIT_MIN — ждать некого (задания кончились/упали, файл не ляжет). Не смотрим «жив ли юнит с
-    именем задания»: ждущий юнит жив и после гибели волны. Алиас без адаптера заданий (owners) не проверяется. True — разбудил."""
+    running/queued дольше IDLE_WAIT_MIN — ждать некого (задания кончились/упали, файл не ляжет). Пока у тикета есть задания
+    в адаптере, «жив ли юнит с именем задания» не смотрим: ждущий юнит жив и после гибели волны (TK-114/115). Заданий тикета
+    в адаптере нет вовсе, а юнит с именем задания жив (`st == "producer"`) — работа идёт мимо очереди (`systemd-run` роли,
+    alpha TK-261 16.10: три ложных пробуждения): не будим, от зависшего юнита страхует срок `wait_by`.
+    Алиас без адаптера заданий (owners) не проверяется. True — разбудил."""
     idle = ws.setdefault("idle_wait", {})
     if not parsed or parsed[0] != "host" or parsed[2] != "path" or parsed[1] not in owners:
         idle.pop(tkt.id, None)
         return False
     mine = [j for j in owners[parsed[1]] if j["ticket"] == tkt.id]
-    if any(j["state"] in ("running", "queued") for j in mine):
+    if any(j["state"] in ("running", "queued") for j in mine) or (not mine and st == "producer"):
         idle.pop(tkt.id, None)
         return False
     ent = idle.get(tkt.id)
@@ -483,7 +486,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         met.pop(tkt.id, None)
         if st != "dead" and (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, ws, spec, now):
             continue
-        if st != "dead" and _idle_wait(path, tkt, ws, spec, parsed, owners, now):
+        if st != "dead" and _idle_wait(path, tkt, ws, spec, parsed, owners, now, st):
             continue
         if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
             alive.add(tkt.id)

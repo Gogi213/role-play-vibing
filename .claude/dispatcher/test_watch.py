@@ -559,6 +559,21 @@ class TriageWaitsTests(WatchSandbox):
             W.triage_waits(ws, n, probe=lambda *a: "producer", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
+    def test_idle_wait_trusts_live_unit_outside_queue(self):
+        """alpha TK-261 16.10: замер запущен ролью через `systemd-run`, в адаптере заданий тикета нет, юнит `tk261-abba-pf`
+        жив (producer) — не будить; юнит пропал (dead) — обычный путь мёртвой цели."""
+        p = self._waiting("host:calc:/data/tk0261/abba-pf.done")
+        tid = T.read_ticket(p).id
+        other = lambda al: [{"id": "z", "ticket": "TK-999", "unit": "tk999-x", "state": "running"}]  # адаптер есть, заданий тикета нет
+        ws = {}
+        for m in (0, W.IDLE_WAIT_MIN + 1, 3 * W.IDLE_WAIT_MIN):
+            W.triage_waits(ws, self.now + timedelta(minutes=m), probe=lambda *a: "producer", owners_probe=other)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        for m in (60, 62):
+            W.triage_waits(ws, self.now + timedelta(minutes=m), probe=lambda *a: "dead", owners_probe=other)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")
+        self.assertIn("не существует и её никто не производит", T.read_ticket(p).log[-1].text)
+
     def test_idle_wait_timer_resets_when_job_appears(self):
         p = self._waiting("host:gpu1:/data/x/tier1.done")
         tid = T.read_ticket(p).id

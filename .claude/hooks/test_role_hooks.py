@@ -508,6 +508,23 @@ class CeoSignalGuardTest(unittest.TestCase):
         self.assertFalse(d("Bash", {"command": 'python tickets.py result TK-1 done --why "читал ceo-inbox.md через open( и > "'}))  # TK-110 Ж-3
         self.assertTrue(d("Bash", {"command": 'python tickets.py result TK-1 done --why "x" > ceo-inbox.md'}))
 
+    def test_python_read_is_not_a_write(self):
+        """alpha 16.10: подсчёт сигналов `python -c "...open(p, encoding=…)... >= ..."` отклонялся как запись."""
+        import delete_guard as g
+        d = g.ceo_signal_write
+        log = ".claude/dispatcher/ceo-wake.log"
+        for cmd in (f"""python -c "import collections,datetime as d;c=collections.Counter(l.split()[2] for l in open('{log}',encoding='utf-8') if len(l.split())>2 and l.split()[0]>=(d.datetime.now().astimezone()-d.timedelta(days=1)).isoformat());print(c)" """,
+                    f"""python -c "print(open('{log}').read())" """, f"""python -c "print(open('{log}', 'rb').read())" """,
+                    f"""python -c "import os;os.open('{log}', os.O_RDONLY)" """, f"cat {log} 2>/dev/null",
+                    f"Get-Content {log} | Select-Object -Last 5"):
+            self.assertFalse(d("Bash", {"command": cmd}), cmd)
+        for cmd in (f"""python -c "open('{log}','a').write('x')" """, f"""python -c "open('{log}', mode='w')" """,
+                    f"""python -c "open('{log}', m)" """, f"""python -c "import pathlib;pathlib.Path('{log}').open('a')" """,
+                    f"""python -c "import pathlib;pathlib.Path('{log}').write_text('x')" """,
+                    f"""python -c "import os;os.open('{log}', os.O_WRONLY)" """, f"echo x 2>{log}", f"bash -c 'echo x > {log}'",
+                    f"""powershell -c "[IO.File]::AppendAllText('{log}','x')" """, f"""powershell -c "[IO.File]::Open('{log}', 'Append')" """):
+            self.assertTrue(d("Bash", {"command": cmd}), cmd)
+
 
 class GuardJournalTest(unittest.TestCase):
     def test_journal_lines_and_silent_failure(self):
