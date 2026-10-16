@@ -233,10 +233,11 @@ def cmd_result(args) -> int:
         err, ack = _decisions_ack(args)
         nerr, nack = _numbers_ack(args, args.id)
         terr, tack, tail_ceo = _tail_ack(args, args.id)
-        if err or nerr or terr:
-            print(f"result: {err or nerr or terr}", file=sys.stderr)
+        lerr, lack = _live_ack(args, args.id)
+        if err or nerr or terr or lerr:
+            print(f"result: {err or nerr or terr or lerr}", file=sys.stderr)
             return 1
-        ack += nack + tack
+        ack += nack + tack + lack
         proof += ack
     if args.result == "accept" and not args.pr and _regression(args.id, "result"):
         return 1  # приёмка в PR проходит ту же проверку в cmd_accept
@@ -245,7 +246,8 @@ def cmd_result(args) -> int:
                                       "repo": getattr(args, "repo", None),
                                       "decisions": getattr(args, "decisions", None),
                                       "numbers": getattr(args, "numbers", None),
-                                      "tail": getattr(args, "tail", None)})())
+                                      "tail": getattr(args, "tail", None),
+                                      "live": getattr(args, "live", None)})())
         if rc == 0:  # запись итога — иначе Stop-хук (stop_result.py) не видит сдачи шага и блокирует Судью
             with T.ticket_lock(path):
                 T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
@@ -311,6 +313,41 @@ def _owner_submission(tkt) -> str:
         if T.author_is(e.author, tkt.owner or "") and re.match(r"\[итог:\s*(done|pr)\]", e.text.strip()):
             return e.text
     return ""
+
+
+# Живая проверка (разбор alpha 14–16.10, П1): дефекты, которые нашёл владелец, видны за секунды на настоящей странице, а
+# сдачу проверяли на dry_run и фикстурах. Пункт заказа или договора с меткой `[вживую]` принимается только с файлом, где
+# Судья записал, что увидел сам на настоящей машине и настоящих данных (малый срез): `--live <файл>`. Код не может
+# проверить, что Судья смотрел, — он требует явной записи; ложь в ней видна в логе. Слова и время файла не проверяются:
+# честное «не на dry_run» и пересохранение дали бы ложные отказы и ложные пропуски.
+LIVE_MARK = re.compile(r"\[вживую\]", re.I)
+LIVE_MIN_CHARS = 40
+LIVE_HINT = ("файл в проекте (например docs/reviews/<тикет>-live.md): где открыл (X), что увидел (Y), за сколько (Z с), "
+             "на каком срезе настоящих данных; открыть нечем — не принимать, а `blocked`")
+
+
+def _live_ack(args, tid: str) -> tuple[str, str]:
+    """Есть `[вживую]` в описании тикета или в записях исполнителя (договор) — приёмка только с `--live <файл>`. → (отказ, пометка)."""
+    path = TICKETS_DIR / f"{tid}.md"
+    if not path.exists():
+        return "", ""
+    tkt = T.read_ticket(path)
+    texts = [tkt.description] + [e.text for e in tkt.log if T.author_is(e.author, tkt.owner or "")]
+    if not any(LIVE_MARK.search(t or "") for t in texts):
+        return "", ""
+    raw = (getattr(args, "live", None) or "").strip()
+    if not raw:
+        return f"в договоре есть пункт [вживую] — приёмка только с --live <файл>: {LIVE_HINT}", ""
+    f = Path(raw) if Path(raw).is_absolute() else PROJECT_ROOT / raw
+    try:
+        rel = f.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return f"--live {raw}: файл вне проекта — {LIVE_HINT}", ""
+    if not f.is_file():
+        return f"--live {raw}: файла нет — {LIVE_HINT}", ""
+    if len(f.read_text(encoding="utf-8", errors="replace").strip()) < LIVE_MIN_CHARS:
+        return f"--live {raw}: пусто — {LIVE_HINT}", ""
+    return "", f" вживую: {rel}"
 
 
 def _tail_ack(args, tid: str) -> tuple[str, str, str]:
@@ -532,10 +569,11 @@ def cmd_accept(args) -> int:
     derr, ack = _decisions_ack(args)
     nerr, nack = _numbers_ack(args, args.id)
     terr, tack, tail_ceo = _tail_ack(args, args.id)
-    if derr or nerr or terr:
-        print(f"accept: {derr or nerr or terr}", file=sys.stderr)
+    lerr, lack = _live_ack(args, args.id)
+    if derr or nerr or terr or lerr:
+        print(f"accept: {derr or nerr or terr or lerr}", file=sys.stderr)
         return 1
-    ack += nack + tack
+    ack += nack + tack + lack
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:
@@ -850,6 +888,7 @@ def main(argv=None) -> int:
     p_accept.add_argument("--decisions", default=None, help="решения владельца, с которыми сверено: В-N[,В-M] или - (связанных нет)")
     p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл:строка |» или - (чисел нет)")
     p_accept.add_argument("--tail", default=None, help="хвосты: - (нет) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
+    p_accept.add_argument("--live", default=None, help="договор с [вживую]: файл живой проверки (что увидит владелец)")
     p_accept.set_defaults(func=cmd_accept)
 
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
@@ -871,6 +910,8 @@ def main(argv=None) -> int:
                           help="accept: файл с таблицей ключевых чисел «| число | файл:строка |» или - (чисел нет; код проверяет по --path)")
     p_result.add_argument("--tail", default=None,
                           help="accept: хвосты — - (нет; сверяется со сдачей исполнителя) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
+    p_result.add_argument("--live", default=None,
+                          help="accept: договор с [вживую] — файл живой проверки на настоящих данных (что увидит владелец)")
     p_result.set_defaults(func=cmd_result)
 
     p_start = sub.add_parser("start")

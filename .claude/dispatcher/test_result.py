@@ -532,6 +532,49 @@ class ResultTests(unittest.TestCase):
         self.res("engineer", "done", path="out.md", why="не сделано: всё")
         self.assertEqual(self.res("judge", "accept", path="review.md", tail=None), 0, "до V2 (без реестра) ворот нет")
 
+    # --- живая проверка (разбор alpha 14–16.10, П1): пункт [вживую] — приёмка только с файлом «что увидит владелец»
+    LIVE_TEXT = "Открыл /runs на calc (10 клеток R1): таблица за 1,8 с, у Г-39 и Г-35 статус «9/9», не жёлтый."
+
+    def _live_done(self):
+        T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
+        self.res("engineer", "done", path="out.md",
+                 why="Сдам форму. Примут, если: [вживую] владелец открывает /runs и видит таблицу за ≤ 2 с")
+
+    def test_live_mark_requires_live_file(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        self._live_done()
+        self.refused("judge", "accept", path="review.md", live=None)
+        self.refused("judge", "accept", path="review.md", live="docs/reviews/нет.md")
+        self.refused("judge", "accept", pr=7, sha=SHA, decisions="-", numbers="-", live=None)  # приёмка PR — те же ворота
+        (self.base / "docs").mkdir()
+        (self.base / "docs" / "b.md").write_text("ок", encoding="utf-8")
+        self.refused("judge", "accept", path="review.md", live="docs/b.md")  # пустая запись
+        live = self.base / "docs" / "live.md"
+        live.write_text(self.LIVE_TEXT + " Не dry_run: настоящие хеши.", encoding="utf-8")  # честное «не dry_run» — не отказ
+        self.assertEqual(self.res("judge", "accept", path="review.md", live="docs/live.md"), 0)
+        self.assertIn("вживую: docs/live.md", self.tkt().log[-1].text)
+
+    def test_live_file_outside_project_refused(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        self._live_done()
+        with tempfile.TemporaryDirectory() as out:
+            (Path(out) / "live.md").write_text(self.LIVE_TEXT, encoding="utf-8")
+            self.refused("judge", "accept", path="review.md", live=str(Path(out) / "live.md"))
+
+    def test_live_mark_in_description_counts_and_no_mark_no_gate(self):
+        (self.base / "out.md").write_text("x", encoding="utf-8")
+        (self.base / "review.md").write_text("x", encoding="utf-8")
+        self.res("engineer", "done", path="out.md")
+        self.assertEqual(self.res("judge", "accept", path="review.md", live=None), 0, "без [вживую] ворот нет")
+        p = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="Ф", status="in_progress",
+                            description="Примут, если: [вживую] владелец открывает форму и видит прогоны за 2 с", now=NOW)
+        T.write_header_updates(p, {"reviewer": "judge"}, now=NOW)
+        self.tid = p.stem
+        self.res("engineer", "done", path="out.md")
+        self.refused("judge", "accept", path="review.md", live=None)
+
     def test_accept_numbers_must_be_in_their_sources(self):
         """CP9: в V2-проекте приёмка — с таблицей «число · файл»; число, которого нет в источнике, — отказ."""
         self._registry_with_decision()
