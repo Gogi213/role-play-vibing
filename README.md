@@ -38,6 +38,18 @@ Requires Python 3.11 (`python` on `PATH`), git, and the Claude Code CLI `claude`
 
 Platform details, manual start and project-root lookup: [docs/install.md](docs/install.md) (Russian).
 
+### Updating
+
+1. Update the plugin and restart Claude Code:
+
+   ```
+   claude plugin marketplace update role-play-vibing
+   claude plugin update role-play-vibing@role-play-vibing
+   ```
+
+2. Run `/rpv-start` in the project: it restarts the dispatcher and the watcher on the new code.
+3. Bring the role charters up to date. `/rpv-init` never overwrites `.claude/roles/`, so new rules from a release reach an existing project only when the CEO copies them from the plugin's `templates/roles/` (the release's entry in [CHANGELOG.md](CHANGELOG.md) names the files).
+
 ## How it works
 
 ![How Role Play Vibing works: owner, CEO, ticket file, dispatcher, roles, signals to the CEO, watcher, overseer, Telegram](docs/img/workflow.svg)
@@ -70,6 +82,8 @@ Tickets can also wait for a file, another ticket, or a job on a remote machine f
 - Work is handed over only with `--next`.
 - Deleting is allowed only inside the project: a `PreToolUse` hook checks Bash, PowerShell and file edits, and also refuses to delete or overwrite paths the project marks as protected (`protected_paths` in `.claude/rpv.json`).
 - Publishing (release, PR merge, push to main/master, tags, packages) only with the owner's consent on the ticket: `tickets.py allow <ID> publish --ref <decision id>`. Deleting remote branches needs the owner's word too, even for the CEO: `tickets.py allow-delete <branch> --ref <decision id>` (one hour, never main/master).
+- No "accepted with a tail": if the executor reports something from the order as not done, the Judge returns it. Every acceptance states the tails (`--tail`): none (checked against the executor's submission), tickets already filed for them, or a task for the CEO.
+- Live check: when the owner may look at the result (a page, a form, a report), the CEO writes the criterion as "`[вживую]` the owner opens X and sees Y within Z s". The executor checks it on the real machine and real data before handing in; the Judge opens it too and records what was seen, and the acceptance is refused without that record (`--live <file>`).
 - A bug counts as fixed only with a check attached; the Judge runs the checks of all fixed bugs on every acceptance.
 - The CEO cannot remove the Judge; only the owner can, with a direct quote.
 
