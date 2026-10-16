@@ -62,7 +62,7 @@
 <text x="822" y="319" class="s">done · pr → next: judge</text>
 <rect class="n-model" x="812" y="338" width="256" height="62" rx="6"/>
 <text x="822" y="357" class="t">Judge · Opus 5.5 high</text>
-<text x="822" y="373" class="s">reviews every result</text>
+<text x="822" y="373" class="s">reviews every result, [вживую] live</text>
 <text x="822" y="387" class="s">accept → done · return → executor</text>
 <polyline class="e" points="710,270 796,270" marker-end="url(#mk-e-w)"/>
 <text x="753" y="262" class="l" text-anchor="middle">claude -p</text>
