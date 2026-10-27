@@ -21,6 +21,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import waits as WAITS  # noqa: E402
 import procs  # noqa: E402
 import ticket as T  # noqa: E402
 import watch as W  # noqa: E402
@@ -55,7 +56,7 @@ class WatchSandbox(unittest.TestCase):
         env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
         env_patch.start()
         self.addCleanup(env_patch.stop)
-        aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"gpu1"})   # умолчания нет: машины со сторожем задаёт окружение
+        aliases_patch = mock.patch.object(WAITS, "WATCHED_ALIASES", {"gpu1"})   # умолчания нет: машины со сторожем задаёт окружение
         aliases_patch.start()
         self.addCleanup(aliases_patch.stop)
 
@@ -301,9 +302,9 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_probe_progress_json_in_flight_is_producer_not_met(self):
         import subprocess as sp
-        orig, orig_ssh = sp.run, W.D._ssh_cmd
+        orig, orig_ssh = sp.run, WAITS._ssh_cmd
         try:
-            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
+            WAITS._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.json"), "producer")
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
@@ -311,15 +312,15 @@ class TriageWaitsTests(WatchSandbox):
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
             self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.mark"), "met")
         finally:
-            sp.run, W.D._ssh_cmd = orig, orig_ssh
+            sp.run, WAITS._ssh_cmd = orig, orig_ssh
 
     def test_probe_reads_rc_like_dispatcher(self):
         """ssh-проба (TK-010): сторож читает `.rc` так же, как диспетчер, и вердикт у обоих один (`_path_met`)."""
         import subprocess as sp
-        orig, orig_ssh = sp.run, W.D._ssh_cmd
+        orig, orig_ssh = sp.run, WAITS._ssh_cmd
         sent = []
         try:
-            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
+            WAITS._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
             def fake(cmd, *a, **k):
                 sent.append(cmd[-1])
                 return sp.CompletedProcess(cmd, 0, stdout=b"exists\nrc=0 done", stderr=b"")
@@ -327,11 +328,11 @@ class TriageWaitsTests(WatchSandbox):
             arg = "/data/sched/job-a.rc"
             self.assertEqual(W.probe_wait_target("gpu1", "path", arg), "met")
             self.assertIn("cat /data/sched/job-a.rc", sent[0])
-            self.assertEqual(W.D._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
-            self.assertTrue(W.D._path_met(("gpu1", "path", arg), "rc=0 done"))
+            self.assertEqual(W.WAITS._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
+            self.assertTrue(W.WAITS._path_met(("gpu1", "path", arg), "rc=0 done"))
         finally:
-            sp.run, W.D._ssh_cmd = orig, orig_ssh
-            W.D._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
+            sp.run, WAITS._ssh_cmd = orig, orig_ssh
+            W.WAITS._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
 
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch

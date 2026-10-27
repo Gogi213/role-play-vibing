@@ -34,6 +34,7 @@ import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox
 import procs  # noqa: E402 — замок экземпляра
+import waits as W  # noqa: E402 — ssh-проба и разбор условий ожидания
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
@@ -132,7 +133,7 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
 DEAD_WAIT_STRIKES = 2  # подряд мёртвых проверок до действия
 AT_GRACE_MIN = 30  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
 EMPTY_WAIT_STRIKES = 3  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
-MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (dispatch.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
+MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (waits.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
 BY_GRACE_MIN = 15  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
 IDLE_WAIT_MIN = 15  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
 SSH_FAIL_STRIKES = 5  # подряд молчаний ssh до тревоги владельцу тикета
@@ -152,13 +153,13 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     pat = _producer_pattern(arg)
     if what != "path" or not arg.startswith("/") or not pat:
         return "unknown"
-    q = D._remote_test_arg(arg)
-    cat = f"; cat {q}" if D._reads_body(arg) else ""  # содержимое нужно: файл хода «идёт»/«готов», файл итога `.rc` — как у диспетчера
+    q = W._remote_test_arg(arg)
+    cat = f"; cat {q}" if W._reads_body(arg) else ""  # содержимое нужно: файл хода «идёт»/«готов», файл итога `.rc` — как у диспетчера
     remote = (f"if test -e {q}; then echo exists{cat}; "
               f"elif {{ systemctl list-units --all --plain --no-legend --state=active,activating 2>/dev/null; "
               f"ps -eo args 2>/dev/null; }} | grep -q -e '{pat}'; then echo producer; else echo dead; fi")
     try:
-        r = hide.run(D._ssh_cmd(alias, remote), capture_output=True, timeout=20)
+        r = hide.run(W._ssh_cmd(alias, remote), capture_output=True, timeout=20)
     except Exception:
         return "ssh-error"
     text = (r.stdout or b"").decode("utf-8", "replace").strip()
@@ -166,7 +167,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     if r.returncode != 0 or not out or out[0] not in ("exists", "producer", "dead"):
         return "ssh-error"
     if out[0] == "exists":  # как у диспетчера (_host_probe): файл хода — готов при done>=total, прочее — достаточно наличия
-        return "met" if D._path_met((alias, what, arg), "\n".join(out[1:])) else "producer"
+        return "met" if W._path_met((alias, what, arg), "\n".join(out[1:])) else "producer"
     return out[0]
 
 
@@ -224,9 +225,9 @@ def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "j
 
 
 def _fetch_owners(owners_probe) -> dict:
-    probe = owners_probe or (lambda alias: LW.fetch_owners(alias, D._ssh_cmd))
+    probe = owners_probe or (lambda alias: LW.fetch_owners(alias, W._ssh_cmd))
     res = {}
-    for alias in sorted(D.watched_aliases()):
+    for alias in sorted(W.watched_aliases()):
         got = probe(alias)
         if got is not None:
             res[alias] = got
@@ -406,7 +407,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
     if run_probe is None:
         import ci_watch
         run_probe = ci_watch.run_state
-    job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, D._ssh_cmd))
+    job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, W._ssh_cmd))
     owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет»
     link = None  # связь ПК проверяется лениво, раз за проход
     for path in T.list_tickets(D.TICKETS_DIR):
@@ -554,9 +555,9 @@ def check_strays(ws: dict, now, probe=None) -> list:
     """Прогон мимо планировщика поверх чужого задания (замер портит чужую волну): адаптер проекта `stray_cmd` даёт
     строки «тикет<TAB>описание»; владельца тикета-нарушителя будим записью, нет тикета — строка CEO. Один сигнал на
     (тикет, описание) за STRAY_WAKE_REPEAT_HOURS. Адаптер не задан — тихо ничего."""
-    probe = probe or (lambda alias: LW.fetch_strays(alias, D._ssh_cmd))
+    probe = probe or (lambda alias: LW.fetch_strays(alias, W._ssh_cmd))
     seen, out = ws.setdefault("stray_seen", {}), []
-    for alias in sorted(D.watched_aliases()):
+    for alias in sorted(W.watched_aliases()):
         for tid, desc in probe(alias) or []:
             key = f"{tid or '?'}|{desc}"
             prev = seen.get(key)
