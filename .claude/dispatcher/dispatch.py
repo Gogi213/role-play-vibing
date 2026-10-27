@@ -769,8 +769,20 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     return T.read_ticket(path)
 
 
+def _awaits_judge(tkt: T.Ticket) -> bool:
+    """blocked исполнителя (`result blocked|ask-owner`) идёт Судье (routes.py) — CEO о нём не знает, пока Судья не ответил
+    своим blocked/ask-owner (как с Надзирателем, 2.0.3; alpha #107 П1, #109 п.2). Судья ответил — последняя запись его."""
+    if tkt.status != "blocked":
+        return False
+    if tkt.next_role == "judge":
+        return True
+    last = tkt.log[-1] if tkt.log else None
+    return bool(last and any(T.author_is(last.author, r) for r in ("engineer", "researcher"))
+                and re.match(r"\[итог:\s*(blocked|ask-owner)\]", last.text.strip()))
+
+
 def notify_status_for_ceo(tkt: T.Ticket, state: dict, now) -> None:
-    if tkt.status not in ("blocked", "needs_owner"):
+    if tkt.status not in ("blocked", "needs_owner") or _awaits_judge(tkt):
         return
     notified = state.setdefault("ceo_status_notified", {})
     marker = f"{tkt.status}@{tkt.header.get('updated', '')}"
@@ -882,11 +894,18 @@ def notify_done(tkt: T.Ticket, state: dict, now) -> None:
     """v2 (02.10): `done` — одна строка CEO, когда работа реально закончена: ревьюера нет (V2-1: механическая задача
     Haiku, тикет Судьи или закрыл CEO) либо ревью уже состоялось. Если ждёт ревью — молчим, строка придёт после
     вердикта. Дедуп по (задача, `updated`)."""
-    if tkt.status != "done" or _review_pending(tkt, state):
-        return
     notified = state.setdefault("ceo_done_notified", {})
+    if tkt.status != "done":
+        notified.pop(tkt.id, None)  # вышел из done (переоткрыт) — следующее закрытие снова сообщается
+        return
+    if _review_pending(tkt, state):
+        return
     marker = _done_marker(tkt)
     if notified.get(tkt.id) == marker:
+        return
+    last = tkt.log[-1] if tkt.log else None
+    if tkt.id in notified and last and T.author_is(last.author, "ceo") and last.text.lstrip().startswith("[итог: done]"):
+        notified[tkt.id] = marker  # CEO повторно закрыл уже сообщённый done (гонка с закрытием по слиянию) — второй строки нет
         return
     title = (tkt.header.get("title") or "")[:80]
     last = tkt.log[-1] if tkt.log else None
@@ -916,6 +935,54 @@ def haiku_refused_reason(tkt: T.Ticket) -> str:
 # последним. Внутри одного приоритета — кто дольше не запускался (иначе тикет с in_progress-resume
 # вытеснял бы остальные: на роль теперь один запуск).
 REASON_PRIORITY = {"next": 0, "in_progress-resume": 2}
+
+
+ACCEPT_PR = re.compile(r"(?:\[итог:\s*accept\]\s*PR\s*#(\d+)@|ПРИНЯТО PR #(\d+) на голове\s+)([0-9a-f]{4,40})")
+
+
+def _last_accept(tkt: T.Ticket, pr: int) -> tuple:
+    """Последняя приёмка Судьи этого PR в логе: (индекс записи, sha), нет — (-1, "")."""
+    for i in range(len(tkt.log) - 1, -1, -1):
+        e = tkt.log[i]
+        m = ACCEPT_PR.match(e.text.strip())
+        if m and T.author_is(e.author, "judge") and int(m.group(1) or m.group(2)) == pr:
+            return i, m.group(3)
+    return -1, ""
+
+
+def _ceo_order_after_accept(tkt: T.Ticket, pr: int) -> bool:
+    """После последней приёмки PR есть запись ceo/владельца (не само закрытие `[итог: done]`) — заказ, на который автор не ответил."""
+    idx, _ = _last_accept(tkt, pr)
+    return idx >= 0 and any(any(T.author_is(e.author, a) for a in ("ceo", "owner", "владелец"))
+                            and not re.match(r"\[итог:\s*done\]", e.text.strip()) for e in tkt.log[idx + 1:])
+
+
+def close_after_merge(path: Path, tkt: T.Ticket, now) -> "T.Ticket | None":
+    """alpha #107 П0: `wait_for: merged:` выполнен, приёмка Судьи стоит на голове влитого PR, заказов после неё нет — закрываем
+    сами (done, путь из приёмки), роли не будим: автор писал бы `done` ради блокнота, а Судья принимал бы повторно. Иначе None."""
+    if tkt.status != "waiting" or tkt.next_role:
+        return None
+    parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
+    if not parsed or parsed[0] != "merged":
+        return None
+    repo, pr = parsed[1], parsed[2]
+    idx, sha = _last_accept(tkt, pr)
+    if idx < 0 or _ceo_order_after_accept(tkt, pr):
+        return None
+    import merge_rule
+    head = merge_rule.merged_head(repo, pr)
+    if not head or not head.lower().startswith(sha.lower()):
+        return None  # не влит, не найден или влита другая голова, чем принятая — решает автор (wait_for-met)
+    proof = next((m.group(1) for e in reversed(tkt.log[:idx + 1])
+                  for m in [re.search(r"(?:проверка|результат):\s*(\S+)", e.text)] if m), "")
+    with T.ticket_lock(path):
+        cur = T.read_ticket(path)
+        if cur.status != "waiting" or cur.next_role or len(cur.log) != len(tkt.log):
+            return None  # пока читали, тикет двинулся (запись роли/CEO)
+        T.append_log(path, "dispatcher", f"[итог: done]{f' результат: {proof}' if proof else ''} — PR #{pr} влит, приёмка Судьи "
+                     f"на голову {sha[:7]} стоит, нового заказа нет: тикет закрыт без запуска ролей ({NO_REVIEW_MARK}).", now=now)
+        T.write_header_updates(path, {"status": "done", "next": "", "wait_for": "", "on_met": ""}, now=now)
+    return T.read_ticket(path)
 
 
 def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
@@ -949,6 +1016,9 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
     # (в) waiting и условие wait_for выполнено → owner
     if status == "waiting" and owner in ROLE_KEYS:
         if check_wait_for(tkt.header.get("wait_for", "")):
+            parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
+            if parsed and parsed[0] == "merged" and _ceo_order_after_accept(tkt, parsed[2]):
+                return Decision(role=owner, reason="ceo-order-after-accept")  # alpha TK-283: заказ CEO после приёмки без ответа
             return Decision(role=owner, reason="wait_for-met")
         return None
 
@@ -1574,6 +1644,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         next_note = ("Запуск по явной передаче (`--next`): прочитай последнюю запись лога, сделай "
                      "запрошенное и запиши итог.")
         extra_note = " ".join(x for x in (extra_note, next_note) if x)
+    if reason == "ceo-order-after-accept":
+        order_note = ("PR влит, но после приёмки Судьи в логе есть заказ CEO: ответь на него записью — выполнен (чем, "
+                      "коммит/PR) или нет (что осталось); не закрывай тикет молча.")
+        extra_note = " ".join(x for x in (extra_note, order_note) if x)
     prompt = build_prompt(role, tid, extra_note)
     try:
         launch_tkt = T.read_ticket(ticket_path)
@@ -2595,6 +2669,8 @@ def tick(now=None) -> int:
                 # аудит-3: пока владелец ещё работает, его промежуточная запись — не «сдал на ревью»; эскалация — после запуска
                 tkt = escalate_review_limit(path, tkt, state, now)
             handle_next_ceo(path, tkt, state, now)
+            if tkt.id not in RUNNING and path.stem not in RUNNING:
+                tkt = close_after_merge(path, tkt, now) or tkt
             _expire_ceo_handoff(tkt, state)
             notify_status_for_ceo(tkt, state, now)
             notify_done(tkt, state, now)

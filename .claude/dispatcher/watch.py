@@ -92,6 +92,9 @@ def check_blocked_and_needs_owner(now) -> list:
     return out
 
 
+ORPHAN_AFTER_RELEASE_S = 600  # после записи сторожа «ожидание снято» orphan-ticket по тому же тикету молчит 10 минут
+
+
 def check_orphan_tickets(now, skip_ids=()) -> list:
     """п.2б: in_progress/waiting/in_review без новой записи дольше порога — сирота (in_review — аудит 03.10: ревьюер
     мог упасть, и тикет висел бы вечно) (TK-001 п.2, до правила
@@ -106,6 +109,9 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
         if tkt.status in CLOSED_TICKET_STATUSES or tkt.status not in ("in_progress", "waiting", "in_review"):
             continue
         if tkt.id in skip_ids:  # цель wait_for жива (TK-056 п.4): долгое ожидание — не сирота
+            continue
+        if any(T.author_is(e.author, "watch") and "ожидание снято" in e.text and 0 <= (now - e.ts).total_seconds() <= ORPHAN_AFTER_RELEASE_S
+               for e in tkt.log):  # alpha TK-278: «ожидание снято» уже сказало о том же тикете — второй сигнал не нужен
             continue
         entries = [e for e in tkt.log if not T.author_is(e.author, "watch")]  # записи сторожа не сбрасывают таймер
         last_ts = entries[-1].ts if entries else T.parse_dt(tkt.header.get("updated")) if tkt.header.get(

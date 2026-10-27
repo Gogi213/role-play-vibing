@@ -1,0 +1,185 @@
+"""Тесты TK-002 (CP1-б): закрытие после слияния без запусков ролей, заказ CEO после приёмки, blocked исполнителя не будит CEO,
+orphan-ticket не дублирует «ожидание снято» (alpha #107 П0/П1/П2б/П3 п.2, #109 п.2/п.4)."""
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from datetime import timedelta
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dispatch as D  # noqa: E402
+import merge_rule as M  # noqa: E402
+import ticket as T  # noqa: E402
+import watch as W  # noqa: E402
+
+T0 = T.parse_dt("2026-10-17T12:40:00+04:00")
+WAIT = "merged:org/repo#44"
+ATTRS = ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG", "CEO_INBOX", "CEO_WAKE_LOG", "STOP_DIR")
+
+
+class Sandbox(unittest.TestCase):
+    def setUp(self):
+        base = Path(tempfile.mkdtemp())
+        saved = {k: getattr(D, k) for k in ATTRS}
+        self.addCleanup(lambda: [setattr(D, k, v) for k, v in saved.items()])
+        D.TICKETS_DIR, D.PROJECT_ROOT, D.DISPATCHER_DIR = base / "tickets", base, base / "dispatcher"
+        D.TICKETS_DIR.mkdir()
+        D.DISPATCHER_DIR.mkdir()
+        D.STATE_FILE, D.RUNS_DIR, D.RUNS_LOG = D.DISPATCHER_DIR / "state.json", D.DISPATCHER_DIR / "runs", D.DISPATCHER_DIR / "runs.log"
+        D.CEO_INBOX, D.CEO_WAKE_LOG, D.STOP_DIR = D.DISPATCHER_DIR / "ceo-inbox.md", D.DISPATCHER_DIR / "ceo-wake.log", D.DISPATCHER_DIR / "stop"
+        D.RUNNING.clear()
+        self.addCleanup(D.RUNNING.clear)
+
+    def ticket(self, status="waiting", wait_for="", owner="engineer"):
+        p = T.create_ticket(D.TICKETS_DIR, owner=owner, title="t", reviewer="judge", now=T0)
+        T.write_header_updates(p, {"status": status, "wait_for": wait_for}, now=T0)
+        return p
+
+    def wake_lines(self):
+        return D.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines() if D.CEO_WAKE_LOG.exists() else []
+
+
+class CloseAfterMergeTests(Sandbox):
+    """TK-266: accept → merged met → CEO done."""
+
+    def accepted(self, sha="7a5547b"):
+        p = self.ticket(wait_for=WAIT)
+        T.append_log(p, "engineer", "[итог: pr] PR #44@7a5547b — готово", now=T0)
+        T.append_log(p, "judge", f"[итог: accept] PR #44@{sha} проверка: docs/reviews/TK-1.md — принято", now=T0 + timedelta(minutes=1))
+        return p
+
+    def tick(self, minutes, head="7a5547b1111", merged=True):
+        with mock.patch.object(D, "launch_run") as launch, \
+                mock.patch.object(M, "merged_done", return_value=merged), \
+                mock.patch.object(M, "merged_head", return_value=head if merged else ""):
+            D.tick(T0 + timedelta(minutes=minutes))
+        return launch
+
+    def test_tk266_closed_by_dispatcher_no_runs_one_signal(self):
+        p = self.accepted()
+        launch = self.tick(20)
+        launch.assert_not_called()
+        tkt = T.read_ticket(p)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("done", ""))
+        last = tkt.log[-1]
+        self.assertEqual(last.author, "dispatcher")
+        self.assertIn("результат: docs/reviews/TK-1.md", last.text)
+        self.assertTrue(D.closed_without_review(tkt))
+        self.assertEqual(len(self.wake_lines()), 1)
+        # CEO закрыл гонкой следом, диспетчер тикает дальше — ни запусков, ни второго сигнала
+        T.append_log(p, "ceo", "[итог: done] результат: x (закрыто без ревью) — закрыл", now=T0 + timedelta(minutes=21))
+        T.write_header_updates(p, {"status": "done"}, now=T0 + timedelta(minutes=21))
+        self.tick(22).assert_not_called()
+        self.tick(23).assert_not_called()
+        self.assertEqual(len(self.wake_lines()), 1)
+
+    def test_ceo_done_first_then_merge_one_signal_no_runs(self):
+        p = self.accepted()
+        self.tick(2, merged=False)  # первый тик ставит базу done — история не пересказывается
+        T.append_log(p, "ceo", "[итог: done] результат: x (закрыто без ревью) — закрыл", now=T0 + timedelta(minutes=5))
+        T.write_header_updates(p, {"status": "done"}, now=T0 + timedelta(minutes=5))
+        self.tick(6).assert_not_called()
+        self.tick(20).assert_not_called()
+        self.assertEqual(len(self.wake_lines()), 1)
+
+    def test_other_head_not_closed(self):
+        p = self.accepted(sha="aaaaaaa")
+        launch = self.tick(20)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertEqual(launch.call_args.kwargs.get("reason"), "wait_for-met")
+
+    def test_not_merged_not_closed(self):
+        p = self.accepted()
+        self.tick(20, merged=False).assert_not_called()
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+
+    def test_no_accept_not_closed(self):
+        p = self.ticket(wait_for=WAIT)
+        launch = self.tick(20)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertEqual(launch.call_args.kwargs.get("reason"), "wait_for-met")
+
+    def test_ceo_order_after_accept_wakes_author_with_reason(self):  # П2б, TK-283
+        p = self.accepted()
+        T.append_log(p, "ceo", "Правило: elastic только для заданий ≤ 1 ч — учти.", now=T0 + timedelta(minutes=5))
+        launch = self.tick(20)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        launch.assert_called_once()
+        self.assertEqual(launch.call_args.args[1], "engineer")
+        self.assertEqual(launch.call_args.kwargs["reason"], "ceo-order-after-accept")
+
+    def test_ceo_done_entry_is_not_an_order(self):
+        p = self.accepted()
+        T.append_log(p, "ceo", "[итог: done] — x", now=T0 + timedelta(minutes=5))
+        self.assertFalse(D._ceo_order_after_accept(T.read_ticket(p), 44))
+
+
+class ExecutorBlockedTests(Sandbox):
+    """#107 П1, #109 п.2: blocked/ask-owner исполнителя идёт Судье — CEO узнаёт, когда Судья ответил blocked/ask-owner."""
+
+    def blocked(self, role, result):
+        p = self.ticket(status="in_progress", owner=role)
+        T.append_log(p, role, f"[итог: {result}] — вопрос по методике", now=T0)
+        T.write_header_updates(p, {"status": "blocked", "next": "judge"}, now=T0)
+        return p
+
+    def tick(self, minutes):
+        with mock.patch.object(D, "launch_run"):
+            D.tick(T0 + timedelta(minutes=minutes))
+
+    def test_executor_blocked_and_ask_owner_do_not_wake_ceo(self):
+        for result in ("blocked", "ask-owner"):
+            p = self.blocked("engineer", result)
+            self.tick(1)
+            T.write_header_updates(p, {"next": ""}, now=T0)  # Судья запущен, поле очищено; статус пока blocked
+            self.tick(2)
+            self.assertEqual(self.wake_lines(), [], result)
+            p.unlink()
+
+    def test_judge_answer_blocked_or_ask_owner_wakes_ceo_once(self):
+        p = self.blocked("engineer", "ask-owner")
+        self.tick(1)
+        T.append_log(p, "judge", "[итог: ask-owner] повод: деньги — нужен бюджет", now=T0 + timedelta(minutes=3))
+        T.write_header_updates(p, {"status": "needs_owner", "next": ""}, now=T0 + timedelta(minutes=3))
+        self.tick(4)
+        self.tick(5)
+        self.assertEqual(len(self.wake_lines()), 1)
+
+    def test_manual_blocked_without_result_still_wakes_ceo(self):
+        p = self.ticket(status="in_progress")
+        T.append_log(p, "engineer", "стоп, не могу", now=T0)
+        T.write_header_updates(p, {"status": "blocked"}, now=T0)
+        self.tick(1)
+        self.assertEqual(len(self.wake_lines()), 1)
+
+
+class OrphanDedupTests(Sandbox):
+    """TK-278 02:20: «ожидание снято» и orphan-ticket на тот же тикет — одна находка, не две."""
+
+    def make(self, released_ago_min):
+        now = T.parse_dt("2026-10-17T12:00:00+04:00")
+        p = self.ticket(status="in_progress")
+        T.append_log(p, "engineer", "ждём", now=now - timedelta(hours=5))
+        if released_ago_min is not None:
+            T.append_log(p, "watch", "сторож: задание не живёт — ожидание снято, владелец будится",
+                         now=now - timedelta(minutes=released_ago_min))
+        return now
+
+    def test_orphan_silent_right_after_release(self):
+        now = self.make(0)
+        self.assertEqual(W.check_orphan_tickets(now), [])
+
+    def test_orphan_returns_after_ten_minutes(self):
+        now = self.make(11)
+        self.assertEqual([f.kind for f in W.check_orphan_tickets(now)], ["orphan-ticket"])
+
+    def test_orphan_without_release_is_found(self):
+        now = self.make(None)
+        self.assertEqual(len(W.check_orphan_tickets(now)), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
