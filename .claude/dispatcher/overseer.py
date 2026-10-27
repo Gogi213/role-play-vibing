@@ -41,7 +41,6 @@ import registry  # noqa: E402
 import runs as RL  # noqa: E402
 import ticket as T  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[2]  # корень плагина: agents/overseer.md
 KINDS = ("не-движемся", "ломает-принятое", "вопрос-уже-решён", "не-служит-цели")
 DEFAULT_TZ = timezone(timedelta(hours=4))  # запись без пояса — время владельца (GMT+4), как у логов проекта
 MIN_QUOTE = 12  # короче этого цитата не доказательство
@@ -408,14 +407,6 @@ def grade(raw: str, tid: str, entries: list, until: datetime, shown: str = "") -
     return res
 
 
-def load_agent(name: str = "overseer") -> dict:
-    """agents/<name>.md → определение для `claude --agents` (пустой `tools:` — без инструментов)."""
-    try:
-        return HA.agent_def(ROOT / "agents" / f"{name}.md", with_tools=True)
-    except ValueError as e:
-        raise SystemExit(str(e))
-
-
 def call_overseer(prompt: str, agents_file: Path, workdir: Path, model: str, effort: str, per_call: float, timeout: int) -> dict:
     """Один вызов: `claude -p --agent overseer` без инструментов, без MCP, настроек пользователя и навыков — только устав и промпт."""
     cmd = HA.agent_cmd(claude_bin(), agents_file, "overseer", model, effort, per_call,
@@ -535,7 +526,7 @@ def agents_file(work: Path) -> Path:
     вызова, не в проекте)."""
     p = Path(work) / "overseer-agent.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"overseer": load_agent("overseer")}, ensure_ascii=False), encoding="utf-8")
+    p.write_text(json.dumps({"overseer": HA.load_agent("overseer")}, ensure_ascii=False), encoding="utf-8")
     return p
 
 

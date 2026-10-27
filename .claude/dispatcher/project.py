@@ -50,7 +50,7 @@ _CACHE: dict = {}
 
 
 def set_root(root) -> None:
-    """Корень проекта для `setting` — ставит `dispatch.configure_project`."""
+    """Корень проекта для `setting` — ставит `project_paths.configure_project`."""
     global _ROOT
     _ROOT = Path(root) if root else None
 

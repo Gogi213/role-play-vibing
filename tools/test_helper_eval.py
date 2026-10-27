@@ -9,14 +9,14 @@ import helper_eval as HE  # noqa: E402
 
 class LoadAgent(unittest.TestCase):
     def test_tools_list_and_prompt(self):
-        d = HE.load_agent("secretary")
+        d = HE.HA.load_agent("secretary")
         self.assertEqual(d["tools"], ["Read", "Grep", "Glob", "Bash"])
         self.assertTrue(d["prompt"])
         self.assertIn("description", d)
 
     def test_missing_frontmatter_exits(self):
         with self.assertRaises((SystemExit, FileNotFoundError)):
-            HE.load_agent("нет-такого-помощника")
+            HE.HA.load_agent("нет-такого-помощника")
 
 
 if __name__ == "__main__":

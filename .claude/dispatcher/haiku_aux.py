@@ -15,6 +15,7 @@ from pathlib import Path
 import hide
 import project as P
 
+ROOT = Path(__file__).resolve().parents[2]  # корень плагина: agents/<имя>.md
 MODEL = "claude-haiku-5-5"
 EFFORT = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
 TIMEOUT_S = 90
@@ -64,6 +65,14 @@ def agent_def(path: Path, with_tools: bool = False) -> dict:
         if meta.get(k):
             d[k] = meta[k]
     return d
+
+
+def load_agent(name: str) -> dict:
+    """`agents/<name>.md` плагина → определение с tools (`agent_def`); нет фронтматтера — SystemExit с текстом ошибки."""
+    try:
+        return agent_def(ROOT / "agents" / f"{name}.md", with_tools=True)
+    except ValueError as e:
+        raise SystemExit(str(e))
 
 
 def agent_cmd(claude: str, agents_file, agent: str, model: str, effort: str, budget, extra: tuple = (),

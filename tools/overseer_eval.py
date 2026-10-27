@@ -52,9 +52,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
 from eval_common import LOCK, append_jsonl, emit, read_jsonl  # noqa: E402
+import haiku_aux as HA  # noqa: E402
 import overseer as core  # noqa: E402  ядро — общее с живым Надзирателем (`.claude/dispatcher/overseer.py`)
 from overseer import (  # noqa: E402
-    build_prompt, call_overseer, closed_scale, grade, is_judge_return, load_agent, load_runs, load_ticket,
+    build_prompt, call_overseer, closed_scale, grade, is_judge_return, load_runs, load_ticket,
     make_windows, parse_ts, scale_text, stats_at, ticket_ids, ticket_start)
 BAD = ("TK-048", "TK-049", "TK-063", "TK-065", "TK-071", "TK-076", "TK-079", "TK-087", "TK-100", "TK-120")
 NORMAL_N, NORMAL_SEED, NORMAL_MAX_RUNS = 20, 14, 6
@@ -153,7 +154,7 @@ def cmd_run(a) -> int:
     done = {r["key"] for r in read_rows(out) if r["outcome"] != "error"}
     todo = [j for j in jobs if j["key"] not in done]
     agents = out / "agents.json"
-    d = load_agent()
+    d = HA.load_agent("overseer")
     d["model"], d["effort"] = a.model, a.effort
     agents.write_text(json.dumps({"overseer": d}, ensure_ascii=False), encoding="utf-8")
     state = {"spent": 0.0, "calls": 0, "skipped": 0}

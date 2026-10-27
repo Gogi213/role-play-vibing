@@ -1,6 +1,6 @@
 """Тревога «работа стоит», ежедневный отчёт, Надзиратель и вопросы владельцу — побочная работа тика, вынесено из
 dispatch.py (TK-011, ось 4). Процессы `report.py`/`overseer.py` запускает переданный вызывающим `popen` (тесты подменяют
-`dispatch._popen`), строку CEO пишет переданный `ceo_inbox`; пути проекта — `config`."""
+`dispatch._popen`), строку CEO пишет переданный `ceo_inbox`; пути проекта — `project_paths`."""
 from __future__ import annotations
 
 import re
