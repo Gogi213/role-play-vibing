@@ -21,6 +21,8 @@ DISP = ROOT / ".claude" / "dispatcher"
 HOOKS = ROOT / ".claude" / "hooks"
 PY = sys.executable
 GIT_ID = ["-c", "user.name=bench", "-c", "user.email=bench@example.invalid"]
+sys.path.insert(0, str(DISP))
+import haiku_aux as HA  # noqa: E402  одна копия clean_env — в плагине
 
 
 def sh(cmd, cwd=None, env=None, timeout=None, input=None):
@@ -30,7 +32,7 @@ def sh(cmd, cwd=None, env=None, timeout=None, input=None):
 
 def clean_env(**extra) -> dict:
     """Окружение без чужих RPV_*: замер не должен зависеть от того, из какой сессии его запустили."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}
+    env = HA.clean_env()
     env.update({k: str(v) for k, v in extra.items()})
     return env
 
@@ -140,10 +142,17 @@ def bench_cmd(cmd, n: int, warmup: int = 2, **kw) -> dict:
 # --- песочница проекта ---------------------------------------------------------------------------
 
 def find_bash() -> str:
-    b = shutil.which("bash")
-    if not b:
-        raise SystemExit("не найден bash")
-    return b
+    """На Windows `bash` из System32 — заглушка WSL; `/rpv-init` идёт в Git Bash, как у Claude Code."""
+    cands = [shutil.which("bash")]
+    if os.name == "nt":
+        git = shutil.which("git")
+        roots = [Path(git).resolve().parent.parent] if git else []
+        roots += [Path(b) / "Git" for b in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")) if b]
+        cands = [str(r / "bin" / "bash.exe") for r in roots] + cands
+    for c in cands:
+        if c and os.path.isfile(c) and "system32" not in c.lower():
+            return c
+    raise SystemExit("не найден bash (на Windows нужен Git Bash)")
 
 
 def init_script() -> str:

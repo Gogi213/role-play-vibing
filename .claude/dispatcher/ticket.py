@@ -221,6 +221,9 @@ def file_wait_problem(spec: str) -> str:
 
 # Закрытый тикет: работа не идёт и не ждётся. Единственное определение (watch, worktree_hygiene, поиск дублей).
 CLOSED_STATUSES = ("done", "stopped")
+# Активный: за ним ведётся работа (ходит роль или идёт ожидание); открытый: активный плюс те, что ждут слова (blocked, needs_owner).
+ACTIVE_STATUSES = ("todo", "in_progress", "in_review", "waiting")
+OPEN_STATUSES = ACTIVE_STATUSES + ("blocked", "needs_owner")
 DUP_WINDOW_S = 3600
 DUP_RATIO = 0.8
 

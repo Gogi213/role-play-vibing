@@ -17,7 +17,7 @@ import merge_rule  # noqa: E402
 import procs  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
-from ci_core import ACTIVE, gh_api, load_state, save_state, ticket_for_pr, wake  # noqa: E402,F401
+from ci_core import gh_api, load_state, save_state, ticket_for_pr, wake  # noqa: E402,F401
 
 INTERVAL_S = 60.0
 RED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale")
@@ -40,7 +40,7 @@ def judged_on(tkt, sha: str) -> bool:
 def decide(tkt, sha: str, state: str, red: list, pr_number: int, repo: str):
     """(кого будить | None, текст записи). pending — тишина. Тикет, ждущий `ci:` этого PR, будится так же, как прочие:
     зелёный → Судья (не владелец: лишний запуск ИИ ради передачи), красный → владелец; ожидание при этом снимает wake()."""
-    if state == "pending" or tkt.status not in ACTIVE:
+    if state == "pending" or tkt.status not in T.ACTIVE_STATUSES:
         return None, ""
     s7 = sha[:7]
     if state == "failure":
@@ -57,7 +57,7 @@ def _count_error(st: dict, key: str, sha: str, tkt, pr_number: int, e: Exception
     """Сбой опроса GitHub не молчит в stderr вечно: на ERR_LIMIT-м подряд — запись и `next` владельцу тикета (один раз на голову)."""
     ent = st.setdefault(key, {})
     ent["errs"] = ent.get("errs", 0) + 1
-    if ent["errs"] != ERR_LIMIT or tkt is None or tkt.status not in ACTIVE:
+    if ent["errs"] != ERR_LIMIT or tkt is None or tkt.status not in T.ACTIVE_STATUSES:
         return
     wake(tkt.path, tkt, tkt.owner, f"CI PR #{pr_number} ({sha[:7]}): GitHub отвечает ошибкой {ERR_LIMIT} раза подряд: {e}. "
                                    "Проверь PR и права gh вручную; ci_watch продолжает опрос.")

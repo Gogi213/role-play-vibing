@@ -231,7 +231,7 @@ def _switch_base(gh, repo: str, pr: dict, default: str, tkt, key: str, st: dict,
 def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, open_heads: set, st: dict, out: list) -> None:
     n, sha = pr["number"], pr["head"]["sha"]
     tkt = C.ticket_for_pr(pr, tickets)
-    if tkt is None or tkt.status not in C.ACTIVE + ("done",):
+    if tkt is None or tkt.status not in T.ACTIVE_STATUSES + ("done",):
         return
     acc = accepted_head(tkt, n)
     if not acc or not sha.startswith(acc):

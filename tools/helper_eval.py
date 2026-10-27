@@ -30,10 +30,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
 import haiku_aux as HA  # noqa: E402
+import ticket as T  # noqa: E402
 from eval_common import LOCK, append_jsonl, emit, parse_claude_json, read_jsonl  # noqa: E402
 CLAUDE = shutil.which("claude") or "claude"
 WRITERS = {"secretary"}  # помощники, которые пишут в проект: каждому запуску — своя копия заготовки
-OPEN_STATUSES = ("todo", "in_progress", "in_review", "waiting", "blocked", "needs_owner")
 
 PROMPTS = {
     "secretary": lambda c, w: (f"Сейчас: {c['now']} (GMT+4). Команда реестра: `{registry_cmd(w)}`. "
@@ -240,7 +240,7 @@ def grade_reporter(c: dict, ans: str, work: Path, fixture: Path) -> dict:
             old = up and datetime.fromisoformat(up.group(1)) < now - timedelta(days=1)
         except ValueError:
             old = False
-        if st and st.group(1) not in OPEN_STATUSES and old:
+        if st and st.group(1) not in T.OPEN_STATUSES and old:
             stale.append(t)
     return {
         "flags_recall": round(len(flagged) / len(c["gold_flag"]), 2),

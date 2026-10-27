@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Надзиратель (CP14; критерии 1, 3, 4, 5, 6, 10, 11): ловит то, что тормозам кода не видно, — деньги и время идут, а к цели
-не движемся. Только stdlib. Его зовёт диспетчер отдельным коротким процессом не чаще раза в 15 минут (`dispatch.OVERSEER_EVERY_S`) и только когда тикеты
+не движемся. Только stdlib. Его зовёт диспетчер отдельным коротким процессом не чаще раза в 15 минут (`alarms.OVERSEER_EVERY_S`) и только когда тикеты
 менялись. Находка идёт Судье: запись «надзиратель» в логе тикета и `next: judge` (`to_judge`). CEO и владельца Надзиратель
 не будит: CEO узнаёт от Судьи, если тот ответил `blocked` или `ask-owner`; цена и находки — строкой ежедневного отчёта.
 
@@ -52,7 +52,6 @@ HDR = re.compile(r"^### (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\
 RETURN = re.compile(r"^\[итог:\s*return\]")
 
 # --- живая работа ----------------------------------------------------------------------------------------------
-OPEN = ("todo", "in_progress", "in_review", "waiting", "blocked", "needs_owner")
 SUPPRESS_H = 24            # одна находка по тикету — не чаще раза в сутки (без этого модель повторяет её в каждом окне)
 MAX_TICKETS = 12           # тикетов за один взгляд: самые свежие записи и MAX_COSTLY самых дорогих из остальных
 MAX_COSTLY = 2             # дорогой дрейфующий тикет не всегда самый свежий
@@ -560,7 +559,7 @@ def to_judge(root: Path, tid: str, text: str, now: datetime) -> bool:
     if not path.exists():
         return True  # тикета больше нет — передавать некому
     tkt = T.read_ticket(path)
-    if tkt.status not in OPEN:
+    if tkt.status not in T.OPEN_STATUSES:
         return True
     if busy(root, tid, tkt.header.get("next", "")):
         return False
@@ -579,7 +578,7 @@ def _cost_alerts(tickets: dict, runs: dict, base: float, sbase: float, st: dict,
     recent = now - timedelta(hours=ACTIVE_H)
     for tid, t in sorted(tickets.items()):
         rs = runs.get(tid, [])
-        if t.status not in OPEN or not any(r.ts > recent for r in rs):
+        if t.status not in T.OPEN_STATUSES or not any(r.ts > recent for r in rs):
             continue
         spent = sum(r.cost for r in rs)
         k = cost_step(spent, base)
@@ -604,7 +603,7 @@ def _fresh_batches(tickets: dict, runs: dict, seen: dict, now: datetime) -> list
     recent = now - timedelta(hours=ACTIVE_H)
     fresh = []
     for tid, t in tickets.items():
-        if t.status in OPEN and t.entries:
+        if t.status in T.OPEN_STATUSES and t.entries:
             last = parse_ts(seen[tid]) if tid in seen else None
             new = [e for e in t.entries if (last is None or e.ts > last) and e.role != SELF]  # свои записи — не работа
             if new and new[-1].ts > recent:

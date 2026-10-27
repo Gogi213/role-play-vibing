@@ -36,7 +36,7 @@ import alarms as AL  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
 from role_args import (  # noqa: E402,F401 — запуск роли (усилие, MCP, промпт) вынесен в role_args.py; имена для launch_run и тестов
-    ROLE_EFFORT, role_mcp_args, plugin_dir_args, effort_for)
+    role_mcp_args, plugin_dir_args, effort_for)
 import role_args as RA  # noqa: E402
 from limits import (  # noqa: E402,F401 — лимит сессии и ошибки API (распознавание) вынесены в limits.py
     _limit_hit, _api_error, _limit_reset_at, _limit_paused)
@@ -129,7 +129,7 @@ CLAUDE_MODEL = "claude-sonnet-5-5"
 
 
 # В-153 уточнение (02.10, v1.6.1): на Sonnet 5.5 — только те, кого рационально; Судья (проверяет всех)
-# остаётся на Opus 5.5 (усилие — ROLE_EFFORT: с 14.10 high). Роль вне словаря и executor haiku — см. launch_run.
+# остаётся на Opus 5.5 (усилие — role_args.ROLE_EFFORT: с 14.10 high). Роль вне словаря и executor haiku — см. launch_run.
 ROLE_MODEL = {"judge": "claude-opus-5-5", "engineer": CLAUDE_MODEL, "researcher": CLAUDE_MODEL}
 
 
@@ -161,7 +161,7 @@ CLAUDE_HAIKU_MODEL = "claude-haiku-5-5"
 # --resume — только повтор после таймаута в том же запуске (TK-056 п.3′). Предел запусков на роль — _role_busy
 # (`role_parallel` в rpv.json, по умолчанию 1); на один тикет — один запуск роли.
 # транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
-# `usage.iterations` (см. _context_tokens_last)
+# `usage.iterations` (см. runlog.context_tokens_last)
 CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
 
 
@@ -228,10 +228,6 @@ def _resume_store(state: dict, tid: str, role: str) -> dict:
 
 import runlog as RL  # noqa: E402
 from runlog import read_run_result as _read_run_result  # noqa: E402
-
-
-def _context_tokens_last(result: dict) -> int:
-    return RL.context_tokens_last(result, CLAUDE_PROJECTS_DIR)
 
 
 def _log_run_summary(*args, **kwargs) -> None:

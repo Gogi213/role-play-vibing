@@ -58,7 +58,7 @@ import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
 ERROR_ID = re.compile(r"^E-(\d{3,})$")
-INTERPRETERS = ("python", "python3", "bash")   # то же правило, что у on_met диспетчера (`dispatch._on_met_argv`)
+INTERPRETERS = ("python", "python3", "bash")   # то же правило, что у on_met диспетчера (`on_met._on_met_argv`)
 SCRIPT_DIRS = ("tools", ".claude")
 PYTEST_FLAGS = ("-q", "-qq", "-v", "-vv", "-x", "-s")
 UNITTEST_FLAGS = ("-q", "-v", "-f", "-b")
