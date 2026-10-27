@@ -49,8 +49,7 @@ except ImportError:
 HEADER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
 LOG_HEADING_RE = re.compile(r"^##\s*Лог\s*$", re.M)
 ENTRY_RE = re.compile(r"^###\s+(\S+)\s+(.+?)\s*$", re.M)
-MENTION_RE = re.compile(r"@(researcher|engineer|judge|ceo)\b", re.I)
-ROLE_TOKENS = ("researcher", "engineer", "judge", "ceo")
+ROLE_TOKENS = (*P.ROLES, "ceo")
 VALID_EFFORTS = ("low", "medium", "high", "xhigh")
 
 # v2 (02.10): компакция лога тикета — файл > LOG_COMPACT_BYTES → всё, кроме последних LOG_KEEP_ENTRIES
@@ -283,10 +282,6 @@ class LogEntry:
     author: str
     text: str
 
-    @property
-    def mentions(self) -> set:
-        return {m.lower() for m in MENTION_RE.findall(self.text)}
-
 
 @dataclass
 class Ticket:
@@ -331,10 +326,6 @@ class Ticket:
         """v2: усилие запуска по тикету (`effort:`); пусто/незнакомое значение — роль решает по умолчанию."""
         value = (self.header.get("effort") or "").strip().lower()
         return value if value in VALID_EFFORTS else ""
-
-    def logged_since(self, author: str, since: datetime) -> bool:
-        author = author.lower()
-        return any(e.author.lower() == author and e.ts > since for e in self.log)
 
 
 def _match_header(text: str):

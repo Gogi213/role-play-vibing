@@ -81,10 +81,7 @@ class TicketParsingTests(unittest.TestCase):
         self.assertIn("Описание задачи", tkt.description)
         self.assertEqual(len(tkt.log), 2)
         self.assertEqual(tkt.log[0].author, "researcher")
-        self.assertEqual(tkt.log[0].mentions, {"judge"})
         self.assertEqual(tkt.log[1].author, "judge")
-        self.assertTrue(tkt.logged_since("judge", dt("2026-09-27T10:06:00+04:00")))
-        self.assertFalse(tkt.logged_since("judge", dt("2026-09-27T10:11:00+04:00")))
 
     def test_no_header_raises(self):
         with self.assertRaises(ValueError):
@@ -425,7 +422,6 @@ class TicketMutationTests(unittest.TestCase):
         T.append_log(p1, "researcher", "Сделал X. @judge глянь.", now=dt("2026-09-27T09:10:00+04:00"))
         tkt = T.read_ticket(p1)
         self.assertEqual(len(tkt.log), 1)
-        self.assertEqual(tkt.log[0].mentions, {"judge"})
 
     def test_next_id_survives_gaps(self):
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -1701,7 +1697,7 @@ class DispatchRunTests(unittest.TestCase):
             child.kill()
             child.wait(timeout=10)
 
-    def test_pid_alive_name_windows_tasklist_oem_bytes_do_not_break_decode(self):
+    def test_pid_alive_windows_tasklist_oem_bytes_do_not_break_decode(self):
         """Windows: tasklist печатает в OEM-кодировке (cp866), а под PYTHONUTF8=1 text=True читал её как utf-8 — поток
         чтения падал, stdout пустой, живой pid считался мёртвым (doctor: ложный FAIL диспетчера, подхват «как завершённый»)."""
         raw = b'"python.exe","4444","Console","1","35\xa0176 \x8a"\r\n'
@@ -1715,8 +1711,8 @@ class DispatchRunTests(unittest.TestCase):
             return real_run(cmd, **kw)
 
         with mock.patch.object(D.os, "name", "nt"), mock.patch.object(D.subprocess, "run", fake_run):
-            self.assertTrue(D._pid_alive_name(4444, "python"))
-            self.assertFalse(D._pid_alive_name(4445, "python"))
+            self.assertTrue(D._pid_alive(4444, "python"))
+            self.assertFalse(D._pid_alive(4445, "python"))
 
     def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
         """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
@@ -4211,7 +4207,6 @@ class ProjectRootTests(unittest.TestCase):
         self.assertEqual(P.resolve_project([]), b)
         self.assertEqual(P.resolve_project(["--once", "--project", str(a)]), a)
         self.assertEqual(P.resolve_project([f"--project={a}"]), a)
-        self.assertEqual(P.strip_project_arg(["--project", str(a), "--once"]), ["--once"])
 
     def chdir(self, path):
         """Контекст: текущий каталог процесса — `path` (возврат — в конце)."""

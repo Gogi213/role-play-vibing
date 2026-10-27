@@ -104,12 +104,12 @@ def _str_list(data, key):
     return tuple(raw), None
 
 
-def load_protected(project_dir):
+def load_protected(project_dir, rpv=None):
     """Защищённые пути проекта: `<проект>/.claude/rpv.json`, ключ `protected_paths` — список шаблонов путей (glob) →
     (шаблоны, ошибка). Нет файла или ключа — защиты нет. Файл есть, но не читается, не JSON или ключ не список непустых
     строк — ошибка: страж отказывает любому удалению и перезаписи (fail-closed), пока файл не исправят. Шаблон приводится
     к виду путей стража (строчные, `/`, без хвостового `/`); `..` в шаблоне недопустимо."""
-    data, err = _load_rpv(project_dir)
+    data, err = rpv or _load_rpv(project_dir)
     if err:
         return (), err
     raw, err = _str_list(data, "protected_paths")
@@ -140,8 +140,9 @@ def configure(project_dir):
     LOCAL_ROOTS = project_roots(project_dir)
     WRITE_HOME_ROOTS = memory_roots(project_dir)
     PROJECT_DIR = str(project_dir)
-    PROTECTED, PROTECTED_ERROR = load_protected(project_dir)
-    REMOTE_ROOTS, STAGE, CLOSED_RE, err = machine_rules(_load_rpv(project_dir)[0])
+    rpv = _load_rpv(project_dir)
+    PROTECTED, PROTECTED_ERROR = load_protected(project_dir, rpv)
+    REMOTE_ROOTS, STAGE, CLOSED_RE, err = machine_rules(rpv[0])
     PROTECTED_ERROR = PROTECTED_ERROR or err
 
 
@@ -233,6 +234,16 @@ class BranchDelete(Forbid):
         return self
 
 
+def under_cwd(cwd, p):
+    """Относительный путь `p` от рабочего каталога `cwd`, нормализованный."""
+    return posixpath.normpath(cwd + "/" + p)
+
+
+def placeholder(p):
+    """Нормализованный путь — не путь: пусто, заготовка `<…>` или `{}` (подстановка `find -exec`)."""
+    return not p or p.startswith("<") or "{}" in p
+
+
 def literal_part(p):
     """Буквальная часть нормализованного пути: до первой неизвестной переменной (`$home` — известна)."""
     return re.split(r"\$(?!home\b|\{home\})", p, maxsplit=1)[0] if "$" in p else p
@@ -305,7 +316,7 @@ def temp_ok(p, ctx):
 def allowed(t, ctx=None):
     """Цель удаления разрешена (путь внутри своей папки)? `ctx.cwd` — рабочий каталог для относительных путей."""
     p = norm(t)
-    if not p or p.startswith("<") or "{}" in p:
+    if placeholder(p):
         return False
     if closed_host(p):
         return False
@@ -327,8 +338,7 @@ def allowed(t, ctx=None):
     cwd = getattr(ctx, "cwd", None)
     if not cwd:
         return False
-    return allowed(posixpath.normpath(cwd + "/" + literal), Ctx(None, getattr(ctx, "remote", False),
-                                                                host=getattr(ctx, "host", None)))
+    return allowed(under_cwd(cwd, literal), Ctx(None, getattr(ctx, "remote", False), host=getattr(ctx, "host", None)))
 
 
 def home_relative(literal):
@@ -346,7 +356,7 @@ def write_only_ok(t, ctx=None):
     if getattr(ctx, "remote", False):
         return False
     p = norm(t)
-    if not p or p.startswith("<") or "{}" in p:
+    if placeholder(p):
         return False
     literal = literal_part(p)
     if not literal or ".." in literal.split("/") or closed_host(p):
@@ -357,7 +367,7 @@ def write_only_ok(t, ctx=None):
     if literal.startswith(("/", "$", "c:", "%")) or re.match(r"[a-z]:", literal):
         return False
     cwd = getattr(ctx, "cwd", None)                         # относительный путь — от известного рабочего каталога
-    return bool(cwd) and write_only_ok(posixpath.normpath(cwd + "/" + literal), None)
+    return bool(cwd) and write_only_ok(under_cwd(cwd, literal), None)
 
 
 def linked_worktree(p):
@@ -912,7 +922,7 @@ def join_cwd(cwd, target, vars_):
         return posixpath.normpath(t)
     if not cwd:
         return None
-    return posixpath.normpath(cwd + "/" + t)
+    return under_cwd(cwd, t)
 
 
 def python_consts(tree):
@@ -2169,7 +2179,7 @@ def _abs_norm(t, ctx):
     if p and not (p.startswith(("/", "~", "$", "%")) or re.match(r"[a-z]:", p)):
         cwd = getattr(ctx, "cwd", None)
         if cwd:
-            p = posixpath.normpath(cwd + "/" + p)
+            p = under_cwd(cwd, p)
     return p
 
 
@@ -2243,13 +2253,7 @@ def owner_record_write(tool, ti):
     """Запись запуска диспетчера в слово владельца через оболочку, в т. ч. дописывание `>>` (его разбор целей не видит);
     чтение свободно (в т. ч. с `2>/dev/null`, `2>&1`), текст `--text`/`--why` у tickets.py не в счёт. Сам `errors.py` через
     оболочку по-прежнему пишет в `.claude/errors/`: путь скрипта (`…/dispatcher/errors.py`) названием каталога не считается."""
-    if tool not in SHELL_TOOLS:
-        return False
-    cmd = str(ti.get("command") or "")
-    if "tickets.py" in cmd:
-        cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
-    cmd = BENIGN_REDIRECT.sub("", cmd)
-    return any(shell_writes(part, OWNER_RECORD_NAMES) for part in re.split(r"\n|&&|\|\||;", cmd))
+    return tool in SHELL_TOOLS and parts_write(command_text(ti, benign=True), OWNER_RECORD_NAMES)
 
 
 CONSENT_LINE = re.compile(r"(?mi)^[ \t]*allow[ \t]*:")      # строка шапки тикета `allow: publish (В-N)`
@@ -2273,10 +2277,7 @@ def consent_forge(tool, ti):
     публикацию ставит только CEO. Файловые инструменты — строка шапки `allow:` в новом тексте; оболочка — команда, которая
     пишет (как в `owner_record_write`), называет `.claude/tickets/` и `allow:`; чтение и текст `--text`/`--why` не в счёт."""
     if tool in SHELL_TOOLS:
-        cmd = str(ti.get("command") or "")
-        if "tickets.py" in cmd:
-            cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
-        cmd = BENIGN_REDIRECT.sub("", cmd)
+        cmd = command_text(ti, benign=True)
         return bool(shell_writes(cmd, (".claude/tickets/",)) and re.search(r"\ballow[ \t]*:", cmd, re.I))
     path = file_target(ti) or ""
     return ".claude/tickets/" in path.replace("\\", "/").lower() and any(CONSENT_LINE.search(s) for s in _strings(ti))
@@ -2333,7 +2334,7 @@ def protected_match(t, ctx, deleting):
     начало которого — неизвестная переменная, не видно (решают прочие правила); временный каталог (`$TMP/x`) — виден."""
     remote = bool(getattr(ctx, "remote", False))
     p = _abs_norm(t, ctx)
-    if not p or p.startswith("<") or "{}" in p:
+    if placeholder(p):
         return None
     lit = literal_part(p)
     rel = None                                               # путь от корня проекта (только локально)
@@ -2600,15 +2601,26 @@ REASON_CEO_SIGNAL = ("Сигналы команды пишет только ди
                      "Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; новые строки читает `tickets.py inbox` (docs/signals.md).")
 
 
+def command_text(ti, benign=False):
+    """Команда оболочки из tool_input; текст `--text`/`--why` у tickets.py не в счёт (TK-110 Ж-3); `benign` — и без
+    `2>/dev/null`, `2>&1`."""
+    cmd = str(ti.get("command") or "")
+    if "tickets.py" in cmd:
+        cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)
+    return BENIGN_REDIRECT.sub("", cmd) if benign else cmd
+
+
+def parts_write(cmd, names):
+    """Какая-то часть команды (по `;`, `&&`, `||`, переводу строки) пишет в файл из `names`."""
+    return any(shell_writes(part, names) for part in re.split(r"\n|&&|\|\||;", cmd))
+
+
 def ceo_signal_write(tool, ti, names=None):
     """Запись в ceo-inbox.md/ceo-wake.log (или в файлы `names`) из сессии (Write/Edit/Bash) — отказ; чтение свободно; текст
     `--text`/`--why` у tickets.py не в счёт."""
     names = names or CEO_SIGNAL_NAMES
     if tool in SHELL_TOOLS:
-        cmd = str(ti.get("command") or "")
-        if "tickets.py" in cmd:
-            cmd = CEO_SIGNAL_TEXT.sub("--text X", cmd)  # и --why (TK-110 Ж-3)
-        return any(shell_writes(part, names) for part in re.split(r"\n|&&|\|\||;", cmd))
+        return parts_write(command_text(ti), names)
     path = file_target(ti)
     return bool(path) and path.replace("\\", "/").lower().rsplit("/", 1)[-1] in names
 
@@ -2632,15 +2644,16 @@ def check_tool(data, trace=None):
             return _deny(trace, "ceo-signal", REASON_BRANCH_CONSENT_FILE)
         if ceo_signal_write(tool, ti, CONFIG_LOG_NAMES):
             return _deny(trace, "protected", REASON_CONFIG_LOG)
-        if dispatcher_role() is None and charter_table_edit(tool, ti):
+        role = dispatcher_role()
+        if role is None and charter_table_edit(tool, ti):
             return None
-        if dispatcher_role() is None and decide_outside_secretary(tool, ti, data):
+        if role is None and decide_outside_secretary(tool, ti, data):
             return _deny(trace, "protected", REASON_DECIDE)
-        if dispatcher_role() and owner_record_write(tool, ti):
+        if role and owner_record_write(tool, ti):
             return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors / dispatcher/state.json"))
-        if dispatcher_role() and consent_forge(tool, ti):
+        if role and consent_forge(tool, ti):
             return _deny(trace, "publish", REASON_CONSENT)
-        if dispatcher_role() and identity_change(tool, ti):
+        if role and identity_change(tool, ti):
             return _deny(trace, "identity", REASON_IDENTITY)
         if tool in SHELL_TOOLS:
             reason = check(str(ti.get("command") or ""), cwd, trace)
