@@ -27,13 +27,12 @@ from doctor import FAIL, OFF, OK, render  # noqa: E402
 CODE_DIR = Path(__file__).resolve().parent
 MARKETPLACE = "role-play-vibing"
 PLUGIN = f"{MARKETPLACE}@{MARKETPLACE}"
-PLUGIN_NAME = MARKETPLACE
 RESTART = "Перезапустите Claude Code — до перезапуска сессия на старой версии."
 
 
 def install_entry(project: Path) -> dict | None:
     """Установка плагина для проекта — `plugin_version.plugin_entry` (то же правило, что у хуков и doctor)."""
-    return PV.plugin_entry(project, PLUGIN_NAME)
+    return PV.plugin_entry(project, MARKETPLACE)
 
 
 def run_cmd(cmd: list, timeout: float) -> tuple:

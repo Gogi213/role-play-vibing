@@ -1,5 +1,6 @@
 """Тесты харнесса замеров (`tools/bench/`): статистика, проверки задач на заведомо верных и неверных решениях, сводка.
 Модели и деньги не нужны. Заглушка `claude` и оркестрация — в живом прогоне `run.py` (минуты), здесь только быстрое."""
+import json
 import os
 import subprocess
 import sys
@@ -40,6 +41,13 @@ class StatsTests(unittest.TestCase):
         r = C.run_measured([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.5)
         self.assertNotEqual(r["rc"], 0)
         self.assertLess(r["wall_ms"], 10_000)
+
+
+class EnvInfoTests(unittest.TestCase):
+    def test_plugin_version_is_manifest_version(self):
+        """Версия в окружении замера — `version` из `plugin.json` (читает `plugin_version.meta`, TK-047)."""
+        manifest = json.loads((C.ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(C.env_info()["plugin_version"], manifest["version"])
 
 
 class RunJsonsTests(unittest.TestCase):

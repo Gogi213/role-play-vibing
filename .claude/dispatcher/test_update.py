@@ -121,6 +121,13 @@ class UpdateOrder(unittest.TestCase):
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
                 return U.install_entry(project)
 
+    def test_install_entry_looks_up_the_marketplace_plugin(self):
+        """Алиаса `PLUGIN_NAME` нет: запись ищется по `MARKETPLACE` (TK-047, #9)."""
+        self.assertFalse(hasattr(U, "PLUGIN_NAME"))
+        with mock.patch.object(U.PV, "plugin_entry", return_value={"version": "1"}) as pe:
+            U.install_entry(PROJ)
+        self.assertEqual(pe.call_args.args, (PROJ, U.MARKETPLACE))
+
     def test_install_entry_is_the_hook_reader_narrowest_scope_wins(self):
         proj = str(PROJ)
         self.assertEqual(self._entry_for([("user", None, "1"), ("project", proj, "2")])["version"], "2")
