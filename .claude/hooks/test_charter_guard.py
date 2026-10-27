@@ -134,6 +134,20 @@ class CharterGuard(unittest.TestCase):
             self.assertIn("charter sync", reason or "", tool)
             self.assertIsNone(dg.check_tool({"tool_name": tool, "cwd": self.d, "tool_input": {key: f"{self.base}/.claude/roles/notes/ceo.md"}}), tool)
 
+    def test_project_addons_are_written_by_the_command_only(self):
+        """TK-038: `.claude/roles/project/<роль>.md` закрыт CEO как устав — и существующий, и новый файл; чтение — свободно."""
+        a = f"{self.base}/.claude/roles/project/judge.md"
+        for cmd in (f'echo x > {a}', f'echo x >> {a}', f'cp /tmp/x {a}', 'cp /tmp/x .claude/roles/project/engineer.md', f'cat /tmp/x | tee {a}',
+                    'cd .claude/roles/project && cp /tmp/x judge.md', f'sed -i s/a/b/ {a}', 'cp /tmp/x .claude/roles/project/*.md',
+                    f'python -c "open(r\'{a}\', \'w\').write(\'x\')"'):
+            self.no(cmd)
+        for cmd in (f'cat {a}', 'grep -rn "правило" .claude/roles/project/', 'cp .claude/roles/project/judge.md /tmp/x',
+                    f'python "{PLUGIN}/.claude/dispatcher/tickets.py" --project "{self.base}" charter addon judge --text "x" --ref В-1'):
+            self.ok(cmd)
+        for tool, key in (("Write", "file_path"), ("Edit", "file_path")):
+            reason = dg.check_tool({"tool_name": tool, "cwd": self.d, "tool_input": {key: a}})
+            self.assertIn("charter addon", reason or "", tool)
+
     def test_readme_table_rows_stay_editable(self):
         ev = lambda old, new: {"tool_name": "Edit", "cwd": self.d, "tool_input": {
             "file_path": f"{self.base}/.claude/roles/README.md", "old_string": old, "new_string": new}}

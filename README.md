@@ -48,7 +48,7 @@ Platform details, manual start and project-root lookup: [docs/install.md](docs/i
    ```
 
 2. Run `/rpv-start` in the project: it restarts the dispatcher and the watcher on the new code.
-3. Bring the role charters up to date. `/rpv-init` never overwrites `.claude/roles/`, so new rules from a release reach an existing project only through `python <plugin>/.claude/dispatcher/tickets.py charter sync [--file <name>.md]` (the CEO's guard rejects copying by hand; the release's entry in [CHANGELOG.md](CHANGELOG.md) names the changed files).
+3. Bring the role charters up to date. `/rpv-init` never overwrites `.claude/roles/`, so new rules from a release reach an existing project only through `python <plugin>/.claude/dispatcher/tickets.py charter sync [--file <name>.md] --ref В-N` (`--ref` — the owner's decision already in the registry, required; the CEO's guard rejects copying by hand; the release's entry in [CHANGELOG.md](CHANGELOG.md) names the changed files). Sync replaces a charter with the template's text; the lines it removed and the template lacks are printed ("move to the add-on"). Project rules for a role live in an add-on `.claude/roles/project/<role>.md` (and `project/README.md`) that sync never touches and the role's startup context appends after its charter: `python <plugin>/.claude/dispatcher/tickets.py charter addon <role|README> --text "..." --ref В-N` (CEO only, logged in `charter-log.json`).
 
 ## How it works
 

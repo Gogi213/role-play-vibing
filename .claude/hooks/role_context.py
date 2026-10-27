@@ -258,6 +258,8 @@ def full_context(role, title, source, hook_in, reserve=0):
     if last:
         head.append(f"Конспект прошлой сессии этой роли: `{rel(last)}` — не читать целиком, грепом/секциями.")
     paths = ["Устав команды — .claude/roles/README.md (читать по необходимости)."]
+    if os.path.isfile(os.path.join(ROLES_DIR, "project", "README.md")):
+        paths[0] = paths[0][:-1] + "; добавка проекта к нему — .claude/roles/project/README.md."
     if tp:
         paths.append(f"Тикет — {tp}.")
     must = "\n".join(head + paths)
@@ -275,6 +277,16 @@ def full_context(role, title, source, hook_in, reserve=0):
             blocks.append(f"Устав роли не влез в вставку — прочитай {charter_rel}.")
     except Exception as e:
         blocks.append(f"Устав роли не прочитан ({type(e).__name__}) — {charter_rel}.")
+    addon_rel = f".claude/roles/project/{role}.md"       # добавка проекта к уставу: синк уставов её не трогает (TK-038)
+    try:
+        addon = read_file(os.path.join(ROLES_DIR, "project", f"{role}.md"))
+        if addon and len(addon) <= budget:
+            blocks.append(f"--- {addon_rel} (добавка проекта к уставу) ---\n{addon}")
+            budget -= len(addon)
+        elif addon:
+            blocks.append(f"Добавка проекта к уставу не влезла в вставку — прочитай {addon_rel}.")
+    except OSError:
+        pass
     try:
         notebook = read_file(os.path.join(ROLES_DIR, "notes", f"{role}.md"))
         take = min(NOTEBOOK_TAIL, budget)
