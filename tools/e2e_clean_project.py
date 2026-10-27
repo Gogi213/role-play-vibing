@@ -25,6 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DISP = ROOT / ".claude" / "dispatcher"
+sys.path.insert(0, str(ROOT / "tools" / "bench"))
+from common import ticket_state  # noqa: E402  одна копия — в bench/common.py
+
 GOAL_QUOTE = "нужен скрипт hello.py, который печатает слово привет"
 CRITERION = "python hello.py печатает «привет»"
 
@@ -52,16 +55,6 @@ def init_script() -> str:
     text = (ROOT / "commands" / "rpv-init.md").read_text(encoding="utf-8")
     block = re.search(r"```\n(.*?)\n```", text, re.S).group(1)
     return block.replace("${CLAUDE_PLUGIN_ROOT}", ROOT.as_posix())
-
-
-def ticket_state(proj: Path, tid: str) -> tuple[str, str]:
-    p = proj / ".claude" / "tickets" / f"{tid}.md"
-    if not p.exists():
-        return "", ""
-    text = p.read_text(encoding="utf-8")
-    st = re.search(r"^status: *(\S+)", text, re.M)
-    results = re.findall(r"^\[итог: ([\w-]+)\]", text, re.M)
-    return (st.group(1) if st else ""), (results[-1] if results else "")
 
 
 def run_jsons(runs_dir: Path) -> list[Path]:

@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
-from signals import NO_REVIEW_MARK, MAX_REVIEW_RETURNS, _review_returns, closed_without_review  # noqa: E402
+from signals import CLOSED_BY_MERGE_MARK, MAX_REVIEW_RETURNS, _review_returns, closed_without_review, last_move, _done_marker  # noqa: E402
 
 
 @dataclass
@@ -46,11 +46,24 @@ def _executor_waits_after_accept(tkt: T.Ticket, idx: int) -> bool:
     return any(re.match(r"\[итог:\s*wait\]", e.text.strip()) and not T.author_is(e.author, "judge") for e in tkt.log[idx + 1:])
 
 
-def close_after_merge(path: Path, tkt: T.Ticket, now) -> "T.Ticket | None":
+CLOSED_BY_MERGE = re.compile(r"PR #(\d+) влит, приёмка Судьи (?:на голову )?([0-9a-f]{4,40})")
+
+
+def _closed_by_merge_before(tkt: T.Ticket, pr: int, sha: str) -> bool:
+    """Диспетчер уже закрывал тикет по слиянию этого PR на этой принятой голове (повтор приёмки не новый заказ)."""
+    for e in tkt.log:
+        m = CLOSED_BY_MERGE.search(e.text) if e.author.lower() == "dispatcher" else None
+        if m and int(m.group(1)) == pr and sha.lower().startswith(m.group(2).lower()[:7]):
+            return True
+    return False
+
+
+def close_after_merge(path: Path, tkt: T.Ticket, now, state: dict = None) -> "T.Ticket | None":
     """alpha #107 П0: `wait_for: merged:` выполнен, приёмка Судьи стоит на голове влитого PR, заказов после неё нет — закрываем
     сами (done, путь из приёмки), роли не будим: автор писал бы `done` ради блокнота, а Судья принимал бы повторно. Заказ CEO
     04:37: только если ожидание поставил Судья (не исполнитель ради шага после слияния) и PR влит в ветку по умолчанию (не в
-    промежуточную, как alpha TK-263 в tk262). Иначе None — автора будит wait_for-met, как раньше."""
+    промежуточную, как alpha TK-263 в tk262). Иначе None — автора будит wait_for-met, как раньше. TK-018: закрывали этим же PR
+    на этой же голове — это повтор, второй сигнал done CEO не уходит (метка в `state`)."""
     if tkt.status != "waiting" or tkt.next_role:
         return None
     parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
@@ -66,14 +79,19 @@ def close_after_merge(path: Path, tkt: T.Ticket, now) -> "T.Ticket | None":
         return None  # не влит, не найден, влита другая голова, чем принятая, или не в ветку по умолчанию — решает автор (wait_for-met)
     proof = next((m.group(1) for e in reversed(tkt.log[:idx + 1])
                   for m in [re.search(r"(?:проверка|результат):\s*(\S+)", e.text)] if m), "")
+    repeat = _closed_by_merge_before(tkt, pr, sha)
     with T.ticket_lock(path):
         cur = T.read_ticket(path)
         if cur.status != "waiting" or cur.next_role or len(cur.log) != len(tkt.log):
             return None  # пока читали, тикет двинулся (запись роли/CEO)
         T.append_log(path, "dispatcher", f"[итог: done]{f' результат: {proof}' if proof else ''} — PR #{pr} влит, приёмка Судьи "
-                     f"на голову {sha[:7]} стоит, нового заказа нет: тикет закрыт без запуска ролей ({NO_REVIEW_MARK}).", now=now)
+                     f"{sha[:7]} есть, нового заказа нет: {CLOSED_BY_MERGE_MARK}." + (" Повтор: этим слиянием тикет уже закрыт." if repeat else ""),
+                     now=now)
         T.write_header_updates(path, {"status": "done", "next": "", "wait_for": "", "on_met": ""}, now=now)
-    return T.read_ticket(path)
+    closed = T.read_ticket(path)
+    if repeat and state is not None:
+        state.setdefault("ceo_done_notified", {})[closed.id] = _done_marker(closed)  # CEO о закрытии уже знает
+    return closed
 
 
 def decide(tkt: T.Ticket, state: dict, now, check_wait_for) -> "Decision | None":
@@ -121,7 +139,8 @@ def decide(tkt: T.Ticket, state: dict, now, check_wait_for) -> "Decision | None"
     # MAX_SAME_STATUS_RUNS.
     if status in ("done", "in_review") and tkt.reviewer in P.ROLES:
         reviewer = tkt.reviewer
-        last_author = tkt.log[-1].author if tkt.log else ""
+        last = last_move(tkt)  # запись merge («PR влит») — не ход: ревьюера не будит (TK-018)
+        last_author = last.author if last else ""
         if closed_without_review(tkt):
             return None
         if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":

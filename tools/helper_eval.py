@@ -108,10 +108,8 @@ def answer_fields(text: str) -> dict:
     return f
 
 
-def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
-    f = answer_fields(ans)
-    t = (f.get("тип") or "").lower()
-    types = sorted({k for k in ("решение", "цель") if k in t})
+def _registry_state(work: Path, fixture: Path) -> dict:
+    """Реестр решений после прогона: исходный текст, новое (без отметок «Повторено владельцем») и сами отметки по блокам."""
     seeds = (fixture / ".claude" / "decisions.md").read_text(encoding="utf-8")
     dec_p = work / ".claude" / "decisions.md"
     raw = dec_p.read_text(encoding="utf-8") if dec_p.exists() else ""
@@ -121,30 +119,50 @@ def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
         if ln.startswith("Повторено владельцем"):
             repeated.append((cur, ln))
     dec = "".join(ln for ln in raw.splitlines(keepends=True) if not ln.startswith("Повторено владельцем"))
-    new_dec = dec[len(seeds):] if dec.startswith(seeds) else dec  # переписанный целиком реестр — всё «новое»
-    seeds_intact = dec.startswith(seeds)
+    return {"seeds": seeds, "repeated": repeated, "intact": dec.startswith(seeds),
+            "new_dec": dec[len(seeds):] if dec.startswith(seeds) else dec}  # переписанный целиком реестр — всё «новое»
+
+
+def _goal_files(work: Path, fixture: Path) -> tuple[set, list]:
     old_goals = {p.name for p in (fixture / ".claude" / "goals").glob("*.md")}
     goals_dir = work / ".claude" / "goals"
-    new_goals = [p for p in sorted(goals_dir.glob("*.md")) if p.name not in old_goals] if goals_dir.exists() else []
-    new_blocks = re.findall(r"^## В-(\d+)", new_dec, re.M)
-    written = sorted(({"решение"} if new_blocks or repeated else set()) | ({"цель"} if new_goals else set()))
-    records = new_dec + "".join(p.read_text(encoding="utf-8") for p in new_goals)
+    return old_goals, ([p for p in sorted(goals_dir.glob("*.md")) if p.name not in old_goals] if goals_dir.exists() else [])
+
+
+def _numbering_ok(seeds: str, old_goals: set, new_blocks: list, new_goals: list) -> bool:
+    seed_max = max((int(n) for n in re.findall(r"^## В-(\d+)", seeds, re.M)), default=0)
+    goal_max = max((int(n[2:5]) for n in old_goals if re.match(r"G-\d{3}", n)), default=0)
+    return ([int(b) for b in new_blocks] == list(range(seed_max + 1, seed_max + 1 + len(new_blocks)))
+            and [p.name for p in new_goals] == [f"G-{goal_max + i + 1:03d}.md" for i in range(len(new_goals))])
+
+
+def _record_quotes(records: str, repeated: list, f: dict) -> list[str]:
     quotes = [ln.lstrip("> ").strip() for ln in records.splitlines() if ln.startswith(">")]
     quotes += [ln.split(": ", 1)[1] for _, ln in repeated if ": " in ln]
     if (f.get("цитата") or "").strip() not in ("", "—", "-"):
         quotes.append(f["цитата"])
+    return quotes
+
+
+def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
+    f = answer_fields(ans)
+    t = (f.get("тип") or "").lower()
+    types = sorted({k for k in ("решение", "цель") if k in t})
+    reg = _registry_state(work, fixture)
+    seeds, repeated, new_dec = reg["seeds"], reg["repeated"], reg["new_dec"]
+    old_goals, new_goals = _goal_files(work, fixture)
+    new_blocks = re.findall(r"^## В-(\d+)", new_dec, re.M)
+    written = sorted(({"решение"} if new_blocks or repeated else set()) | ({"цель"} if new_goals else set()))
+    records = new_dec + "".join(p.read_text(encoding="utf-8") for p in new_goals)
     owner = norm(c["text"]).replace(" / ", " ")
-    bad_quotes = [q for q in quotes for p in quote_pieces(q) if p not in owner]
+    bad_quotes = [q for q in _record_quotes(records, repeated, f) for p in quote_pieces(q) if p not in owner]
     body = "\n".join(ln for ln in records.splitlines()
                      if not re.match(r"^(## В-|id:|set:|status:|accepted:|---)", ln))
     allowed = c["text"] + "\n" + c["prev"] + "\n" + seeds
     invented = [n for n in numbers(body) if n not in allowed]
     rel = c.get("gold_related")
     rel_hit = None if not rel else bool(re.search(rf"\b{re.escape(rel)}\b", (f.get("связано") or "") + "\n" + new_dec))
-    seed_max = max((int(n) for n in re.findall(r"^## В-(\d+)", seeds, re.M)), default=0)
-    goal_max = max((int(n[2:5]) for n in old_goals if re.match(r"G-\d{3}", n)), default=0)
-    numbering = ([int(b) for b in new_blocks] == list(range(seed_max + 1, seed_max + 1 + len(new_blocks)))
-                 and [p.name for p in new_goals] == [f"G-{goal_max + i + 1:03d}.md" for i in range(len(new_goals))])
+    numbering = _numbering_ok(seeds, old_goals, new_blocks, new_goals)
     return {
         "type_ok": types in [sorted(g) for g in c["gold_types"]],
         "types": types,
@@ -157,7 +175,7 @@ def grade_secretary(c: dict, ans: str, work: Path, fixture: Path) -> dict:
         "repeat_hit": None if not c.get("gold_repeat") else any(r == c["gold_repeat"] for r, _ in repeated),
         "repeated": [r for r, _ in repeated],
         "numbering_ok": numbering,
-        "registry_intact": seeds_intact,
+        "registry_intact": reg["intact"],
         "format_ok": all(k in f for k in ("тип", "запись", "цитата", "суть", "связано")),
     }
 
@@ -415,6 +433,48 @@ METRICS = {
 }
 
 
+def _metric_cell(met: str, mr: list[dict]) -> str:
+    """Одна ячейка сводки: метрика `met` по прогонам `mr` одной модели."""
+    ok = [r for r in mr if not r["error"]]
+    if met == "случаев":
+        return str(len(mr))
+    if met == "ошибок запуска":
+        return str(len(mr) - len(ok))
+    if met.startswith("цена, $ всего"):
+        return f"{sum(r['cost'] or 0 for r in mr):.3f}"
+    if met.startswith("цена, $ на"):
+        return f"{sum(r['cost'] or 0 for r in mr) / max(len(mr), 1):.4f}"
+    if met.startswith("время"):
+        return f"{sum(r['dur'] for r in mr) / max(len(mr), 1):.0f}"
+    vals = [r["grade"].get(met) for r in ok if r["grade"].get(met) is not None]
+    if not vals:
+        return "—"
+    if isinstance(vals[0], float):
+        return f"{sum(vals) / len(vals):.2f}"
+    return f"{sum(vals)} всего" if not isinstance(vals[0], bool) else f"{sum(vals)}/{len(vals)}"  # не bool — счётчик (stale_cited)
+
+
+def _task_table(task: str, mets: list[str], rows: list[dict], models: list[str]) -> list[str]:
+    tr = [r for r in rows if r["task"] == task]
+    if not tr:
+        return []
+    md = [f"## {task}", "", "| метрика | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
+    for met in ["случаев", "ошибок запуска"] + mets + ["цена, $ всего", "цена, $ на случай", "время, с на случай"]:
+        md.append(f"| {met} | " + " | ".join(_metric_cell(met, [r for r in tr if r["model"] == m]) for m in models) + " |")
+    md.append("")
+    return md
+
+
+def _misses(rows: list[dict]) -> list[str]:
+    md = ["## Промахи", ""]
+    for r in sorted(rows, key=lambda r: (r["task"], r["id"], r["model"])):
+        bad = {k: v for k, v in r["grade"].items() if v is False or (isinstance(v, list) and v and k not in ("types",))}
+        if r["error"] or bad:
+            md.append(f"- `{r['id']}` {r['model'].replace('claude-', '')}: "
+                      + ("ошибка запуска; " if r["error"] else "") + json.dumps(bad, ensure_ascii=False))
+    return md
+
+
 def cmd_report(a) -> int:
     out = Path(a.out)
     rows = {}
@@ -425,40 +485,8 @@ def cmd_report(a) -> int:
     models = sorted({r["model"] for r in rows})
     md = ["# Замер помощников CEO", ""]
     for task, mets in METRICS.items():
-        tr = [r for r in rows if r["task"] == task]
-        if not tr:
-            continue
-        md += [f"## {task}", "", "| метрика | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
-        for met in ["случаев", "ошибок запуска"] + mets + ["цена, $ всего", "цена, $ на случай", "время, с на случай"]:
-            cells = []
-            for m in models:
-                mr = [r for r in tr if r["model"] == m]
-                ok = [r for r in mr if not r["error"]]
-                if met == "случаев":
-                    v = str(len(mr))
-                elif met == "ошибок запуска":
-                    v = str(len(mr) - len(ok))
-                elif met.startswith("цена, $ всего"):
-                    v = f"{sum(r['cost'] or 0 for r in mr):.3f}"
-                elif met.startswith("цена, $ на"):
-                    v = f"{sum(r['cost'] or 0 for r in mr) / max(len(mr), 1):.4f}"
-                elif met.startswith("время"):
-                    v = f"{sum(r['dur'] for r in mr) / max(len(mr), 1):.0f}"
-                else:
-                    vals = [r["grade"].get(met) for r in ok if r["grade"].get(met) is not None]
-                    v = ("—" if not vals else f"{sum(vals) / len(vals):.2f}" if isinstance(vals[0], float)
-                         else f"{sum(vals)} всего" if not isinstance(vals[0], bool)  # счётчик (stale_cited)
-                         else f"{sum(vals)}/{len(vals)}")
-                cells.append(v)
-            md.append(f"| {met} | " + " | ".join(cells) + " |")
-        md.append("")
-    md += ["## Промахи", ""]
-    for r in sorted(rows, key=lambda r: (r["task"], r["id"], r["model"])):
-        g = r["grade"]
-        bad = {k: v for k, v in g.items() if v is False or (isinstance(v, list) and v and k not in ("types",))}
-        if r["error"] or bad:
-            md.append(f"- `{r['id']}` {r['model'].replace('claude-', '')}: "
-                      + ("ошибка запуска; " if r["error"] else "") + json.dumps(bad, ensure_ascii=False))
+        md += _task_table(task, mets, rows, models)
+    md += _misses(rows)
     (out / "summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     print("\n".join(md))

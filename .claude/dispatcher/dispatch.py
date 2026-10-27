@@ -659,7 +659,7 @@ def _collect_candidates(state: dict, now) -> tuple:
                 tkt = escalate_review_limit(path, tkt, state, now)
             handle_next_ceo(path, tkt, state, now)
             if tkt.id not in RUNNING and path.stem not in RUNNING:
-                tkt = close_after_merge(path, tkt, now) or tkt
+                tkt = close_after_merge(path, tkt, now, state) or tkt
             _expire_ceo_handoff(tkt, state)
             notify_status_for_ceo(tkt, state, now)
             notify_done(tkt, state, now)

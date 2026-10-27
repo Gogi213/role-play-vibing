@@ -1,0 +1,21 @@
+# TK-003 проверка Судьи 2026-10-27, PR #114 @ e288114 (данные alpha — только чтение)
+this: dispatcher/runs err.log с 'Hook cancelled': 21
+this: конспектов в .claude/roles/log: 21
+this: конспектов с выжимкой Haiku: 0
+this: err.log с unrecognized_model: 0; CLI 2.1.302 (Claude Code)
+alpha: день запусков(err.log) конспектов
+alpha: 20261016 164 162
+alpha: 20261017 183 182
+alpha: 20261018 184 183
+alpha: 20261019 165 163
+alpha: 20261020 160 159
+alpha: 20261021 151 150
+alpha: 20261022 182 174
+alpha: 20261023 192 186
+alpha: 20261024 141 139
+alpha: 20261025 226 225
+alpha: 20261026 230 228
+alpha: 20261027 58 59
+alpha: конспектов 20–27.10: 1320 с выжимкой Haiku: 4
+git: конспект до Haiku с 18d7801 (2026-10-09, 1.8.22)
+CI PR #114: ci-ok=pass jobrun на настоящем systemd=pass tests (macos-latest, py3.12)=pass tests (ubuntu-latest, py3.12)=pass tests (windows-latest, py3.12)=pass чистый проект (${{ matrix.os }})=skipping 

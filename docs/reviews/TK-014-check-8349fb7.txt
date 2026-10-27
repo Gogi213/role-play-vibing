@@ -1,0 +1,13 @@
+TK-014 проверка Судьи, PR #123 @8349fb7, 2026-10-27
+pytest -n auto (копия tk014): 1295 passed, 8 skipped in 236.67s
+radon cc -n E delete_guard.py dguard/: пусто (нет E/F)
+wc -l (наибольшие):
+   364 .claude/hooks/dguard/lexer.py
+   480 .claude/hooks/dguard/cmd_scan.py
+  2959 total
+длиннейшие функции (ast):
+51 .claude/hooks/dguard\policy.py protected_match
+52 .claude/hooks/dguard\lexer.py run
+scan_one 41
+хук тем же путём hooks.json: rm -rf /etc -> deny, ls -> пусто, rc=0
+CI PR #123: ubuntu/windows/macos pass

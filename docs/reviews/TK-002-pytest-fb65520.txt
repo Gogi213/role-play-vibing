@@ -1,0 +1,2 @@
+fb65520: python -m pytest -n auto -q .claude/dispatcher
+800 passed, 2 skipped in 158.07s (0:02:38)

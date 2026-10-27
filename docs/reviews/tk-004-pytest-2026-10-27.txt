@@ -1,0 +1,2 @@
+1218 passed, 8 skipped in 282.37s (0:04:42)
+# pytest -n auto, копия .claude/worktrees/TK-004 на d0bc06e, 27.10 Судья

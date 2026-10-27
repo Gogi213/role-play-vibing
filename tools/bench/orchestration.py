@@ -185,7 +185,6 @@ def _peak_concurrency(events: list[dict]) -> int:
     pts = []
     open_ = {}
     for e in events:
-        k = (e["tid"], e["role"], e.get("pid"))
         if e["at"] == "start":
             pts.append((e["t"], 1))
             open_[(e["tid"], e["role"])] = e["t"]
