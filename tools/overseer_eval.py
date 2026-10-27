@@ -44,7 +44,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -54,11 +53,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
 import overseer as core  # noqa: E402  ядро — общее с живым Надзирателем (`.claude/dispatcher/overseer.py`)
-from overseer import (  # noqa: E402,F401
-    DAYS_SHOWN, DEFAULT_TZ, HDR, KINDS, MIN_QUOTE, RECENT_H, RETURN, Entry, Run, Stats, Ticket, Window, _numbers,
-    _pct, build_prompt, call_overseer, claude_bin, closed_scale, cut, entry_block, gist, grade, invented_numbers, is_judge_return,
-    load_agent, load_runs, load_ticket, make_windows, merge_entries, norm_ws, parse_answer, parse_log, parse_runs, parse_ts,
-    pick_new, quote_found, scale_text, split_ticket, stats_at, stats_text, ticket_ids, ticket_start)
+from overseer import (  # noqa: E402
+    build_prompt, call_overseer, closed_scale, grade, is_judge_return, load_agent, load_runs, load_ticket,
+    make_windows, parse_ts, scale_text, stats_at, ticket_ids, ticket_start)
 BAD = ("TK-048", "TK-049", "TK-063", "TK-065", "TK-071", "TK-076", "TK-079", "TK-087", "TK-100", "TK-120")
 NORMAL_N, NORMAL_SEED, NORMAL_MAX_RUNS = 20, 14, 6
 MECHANICAL = ("watch", "dispatcher", "ci", "merge")  # записи кода, не ролей: для оценки «сколько окон без них»
