@@ -234,7 +234,7 @@ PROMPT_TEMPLATE = (
 
 RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, out_fh, err_fh, reason}
 # popen=None у записей, восстановленных из state.json["active_runs"] после перезапуска диспетчера
-# (recover_active_runs) — тогда живость и остановка идут по pid (_pid_alive/_pid_kill), не по Popen.
+# (recover_active_runs) — тогда живость и остановка идут по pid (_pid_alive/_kill), не по Popen.
 
 
 @dataclass
@@ -1394,17 +1394,19 @@ def _pid_alive_posix(pid, expect_name: str = None) -> bool:
     return True if comm is None else expect_name.lower() in comm.lower()  # имя узнать нельзя — не валим живость
 
 
-def _pid_kill(pid) -> None:
+def _kill(pid, tree: bool = False, force: bool = False) -> None:
+    """Единственный способ снять процесс. tree — со всеми потомками: Windows `taskkill /T`, POSIX — SIGKILL группе роли
+    (запуск со `start_new_session=True`, группа = pid; не лидер своей группы — только он сам: killpg по такой группе
+    снял бы и сам диспетчер). force — SIGKILL вместо SIGTERM (Windows: taskkill всегда `/F`)."""
     if not pid:
         return
-    if os.name == "nt":
-        try:
-            hide.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=5)
-        except Exception:
-            pass
-        return
     try:
-        os.kill(pid, 15)
+        if os.name == "nt":
+            hide.run(["taskkill", *(["/T"] if tree else []), "/F", "/PID", str(pid)], capture_output=True, timeout=15)
+        elif tree and os.getpgid(pid) == pid:
+            os.killpg(pid, getattr(signal, "SIGKILL", 9))
+        else:
+            os.kill(pid, getattr(signal, "SIGKILL", 9) if tree or force else 15)
     except Exception:
         pass
 
@@ -1481,35 +1483,7 @@ def _kill_proc(info: dict) -> None:
         except Exception:
             pass
     else:
-        _pid_kill(info.get("pid"))
-
-
-def _kill_tree_nt(pid) -> None:
-    """Windows: `taskkill /T /F /PID` — процесс и все его потомки."""
-    try:
-        hide.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
-    except Exception:
-        pass
-
-
-def _kill_tree_posix(pid) -> None:
-    """Linux/macOS: SIGKILL всей группе процессов роли — запуск идёт со `start_new_session=True`, группа = pid. Процесс не
-    лидер своей группы (запущен до этой правки и сидит в группе диспетчера) — только он сам: killpg по такой группе
-    снял бы и сам диспетчер."""
-    sig = getattr(signal, "SIGKILL", 9)
-    try:
-        if os.getpgid(pid) == pid:
-            os.killpg(pid, sig)
-        else:
-            os.kill(pid, sig)
-    except Exception:
-        pass
-
-
-def _kill_tree(pid) -> None:
-    if not pid:
-        return
-    (_kill_tree_nt if os.name == "nt" else _kill_tree_posix)(pid)
+        _kill(info.get("pid"))
 
 
 def _stop_run(info: dict) -> bool:
@@ -1517,7 +1491,7 @@ def _stop_run(info: dict) -> bool:
     Уже мёртвый процесс не трогаем: его pid ОС могла отдать чужому."""
     pid = info.get("pid") or (info["popen"].pid if info.get("popen") is not None else None)
     if _proc_alive(info):
-        _kill_tree(pid)
+        _kill(pid, tree=True)
     deadline = time.time() + STOP_VERIFY_S
     while _proc_alive(info):
         if time.time() >= deadline:
@@ -2359,7 +2333,7 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
             out, err = proc.communicate(timeout=ON_MET_TIMEOUT_S)
             code = proc.returncode
         except subprocess.TimeoutExpired:
-            _kill_tree(proc.pid)
+            _kill(proc.pid, tree=True)
             status = "timeout"
             try:
                 out, err = proc.communicate(timeout=10)

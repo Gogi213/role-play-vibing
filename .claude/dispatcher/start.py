@@ -27,14 +27,13 @@ import os
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import dispatch as D  # noqa: E402 — _pid_alive/_pid_kill; импорт ничего не создаёт
+import dispatch as D  # noqa: E402 — _pid_alive/_kill; импорт ничего не создаёт
 import project as P  # noqa: E402
 import hide  # noqa: E402
 
@@ -318,20 +317,17 @@ def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT
     stopped = stop_unit(unit) if unit else 0
     pid = read_pid(pid_file)
     if is_ours(pid, script_name):
-        D._pid_kill(pid)
+        D._kill(pid)
         deadline = time.time() + timeout
         while D._pid_alive(pid, LOCK_IMAGE) and time.time() < deadline:
             time.sleep(0.1)
         if D._pid_alive(pid, LOCK_IMAGE) and os.name != "nt":
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+            D._kill(pid, force=True)
             time.sleep(0.3)
         stopped = pid
     for extra in (find_copies(script_name, project) if project else []):   # копия без pid-файла (упавший старт) — тоже гасим
         if extra != pid:
-            D._pid_kill(extra)
+            D._kill(extra)
             stopped = stopped or extra
     if read_pid(pid_file) == pid:   # перезапись другим процессом (свежий диспетчер) не стираем (В-209 Д-2)
         try:

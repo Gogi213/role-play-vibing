@@ -78,7 +78,7 @@ class StartTests(unittest.TestCase):
 
     def cleanup(self):
         for pid in self.pids:
-            D._kill_tree(pid)
+            D._kill(pid, tree=True)
         for pid in self.pids:
             wait_alive(pid, want=False, timeout=5)
         self.tmp.cleanup()
@@ -354,7 +354,7 @@ class StartTests(unittest.TestCase):
     def test_stop_running_kills_copy_without_pid_file(self):
         killed = []
         pid_file = self.project / ".claude" / "dispatcher" / "dispatch.pid"
-        with mock.patch.object(S, "find_copies", return_value=[555]), mock.patch.object(S.D, "_pid_kill", killed.append):
+        with mock.patch.object(S, "find_copies", return_value=[555]), mock.patch.object(S.D, "_kill", killed.append):
             self.assertEqual(S.stop_running(pid_file, "dispatch.py", project=self.project), 555)
         self.assertEqual(killed, [555])
 
@@ -366,7 +366,7 @@ class StartTests(unittest.TestCase):
 
         def kill(pid):
             pid_file.write_text("222", encoding="utf-8")
-        with mock.patch.object(S, "is_ours", return_value=True), mock.patch.object(S.D, "_pid_kill", kill),                 mock.patch.object(S.D, "_pid_alive", return_value=False), mock.patch.object(S, "find_copies", return_value=[]):
+        with mock.patch.object(S, "is_ours", return_value=True), mock.patch.object(S.D, "_kill", kill),                 mock.patch.object(S.D, "_pid_alive", return_value=False), mock.patch.object(S, "find_copies", return_value=[]):
             S.stop_running(pid_file, "dispatch.py", project=self.project)
         self.assertEqual(pid_file.read_text(encoding="utf-8"), "222")
 

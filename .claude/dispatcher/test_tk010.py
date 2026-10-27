@@ -356,5 +356,44 @@ class ProcessScanOnce(unittest.TestCase):
         self.assertIn(os.getpid(), {p for p, _ in S._list_procs()})
 
 
+class KillOnce(unittest.TestCase):
+    """Снять процесс — одна `dispatch._kill`; дерево уходит целиком, на настоящих процессах (Windows и Linux)."""
+
+    def test_no_private_killers(self):
+        here = Path(__file__).resolve().parent
+        for name in ("dispatch", "start", "errors"):
+            src = (here / f"{name}.py").read_text(encoding="utf-8")
+            for old in ("_pid_kill", "_kill_tree"):
+                self.assertNotIn(old, src, (name, old))
+            self.assertEqual(src.count('["taskkill"'), 1 if name == "dispatch" else 0, name)
+            if name != "dispatch":
+                self.assertNotIn("os.kill(", src, name)
+
+    def test_tree_kill_takes_real_grandchild_and_plain_kill_takes_only_parent(self):
+        import subprocess
+        import time
+        code = ("import subprocess,sys,time;"
+                "c=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+                "print(c.pid,flush=True);time.sleep(60)")
+        for tree in (True, False):
+            kw = hide_kwargs()
+            p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, **kw)
+            child = int(p.stdout.readline())
+            try:
+                D._kill(p.pid, tree=tree)
+                p.wait(timeout=10)
+                time.sleep(0.5)
+                self.assertEqual(D._pid_alive(child, "py"), not tree, f"tree={tree}")
+            finally:
+                D._kill(child, tree=True)
+                D._kill(p.pid, tree=True)
+                p.stdout.close()
+
+
+def hide_kwargs() -> dict:
+    """Группа процессов своя (POSIX: группа = pid, как у роли диспетчера), чтобы тест не снял сам себя."""
+    return {"start_new_session": True} if os.name != "nt" else {}
+
+
 if __name__ == "__main__":
     unittest.main()
