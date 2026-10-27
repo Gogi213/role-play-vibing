@@ -294,5 +294,41 @@ class AtomicJsonOnce(unittest.TestCase):
         self.assertIs(T.atomic_write_text, P.atomic_write_text)
 
 
+class GitOnce(unittest.TestCase):
+    """git из диспетчера — только `hide.git` (скрытое окно, предел времени); частных обёрток и голых вызовов нет."""
+
+    def test_no_bare_git_calls(self):
+        import re
+        here = Path(__file__).resolve().parent
+        for f in sorted(here.glob("*.py")):
+            if f.name.startswith("test_") or f.name == "hide.py":
+                continue
+            self.assertIsNone(re.search(r"""\[\s*["']git["']""", f.read_text(encoding="utf-8")), f.name)
+
+    def test_hide_git_on_real_repo(self):
+        import hide
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            r = hide.git(d, "rev-parse", "--is-inside-work-tree")
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, b"true"))
+            self.assertEqual(hide.git(d, "rev-parse", "--is-inside-work-tree", text=True).stdout.strip(), "true")
+            self.assertNotEqual(hide.git(d, "cat-file", "-e", "HEAD:нет").returncode, 0)
+
+    def test_release_and_routes_use_it(self):
+        import hide
+        import release as REL
+        import subprocess
+        self.assertIs(REL._git.__kwdefaults__["run"], hide.git)
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            (Path(d) / "f.txt").write_text("x", encoding="utf-8")
+            self.assertEqual(RT.tracked_at_head(Path(d), "f.txt")[0], "")
+            subprocess.run(["git", "-C", d, "add", "f.txt"], check=True)
+            subprocess.run(["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"], check=True)
+            sha, why = RT.tracked_at_head(Path(d), "f.txt")
+            self.assertTrue(sha and not why, (sha, why))
+
+
 if __name__ == "__main__":
     unittest.main()

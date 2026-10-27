@@ -2311,9 +2311,7 @@ ON_MET_DIRS = ("tools", ".claude")
 
 
 def _git_tracked(rel: str) -> bool:
-    r = hide.run(["git", "-C", str(PROJECT_ROOT), "ls-files", "--error-unmatch", "--", rel],
-                       capture_output=True, timeout=20)
-    return r.returncode == 0
+    return hide.git(PROJECT_ROOT, "ls-files", "--error-unmatch", "--", rel, timeout=20).returncode == 0
 
 
 def _on_met_argv(spec: str):

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hide  # noqa: E402
 import project as P  # noqa: E402
 
 RESULTS = ("done", "pr", "accept", "return", "blocked", "ask-owner", "wait", "continue")
@@ -133,7 +134,7 @@ def tracked_at_head(root: Path, path: str) -> tuple[str, str]:
         rel = f.relative_to(base).as_posix()
 
         def git(*a):
-            return subprocess.run(["git", "-C", str(base), *a], capture_output=True, text=True, timeout=30)
+            return hide.git(base, *a, text=True, timeout=30)
         if git("ls-files", "--error-unmatch", "--", rel).returncode or git("cat-file", "-e", f"HEAD:{rel}").returncode:
             return "", f"{hint}: {rel} не в git на HEAD"
         if git("diff", "--quiet", "HEAD", "--", rel).returncode:

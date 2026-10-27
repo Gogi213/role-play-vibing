@@ -16,8 +16,7 @@ TOKEN = re.compile(r"tk0*(\d+)", re.I)
 
 
 def _git(project: Path, *a, cwd=None, timeout=60):
-    return hide.run(["git", *a], cwd=str(cwd or project), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
+    return hide.git(cwd or project, *a, text=True, timeout=timeout)
 
 
 def list_worktrees(project: Path) -> list:

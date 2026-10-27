@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hide  # noqa: E402
 import project as P  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,13 +51,12 @@ def bump(version: str, root: Path = ROOT) -> None:
         raise SystemExit(problem)
 
 
-def _run(cmd: list, run=subprocess.run, timeout: float = GIT_TIMEOUT_S) -> subprocess.CompletedProcess:
-    """git с пределом времени: завис — код 124, процесс убит; вызывающий видит обычный отказ."""
+def _git(*args: str, run=hide.git, timeout: float = GIT_TIMEOUT_S) -> subprocess.CompletedProcess:
+    """git в корне плагина с пределом времени: завис — код 124, процесс убит; вызывающий видит обычный отказ."""
     try:
-        return run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                   env={**os.environ, **GIT_STALL_ENV})
+        return run(ROOT, *args, text=True, timeout=timeout, env={**os.environ, **GIT_STALL_ENV})
     except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(cmd, 124, "", f"таймаут {timeout:.0f} с")
+        return subprocess.CompletedProcess(("git", *args), 124, "", f"таймаут {timeout:.0f} с")
 
 
 def main(argv=None) -> int:
@@ -66,12 +66,11 @@ def main(argv=None) -> int:
     cmd = argv[0] if argv else ""
     if cmd == "bump" and len(argv) >= 2:
         bump(argv[1])
-        git = ["git", "-C", str(ROOT)]
-        for c in (git + ["add", ".claude-plugin", "CHANGELOG.md"], git + ["commit", "-m", f"Выпуск {argv[1]}"],
-                  git + ["tag", f"v{argv[1]}"]) + ((git + ["push", "origin", "HEAD", f"v{argv[1]}"],) if "--push" in argv else ()):
-            r = _run(c)
+        for c in (("add", ".claude-plugin", "CHANGELOG.md"), ("commit", "-m", f"Выпуск {argv[1]}"), ("tag", f"v{argv[1]}")
+                  ) + ((("push", "origin", "HEAD", f"v{argv[1]}"),) if "--push" in argv else ()):
+            r = _git(*c)
             if r.returncode:
-                print(f"[release] {' '.join(c)}: {(r.stderr or r.stdout).strip()}", file=sys.stderr)
+                print(f"[release] git {' '.join(c)}: {(r.stderr or r.stdout).strip()}", file=sys.stderr)
                 return 1
         print(f"[release] выпуск {argv[1]}: тег v{argv[1]} поставлен" + ("" if "--push" in argv else "; отправить: git push origin HEAD v" + argv[1]))
         return 0

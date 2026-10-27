@@ -109,8 +109,7 @@ def _one_line(s) -> str:
 # --- допустимая команда проверки ---------------------------------------------------------------
 
 def _tracked(cwd: Path, rel: str) -> bool:
-    r = hide.run(["git", "-C", str(cwd), "ls-files", "--error-unmatch", "--", rel], capture_output=True, timeout=20)
-    return r.returncode == 0
+    return hide.git(cwd, "ls-files", "--error-unmatch", "--", rel, timeout=20).returncode == 0
 
 
 def _rel_ok(rel: str) -> bool:
@@ -222,7 +221,7 @@ def _seconds(v) -> float:
 def _git(cwd: Path, *args, timeout: float = 60):
     """git в `cwd` → CompletedProcess (байты) или None, если git не запустился или завис."""
     try:
-        return hide.run(["git", "-C", str(cwd), *args], capture_output=True, timeout=timeout)
+        return hide.git(cwd, *args, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -537,7 +536,7 @@ def cmd_add(a, root: Path) -> int:
 
 def _head_sha(cwd: Path) -> str:
     try:
-        r = hide.run(["git", "-C", str(cwd), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=20)
+        r = hide.git(cwd, "rev-parse", "--short", "HEAD", text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""

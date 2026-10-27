@@ -26,6 +26,15 @@ def hidden_console() -> dict:
     return {"creationflags": CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP, "startupinfo": si}
 
 
+def git(cwd, *args, timeout: float = 60, text: bool = False, env: dict | None = None) -> subprocess.CompletedProcess:
+    """`git -C cwd …` без окна, с пределом времени; вывод — байты (text=True — utf-8 с заменой). Не запустился или завис —
+    исключение вызывающему (`OSError`, `subprocess.TimeoutExpired`)."""
+    kw = {"encoding": "utf-8", "errors": "replace"} if text else {}
+    if env is not None:
+        kw["env"] = env
+    return run(["git", "-C", str(cwd), *args], capture_output=True, timeout=timeout, **kw)
+
+
 def run(cmd, **kw) -> subprocess.CompletedProcess:
     """subprocess.run: скрытое окно и таймаут по умолчанию; по таймауту процесс убит (TimeoutExpired — вызывающему)."""
     for k, v in hidden().items():
