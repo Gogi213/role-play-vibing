@@ -13,16 +13,15 @@ RESULTS = ("done", "pr", "accept", "return", "blocked", "ask-owner", "wait", "co
 WHY_MAX = 200
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 
-ALL_ROLES = set(P.ROLES)
 # итог → (кто вправе, обязательное доказательство)
 RULES = {
     "done": ({"researcher", "engineer", "ceo"}, "path"),  # ceo — сессия без роли: закрыть тикет (TK-090 б)
     "pr": ({"engineer", "researcher"}, "pr+sha"),
     "accept": ({"judge"}, "pr+sha|path"),
     "return": ({"judge"}, "sha|path"),
-    "blocked": (ALL_ROLES, ""),
-    "ask-owner": (ALL_ROLES, ""),
-    "wait": (ALL_ROLES, "form"),
+    "blocked": (set(P.ROLES), ""),
+    "ask-owner": (set(P.ROLES), ""),
+    "wait": (set(P.ROLES), "form"),
     "continue": ({"researcher", "engineer"}, ""),  # TK-090 в: длинная работа кусками — следующий запуск той же роли
 }
 OWNER_REASONS = ("деньги", "направление", "необратимое", "бизнес-правило")  # V2-1: поводы вопроса владельцу (TK-233 п.4; «направление» вместо «видимого»)

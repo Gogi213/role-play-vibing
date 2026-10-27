@@ -10,13 +10,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
-import cfg as CFG  # noqa: E402
 import dispatch as D  # noqa: E402
 import doctor as DOC  # noqa: E402
 import heartbeat as HB  # noqa: E402
 import overseer as OV  # noqa: E402
 import project as P  # noqa: E402
-import registry as REG  # noqa: E402
 import report as RP  # noqa: E402
 import routes as RT  # noqa: E402
 import runs as RL  # noqa: E402
@@ -180,12 +178,8 @@ class RunsLogLine(unittest.TestCase):
 class RolesOneTuple(unittest.TestCase):
     """Роли, которых запускает диспетчер, — кортеж `project.ROLES`; в остальных модулях его литерала нет."""
 
-    def test_aliases_are_the_same_object(self):
-        self.assertIs(CFG.ROLES, P.ROLES)
-        self.assertIs(D.ROLE_KEYS, P.ROLES)
-        self.assertIs(REG.DISPATCH_ROLES, P.ROLES)
-        self.assertEqual(T.ROLE_TOKENS, P.ROLES + ("ceo",))
-        self.assertEqual(set(RT.ALL_ROLES), set(P.ROLES))
+    def test_role_tokens_follow_roles(self):
+        self.assertEqual(T.ROLE_TOKENS, (*P.ROLES, "ceo"))
 
     def test_routes_follow_roles(self):
         for role in P.ROLES:

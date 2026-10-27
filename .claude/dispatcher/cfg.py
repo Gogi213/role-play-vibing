@@ -21,7 +21,6 @@ import registry as registry_mod
 ROLLBACK_AFTER_S = 2 * 3600
 LOG_NAME = "config-log.json"
 ABSENT = None                                    # «ключа не было» в журнале: откат удаляет ключ
-ROLES = P.ROLES
 
 
 def _text(v) -> bool:
@@ -37,7 +36,7 @@ def _str_list(v) -> bool:
 
 
 def _role_parallel(v) -> bool:
-    return isinstance(v, dict) and bool(v) and all(k in ROLES and _int_min(n) for k, n in v.items())
+    return isinstance(v, dict) and bool(v) and all(k in P.ROLES and _int_min(n) for k, n in v.items())
 
 
 def _role_mcp(v) -> bool:

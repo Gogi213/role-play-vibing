@@ -56,7 +56,6 @@ import ceo_inbox as CI  # noqa: E402
 import cfg as cfg_mod  # noqa: E402
 import dispatch as D  # noqa: E402
 import errors as errors_mod  # noqa: E402
-import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
@@ -173,7 +172,7 @@ def cmd_comment(args) -> int:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
             T.write_header_updates(path, {"next": nxt}, stamp_updated=False)
             # №15 аудита: blocked + next: роль — запись без запуска; ход роли снимает blocked (иначе тикет висит с будильником)
-            if nxt in P.ROLES and T.read_ticket(path).status == "blocked":
+            if nxt in D.P.ROLES and T.read_ticket(path).status == "blocked":
                 T.write_header_updates(path, {"status": "in_progress"}, stamp_updated=False)
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
@@ -883,9 +882,9 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_new = sub.add_parser("new")
-    p_new.add_argument("--owner", required=True, choices=list(P.ROLES))
+    p_new.add_argument("--owner", required=True, choices=D.P.ROLES)
     p_new.add_argument("--title", required=True)
-    p_new.add_argument("--reviewer", choices=list(P.ROLES),
+    p_new.add_argument("--reviewer", choices=D.P.ROLES,
                         help="ревьюер; по умолчанию Судья (у Haiku-задач и тикетов Судьи — никого)")
     p_new.add_argument("--no-reviewer", action="store_true",
                         help="только с --executor haiku (там и так без Судьи); иначе отказ — Судью снимает владелец")
@@ -910,7 +909,7 @@ def main(argv=None) -> int:
     p_comment.add_argument("id")
     p_comment.add_argument("--author", required=True)
     p_comment.add_argument("--text", required=True)
-    p_comment.add_argument("--next", choices=[*P.ROLES, "ceo"], default=None,
+    p_comment.add_argument("--next", choices=[*D.P.ROLES, "ceo"], default=None,
                             help="разбудить эту роль один раз (ceo — только blocked/нужно решение владельца)")
     p_comment.set_defaults(func=cmd_comment)
 
@@ -972,7 +971,7 @@ def main(argv=None) -> int:
     p_stop = sub.add_parser("stop", help="только CEO: остановить запущенную роль тикета и дать новую постановку")
     p_stop.add_argument("id")
     p_stop.add_argument("--text", required=True, help="новая постановка — запись CEO в лог тикета")
-    p_stop.add_argument("--next", choices=list(P.ROLES), default=None,
+    p_stop.add_argument("--next", choices=D.P.ROLES, default=None,
                         help="роль, которая стартует сразу (тикет станет todo); без --next — status: stopped, не будить")
     p_stop.set_defaults(func=cmd_stop)
 

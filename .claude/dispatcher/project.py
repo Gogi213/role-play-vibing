@@ -84,7 +84,7 @@ def setting(key: str, default=None, root=None):
     return default if value is None or value == "" else value
 
 
-ROLES = ("researcher", "engineer", "judge")
+ROLES = ("researcher", "engineer", "judge")  # роли, которых запускает диспетчер; единственный список (ceo — человек/CEO-сессия)
 
 
 def now_iso(now: datetime | None = None) -> str:
@@ -228,14 +228,3 @@ def resolve_project(argv=None) -> Path:
     return found
 
 
-def strip_project_arg(argv) -> list:
-    """Аргументы без `--project <путь>` (для разборщиков, которым флаг не нужен)."""
-    out, skip = [], False
-    for arg in argv:
-        if skip:
-            skip = False
-        elif arg == "--project":
-            skip = True
-        elif not arg.startswith("--project="):
-            out.append(arg)
-    return out

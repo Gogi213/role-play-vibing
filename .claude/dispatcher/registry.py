@@ -32,10 +32,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 
-DISPATCH_ROLES = P.ROLES
 DECISION = re.compile(r"^## В-(\d+) · (.+)$", re.M)
 GOAL_ID = re.compile(r"^G-(\d{3,})$")
-REF = re.compile(r"^(?:В-\d+|G-\d{3,})$")
 NOT_NAMED = "не названо — спросить владельца"
 SHORT_QUOTE = 15       # слово владельца короче — ответ на вопрос CEO: без вопроса суть не проверить
 QUESTION = "Вопрос CEO: "
@@ -99,7 +97,7 @@ def ref_exists(root: Path, ref: str) -> bool:
 def _refuse_role() -> str:
     role = P.caller_role()  # RPV_ROLE, а стёрта — по дереву процессов: запуск роли CEO не притворится
     return (f"реестр владельца пишет только CEO; запуск роли {role} — только читает (`show`, `list`). Нужна запись — "
-            f"`tickets.py result <ID> ask-owner`") if role in DISPATCH_ROLES else ""
+            f"`tickets.py result <ID> ask-owner`") if role in P.ROLES else ""
 
 
 def _read_quote(a) -> None:

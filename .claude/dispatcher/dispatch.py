@@ -202,7 +202,6 @@ def _expected_model_family(info: dict) -> str:
 CLAUDE_HAIKU_MODEL = "claude-haiku-5-5"
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
-ROLE_KEYS = P.ROLES  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
 # Сессия: каждое пробуждение роли — новая (бабочка); память между запусками — блокнот роли и лог тикета.
 # --resume — только повтор после таймаута в том же запуске (TK-056 п.3′). Предел запусков на роль — _role_busy
@@ -753,10 +752,10 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
     ревьюера не будим; запись dispatcher с остатком, статус done («не сделано»). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
     не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
-    if tkt.status not in ("done", "in_review") or tkt.reviewer not in ROLE_KEYS:
+    if tkt.status not in ("done", "in_review") or tkt.reviewer not in P.ROLES:
         return tkt
     returns = _review_returns(state, tkt.id)
-    if returns < MAX_REVIEW_RETURNS or tkt.next_role in ROLE_KEYS or tkt.next_role == "ceo":
+    if returns < MAX_REVIEW_RETURNS or tkt.next_role in P.ROLES or tkt.next_role == "ceo":
         return tkt
     last_author = tkt.log[-1].author if tkt.log else ""
     if not T.author_is(last_author, tkt.owner):
@@ -888,7 +887,7 @@ def _review_pending(tkt: T.Ticket, state: dict = None) -> bool:
     """done при заданном reviewer, но последняя запись лога не от ревьюера (и не dispatcher) — правило (г)
     ещё запустит ревью: задача не закончена. На пределе возвратов (MAX_REVIEW_RETURNS) ревьюера уже не будят —
     ревью не «ожидается», решает CEO."""
-    if tkt.status != "done" or tkt.reviewer not in ROLE_KEYS or closed_without_review(tkt):
+    if tkt.status != "done" or tkt.reviewer not in P.ROLES or closed_without_review(tkt):
         return False
     if state is not None and _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
         return False
@@ -1029,25 +1028,25 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
 
     # (0) явная передача: `next: <роль>` — один запуск этой роли, поле очищается при запуске (tick)
     nxt = tkt.next_role
-    if nxt in ROLE_KEYS:
+    if nxt in P.ROLES:
         return Decision(role=nxt, reason="next", header_updates={"next": ""})
 
     status = tkt.status
     owner = tkt.owner
 
     # (а) todo → owner (роль-владелец тикета)
-    if status == "todo" and owner in ROLE_KEYS:
+    if status == "todo" and owner in P.ROLES:
         return Decision(role=owner, reason="todo")
 
     # (а') in_progress без активного запуска → владелец, чтобы продолжить многошаговую задачу (судья
     # 27.09, п.2 «обязательно»: раньше такой тикет замирал после первой сессии — устав ролей обещает
     # продолжение другой сессией, а диспетчер никого не будил). Троттлинг — MIN_GAP_S/MAX_RUNS_PER_TICKET_HOUR
     # в tick(), как у любого решения; уходит через явную смену status (done/waiting/blocked/…).
-    if status == "in_progress" and owner in ROLE_KEYS:
+    if status == "in_progress" and owner in P.ROLES:
         return Decision(role=owner, reason="in_progress-resume")
 
     # (в) waiting и условие wait_for выполнено → owner
-    if status == "waiting" and owner in ROLE_KEYS:
+    if status == "waiting" and owner in P.ROLES:
         if check_wait_for(tkt.header.get("wait_for", "")):
             parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
             if parsed and parsed[0] == "merged" and _ceo_order_after_accept(tkt, parsed[2]):
@@ -1061,7 +1060,7 @@ def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
     # status ПОСЛЕ append_log, и (г) будило ревьюера повторно за его же вердикт (судья 27.09, п.3 «обязательно»).
     # in_review (аудит 03.10): ревьюер упал/убит без записи — тикет не висит вечно; повторы режут MAX_IDLE_RUNS и
     # MAX_SAME_STATUS_RUNS.
-    if status in ("done", "in_review") and tkt.reviewer in ROLE_KEYS:
+    if status in ("done", "in_review") and tkt.reviewer in P.ROLES:
         reviewer = tkt.reviewer
         last_author = tkt.log[-1].author if tkt.log else ""
         if closed_without_review(tkt):
@@ -1312,18 +1311,12 @@ def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
         now_start = _proc_start(pid)
         if now_start is not None:
             return now_start == start and _pid_alive(pid, "")
-        return _pid_alive_name(pid, "")  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
-    return _pid_alive_name(pid, expect_name)
+        return _pid_state(pid, "") is not False  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
+    return _pid_state(pid, expect_name) is not False  # «неизвестно» (таймаут tasklist) = жив: В-209 Д-1
 
 
 PID_CHECK_TRIES = 3          # tasklist на нагруженной машине отвечает позже 5 с — повтор, не «мёртв»
 PID_CHECK_TIMEOUT_S = 10
-
-
-def _pid_alive_name(pid, expect_name: str = None) -> bool:
-    """Жив ли pid. Сбой проверки (таймаут tasklist) — не «мёртв»: см. `_pid_state`; здесь «неизвестно» = жив, чтобы
-    нагруженная машина не объявляла живую службу мёртвой (В-209 Д-1)."""
-    return _pid_state(pid, expect_name) is not False
 
 
 def _pid_state(pid, expect_name: str = None):
@@ -1569,8 +1562,9 @@ def role_mcp_args(run_stem: str) -> list[str]:
     (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
     `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
     mode = P.setting("role_mcp", "all")
-    if isinstance(mode, str) and mode.strip().lower() in ("all", "none"):
-        return [] if mode.strip().lower() == "all" else ["--strict-mcp-config"]
+    word = mode.strip().lower() if isinstance(mode, str) else ""
+    if word in ("all", "none"):
+        return [] if word == "all" else ["--strict-mcp-config"]
     names = [str(n).strip() for n in (mode if isinstance(mode, list) else str(mode).split(",")) if str(n).strip()]
     servers = _read_mcp_servers(Path.home() / ".claude.json", str(PROJECT_ROOT))
     servers.update(_read_mcp_servers(PROJECT_ROOT / ".mcp.json"))
@@ -1881,7 +1875,7 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
         # запуск ревьюера на ревью: вернул владельцу (todo/in_progress либо `--next` другой роли) — счётчик +1, иначе
         # (принял, заблокировал, передал CEO) ревью состоялось — серия кончилась
         returns = state.setdefault("review_returns", {})
-        if tkt.status in ("todo", "in_progress") or (tkt.next_role in ROLE_KEYS and tkt.next_role != role):
+        if tkt.status in ("todo", "in_progress") or (tkt.next_role in P.ROLES and tkt.next_role != role):
             returns[tid] = returns.get(tid, 0) + 1
         else:
             returns.pop(tid, None)
@@ -2235,7 +2229,7 @@ def _stop_requests() -> list:
 def _reset_loop_state(state: dict, tid: str) -> None:
     """Остановка CEO — не провал и новая постановка: счётчики холостых и «запись есть, статус тот же» запусков, повторов,
     ротации (сессия и контекст ЭТОГО тикета у всех ролей) и часовой лимит запусков по тикету — с нуля."""
-    for role in ROLE_KEYS:
+    for role in P.ROLES:
         key = f"{tid}::{role}"
         state.setdefault("idle_runs", {}).pop(key, None)
         _reset_same_status(state, key)
@@ -2264,7 +2258,7 @@ def _apply_stop(path: Path, tid: str, req: dict, info, state: dict, now) -> None
         at = now
     T.append_log(path, "ceo", str(req.get("text") or "").strip() or "(постановка без текста)", now=at)
     nxt = req.get("next")
-    if nxt in ROLE_KEYS:
+    if nxt in P.ROLES:
         T.write_header_updates(path, {"status": "todo", "next": nxt}, now=now)
     else:
         T.write_header_updates(path, {"status": "stopped", "next": ""}, now=now)
@@ -2434,7 +2428,7 @@ LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее ча�
 
 
 def _waits_without_condition(tkt: T.Ticket, now) -> bool:
-    if tkt.status != "waiting" or tkt.owner not in ROLE_KEYS or tkt.next_role:
+    if tkt.status != "waiting" or tkt.owner not in P.ROLES or tkt.next_role:
         return False
     if (tkt.header.get("wait_for") or "").strip():
         return False
@@ -2512,7 +2506,7 @@ def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | N
         if T.parse_wait_for(spec) is None:
             return f"wait_for не понят ({spec[:80]})"
         return None
-    if tkt.reviewer in ROLE_KEYS and _review_returns(state or {}, tkt.id) < MAX_REVIEW_RETURNS:  # предел — вопрос CEO
+    if tkt.reviewer in P.ROLES and _review_returns(state or {}, tkt.id) < MAX_REVIEW_RETURNS:  # предел — вопрос CEO
         return "in_review: последняя запись — ревьюера, статус не сменён, next не задан"
     return None
 
@@ -2528,8 +2522,8 @@ def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ti
     if sig.get(tkt.id) != key:
         sig[tkt.id] = key
         append_ceo_inbox(tkt.id, "нет-хода", f"{reason} дольше {int(INVARIANT_GRACE_S // 60)} мин — "
-                         + (f"владелец {tkt.owner} разбужен" if tkt.owner in ROLE_KEYS else "владельца-роли нет, нужен CEO"), now)
-    if tkt.owner not in ROLE_KEYS:
+                         + (f"владелец {tkt.owner} разбужен" if tkt.owner in P.ROLES else "владельца-роли нет, нужен CEO"), now)
+    if tkt.owner not in P.ROLES:
         return tkt
     T.write_header_updates(path, {"status": "in_progress"}, now=now)
     T.append_log(path, "dispatcher", f"инвариант «у открытого тикета есть ход»: {reason} — владелец разбужен "
@@ -2567,6 +2561,14 @@ STALLED = []  # заголовки тикетов, стоящих в этом т
 
 def _stall_title(tkt: T.Ticket) -> str:
     return " ".join((tkt.header.get("title") or tkt.id).split())[:70]
+
+
+def _guarded(label: str, fn, *args) -> None:
+    """Побочная работа тика (тревога, отчёт, Надзиратель, вопрос владельцу) не должна ронять тик."""
+    try:
+        fn(*args)
+    except Exception as e:
+        print(f"[dispatch] {label}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
 
 def _stall_alarm(state: dict, now, stalled: list) -> None:
@@ -2787,25 +2789,13 @@ def tick(now=None) -> int:
     idle_now = not RUNNING and not launched and not paused
     if idle_now:  # готовая работа не взята, и никто не работает — стоит
         STALLED.extend(_stall_title(t) for p_, t, _ in candidates if t.id not in RUNNING and p_.stem not in RUNNING)
-    try:
-        _stall_alarm(state, now, STALLED)
-    except Exception as e:  # тревога не должна ронять тик
-        print(f"[dispatch] тревога: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    _guarded("тревога", _stall_alarm, state, now, STALLED)
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
-    try:
-        _daily_report(state, now)
-    except Exception as e:  # отчёт не должен ронять тик
-        print(f"[dispatch] отчёт: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _overseer(state, now)
-    except Exception as e:  # Надзиратель не должен ронять тик
-        print(f"[dispatch] надзиратель: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _owner_questions(state, now)
-    except Exception as e:  # вопрос владельцу не должен ронять тик
-        print(f"[dispatch] вопрос владельцу: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    _guarded("отчёт", _daily_report, state, now)
+    _guarded("надзиратель", _overseer, state, now)
+    _guarded("вопрос владельцу", _owner_questions, state, now)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
     return launched

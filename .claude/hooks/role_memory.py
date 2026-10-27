@@ -79,10 +79,11 @@ def load_state(role=None):
 
 def save_state(state, role=None):
     os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = state_path(role) + ".tmp"
+    path = state_path(role)
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(state, fh, ensure_ascii=False)
-    os.replace(tmp, state_path(role))
+    os.replace(tmp, path)
 
 
 def stamp(iso):
