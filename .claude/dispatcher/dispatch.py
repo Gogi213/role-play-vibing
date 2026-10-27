@@ -491,25 +491,11 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     store = _resume_store(state, tid, role)
     sid = store.get("session_id")
     state.get("on_met_chain", {}).pop(tid, None)  # запуск роли обрывает цепочку on_met
-    if state.get("stopped_runs", {}).pop(tid, None):
-        # прошлый запуск этого тикета оборван CEO (`tickets.py stop`): сессия НОВАЯ (без --resume), в промпте — пометка
+    stopped = bool(state.get("stopped_runs", {}).pop(tid, None))
+    rotated = bool(sid and not attempt and not stopped)
+    if stopped or rotated:
         sid = None
-        extra_note = " ".join(x for x in (extra_note, STOP_NOTE) if x)
-    if sid and not attempt:
-        # каждое пробуждение — новая сессия; --resume только у повтора после таймаута (attempt > 0)
-        sid = None
-        rotate_note = (f"Начинаем новую сессию: прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
-                       f"docs/research/reviews/ по нужной задаче.")
-        extra_note = " ".join(x for x in (extra_note, rotate_note) if x)
-
-    if reason == "next":
-        next_note = ("Запуск по явной передаче (`--next`): прочитай последнюю запись лога, сделай "
-                     "запрошенное и запиши итог.")
-        extra_note = " ".join(x for x in (extra_note, next_note) if x)
-    if reason == "ceo-order-after-accept":
-        order_note = ("PR влит, но после приёмки Судьи в логе есть заказ CEO: ответь на него записью — выполнен (чем, "
-                      "коммит/PR) или нет (что осталось); не закрывай тикет молча.")
-        extra_note = " ".join(x for x in (extra_note, order_note) if x)
+    extra_note = RA.launch_notes(extra_note, role, reason, stopped, rotated, STOP_NOTE)
     prompt = build_prompt(role, tid, extra_note)
     try:
         launch_tkt = T.read_ticket(ticket_path)
@@ -537,18 +523,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         sid = str(uuid.uuid4())  # id известен заранее: после таймаута повтор идёт --resume этой же сессии (TK-056 п.3′)
         cmd += ["--session-id", sid]
 
-    env = dict(os.environ)
-    # Судья 27.09, п.4 «обязательно»: без этого дочерний claude наследует CLAUDE_CODE_HOST_SESSION_ID
-    # сессии CEO (диспетчер сам запущен из неё) — role_context.py/role_memory.py принимают роль за CEO
-    # (тревоги/inbox/«молчание» ломаются на все роли). RPV_ROLE сама по себе не спасает: find_title()
-    # срабатывает раньше при непустом host_id, если сама переменная не снята.
-    for _k in list(env):
-        if "HOST_SESSION" in _k.upper():
-            env.pop(_k, None)
-    # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету
-    env["RPV_ROLE"] = role
-    env["RPV_TICKET"] = tid
-    env["RPV_PROJECT"] = str(CFG.PROJECT_ROOT)  # tickets.py роли берёт проект отсюда (и из cwd запуска)
+    env = RA.role_env(role, tid)
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
@@ -1127,19 +1102,9 @@ def sweep_closed_worktrees() -> None:
         print(f"[dispatch] worktree sweep: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def tick(now=None) -> int:
-    now = now or datetime.now().astimezone()
-    state = load_state()
-    recover_active_runs(state, now)  # диспетчер мог перезапуститься — живые/умершие прогоны из state.json
-    process_stop_requests(state, now)  # `tickets.py stop` (CEO): снять запущенную роль до разбора завершённых — не провал
-    _poll_running(state, now)
-    baseline_done_notified(state)  # v2: историю `done` CEO не пересказываем (один раз, ключ в state.json)
-    save_state(state)
-
-    sweep_closed_worktrees()
-    unblock_limit_victims(now)
-    paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
-    candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
+def _collect_candidates(state: dict, now) -> tuple:
+    """Обход тикетов: сигналы CEO, ожидания, решение «кого будить»; (кандидаты [(путь, тикет, решение)], ждёт без условия)."""
+    candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — в _launch_candidates
     STALLED.clear()
     waiting_nocond = False  # TK-076 п.4: роль ждёт без условия (ни wait_for, ни next) дольше IDLE_GRACE_S
     for path in T.list_tickets(CFG.TICKETS_DIR):
@@ -1197,7 +1162,11 @@ def tick(now=None) -> int:
         except Exception as e:
             print(f"[dispatch] тикет {path.stem}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             notify_parse_error(path.stem, f"сбой тика: {type(e).__name__}: {e}", state, now)
+    return candidates, waiting_nocond
 
+
+def _launch_candidates(candidates: list, state: dict, now, paused) -> tuple:
+    """Запуск кандидатов по очереди приоритета с пределами (параллельность, роль, часовой троттлинг); (запущено, придержано)."""
     launched = 0
     throttled = 0
     for path, tkt, decision in sorted(candidates, key=lambda c: _candidate_sort_key(state, c[1], c[2])):
@@ -1215,6 +1184,23 @@ def tick(now=None) -> int:
             _apply_header_updates(path, decision.header_updates, now)
         launch_run(path, decision.role, state, now, reason=decision.reason)
         launched += 1
+    return launched, throttled
+
+
+def tick(now=None) -> int:
+    now = now or datetime.now().astimezone()
+    state = load_state()
+    recover_active_runs(state, now)  # диспетчер мог перезапуститься — живые/умершие прогоны из state.json
+    process_stop_requests(state, now)  # `tickets.py stop` (CEO): снять запущенную роль до разбора завершённых — не провал
+    _poll_running(state, now)
+    baseline_done_notified(state)  # v2: историю `done` CEO не пересказываем (один раз, ключ в state.json)
+    save_state(state)
+
+    sweep_closed_worktrees()
+    unblock_limit_victims(now)
+    paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
+    candidates, waiting_nocond = _collect_candidates(state, now)
+    launched, throttled = _launch_candidates(candidates, state, now, paused)
 
     idle_now = not RUNNING and not launched and not paused
     if idle_now:  # готовая работа не взята, и никто не работает — стоит

@@ -122,3 +122,36 @@ def build_prompt(role: str, tid: str, run_timeout_s: float, extra_note: str = No
     if extra_note:
         prompt += " " + extra_note
     return prompt
+
+
+def launch_notes(extra_note, role: str, reason: str, stopped: bool, rotated: bool, stop_note: str):
+    """Приписки к промпту запуска (по порядку): заказ диспетчера, остановка CEO, новая сессия, `--next`, заказ CEO после приёмки."""
+    notes = [extra_note]
+    if stopped:  # прошлый запуск оборван CEO (`tickets.py stop`): сессия новая, в промпте — пометка
+        notes.append(stop_note)
+    if rotated:  # каждое пробуждение — новая сессия; --resume только у повтора после таймаута (attempt > 0)
+        notes.append(f"Начинаем новую сессию: прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
+                     f"docs/research/reviews/ по нужной задаче.")
+    if reason == "next":
+        notes.append("Запуск по явной передаче (`--next`): прочитай последнюю запись лога, сделай "
+                     "запрошенное и запиши итог.")
+    if reason == "ceo-order-after-accept":
+        notes.append("PR влит, но после приёмки Судьи в логе есть заказ CEO: ответь на него записью — выполнен (чем, "
+                     "коммит/PR) или нет (что осталось); не закрывай тикет молча.")
+    return " ".join(x for x in notes if x)
+
+
+def role_env(role: str, tid: str) -> dict:
+    """Окружение дочернего claude: без *HOST_SESSION* (иначе role_context.py/role_memory.py принимают роль за CEO),
+    RPV_ROLE/RPV_TICKET/RPV_PROJECT для хуков и tickets.py роли."""
+    env = dict(os.environ)
+    # Судья 27.09, п.4 «обязательно»: дочерний claude иначе наследует CLAUDE_CODE_HOST_SESSION_ID сессии CEO (диспетчер
+    # запущен из неё) — тревоги/inbox/«молчание» ломаются на все роли. RPV_ROLE сама не спасает: find_title()
+    # срабатывает раньше при непустом host_id, если переменная не снята.
+    for k in list(env):
+        if "HOST_SESSION" in k.upper():
+            env.pop(k, None)
+    env["RPV_ROLE"] = role
+    env["RPV_TICKET"] = tid
+    env["RPV_PROJECT"] = str(CFG.PROJECT_ROOT)
+    return env
