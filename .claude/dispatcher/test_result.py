@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
+import io
 import os
 import shutil
 import sys
@@ -531,6 +533,51 @@ class ResultTests(unittest.TestCase):
         (self.base / "review.md").write_text("x", encoding="utf-8")
         self.res("engineer", "done", path="out.md", why="не сделано: всё")
         self.assertEqual(self.res("judge", "accept", path="review.md", tail=None), 0, "до V2 (без реестра) ворот нет")
+
+    def test_tail_negation_is_not_a_tail(self):
+        """alpha TK-264 (PR #106): «… Хвостов нет» + `--tail -` отказывало корнем `хвост`; законченное отрицание — не хвост."""
+        for text in ("Всё сделано, тесты зелёные. Хвостов нет", "хвоста нет, всё сделано", "Сделано без хвостов.",
+                     "Сделано, ничего не осталось", "Сделано, осталось 0"):
+            with self.subTest(text=text):
+                T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
+                self._v2_done(text)
+                self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-", tail="-"), 0)
+                self.assertIn("хвосты: нет", self.tkt().log[-1].text)
+
+    def test_tail_with_colon_or_count_still_refused(self):
+        for text in ("Готово. Хвост: нет метрик у 431 строки", "Не сделано: регистрация в settings.json",
+                     "Готово, осталось 3 шага", "Хвост нет метрик у 431 строки", "Не осталось времени доделать экспорт"):
+            with self.subTest(text=text):
+                T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
+                self._v2_done(text)
+                self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail="-")
+
+    # --- непустой next не затирается записью Судьи (alpha TK-282, PR #107 П2а)
+    def _judge_comment(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            TK.cmd_comment(type("A", (), dict(id=self.tid, author="judge", text="заметка Судьи", next=None))())
+        return out.getvalue()
+
+    def test_judge_comment_keeps_nonempty_next(self):
+        T.write_header_updates(self.path, {"owner": "researcher"}, now=NOW)
+        with contextlib.redirect_stdout(io.StringIO()):
+            TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="нужна выкладка", next="engineer"))())
+        out = self._judge_comment()
+        self.assertEqual(self.tkt().header.get("next"), "engineer", "заказ CEO не сброшен на владельца тикета")
+        self.assertIn("next оставлен: engineer", out)
+        self.assertNotIn("проставлен автоматически", out)
+
+    def test_judge_comment_sets_owner_when_next_empty(self):
+        T.write_header_updates(self.path, {"owner": "researcher"}, now=NOW)
+        with contextlib.redirect_stdout(io.StringIO()):
+            TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="нужна выкладка", next="engineer"))())
+            TK.cmd_comment(type("A", (), dict(id=self.tid, author="engineer", text="сделал", next=None))())
+        T.write_header_updates(self.path, {"next": ""}, now=NOW, stamp_updated=False)  # диспетчер погасил next при запуске
+        out = self._judge_comment()
+        self.assertEqual(self.tkt().header.get("next"), "researcher")
+        self.assertIn("проставлен автоматически", out)
+        self.assertNotIn("next оставлен", out)
 
     # --- живая проверка (разбор alpha 14–16.10, П1): пункт [вживую] — приёмка только с файлом «что увидит владелец»
     LIVE_TEXT = "Открыл /runs на calc (10 клеток R1): таблица за 1,8 с, у Г-39 и Г-35 статус «9/9», не жёлтый."
