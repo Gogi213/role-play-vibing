@@ -1674,6 +1674,22 @@ class ProtectedPaths(unittest.TestCase):
         self.assertIsNotNone(dg.check_tool(ev("правило", "другое правило")))
         self.assertIsNotNone(dg.check_tool(ev("| a |\nправило", "| a |\nдругое")))
 
+    def test_ceo_decide_only_through_secretary(self):
+        """TK-007 п.3 (В-7): `registry.py decide` из сессии CEO отказан; тот же вызов помощника `secretary` — пропущен."""
+        self.as_role(None)
+        cmd = ('python "C:/plugin/.claude/dispatcher/registry.py" --project "C:/proj" decide --at "2026-10-27 05:00" '
+               '--gist "суть" --quote - <<\'EOF\'\nдавай\nEOF')
+        ev = lambda tool="Bash", command=cmd, **extra: {"tool_name": tool, "cwd": self.d, "tool_input": {"command": command}, **extra}
+        self.assertIn("secretary", dg.check_tool(ev()) or "")                                      # CEO сам
+        self.assertIn("secretary", dg.check_tool(ev("PowerShell")) or "")
+        self.assertIn("secretary", dg.check_tool(ev(agent_type="general-purpose")) or "")           # другой помощник
+        self.assertIn("secretary", dg.check_tool(ev(command="python registry.py decide --quote x --gist y")) or "")
+        for agent in ("secretary", "role-play-vibing:secretary"):
+            self.assertIsNone(dg.check_tool(ev(agent_id="a1", agent_type=agent)), agent)
+        for command in ("python registry.py list", 'python registry.py show В-3', "git log --grep decide",
+                        'python registry.py goal --title t --quote "x y"'):                         # чтение и прочие подкоманды — не decide
+            self.assertIsNone(dg.check_tool(ev(command=command)), command)
+
     def test_config_log_is_written_by_command_only(self):
         for tool in ("Write", "Edit"):
             self.assertIn("config-log.json", self.tool(tool, ".claude/dispatcher/config-log.json"), tool)

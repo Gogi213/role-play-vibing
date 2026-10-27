@@ -2,7 +2,7 @@
 """Реестр владельца: решения (В-N) и цели (G-NNN). Пишет только CEO — сам или помощником `secretary`, словами
 владельца дословно; запуски ролей (`RPV_ROLE`) только читают: команда им отказывает, страж закрывает файлы. Только stdlib.
 
-    registry.py [--project <путь>] decide --quote "<дословно>" --gist "<одна строка>" [--replaces В-N] [--at <время>]
+    registry.py [--project <путь>] decide --quote "<дословно>" --gist "<одна строка>" [--question "<вопрос CEO>"] [--replaces В-N] [--at <время>]
     registry.py decide --quote - --gist "..." <<'EOF'      # цитата с кавычками и переносами — из stdin как есть
     <слова владельца>
     EOF
@@ -12,6 +12,9 @@
     registry.py repeat В-N --quote -                 # владелец повторил уже принятое — отметка в блоке, нового В-N нет
     registry.py show В-N|G-NNN
     registry.py list [--open]
+
+Слово владельца короче 15 знаков («да», «1 - да») — ответ на вопрос CEO: без `--question` (вопрос дословно) решение не пишется,
+суть короткого ответа не проверить. Из сессии CEO `decide` пускает только помощник `secretary` (страж, TK-007).
 
 Файлы: `<проект>/.claude/decisions.md` (блок на решение, новое — в конец) и `<проект>/.claude/goals/G-NNN.md` (шапка
 `id/status/set/accepted` + цитата, критерии, бюджет). Номер ставит команда: следующий после наибольшего в реестре.
@@ -34,6 +37,8 @@ DECISION = re.compile(r"^## В-(\d+) · (.+)$", re.M)
 GOAL_ID = re.compile(r"^G-(\d{3,})$")
 REF = re.compile(r"^(?:В-\d+|G-\d{3,})$")
 NOT_NAMED = "не названо — спросить владельца"
+SHORT_QUOTE = 15       # слово владельца короче — ответ на вопрос CEO: без вопроса суть не проверить
+QUESTION = "Вопрос CEO: "
 
 
 def decisions_file(root: Path) -> Path:
@@ -119,8 +124,19 @@ def _need_quote(quote: str) -> str:
     return "" if len(" ".join((quote or "").split())) >= 2 else "нужна --quote — слова владельца дословно"
 
 
+def _need_question(quote: str, question: str | None) -> str:
+    short = len(" ".join((quote or "").split())) < SHORT_QUOTE
+    return (f"слово владельца короче {SHORT_QUOTE} знаков — это ответ на вопрос CEO; без вопроса суть не проверить. "
+            "Добавь --question \"<вопрос CEO владельцу дословно>\"") if short and not (question or "").strip() else ""
+
+
+def question_of(block: str) -> str:
+    """Вопрос CEO, на который владелец ответил (строка `Вопрос CEO: …` блока решения); нет — пусто."""
+    return next((ln[len(QUESTION):].strip() for ln in block.splitlines() if ln.startswith(QUESTION)), "")
+
+
 def cmd_decide(a, root: Path) -> int:
-    if err := _refuse_role() or _need_quote(a.quote):
+    if err := _refuse_role() or _need_quote(a.quote) or _need_question(a.quote, a.question):
         print(err, file=sys.stderr)
         return 1
     have = decisions(root)
@@ -131,8 +147,9 @@ def cmd_decide(a, root: Path) -> int:
     f = decisions_file(root)
     f.parent.mkdir(parents=True, exist_ok=True)
     prev = f.read_text(encoding="utf-8") if f.exists() else ""
-    block = [f"## В-{n} · {_now(a.at)}", *_quote_block(a.quote), f"Суть: {' '.join(a.gist.split())}",
-             f"Заменяет: {a.replaces or '—'}"]
+    question = " ".join((a.question or "").split())
+    block = [f"## В-{n} · {_now(a.at)}", *_quote_block(a.quote), *([QUESTION + question] if question else []),
+             f"Суть: {' '.join(a.gist.split())}", f"Заменяет: {a.replaces or '—'}"]
     lead = ("# Решения владельца\n\n" if not prev.strip() else
             "" if prev.endswith("\n\n") else "\n" if prev.endswith("\n") else "\n\n")
     with f.open("a", encoding="utf-8") as w:
@@ -259,6 +276,7 @@ def main(argv=None) -> int:
     d = sub.add_parser("decide", help="решение владельца → В-N в конец .claude/decisions.md")
     d.add_argument("--quote", required=True, help="слова владельца дословно; «-» — из stdin")
     d.add_argument("--gist", required=True, help="суть одной строкой")
+    d.add_argument("--question", default=None, help=f"вопрос CEO дословно, если слово владельца — ответ на него (обязателен при цитате короче {SHORT_QUOTE} знаков)")
     d.add_argument("--replaces", default=None, help="В-N, которое это решение меняет или отменяет")
     d.add_argument("--at", default=None, help="ГГГГ-ММ-ДД ЧЧ:ММ (по умолчанию сейчас)")
     d.set_defaults(func=cmd_decide)

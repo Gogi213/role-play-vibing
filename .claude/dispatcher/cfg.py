@@ -123,11 +123,12 @@ def set_value(root: Path, key: str, raw: str, why: str, ref: str = "", now=None)
         return None, f"значение {raw!r} для {key} не подходит: нужно {words}"
     if not (why or "").strip():
         return None, "нужно --why «зачем»: Судья сверяет его со словом владельца"
-    quote = ""
+    quote = question = ""
     if ref:
         if not re.fullmatch(r"В-\d+", ref) or not registry_mod.ref_exists(root, ref):
             return None, f"--ref {ref}: такого решения нет в реестре (`registry.py list`)"
         quote = quote_of(root, ref)
+        question = registry_mod.question_of(registry_mod.decisions(root).get(ref, ""))
     cur, err = _read_rpv(root)
     if err:
         return None, err
@@ -142,7 +143,7 @@ def set_value(root: Path, key: str, raw: str, why: str, ref: str = "", now=None)
     cur[key] = value
     _atomic(rpv_path(root), cur)
     entry = {"id": f"CFG-{len(log) + 1}", "at": now.isoformat(timespec="seconds"), "key": key, "old": old, "new": value,
-             "why": " ".join(why.split()), "ref": ref, "quote": quote, "state": "pending",
+             "why": " ".join(why.split()), "ref": ref, "quote": quote, "question": question, "state": "pending",
              "deadline": (now + timedelta(seconds=ROLLBACK_AFTER_S)).isoformat(timespec="seconds"), "ticket": ""}
     log.append(entry)
     _atomic(log_path(root), log)
@@ -157,11 +158,16 @@ def attach_ticket(root: Path, entry_id: str, ticket_id: str) -> None:
     _atomic(log_path(root), log)
 
 
+def quote_text(e: dict) -> str:
+    """«Цитата»; слово владельца было ответом — и вопрос CEO, на который он ответил."""
+    return f"«{e['quote'] or '—'}»" + (f" (ответ на вопрос CEO: «{e['question']}»)" if e.get("question") else "")
+
+
 def judge_ticket_text(e: dict) -> str:
     old = "не было" if e["old"] is ABSENT else json.dumps(e["old"], ensure_ascii=False)
     return (f"Проверка правки настроек {e['id']} (CEO, {e['at']}): {e['key']}: {old} → "
             f"{json.dumps(e['new'], ensure_ascii=False)}. Зачем (CEO): {e['why']}. "
-            f"Слово владельца {e['ref'] or '(не названо)'}: «{e['quote'] or '—'}». Сверь суть правки со словом владельца: "
+            f"Слово владельца {e['ref'] or '(не названо)'}: {quote_text(e)}. Сверь суть правки со словом владельца: "
             f"правка не добавляет того, чего в цитате нет. Принять — `tickets.py config accept {e['id']}`; не принять — "
             f"ничего не делать: к {e['deadline']} значение вернётся само.")
 
@@ -224,7 +230,7 @@ def report_lines(root: Path, since, until) -> list:
         old = "не было" if e.get("old") is ABSENT else json.dumps(e["old"], ensure_ascii=False)
         state = {"accepted": "принято Судьёй", "rolled_back": "откатилось: Судья не принял",
                  "pending": "ждёт Судью", "superseded": "заменено новой правкой"}.get(e.get("state"), str(e.get("state")))
-        ref = f" {e['ref']}: «{e['quote']}»" if e.get("ref") else " слово владельца не названо"
+        ref = f" {e['ref']}: {quote_text(e)}" if e.get("ref") else " слово владельца не названо"
         lines.append(f"• {at:%d.%m %H:%M} {e['key']}: {old} → {json.dumps(e['new'], ensure_ascii=False)} "
                      f"({e['why']};{ref}) — {state}")
     return lines

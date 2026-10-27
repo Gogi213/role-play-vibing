@@ -171,6 +171,9 @@ REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): тол�
 REASON_BRANCH_DELETE = ("Удаление веток на удалённом ({t}) без слова владельца закрыто и для CEO: {why}. Слово владельца дословно — "
                         "`registry.py decide` (его пишет `secretary`), затем `tickets.py allow-delete <ветка>… --ref В-N`: согласие на "
                         "названные ветки действует час; main/master удалять нельзя. Запуску роли — только через CEO.")
+REASON_DECIDE = ("Решение владельца в реестр (`registry.py decide`) из сессии CEO пишет только помощник `secretary` (слово владельца "
+                 "дословно, суть — его): CEO суть своими словами не пишет (В-7: без самодеятельности). Передай секретарю слова "
+                 "владельца и команду; слово короче 15 знаков («да») — с вопросом CEO дословно: `--question \"...\"`.")
 REASON_CONFIG_LOG = ("Журнал правок настроек config-log.json пишет только команда `tickets.py config` (ни роль, ни CEO руками).")
 REASON_CEO_CONFIG = ("Настройки плагина и уставы ролей ({t}) CEO напрямую не правит (слово владельца В-7: менять можно, но без "
                      "самодеятельности). Настройки — `tickets.py config set <ключ> <значение> --why \"...\"` (закрытый список "
@@ -2208,6 +2211,17 @@ def charter_table_edit(tool, ti):
     return bool(rows) and all(ln.lstrip().startswith("|") for ln in rows)
 
 
+REGISTRY_DECIDE = re.compile(r"""registry\.py["']?(?:\s+--project(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+))?\s+decide\b""")
+
+
+def decide_outside_secretary(tool, ti, data):
+    """`registry.py decide` из сессии CEO (не помощник `secretary`: в событии хука `agent_type`) — суть пишет секретарь по
+    слову владельца, а не CEO своими словами. Запуск роли реестр отказывает сам."""
+    if tool not in SHELL_TOOLS or not REGISTRY_DECIDE.search(str(ti.get("command") or "")):
+        return False
+    return str(data.get("agent_type") or "").rsplit(":", 1)[-1].strip().lower() != "secretary"
+
+
 def owner_record(t, ctx):
     """Цель — слово владельца (V2): `CLAUDE.md` в любом каталоге, реестр решений `.claude/decisions.md`, цели
     `.claude/goals/…` — и реестр ошибок `.claude/errors/…` (CP1: записи пишет только `errors.py`; прямая правка проверки
@@ -2620,6 +2634,8 @@ def check_tool(data, trace=None):
             return _deny(trace, "protected", REASON_CONFIG_LOG)
         if dispatcher_role() is None and charter_table_edit(tool, ti):
             return None
+        if dispatcher_role() is None and decide_outside_secretary(tool, ti, data):
+            return _deny(trace, "protected", REASON_DECIDE)
         if dispatcher_role() and owner_record_write(tool, ti):
             return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors / dispatcher/state.json"))
         if dispatcher_role() and consent_forge(tool, ti):
