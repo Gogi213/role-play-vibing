@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import project as P
+
 KEEP_DAYS = 14
 
 
@@ -13,7 +15,7 @@ def account(state: dict, now: datetime, *, ready_unserved: bool, work_present: b
             limit_paused: bool = False):
     """Учесть интервал с прошлого тика по ЕГО флагам. Возвращает (день, запись дня, нарушено_впервые)."""
     prev = state.get("dt_last")
-    prev_dt = datetime.fromisoformat(prev) if prev else None
+    prev_dt = P.parse_time(prev, strict=True) if prev else None
     day = now.date().isoformat()
     rec = state.setdefault("downtime", {}).setdefault(day, {"idle_s": 0.0, "wait_s": 0.0, "stall_s": 0.0, "throttle_s": 0.0, "limit_s": 0.0,
                                                                  "alerted": False})

@@ -189,7 +189,7 @@ def rollback_due(root: Path, now=None) -> list:
         if e.get("state") != "pending":
             continue
         try:
-            late = datetime.fromisoformat(e["deadline"]).astimezone() <= now
+            late = P.parse_time(e["deadline"], strict=True) <= now
         except (KeyError, ValueError):
             continue
         if not late:
@@ -218,7 +218,7 @@ def report_lines(root: Path, since, until) -> list:
     lines = []
     for e in read_log(root):
         try:
-            at = datetime.fromisoformat(e["at"]).astimezone()
+            at = P.parse_time(e["at"], strict=True)
         except (KeyError, ValueError):
             continue
         if not (since < at <= until):

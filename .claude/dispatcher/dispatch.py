@@ -1429,10 +1429,8 @@ def acquire_instance_lock(pid_file, expect_name: str = "py"):
             return True, ""
         if other and _pid_alive(other, expect_name):
             return False, f"уже запущен (pid {other}, файл {pid_file.name}) — второй экземпляр не нужен, выхожу"
-        tmp = pid_file.with_name(f"{pid_file.name}.{me}.tmp")
         try:
-            tmp.write_text(str(me), encoding="utf-8")
-            os.replace(tmp, pid_file)   # осиротевший/битый замок забираем, свой пишем целиком
+            P.atomic_write_text(pid_file, str(me))   # осиротевший/битый замок забираем, свой пишем целиком
         except OSError as e:
             return False, f"не удалось взять замок {pid_file}: {e}"
         return True, ""
@@ -1686,7 +1684,7 @@ def _transcript_usage_since(session_id, started) -> dict:
         path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
         if path is None:
             return {}
-        t0 = started if isinstance(started, datetime) else datetime.fromisoformat(str(started))
+        t0 = started if isinstance(started, datetime) else P.parse_time(started, strict=True)
         if t0.tzinfo is None:
             t0 = t0.astimezone()
         per = {}
@@ -1696,7 +1694,7 @@ def _transcript_usage_since(session_id, started) -> dict:
                     continue
                 try:
                     row = json.loads(line)
-                    ts = datetime.fromisoformat(str(row["timestamp"]).replace("Z", "+00:00"))
+                    ts = P.parse_time(row["timestamp"], strict=True)
                 except Exception:
                     continue
                 msg = row.get("message") or {}

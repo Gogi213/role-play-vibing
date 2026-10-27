@@ -234,7 +234,7 @@ def similar_recent_ticket(tickets_dir, title: str, now: datetime | None = None) 
     for path in list_tickets(tickets_dir):
         try:
             tkt = read_ticket(path)
-            upd = datetime.fromisoformat(str(tkt.header.get("updated") or ""))
+            upd = P.parse_time(tkt.header.get("updated") or "", strict=True)
         except Exception:
             continue
         if tkt.status in CLOSED_STATUSES or (now - upd).total_seconds() > DUP_WINDOW_S:

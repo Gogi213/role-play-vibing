@@ -232,6 +232,31 @@ class IsoTime(unittest.TestCase):
             src = (here / f"{name}.py").read_bytes().decode("utf-8")
             self.assertNotIn("astimezone().isoformat(timespec", src, name)
 
+    def test_fromisoformat_only_in_project(self):
+        """Разбор ISO-времени диспетчера — `project.parse_time`; своего `fromisoformat` вне project.py нет (как RolesOneTuple)."""
+        here = Path(__file__).resolve().parent
+        for path in sorted(here.glob("*.py")):
+            if path.name.startswith("test_") or path.name == "project.py":
+                continue
+            self.assertNotIn("fromisoformat", path.read_bytes().decode("utf-8"), path.name)
+
+    def test_readers_agree_on_zones(self):
+        """Один разбор у всех: `Z`, смещение и время без пояса (местное) дают те же моменты у героя каждого читателя."""
+        import downtime as DT
+        z, off, naive = "2026-10-27T02:00:00Z", "2026-10-27T06:00:00+04:00", "2026-10-27T02:00:00"
+        want = datetime(2026, 10, 27, 2, 0, 0).timestamp()
+        self.assertEqual(HB.age_of(naive, 0.0), -want)               # без пояса — местное, как у P.parse_time
+        self.assertEqual(HB.age_of(z, 0.0), HB.age_of(off, 0.0))     # Z и +04:00 — один момент
+        self.assertEqual(HB.age_of(z, 0.0), -P.parse_time(z).timestamp())
+        with self.assertRaises(ValueError):
+            HB.age_of("не время", 0.0)
+        now = P.parse_time("2026-10-27T06:30:00+04:00")               # на 30 мин позже отметки «02:00Z»
+        state = {"dt_last": z, "dt_flags": {"ready_unserved": True}}
+        _, rec, _ = DT.account(state, now, ready_unserved=False, work_present=False, waiting_nocond=False, poll_s=1.0)
+        self.assertEqual(rec["idle_s"], 1800.0)
+        with self.assertRaises(ValueError):
+            DT.account({"dt_last": "не время"}, now, ready_unserved=False, work_present=False, waiting_nocond=False, poll_s=1.0)
+
 
 class ConstantsOnce(unittest.TestCase):
     """Флаги создания процесса — в hide.py, версия X.Y.Z — в project.SEMVER; других определений нет."""
@@ -290,7 +315,7 @@ class AtomicJsonOnce(unittest.TestCase):
         here = Path(__file__).resolve().parent
         for name in ("cfg", "overseer", "tickets", "dispatch", "ci_watch", "merge_rule", "lifewatch"):
             src = (here / f"{name}.py").read_bytes().decode("utf-8")
-            self.assertNotIn("os.replace(tmp", src.replace("os.replace(tmp, pid_file)", ""), name)
+            self.assertNotIn("os.replace(tmp", src, name)
             self.assertNotIn("indent=1", src, name)
         self.assertIs(T.atomic_write_text, P.atomic_write_text)
 

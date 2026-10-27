@@ -1,18 +1,19 @@
 """Сердцебиение службы (state.json / watch-heartbeat.json / ci-heartbeat.json): порог «устарело» и возраст — одни на
 supervise, doctor и хук подсказок (TK-010; раньше 600 с у сторожа служб и 240 с у хука — два ответа на один вопрос).
-Модуль без импортов диспетчера: его читает и хук сессии."""
+Из диспетчера импортирует только project (стандартная библиотека): модуль читает и хук сессии."""
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
+
+import project as P
 
 STALE_S = 600.0
 
 
 def age_of(stamp, now: float) -> float:
     """Возраст отметки времени (ISO, `Z` или со смещением) в секундах на момент `now` (epoch); непонятная — ValueError."""
-    return now - datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    return now - P.parse_time(stamp, strict=True).timestamp()
 
 
 def read_age(path: Path, field: str, now: float) -> float | None:
