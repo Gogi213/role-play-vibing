@@ -432,7 +432,7 @@ def _log_line(root: Path, tid: str, eids: list, mark: str = "") -> None:
         d = root / ".claude" / "dispatcher"
         d.mkdir(parents=True, exist_ok=True)
         with (d / "regressions.log").open("a", encoding="utf-8") as f:
-            f.write("\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), tid or "-", ",".join(eids),
+            f.write("\t".join((P.now_iso(), tid or "-", ",".join(eids),
                                *([mark] if mark else []))) + "\n")
     except OSError:
         pass

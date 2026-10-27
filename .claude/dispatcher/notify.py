@@ -16,7 +16,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -39,7 +38,7 @@ def _log(project, line: str, log_dir=None) -> None:
         d = Path(log_dir) if log_dir else Path(project) / ".claude" / "dispatcher"
         d.mkdir(parents=True, exist_ok=True)
         with (d / "notify.log").open("a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')}\t{line}\n")
+            f.write(f"{P.now_iso()}\t{line}\n")
     except OSError:
         pass
 

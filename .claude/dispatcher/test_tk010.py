@@ -201,5 +201,42 @@ class RolesOneTuple(unittest.TestCase):
             self.assertNotIn(literal, path.read_bytes().decode("utf-8"), path.name)
 
 
+class IsoTime(unittest.TestCase):
+    """Отметка времени и разбор ISO — в project.py; пояс для времени без пояса назван у каждого читателя."""
+
+    def test_now_iso_one_format(self):
+        stamp = P.now_iso()
+        self.assertRegex(stamp, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
+        self.assertIs(T.now_iso, P.now_iso)
+        at = datetime(2026, 10, 27, 5, 0, 0).astimezone()
+        self.assertEqual(P.now_iso(at), at.isoformat(timespec="seconds"))
+
+    def test_naive_zone_is_explicit(self):
+        naive = "2026-10-27T05:00:00"
+        self.assertEqual(T.parse_dt(naive).utcoffset(), timedelta(0))                 # записи тикета: UTC
+        self.assertEqual(OV.parse_ts(naive).utcoffset(), OV.DEFAULT_TZ.utcoffset(None))  # Надзиратель: GMT+4
+        local = datetime(2026, 10, 27, 5, 0, 0).astimezone().utcoffset()
+        self.assertEqual(T.parse_at(naive).utcoffset(), local)                         # at:, отчёт: местное
+        self.assertEqual(RP._ts(naive).utcoffset(), local)
+
+    def test_zone_given_and_garbage(self):
+        for text in ("2026-10-27T05:00:00+03:00", "2026-10-27T02:00:00Z"):
+            want = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            for parse in (T.parse_dt, OV.parse_ts, T.parse_at, RP._ts):
+                self.assertEqual(parse(text), want, (parse, text))
+        self.assertIsNone(T.parse_at("не время"))
+        self.assertIsNone(RP._ts(None))
+        with self.assertRaises(ValueError):
+            T.parse_dt("не время")
+        with self.assertRaises(ValueError):
+            OV.parse_ts("не время")
+
+    def test_no_private_copies(self):
+        here = Path(__file__).resolve().parent
+        for name in ("ci_watch", "errors", "notify", "start", "supervise", "ticket"):
+            src = (here / f"{name}.py").read_bytes().decode("utf-8")
+            self.assertNotIn("astimezone().isoformat(timespec", src, name)
+
+
 if __name__ == "__main__":
     unittest.main()

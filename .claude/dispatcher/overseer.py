@@ -79,8 +79,7 @@ def claude_bin() -> str:
 # ------------------------------------------------------------------------------------------------------------
 
 def parse_ts(s: str) -> datetime:
-    t = datetime.fromisoformat(s.replace("Z", "+00:00"))
-    return t if t.tzinfo else t.replace(tzinfo=DEFAULT_TZ)
+    return T.parse_time(s, DEFAULT_TZ, strict=True)
 
 
 def norm_ws(s: str) -> str:

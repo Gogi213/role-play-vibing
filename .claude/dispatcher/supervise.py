@@ -15,7 +15,6 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,7 +46,7 @@ def decide(age: float | None, alive: bool | None, stale_s: float = STALE_S) -> s
 
 def _log(state_dir: Path, msg: str) -> None:
     with (state_dir / "supervise.log").open("a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')} {msg}\n")
+        f.write(f"{P.now_iso()} {msg}\n")
 
 
 # роль и тикет запуска — не свойство проекта: в снимок/настройки не попадают (TK-090 г)

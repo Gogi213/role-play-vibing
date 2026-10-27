@@ -79,11 +79,7 @@ _CI_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
 
 def parse_at(text: str):
     """Время из `at:<ISO>` → aware datetime; без пояса — местное время машины; не разобрать — None."""
-    try:
-        dt = datetime.fromisoformat((text or "").strip())
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.astimezone()
+    return parse_time(text or "")
 
 
 def at_left_text(spec: str, now: datetime | None = None) -> str:
@@ -266,16 +262,13 @@ def check_wait_for_format(spec: str) -> None:
         raise ValueError(f"wait_for не понят: {spec!r}.{hint} Допустимо: {WAIT_FOR_FORMATS}")
 
 
-def now_iso(now: datetime | None = None) -> str:
-    dt = now or datetime.now().astimezone()
-    return dt.isoformat(timespec="seconds")
+now_iso = P.now_iso
+parse_time = P.parse_time
 
 
 def parse_dt(value: str) -> datetime:
-    dt = datetime.fromisoformat(value.strip())
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+    """Время записи тикета: без пояса — UTC; не разобрать — ValueError."""
+    return parse_time(value, timezone.utc, strict=True)
 
 
 @dataclass

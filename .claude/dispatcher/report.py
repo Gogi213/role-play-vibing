@@ -79,11 +79,7 @@ class Period:
 
 def _ts(text):
     """Время из строки (ISO или `ГГГГ-ММ-ДД ЧЧ:ММ`); без пояса — местное, как в реестре целей и журналах. Не разобрать — None."""
-    try:
-        dt = datetime.fromisoformat(str(text).strip())
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.astimezone()
+    return T.parse_time(text)
 
 
 def _span(seconds: float) -> str:

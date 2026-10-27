@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -84,6 +85,25 @@ def setting(key: str, default=None, root=None):
 
 
 ROLES = ("researcher", "engineer", "judge")
+
+
+def now_iso(now: datetime | None = None) -> str:
+    """Время с поясом машины, до секунды: единственный формат отметок времени в журналах и состоянии."""
+    return (now or datetime.now().astimezone()).isoformat(timespec="seconds")
+
+
+def parse_time(text, naive_tz=None, *, strict: bool = False):
+    """ISO-время → datetime с поясом (`Z` = UTC). Без пояса: `naive_tz`, а `None` — местное время машины.
+    Не разобрать — None; `strict=True` — ValueError."""
+    try:
+        dt = datetime.fromisoformat(str(text).strip().replace("Z", "+00:00"))
+    except ValueError:
+        if strict:
+            raise
+        return None
+    if dt.tzinfo is not None:
+        return dt
+    return dt.astimezone() if naive_tz is None else dt.replace(tzinfo=naive_tz)
 
 
 def _parent_map() -> dict:

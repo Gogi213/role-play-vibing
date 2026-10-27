@@ -791,10 +791,8 @@ def cmd_allow_delete(args) -> int:
 
 
 def _consent_alive(until: str, now) -> bool:
-    try:
-        return datetime.fromisoformat(str(until)).astimezone() > now
-    except ValueError:
-        return False
+    stamp = T.parse_time(until)
+    return stamp is not None and stamp > now
 
 
 def _write_consents(path: Path, data: dict) -> None:

@@ -31,7 +31,6 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -392,7 +391,7 @@ def spawn(script: Path, project: Path, log: Path) -> Started:
     systemd, иначе Popen; не получилось — запасной путь Popen); вывод — в `log` (дописывается)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
-        out.write(f"\n=== {datetime.now().astimezone().isoformat(timespec='seconds')} старт {script.name} ===\n"
+        out.write(f"\n=== {P.now_iso()} старт {script.name} ===\n"
                   .encode("utf-8"))
     cmd = [_python(), "-u", str(script), "--project", str(project)]
     how = _launcher()
