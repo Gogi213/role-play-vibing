@@ -32,6 +32,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import on_met as OM  # noqa: E402
 import procs  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
@@ -4377,9 +4378,9 @@ class OnMetTests(unittest.TestCase):
         (self.root / "tools").mkdir()
         self.tickets = self.root / "tickets"
         self.tickets.mkdir()
-        self.orig = (D.PROJECT_ROOT, D.RUNS_LOG, D._git_tracked, D.ON_MET_TIMEOUT_S)
+        self.orig = (D.PROJECT_ROOT, D.RUNS_LOG, OM._git_tracked, OM.ON_MET_TIMEOUT_S)
         D.PROJECT_ROOT, D.RUNS_LOG = self.root, self.root / "runs.log"
-        D._git_tracked = lambda rel: (self.root / rel).exists()
+        OM._git_tracked = lambda root, rel: (root / rel).exists()
         disp = str(Path(D.__file__).resolve().parent).replace("\\", "/")
         (self.root / "tools" / "hdr.py").write_text(
             f"import sys, json; sys.path.insert(0, {disp!r}); import ticket as T\n"
@@ -4390,7 +4391,7 @@ class OnMetTests(unittest.TestCase):
         self.now = dt("2026-10-05T12:00:00+04:00")
 
     def tearDown(self):
-        D.PROJECT_ROOT, D.RUNS_LOG, D._git_tracked, D.ON_MET_TIMEOUT_S = self.orig
+        D.PROJECT_ROOT, D.RUNS_LOG, OM._git_tracked, OM.ON_MET_TIMEOUT_S = self.orig
         self.tmp.cleanup()
 
     def ticket(self, on_met, wait_for="file:/x/y"):
@@ -4429,7 +4430,7 @@ class OnMetTests(unittest.TestCase):
         self.assertIn("код 3", t.log[-1].text)
 
     def test_timeout_kills_tree(self):
-        D.ON_MET_TIMEOUT_S = 1.0
+        OM.ON_MET_TIMEOUT_S = 1.0
         p = self.ticket("python tools/sleep.py")
         t0 = time.time()
         self.assertFalse(self.run_met(p))
