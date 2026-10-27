@@ -53,6 +53,63 @@ def proofs_for(role: str) -> str:
     return ", ".join(f"{r} — {PROOF_SHORT[r]}" for r in verbs_for(role) if r in PROOF_SHORT)
 
 
+def _file_in_project(root: Path, p: str) -> bool:
+    """TK-109 п.3: файл внутри проекта — не '.', '/', каталог проекта и не путь вне проекта."""
+    if not (p or "").strip():
+        return False
+    try:
+        base = root.resolve()
+        f = (Path(p) if Path(p).is_absolute() else root / p).resolve()
+        return f != base and f.is_file() and f.is_relative_to(base)
+    except (OSError, ValueError):
+        return False
+
+
+def _who_why_error(role: str, result: str, who: set, why: str, why_owner: str) -> str:
+    """Роль вправе сдавать итог и объяснила его: пустая строка — годно."""
+    if role not in who:
+        return f"итог {result} — не для роли {role or '(не роль)'}; вправе: {', '.join(sorted(who))}"
+    if not why:
+        return "нужен --why «зачем/почему» (≤ 200 знаков)"
+    if result == "ask-owner" and role == "judge" and why_owner not in OWNER_REASONS:
+        # V2-1: владельцу — только деньги/направление/необратимое/бизнес-правило; остальное Судья решает сам (blocked, если встал)
+        return (f"ask-owner к владельцу — только с --why-owner {'|'.join(OWNER_REASONS)}; другой повод владельцу не "
+                f"уходит: реши сам по методике либо blocked")
+    if len(why) > WHY_MAX:
+        return f"--why длиннее {WHY_MAX} знаков ({len(why)}) — сократи"
+    return ""
+
+
+def _proof_error(result: str, need: str, pr, sha: str, path: str, form: str, root: Path) -> str:
+    """Доказательство итога (PR и голова, файл результата, форма wait_for): пустая строка — годно."""
+    if "|" in need:  # Судья: работа в PR (голова) либо без PR (артефакт проверки)
+        pr_form = need.partition("|")[0]
+        # PR-форма — с номером PR, либо с одним --sha, когда артефакта --path нет. `--sha` рядом с существующим --path без --pr —
+        # приёмка без PR (sha — пометка в журнал): промпт учил `accept --sha`, и в живых прогонах этот отказ был у каждого второго
+        # запуска Судьи (docs/bench/2026-10-14.md)
+        if pr or (sha and not _file_in_project(root, path)):
+            if result == "accept" and not pr:
+                return f"итог accept требует {HINT[need]} (--sha без --pr и без существующего --path не годится)"
+            need = pr_form
+        elif _file_in_project(root, path):
+            return ""
+        else:
+            return f"итог {result} требует {HINT[need]}"
+    if "pr" in need and not (isinstance(pr, int) and pr > 0):
+        return f"итог {result} требует {HINT[need]}"
+    if "sha" in need and not _SHA.fullmatch((sha or "").lower()):
+        return f"итог {result} требует {HINT[need]}"
+    if need == "path" and not _file_in_project(root, path):
+        return f"итог done требует {HINT['path']}"
+    if need == "form" and not (form or "").strip():
+        return f"итог wait требует {HINT['form']}"
+    if need == "form":
+        import ticket as T
+        if T.parse_wait_for(form.strip()) is None:
+            return f"wait: форма не понята. Допустимо: {T.WAIT_FOR_FORMATS}"
+    return ""
+
+
 def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = "", form: str = "",
           root: Path = Path("."), owner: str = "", why_owner: str = "") -> str:
     """Пустая строка — команда годна; иначе — что исправить (текст отказа в сессии роли)."""
@@ -64,57 +121,13 @@ def check(role: str, result: str, why: str, pr=None, sha: str = "", path: str = 
     formal = role == "judge" and (owner or "").strip() == "judge" and (result == "done" or (result == "accept" and not (pr or sha)))
     if formal:  # TK-225 (В-229 п.4): тикет Судьи закрывается только по артефакту в git, не вручную
         who = who | {"judge"}
-    if role not in who:
-        return f"итог {result} — не для роли {role or '(не роль)'}; вправе: {', '.join(sorted(who))}"
     why = (why or "").strip()
-    if not why:
-        return "нужен --why «зачем/почему» (≤ 200 знаков)"
-    if result == "ask-owner" and role == "judge" and why_owner not in OWNER_REASONS:
-        # V2-1: владельцу — только деньги/направление/необратимое/бизнес-правило; остальное Судья решает сам (blocked, если встал)
-        return (f"ask-owner к владельцу — только с --why-owner {'|'.join(OWNER_REASONS)}; другой повод владельцу не "
-                f"уходит: реши сам по методике либо blocked")
-    if len(why) > WHY_MAX:
-        return f"--why длиннее {WHY_MAX} знаков ({len(why)}) — сократи"
-
-    def _exists(p: str) -> bool:
-        if not (p or "").strip():
-            return False
-        try:  # TK-109 п.3: не '.', '/', каталог проекта и не путь вне проекта
-            base = root.resolve()
-            f = (Path(p) if Path(p).is_absolute() else root / p).resolve()
-            return f != base and f.is_file() and f.is_relative_to(base)
-        except (OSError, ValueError):
-            return False
-
-    if formal:
-        _, err = tracked_at_head(root, path)
+    err = _who_why_error(role, result, who, why, why_owner)
+    if err:
         return err
-    if "|" in need:  # Судья: работа в PR (голова) либо без PR (артефакт проверки)
-        pr_form = need.partition("|")[0]
-        # PR-форма — с номером PR, либо с одним --sha, когда артефакта --path нет. `--sha` рядом с существующим --path без --pr —
-        # приёмка без PR (sha — пометка в журнал): промпт учил `accept --sha`, и в живых прогонах этот отказ был у каждого второго
-        # запуска Судьи (docs/bench/2026-10-14.md)
-        if pr or (sha and not _exists(path)):
-            if result == "accept" and not pr:
-                return f"итог accept требует {HINT[need]} (--sha без --pr и без существующего --path не годится)"
-            need = pr_form
-        elif _exists(path):
-            return ""
-        else:
-            return f"итог {result} требует {HINT[need]}"
-    if "pr" in need and not (isinstance(pr, int) and pr > 0):
-        return f"итог {result} требует {HINT[need]}"
-    if "sha" in need and not _SHA.fullmatch((sha or "").lower()):
-        return f"итог {result} требует {HINT[need]}"
-    if need == "path" and not _exists(path):
-        return f"итог done требует {HINT['path']}"
-    if need == "form" and not (form or "").strip():
-        return f"итог wait требует {HINT['form']}"
-    if need == "form":
-        import ticket as T
-        if T.parse_wait_for(form.strip()) is None:
-            return f"wait: форма не понята. Допустимо: {T.WAIT_FOR_FORMATS}"
-    return ""
+    if formal:
+        return tracked_at_head(root, path)[1]
+    return _proof_error(result, need, pr, sha, path, form, root)
 
 
 def tracked_at_head(root: Path, path: str) -> tuple[str, str]:

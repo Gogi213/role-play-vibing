@@ -609,32 +609,10 @@ def _key(tid: str, kind: str) -> str:
     return f"{tid}|{kind}"
 
 
-def look(root: Path, now: datetime | None = None, call=None, route=None, dry: bool = False) -> list:
-    """Один взгляд по проекту → строки итогов (они же в `overseer.log`). `call(prompt)` → ответ как у `call_overseer`;
-    `route(тикет, текст)` → передано ли Судье (`to_judge`; занят — повтор на следующем взгляде). Ошибка вызова не двигает
-    «прочитано»: тикет посмотрим в следующий раз. `dry` — ни лога, ни состояния, ни записей в тикеты."""
-    root = Path(root)
-    now = now or datetime.now().astimezone()
-    if call is None:
-        work = Path(tempfile.gettempdir()) / "rpv-overseer"
-        af = agents_file(work)
-        call = lambda prompt: call_overseer(prompt, af, work, MODEL, EFFORT, PER_CALL_USD, TIMEOUT_S)  # noqa: E731
-    route = route or (lambda tid, text: True if dry else to_judge(root, tid, text, now))
-    st = load_state(root)
-    seen, found, steps = st.setdefault("seen", {}), st.setdefault("found", {}), st.setdefault("cost_step", {})
-    st["pending"] = [p for p in st.get("pending", []) if not route(p["ticket"], p["text"])]  # прошлые, не переданные
-
-    def emit(tid, text):
-        if not route(tid, text):
-            st["pending"].append({"ticket": tid, "text": text})
-
-    tickets = {tid: load_ticket(root, tid) for tid in ticket_ids(root)}
-    runs = load_runs(root)
-    scale = closed_scale(tickets, runs)
-    base = median_closed(scale, now)
-    sbase = spike_base(runs, now)
+def _cost_alerts(tickets: dict, runs: dict, base: float, sbase: float, st: dict, now: datetime, emit, rows: list) -> None:
+    """Сигналы о деньгах по открытым тикетам, где недавно шли запуски: «дорого» (шаг к медиане закрытых) и «всплеск» за SPIKE_H ч."""
+    found, steps = st["found"], st["cost_step"]
     recent = now - timedelta(hours=ACTIVE_H)
-    rows = []
     for tid, t in sorted(tickets.items()):
         rs = runs.get(tid, [])
         if t.status not in OPEN or not any(r.ts > recent for r in rs):
@@ -655,6 +633,11 @@ def look(root: Path, now: datetime | None = None, call=None, route=None, dry: bo
             found[_key(tid, "всплеск")] = now.isoformat()
             rows.append({"ts": now.isoformat(), "ticket": tid, "outcome": "cost", "kind": "всплеск",
                          "spent": round(last_h, 4), "median": round(sbase, 4), "cost": 0.0})
+
+
+def _fresh_batches(tickets: dict, runs: dict, seen: dict, now: datetime) -> list:
+    """Тикеты с новой работой с прошлого взгляда: свежие первыми (до MAX_TICKETS - MAX_COSTLY) и самые дорогие из остальных."""
+    recent = now - timedelta(hours=ACTIVE_H)
     fresh = []
     for tid, t in tickets.items():
         if t.status in OPEN and t.entries:
@@ -665,41 +648,74 @@ def look(root: Path, now: datetime | None = None, call=None, route=None, dry: bo
     fresh.sort(key=lambda x: x[0], reverse=True)
     picked = fresh[:MAX_TICKETS - MAX_COSTLY]
     costly = sorted(fresh[len(picked):], key=lambda x: -sum(r.cost for r in runs.get(x[1], [])))[:MAX_COSTLY]
-    for _, tid, new in picked + costly:
-        t, rs = tickets[tid], runs.get(tid, [])
-        extra = goal_context(root, t.desc)
-        if t.status == "needs_owner" or any(ASK.search(e.text) for e in new):
-            extra = "\n\n".join(x for x in (extra, decisions_context(root, " ".join(e.text for e in new))) if x)
-        prompt = build_prompt(t, Window(1, 0, new[0].ts, now, new), stats_at(now, t.entries, rs),
-                              scale=scale_text(scale, now), extra=extra)
-        res = call(prompt)
-        row = {"ts": now.isoformat(), "ticket": tid, "cost": float(res.get("cost") or 0.0), "n_new": len(new)}
-        if res.get("error"):
-            row.update(outcome="error", reason=str(res.get("answer", ""))[:200])
-            rows.append(row)
-            continue
-        g = grade(res["answer"], tid, t.entries, now, prompt)
-        row.update(outcome=g["outcome"], reason=g["reason"], kind=g["kind"], quote=g["quote"], action=g["action"],
-                   invented_numbers=g["invented_numbers"])
-        seen[tid] = t.entries[-1].ts.isoformat()
-        if g["outcome"] == "accepted":
-            action = g["action"]
-            if g["invented_numbers"]:  # критерий 4: число не из данных кода и лога не уходит дальше
-                action = f"(совет Надзирателя не передан: в нём числа не из данных — {', '.join(g['invented_numbers'])})"
-            decision = g.get("decision", "")
-            if g["kind"] == "вопрос-уже-решён":
-                known = registry.decisions(root)
-                if decision in known:
-                    action = f"решение уже есть: {decision} — {cut(norm_ws(known[decision]), 300)}"
-                else:
-                    row["decision_unknown"] = decision
-            prev = found.get(_key(tid, g["kind"]))
-            if prev and now - parse_ts(prev) < timedelta(hours=SUPPRESS_H):
-                row["suppressed"] = True
-            else:
-                emit(tid, f"Надзиратель, {g['kind']}: «{t.title}» ({tid}) — «{norm_ws(g['quote'])}» → {action}")
-                found[_key(tid, g["kind"])] = now.isoformat()
+    return picked + costly
+
+
+def _review_ticket(root: Path, tid: str, t, new: list, rs: list, scale: dict, now: datetime, call, st: dict, emit, rows: list) -> None:
+    """Один тикет: вопрос Надзирателю по новым записям, разбор ответа, сигнал владельцу тикета (с подавлением повторов)."""
+    seen, found = st["seen"], st["found"]
+    extra = goal_context(root, t.desc)
+    if t.status == "needs_owner" or any(ASK.search(e.text) for e in new):
+        extra = "\n\n".join(x for x in (extra, decisions_context(root, " ".join(e.text for e in new))) if x)
+    prompt = build_prompt(t, Window(1, 0, new[0].ts, now, new), stats_at(now, t.entries, rs),
+                          scale=scale_text(scale, now), extra=extra)
+    res = call(prompt)
+    row = {"ts": now.isoformat(), "ticket": tid, "cost": float(res.get("cost") or 0.0), "n_new": len(new)}
+    if res.get("error"):
+        row.update(outcome="error", reason=str(res.get("answer", ""))[:200])
         rows.append(row)
+        return
+    g = grade(res["answer"], tid, t.entries, now, prompt)
+    row.update(outcome=g["outcome"], reason=g["reason"], kind=g["kind"], quote=g["quote"], action=g["action"],
+               invented_numbers=g["invented_numbers"])
+    seen[tid] = t.entries[-1].ts.isoformat()
+    if g["outcome"] == "accepted":
+        action = g["action"]
+        if g["invented_numbers"]:  # критерий 4: число не из данных кода и лога не уходит дальше
+            action = f"(совет Надзирателя не передан: в нём числа не из данных — {', '.join(g['invented_numbers'])})"
+        decision = g.get("decision", "")
+        if g["kind"] == "вопрос-уже-решён":
+            known = registry.decisions(root)
+            if decision in known:
+                action = f"решение уже есть: {decision} — {cut(norm_ws(known[decision]), 300)}"
+            else:
+                row["decision_unknown"] = decision
+        prev = found.get(_key(tid, g["kind"]))
+        if prev and now - parse_ts(prev) < timedelta(hours=SUPPRESS_H):
+            row["suppressed"] = True
+        else:
+            emit(tid, f"Надзиратель, {g['kind']}: «{t.title}» ({tid}) — «{norm_ws(g['quote'])}» → {action}")
+            found[_key(tid, g["kind"])] = now.isoformat()
+    rows.append(row)
+
+
+def look(root: Path, now: datetime | None = None, call=None, route=None, dry: bool = False) -> list:
+    """Один взгляд по проекту → строки итогов (они же в `overseer.log`). `call(prompt)` → ответ как у `call_overseer`;
+    `route(тикет, текст)` → передано ли Судье (`to_judge`; занят — повтор на следующем взгляде). Ошибка вызова не двигает
+    «прочитано»: тикет посмотрим в следующий раз. `dry` — ни лога, ни состояния, ни записей в тикеты."""
+    root = Path(root)
+    now = now or datetime.now().astimezone()
+    if call is None:
+        work = Path(tempfile.gettempdir()) / "rpv-overseer"
+        af = agents_file(work)
+        call = lambda prompt: call_overseer(prompt, af, work, MODEL, EFFORT, PER_CALL_USD, TIMEOUT_S)  # noqa: E731
+    route = route or (lambda tid, text: True if dry else to_judge(root, tid, text, now))
+    st = load_state(root)
+    for key in ("seen", "found", "cost_step"):
+        st.setdefault(key, {})
+    st["pending"] = [p for p in st.get("pending", []) if not route(p["ticket"], p["text"])]  # прошлые, не переданные
+
+    def emit(tid, text):
+        if not route(tid, text):
+            st["pending"].append({"ticket": tid, "text": text})
+
+    tickets = {tid: load_ticket(root, tid) for tid in ticket_ids(root)}
+    runs = load_runs(root)
+    scale = closed_scale(tickets, runs)
+    rows = []
+    _cost_alerts(tickets, runs, median_closed(scale, now), spike_base(runs, now), st, now, emit, rows)
+    for _, tid, new in _fresh_batches(tickets, runs, st["seen"], now):
+        _review_ticket(root, tid, tickets[tid], new, runs.get(tid, []), scale, now, call, st, emit, rows)
     if not dry:
         for row in rows:
             log_row(root, row)
