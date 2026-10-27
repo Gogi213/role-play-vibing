@@ -312,6 +312,26 @@ class TriageWaitsTests(WatchSandbox):
         finally:
             sp.run, W.D._ssh_cmd = orig, orig_ssh
 
+    def test_probe_reads_rc_like_dispatcher(self):
+        """ssh-проба (TK-010): сторож читает `.rc` так же, как диспетчер, и вердикт у обоих один (`_path_met`)."""
+        import subprocess as sp
+        orig, orig_ssh = sp.run, W.D._ssh_cmd
+        sent = []
+        try:
+            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
+            def fake(cmd, *a, **k):
+                sent.append(cmd[-1])
+                return sp.CompletedProcess(cmd, 0, stdout=b"exists\nrc=0 done", stderr=b"")
+            sp.run = fake
+            arg = "/data/sched/job-a.rc"
+            self.assertEqual(W.probe_wait_target("gpu1", "path", arg), "met")
+            self.assertIn("cat /data/sched/job-a.rc", sent[0])
+            self.assertEqual(W.D._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
+            self.assertTrue(W.D._path_met(("gpu1", "path", arg), "rc=0 done"))
+        finally:
+            sp.run, W.D._ssh_cmd = orig, orig_ssh
+            W.D._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
+
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch
         self.assertEqual(T.parse_wait_for("ci-run:o/r#123"), ("ci-run", "o/r", 123))

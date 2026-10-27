@@ -152,7 +152,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     if what != "path" or not arg.startswith("/") or not pat:
         return "unknown"
     q = D._remote_test_arg(arg)
-    cat = f"; cat {q}" if arg.endswith(".json") else ""  # содержимое нужно, чтобы отличить файл хода «идёт» от «готов»
+    cat = f"; cat {q}" if D._reads_body(arg) else ""  # содержимое нужно: файл хода «идёт»/«готов», файл итога `.rc` — как у диспетчера
     remote = (f"if test -e {q}; then echo exists{cat}; "
               f"elif {{ systemctl list-units --all --plain --no-legend --state=active,activating 2>/dev/null; "
               f"ps -eo args 2>/dev/null; }} | grep -q -e '{pat}'; then echo producer; else echo dead; fi")
@@ -165,8 +165,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     if r.returncode != 0 or not out or out[0] not in ("exists", "producer", "dead"):
         return "ssh-error"
     if out[0] == "exists":  # как у диспетчера (_host_probe): файл хода — готов при done>=total, прочее — достаточно наличия
-        prog = D._progress_done("\n".join(out[1:])) if arg.endswith(".json") else None
-        return "producer" if prog is False else "met"
+        return "met" if D._path_met((alias, what, arg), "\n".join(out[1:])) else "producer"
     return out[0]
 
 
