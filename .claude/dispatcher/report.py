@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -182,7 +181,7 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
     claude = claude if claude is not None else HA._claude()
     if not claude:
         return None
-    env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}
+    env = HA.clean_env()
     try:
         agent = _agent_def("reporter")
         with tempfile.TemporaryDirectory() as tmp:

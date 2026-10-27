@@ -33,6 +33,11 @@ def _claude():
     return c if c and (os.path.isfile(c) or shutil.which(c)) else None
 
 
+def clean_env() -> dict:
+    """Окружение помощника: без переменных роли и проекта (TK-110 Ж-1) — ни хуков, ни CLAUDE.md проекта."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}
+
+
 def agent_meta(path: Path) -> tuple:
     """`agents/<имя>.md` → (плоский фронтматтер {ключ: значение}, текст промпта). Нет фронтматтера — ValueError."""
     m = re.match(r"^---\n(.*?)\n---\n(.*)$", path.read_text(encoding="utf-8"), re.S)
@@ -49,7 +54,7 @@ def ask(system: str, text: str, runner=hide.run, claude: str | None = None, time
         return None
     cmd = [claude, "-p", "--model", MODEL, "--effort", EFFORT, "--system-prompt", system, "--tools", "",
            "--no-session-persistence"]
-    env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}  # TK-110 Ж-1
+    env = clean_env()
     try:
         with tempfile.TemporaryDirectory() as tmp:
             r = runner(cmd, input=text[-MAX_IN:].encode("utf-8"), capture_output=True, timeout=timeout, cwd=tmp, env=env)
