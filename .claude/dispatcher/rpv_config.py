@@ -70,11 +70,7 @@ def rpv_path(root: Path) -> Path:
 
 
 def read_log(root: Path) -> list:
-    try:
-        data = json.loads(log_path(root).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+    return P.read_log(log_path(root))
 
 
 def _atomic(path: Path, data) -> None:

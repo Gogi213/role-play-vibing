@@ -6,13 +6,14 @@ import posixpath
 import re
 from dguard import config
 from dguard.ceo_signal import REDIRECT, command_text, shell_writes
-from dguard.paths import Ctx
+from dguard.paths import Ctx, under_cwd
 from dguard.tools import SHELL_TOOLS
+from dguard.words import join_cwd
 from dguard.writes import may_exist
 
 ROLES = ".claude/roles"
 WORD = re.compile(r"""\"[^\"]*\"|'[^']*'|\S+""")
-CD = re.compile(r"""^\s*(?:cd|pushd|set-location|sl)\s+(?:-\w+\s+)*(\"[^\"]*\"|'[^']*'|\S+)\s*$""", re.I)
+CD_NAMES = frozenset({"cd", "pushd", "chdir", "set-location", "sl", "popd"})   # как в dguard.cmd_scan; после `popd` каталог неизвестен
 TOKEN = re.compile(r"""[^\s"'`=<>|;&()]*\.claude/roles(?:/[^\s"'`<>|;&()]*)?""", re.I)
 COPY_TO = frozenset({"cp", "mv", "install", "ln", "rsync", "copy", "move", "copy-item", "move-item", "rename-item"})  # назначение — последний путь
 ALL_ARGS = frozenset({"tee", "rm", "truncate", "set-content", "add-content", "out-file", "clear-content", "remove-item", "new-item"})
@@ -28,7 +29,18 @@ def _abs(tok, here):
     p = tok.strip().strip("'\"").replace("\\", "/")
     if not p or p.startswith(("/", "~", "$", "%")) or re.match(r"[A-Za-z]:", p) or not here:
         return p
-    return posixpath.normpath(here + "/" + p) + ("/" if p.endswith("/") else "")
+    return under_cwd(here, p) + ("/" if p.endswith("/") else "")
+
+
+def _cd(here, words):
+    """Рабочий каталог после `cd`/`pushd`/`popd` (общий `join_cwd` стража); неизвестный → None. Путь с неизвестной переменной, но
+    с каталогом уставов в хвосте (`cd $ROOT/.claude/roles`), остаётся буквальным."""
+    pos = [w for w in words[1:] if not w.startswith("-") or w == "-"]
+    target = pos[0] if pos else None
+    new = None if words[0].lower() == "popd" else join_cwd(here, target, {})
+    if new is None and target and ROLES in target.replace("\\", "/").lower():
+        return _abs(target, here).rstrip("/")
+    return new
 
 
 def _charter_path(p, ctx):
@@ -106,7 +118,7 @@ def _sub_hit(sub, here, ctx):
     if structured:
         return None
     text = sub.replace("\\", "/")                                            # интерпретатор и прочее: путь — в тексте команды
-    for token in TOKEN.findall(text) + ([w for w in re.findall(r"[\w.\-]+\.md\b", text)] if ctx.cwd and ROLES in ctx.cwd.lower() else []):
+    for token in TOKEN.findall(text) + (re.findall(r"[\w.\-]+\.md\b", text) if ctx.cwd and ROLES in ctx.cwd.lower() else []):
         p = _abs(token, here)
         if _charter_path(p, ctx) and shell_writes(sub, (token.lower(),)):
             return token
@@ -120,8 +132,9 @@ def charter_shell_write(tool, ti, cwd):
         return None
     here = str(cwd).replace("\\", "/").rstrip("/") if cwd else None
     for part in re.split(r"\n|&&|\|\||;", command_text(ti, benign=True)):
-        if (m := CD.match(part)) and (target := m.group(1).strip("'\"")):
-            here = _abs(target, here).rstrip("/") or here
+        words = _words(part)
+        if words and words[0].lower() in CD_NAMES:
+            here = _cd(here, words)
             continue
         ctx = Ctx(here, False)
         for sub in part.split("|"):

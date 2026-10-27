@@ -9,7 +9,6 @@ CEO уставы руками не правит (страж `delete_guard`, TK-0
 """
 from __future__ import annotations
 
-import os
 import re
 import sys
 from datetime import datetime
@@ -29,8 +28,7 @@ def log_path(root: Path) -> Path:
 
 
 def read_log(root: Path) -> list:
-    data = P.read_json(log_path(root), [])
-    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+    return P.read_log(log_path(root))
 
 
 def plugin_version(plugin_root: Path) -> str:
@@ -62,16 +60,6 @@ def merge_table_rows(template: str, current: str) -> str:
             out[at - 1] += eol
         out[at:at] = [row + eol for row in extra]
     return "".join(out)
-
-
-def _write_bytes(path: Path, data: bytes) -> None:
-    """Файл целиком или прежний: через временный файл рядом + os.replace (читать устав могут запущенные роли)."""
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
 
 
 def _wanted(templates: Path, names) -> tuple:
@@ -114,7 +102,7 @@ def sync(root: Path, names=None, why: str = "", ref: str = "", templates: Path =
     if not changes:
         return None, f"уставы уже совпадают с шаблонами плагина: {', '.join(todo)} — менять нечего", None
     for target, data, _ in changes:
-        _write_bytes(target, data)
+        P.atomic_write_bytes(target, data)             # читать устав могут запущенные роли: повторы при PermissionError
     log = read_log(root)
     version = plugin_version(templates.parents[1])
     entry = {"id": f"CH-{len(log) + 1}", "at": now.isoformat(timespec="seconds"), "version": version,
@@ -145,7 +133,7 @@ def run(args, role: str, root: Path) -> int:
     if role and role != "ceo":
         print(f"charter sync — только CEO; эта сессия — роль {role}", file=sys.stderr)
         return 1
-    entry, msg, err = sync(root, args.file, args.why or "", (args.ref or "").strip())
+    _, msg, err = sync(root, args.file, args.why or "", (args.ref or "").strip())
     if err:
         print(f"charter sync: {err}", file=sys.stderr)
         return 1
