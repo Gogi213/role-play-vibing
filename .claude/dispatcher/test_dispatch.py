@@ -14,6 +14,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import types
@@ -1981,7 +1982,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_kill_posix_group_of_leader_only_pid_of_non_leader_term_unless_force(self):
         from unittest import mock
-        sig = getattr(D.signal, "SIGKILL", 9)
+        sig = getattr(signal, "SIGKILL", 9)
         with mock.patch.object(os, "name", "posix"), mock.patch.object(os, "getpgid", create=True, return_value=4242) as gp, \
                 mock.patch.object(os, "killpg", create=True) as kg, mock.patch.object(os, "kill") as kill:
             D._kill(4242, tree=True)  # запущен со start_new_session: группа = pid
