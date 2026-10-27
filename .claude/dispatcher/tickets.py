@@ -195,28 +195,21 @@ def _regression(tid: str, cmd: str) -> bool:
     return bool(err)
 
 
-def cmd_result(args) -> int:
-    """Сдать шаг: итог из закрытого списка + зачем + доказательство; кого будить — таблица routes.py (TK-079 п.0).
-    Неполная команда — отказ с текстом, что исправить; запись в лог тикета ставит сама команда."""
-    import routes
-    path = TICKETS_DIR / f"{args.id}.md"
-    if not path.exists():
-        print(f"нет тикета {args.id}", file=sys.stderr)
-        return 1
-    role = _caller_role()
-    tkt = T.read_ticket(path)
-    err = routes.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
-                       form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "",
-                       why_owner=getattr(args, "why_owner", None) or "")
+def _result_refusal(args, role: str, tkt) -> str:
+    """Отказ шагу: неполная команда (`routes.check`) или `continue` сверх потолка подряд; пусто — можно писать."""
+    err = routes_mod.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
+                           form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "",
+                           why_owner=getattr(args, "why_owner", None) or "")
     if err:
-        print(f"result: {err}", file=sys.stderr)
-        return 1
-    if args.result == "continue" and routes.continue_streak(tkt, role) >= routes.CONTINUE_MAX:
-        print(f"result: continue уже {routes.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
-              f"либо blocked", file=sys.stderr)
-        return 1
-    role = role or "ceo"  # check() пускает сессию без роли только к done (закрыть тикет)
-    why = args.why.strip()
+        return err
+    if args.result == "continue" and routes_mod.continue_streak(tkt, role) >= routes_mod.CONTINUE_MAX:
+        return (f"continue уже {routes_mod.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
+                f"либо blocked")
+    return ""
+
+
+def _result_proof(args, role: str, tkt) -> str:
+    """Доказательство в записи «[итог: …]»: PR@голова, артефакт проверки, результат, ждём, повод."""
     on_head = f" голова {(args.sha or '')[:7]}" if args.sha else f" проверка: {args.path}"
     if args.result == "accept" and not args.pr:  # приёмка без PR: артефакт проверки, sha (если дан) — пометка
         on_head = f" проверка: {args.path}" + (f" голова {args.sha[:7]}" if args.sha else "")
@@ -224,42 +217,49 @@ def cmd_result(args) -> int:
              "done": f" результат: {args.path}", "wait": f" ждём: {args.form}",
              "ask-owner": f" повод: {args.why_owner}" if getattr(args, "why_owner", None) else ""}.get(args.result, "")
     if role == "judge" and tkt.owner == "judge" and args.result in ("done", "accept") and not (args.pr or args.sha):
-        head, _ = routes.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
+        head, _ = routes_mod.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
-    ack = ""
-    tail_ceo = ""
-    if args.result == "accept":
-        err, ack = _decisions_ack(args)
-        nerr, nack = _numbers_ack(args, args.id)
-        terr, tack, tail_ceo = _tail_ack(args, args.id)
-        lerr, lack = _live_ack(args, args.id)
-        if err or nerr or terr or lerr:
-            print(f"result: {err or nerr or terr or lerr}", file=sys.stderr)
-            return 1
-        ack += nack + tack + lack
-        proof += ack
-    if args.result == "accept" and not args.pr and _regression(args.id, "result"):
-        return 1  # приёмка в PR проходит ту же проверку в cmd_accept
-    if args.result == "accept" and args.pr:
-        rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
-                                      "repo": getattr(args, "repo", None),
-                                      "decisions": getattr(args, "decisions", None),
-                                      "numbers": getattr(args, "numbers", None),
-                                      "tail": getattr(args, "tail", None),
-                                      "live": getattr(args, "live", None)})())
-        if rc == 0:  # запись итога — иначе Stop-хук (stop_result.py) не видит сдачи шага и блокирует Судью
-            with T.ticket_lock(path):
-                T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
-        return rc
-    if args.result == "wait":  # сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет
-        rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None),
-                                      "allow_met": getattr(args, "allow_met", False)})())
-        if rc == 0:
-            with T.ticket_lock(path):
-                T.append_log(path, role, f"[итог: wait]{proof} — {why}")
-        return rc
     if args.result == "done" and role == "ceo":
         proof += f" ({D.NO_REVIEW_MARK})"
+    return proof
+
+
+def _accept_checks(args) -> tuple[str, str, str]:
+    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка. → (отказ, пометки для лога, хвост для CEO)."""
+    err, ack = _decisions_ack(args)
+    nerr, nack = _numbers_ack(args, args.id)
+    terr, tack, tail_ceo = _tail_ack(args, args.id)
+    lerr, lack = _live_ack(args, args.id)
+    return err or nerr or terr or lerr, ack + nack + tack + lack, tail_ceo
+
+
+def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
+    """Приёмка на голове PR: слияние — `cmd_accept`; запись итога — только при успехе (иначе Stop-хук `stop_result.py`
+    не видит сдачи шага и блокирует Судью)."""
+    rc = cmd_accept(type("A", (), {"id": args.id, "pr": args.pr, "sha": args.sha, "text": why,
+                                  "repo": getattr(args, "repo", None),
+                                  "decisions": getattr(args, "decisions", None),
+                                  "numbers": getattr(args, "numbers", None),
+                                  "tail": getattr(args, "tail", None),
+                                  "live": getattr(args, "live", None)})())
+    if rc == 0:
+        with T.ticket_lock(path):
+            T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
+    return rc
+
+
+def _wait_in_result(args, path: Path, role: str, why: str, proof: str) -> int:
+    """Итог wait: сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет."""
+    rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None),
+                                  "allow_met": getattr(args, "allow_met", False)})())
+    if rc == 0:
+        with T.ticket_lock(path):
+            T.append_log(path, role, f"[итог: wait]{proof} — {why}")
+    return rc
+
+
+def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_ceo: str) -> None:
+    """Запись итога в лог, номер PR в шапку, хвост CEO в очередь и ход по таблице маршрутов."""
     with T.ticket_lock(path):
         T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
         if args.result == "pr":
@@ -267,10 +267,42 @@ def cmd_result(args) -> int:
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
     if tail_ceo:
         D.append_ceo_inbox(args.id, "хвост", tail_ceo)
-    upd = routes.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
-                       owner_last=routes.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
+    upd = routes_mod.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
+                           owner_last=routes_mod.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
     print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
+
+
+def cmd_result(args) -> int:
+    """Сдать шаг: итог из закрытого списка + зачем + доказательство; кого будить — таблица routes.py (TK-079 п.0).
+    Неполная команда — отказ с текстом, что исправить; запись в лог тикета ставит сама команда."""
+    path = TICKETS_DIR / f"{args.id}.md"
+    if not path.exists():
+        print(f"нет тикета {args.id}", file=sys.stderr)
+        return 1
+    role = _caller_role()
+    tkt = T.read_ticket(path)
+    err = _result_refusal(args, role, tkt)
+    if err:
+        print(f"result: {err}", file=sys.stderr)
+        return 1
+    role = role or "ceo"  # check() пускает сессию без роли только к done (закрыть тикет)
+    why = args.why.strip()
+    proof = _result_proof(args, role, tkt)
+    tail_ceo = ""
+    if args.result == "accept":
+        err, ack, tail_ceo = _accept_checks(args)
+        if err:
+            print(f"result: {err}", file=sys.stderr)
+            return 1
+        proof += ack
+        if args.pr:
+            return _accept_in_pr(args, path, role, why, ack)
+        if _regression(args.id, "result"):  # приёмка в PR проходит ту же проверку в cmd_accept
+            return 1
+    if args.result == "wait":
+        return _wait_in_result(args, path, role, why, proof)
+    _write_result(args, path, role, tkt, why, proof, tail_ceo)
     return 0
 
 
