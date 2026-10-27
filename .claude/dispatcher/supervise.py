@@ -114,14 +114,10 @@ def _alarm(state_dir: Path, out: dict) -> None:
         for name, act in out.items():
             down[name] = down.get(name, 0) + 1 if act != "ok" else 0
         stuck = [n for n, k in down.items() if k >= 2]
-        if stuck and not st.get("alarmed"):
-            notify.send(f"Работа стоит: {', '.join(NAMES.get(n, n) for n in stuck)} команды падает и не поднимается — "
-                        f"перезапуск не помог дважды подряд. Откройте сессию CEO и скажите «почему стоит работа».",
-                        log_dir=state_dir)
-            st["alarmed"] = True
-        elif not stuck and st.get("alarmed"):
-            notify.send("Команда снова работает.", log_dir=state_dir)
-            st["alarmed"] = False
+        notify.episode(st, "alarmed", firing=bool(stuck), cleared=not stuck, log_dir=state_dir,
+                       down=lambda: f"Работа стоит: {', '.join(NAMES.get(n, n) for n in stuck)} команды падает и не поднимается — "
+                                    f"перезапуск не помог дважды подряд. Откройте сессию CEO и скажите «почему стоит работа».",
+                       up=lambda: "Команда снова работает.")
         f.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
     except Exception as e:  # тревога не должна ронять присмотр
         _log(state_dir, f"тревога: {type(e).__name__}: {e}")

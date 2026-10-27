@@ -2519,27 +2519,25 @@ def _guarded(label: str, fn, *args) -> None:
 
 def _stall_alarm(state: dict, now, stalled: list) -> None:
     """CP5 (критерии 8, 9, 10): одна тревога владельцу — в Telegram (`notify.py`) и строкой CEO — когда готовая работа
-    стоит STALL_ALARM_MIN минут подряд; одна на эпизод. Пошла снова — короткое «снова идёт»."""
+    стоит STALL_ALARM_MIN минут подряд; одна на эпизод (`notify.episode`). Пошла снова — короткое «снова идёт»."""
     st = state.get("stall") or {}
-    if not stalled:
-        if st.get("sent"):
-            mins = (now - T.parse_dt(st["since"])).total_seconds() / 60
-            text = f"Работа снова идёт (стояла {mins:.0f} мин)."
-            notify.send(text, log_dir=DISPATCHER_DIR)
-            append_ceo_inbox("*", "работа-идёт", text, now)
-        state["stall"] = {}
-        return
-    st.setdefault("since", T.now_iso(now))
-    mins = (now - T.parse_dt(st["since"])).total_seconds() / 60
-    if mins >= STALL_ALARM_MIN and not st.get("sent"):
+    if stalled:
+        st.setdefault("since", T.now_iso(now))
+
+    def mins() -> float:
+        return (now - T.parse_dt(st["since"])).total_seconds() / 60
+
+    def down() -> str:
         names = sorted(set(stalled))
-        text = (f"Работа стоит {mins:.0f} мин: {len(names)} задач(и) ждут, их никто не делает — "
+        return (f"Работа стоит {mins():.0f} мин: {len(names)} задач(и) ждут, их никто не делает — "
                 + "; ".join(f"«{n}»" for n in names[:3]) + (f" и ещё {len(names) - 3}" if len(names) > 3 else "")
                 + ". CEO разбирается; если сессии CEO нет — откройте её и скажите «почему стоит работа».")
-        notify.send(text, log_dir=DISPATCHER_DIR)
-        append_ceo_inbox("*", "работа-стоит", text, now)
-        st["sent"] = True
-    state["stall"] = st
+
+    notify.episode(st, "sent", firing=bool(stalled) and mins() >= STALL_ALARM_MIN, cleared=not stalled, down=down,
+                   up=lambda: f"Работа снова идёт (стояла {mins():.0f} мин).", log_dir=DISPATCHER_DIR,
+                   ceo_down=lambda text: append_ceo_inbox("*", "работа-стоит", text, now),
+                   ceo_up=lambda text: append_ceo_inbox("*", "работа-идёт", text, now))
+    state["stall"] = st if stalled else {}
 
 
 REPORT_AT = "10:00"  # CP10: местное время ежедневного отчёта владельцу, ЧЧ:ММ; проект — `report_at` в rpv.json

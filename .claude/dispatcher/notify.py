@@ -75,6 +75,24 @@ def send(text: str, project=None, opener=urllib.request.urlopen, sleep=time.slee
     return False
 
 
+def episode(st: dict, flag: str, firing: bool, cleared: bool, down, up, log_dir=None, ceo_down=None, ceo_up=None) -> None:
+    """Одна тревога на эпизод (TK-010): `firing` и флага `st[flag]` нет — `down()` уходит владельцу (и в `ceo_down(text)`, если
+    задана строка CEO), флаг встаёт; `cleared` и флаг есть — `up()` уходит так же, флаг снимается. Пока ни то ни другое —
+    ничего. Текст строится функцией только в момент отправки: поле, которого нет вне эпизода, тревоге не мешает."""
+    if firing and not st.get(flag):
+        text = down()
+        send(text, log_dir=log_dir)
+        if ceo_down:
+            ceo_down(text)
+        st[flag] = True
+    elif cleared and st.get(flag):
+        text = up()
+        send(text, log_dir=log_dir)
+        if ceo_up:
+            ceo_up(text)
+        st[flag] = False
+
+
 def main(argv=None) -> int:
     P.utf8_stdio()
     ap = argparse.ArgumentParser(prog="notify.py", description=__doc__.split("\n\n")[0])
