@@ -1,0 +1,4 @@
+TK-040 · PR #151 @ 3084ccd · проверка Судьи 2026-10-27
+pytest -q -n auto (копия .claude/worktrees/TK-040): 1379 passed, 8 skipped in 204.05s
+pytest .claude/hooks/test_push_scope.py: 24 passed in 23.39s
+CI: ubuntu pass, windows pass, systemd pass, macos pending

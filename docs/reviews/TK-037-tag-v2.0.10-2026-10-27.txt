@@ -1,0 +1,4 @@
+v2.0.10 -> 2a0ae2e6e147414ff1a30ec052a0f16b11336cd8 (голова main после PR #153)
+release.py check: версии согласованы: plugin/marketplace/changelog = 2.0.10
+git ls-remote --tags origin v2.0.10:
+2a0ae2e6e147414ff1a30ec052a0f16b11336cd8	refs/tags/v2.0.10

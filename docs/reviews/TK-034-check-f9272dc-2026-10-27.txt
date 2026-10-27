@@ -1,0 +1,9 @@
+TK-034 · проверка Судьи · снимок git archive origin/main (влит PR #142, ba2ef65 = f636a67 по .claude)
+diff v2.0.9..origin/main *.py: 6 файлов (charter, project, rpv_config, charter_cmd + 2 теста)
+pyflakes 4 изменённых модуля: exit 0
+radon cc E/F: 0
+radon cc D (dispatcher+hooks): 31
+max файл: 827 строк watch.py (wc)
+max функция: 83 строк dispatch.launch_run
+vulture >=60: только публичные функции project/charter, вызываются из других модулей
+pytest test_tk033.py test_charter_guard.py: 17 passed

@@ -1,0 +1,7 @@
+# TK-031: тег v2.0.9, 2026-10-27
+$ git ls-remote --tags origin v2.0.9
+84ca237fd8e490961eb9240a49582a72413eb46c	refs/tags/v2.0.9
+$ git ls-remote origin refs/heads/main
+84ca237fd8e490961eb9240a49582a72413eb46c	refs/heads/main
+$ python .claude/dispatcher/release.py check (копия .claude/worktrees/TK-031 на 84ca237)
+версии согласованы: {"plugin": "2.0.9", "marketplace": "2.0.9", "changelog": "2.0.9"}
