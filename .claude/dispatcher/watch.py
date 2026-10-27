@@ -573,7 +573,7 @@ def check_strays(ws: dict, now, probe=None) -> list:
                 try:
                     with T.ticket_lock(path):
                         tkt = T.read_ticket(path)
-                        if tkt.owner in ("researcher", "engineer", "judge"):
+                        if tkt.owner in P.ROLES:
                             T.append_log(path, "watch", why + ". Замер искажён: останови его и подай через планировщик.", now)
                             T.write_header_updates(path, {"next": tkt.owner}, stamp_updated=False)
                             continue

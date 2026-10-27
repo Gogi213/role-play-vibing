@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 import hide
 
@@ -29,6 +31,15 @@ COMPACT_SYSTEM = ("Сожми текст в конспект для следую
 def _claude():
     c = os.environ.get("CLAUDE_BIN") or shutil.which("claude")
     return c if c and (os.path.isfile(c) or shutil.which(c)) else None
+
+
+def agent_meta(path: Path) -> tuple:
+    """`agents/<имя>.md` → (плоский фронтматтер {ключ: значение}, текст промпта). Нет фронтматтера — ValueError."""
+    m = re.match(r"^---\n(.*?)\n---\n(.*)$", path.read_text(encoding="utf-8"), re.S)
+    if not m:
+        raise ValueError(f"{path.parent.name}/{path.name}: нет фронтматтера")
+    meta = {k.strip(): v.strip().strip('"') for k, _, v in (ln.partition(":") for ln in m.group(1).splitlines())}
+    return meta, m.group(2).strip()
 
 
 def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S):

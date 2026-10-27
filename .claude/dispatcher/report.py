@@ -171,9 +171,8 @@ def _facts(groups: list) -> str:
 
 def _agent_def(name: str) -> dict:
     """agents/<name>.md → определение для `claude --agents` (как tools/helper_eval.py): модель и усилие — из фронтматтера."""
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", (AGENTS_DIR / f"{name}.md").read_text(encoding="utf-8"), re.S)
-    meta = {k.strip(): v.strip().strip('"') for k, _, v in (ln.partition(":") for ln in m.group(1).splitlines())}
-    return {"description": meta.get("description", name), "prompt": m.group(2).strip(),
+    meta, prompt = HA.agent_meta(AGENTS_DIR / f"{name}.md")
+    return {"description": meta.get("description", name), "prompt": prompt,
             "model": meta["model"], "effort": meta["effort"]}
 
 
@@ -194,7 +193,7 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
                    "--max-budget-usd", str(BUDGET_USD)]
             r = runner(cmd, input=prompt.encode("utf-8"), capture_output=True, timeout=CLAUDE_TIMEOUT_S, cwd=tmp, env=env)
         out = json.loads((r.stdout or b"").decode("utf-8", "replace"))
-    except (OSError, KeyError, AttributeError, ValueError, subprocess.SubprocessError):
+    except (OSError, KeyError, ValueError, subprocess.SubprocessError):
         return None
     return out if r.returncode == 0 and isinstance(out, dict) and not out.get("is_error") and out.get("result") else None
 

@@ -231,7 +231,7 @@ def full_context(role, title, source, hook_in):
     try:  # итоги и доказательства — свои у каждой роли (таблица routes.RULES); сбой — прежний общий список
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
         import routes
-        if role in ("researcher", "engineer", "judge"):
+        if role in routes.P.ROLES:
             verbs, proofs = "|".join(routes.verbs_for(role)), f" (доказательство: {routes.proofs_for(role)}; --why — не длиннее 200 знаков)"
     except Exception:
         pass

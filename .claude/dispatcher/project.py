@@ -83,7 +83,7 @@ def setting(key: str, default=None, root=None):
     return default if value is None or value == "" else value
 
 
-ROLES = ("researcher", "engineer", "judge")
+ROLES = ("researcher", "engineer", "judge")  # роли, которых запускает диспетчер; единственный список (ceo — человек/CEO-сессия)
 
 
 def _parent_map() -> dict:

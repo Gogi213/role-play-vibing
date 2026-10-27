@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import haiku_aux as HA  # noqa: E402
 import registry  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -428,15 +429,11 @@ def grade(raw: str, tid: str, entries: list, until: datetime, shown: str = "") -
 
 def load_agent(name: str = "overseer") -> dict:
     """agents/<name>.md → определение для `claude --agents` (как tools/helper_eval.py). Пустой `tools:` — без инструментов."""
-    text = (ROOT / "agents" / f"{name}.md").read_text(encoding="utf-8")
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.S)
-    if not m:
-        raise SystemExit(f"agents/{name}.md: нет фронтматтера")
-    meta = {}
-    for ln in m.group(1).splitlines():
-        k, _, v = ln.partition(":")
-        meta[k.strip()] = v.strip().strip('"')
-    d = {"description": meta.get("description", name), "prompt": m.group(2).strip(),
+    try:
+        meta, prompt = HA.agent_meta(ROOT / "agents" / f"{name}.md")
+    except ValueError as e:
+        raise SystemExit(str(e))
+    d = {"description": meta.get("description", name), "prompt": prompt,
          "tools": [t.strip() for t in meta.get("tools", "").split(",") if t.strip()]}
     for k in ("model", "effort"):
         if meta.get(k):
