@@ -108,13 +108,17 @@ def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
         return False
 
 
-def merged_head(repo: str, number: int, gh=None) -> str:
-    """Голова PR, если он влит; иначе (не влит, не найден, сбой GitHub) пустая строка."""
+def merged_pr(repo: str, number: int, gh=None) -> dict:
+    """Влитый PR: {"head": sha головы, "base": ветка, куда влит, "default": ветка репозитория по умолчанию}; иначе (не влит, не
+    найден, сбой GitHub) пустой словарь."""
+    gh = gh or C.gh_api
     try:
-        pr = (gh or C.gh_api)(f"repos/{repo}/pulls/{number}")
-        return str(pr["head"]["sha"]) if pr.get("merged") else ""
+        pr = gh(f"repos/{repo}/pulls/{number}")
+        if not pr.get("merged"):
+            return {}
+        return {"head": str(pr["head"]["sha"]), "base": str(pr["base"]["ref"]), "default": str(gh(f"repos/{repo}")["default_branch"])}
     except Exception:
-        return ""
+        return {}
 
 
 def check_pr(repo: str, number: int, sha: str, gh=C.gh_api) -> str:

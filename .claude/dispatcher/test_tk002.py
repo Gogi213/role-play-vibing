@@ -51,10 +51,11 @@ class CloseAfterMergeTests(Sandbox):
         T.append_log(p, "judge", f"[итог: accept] PR #44@{sha} проверка: docs/reviews/TK-1.md — принято", now=T0 + timedelta(minutes=1))
         return p
 
-    def tick(self, minutes, head="7a5547b1111", merged=True):
+    def tick(self, minutes, head="7a5547b1111", merged=True, base="main"):
+        info = {"head": head, "base": base, "default": "main"} if merged else {}
         with mock.patch.object(D, "launch_run") as launch, \
                 mock.patch.object(M, "merged_done", return_value=merged), \
-                mock.patch.object(M, "merged_head", return_value=head if merged else ""):
+                mock.patch.object(M, "merged_pr", return_value=info):
             D.tick(T0 + timedelta(minutes=minutes))
         return launch
 
@@ -90,6 +91,27 @@ class CloseAfterMergeTests(Sandbox):
         launch = self.tick(20)
         self.assertEqual(T.read_ticket(p).status, "waiting")
         self.assertEqual(launch.call_args.kwargs.get("reason"), "wait_for-met")
+
+    def test_merged_into_non_default_base_not_closed(self):  # заказ CEO 04:37: alpha TK-263, база tk262
+        p = self.accepted()
+        launch = self.tick(20, base="tk262")
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertEqual(launch.call_args.args[1], "engineer")
+        self.assertEqual(launch.call_args.kwargs["reason"], "wait_for-met")
+
+    def test_executor_wait_after_accept_wakes_executor(self):  # alpha TK-258, TK-077: после слияния — выкладка/выпуск
+        p = self.accepted()
+        T.append_log(p, "engineer", "[итог: wait] — слияние, потом выкладка", now=T0 + timedelta(minutes=2))
+        launch = self.tick(20)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertEqual(launch.call_args.args[1], "engineer")
+        self.assertEqual(launch.call_args.kwargs["reason"], "wait_for-met")
+
+    def test_judge_wait_after_accept_still_closes(self):
+        p = self.accepted()
+        T.append_log(p, "judge", "[итог: wait] — ждём слияния", now=T0 + timedelta(minutes=2))
+        self.assertEqual(self.tick(20).call_count, 0)
+        self.assertEqual(T.read_ticket(p).status, "done")
 
     def test_not_merged_not_closed(self):
         p = self.accepted()
@@ -172,6 +194,31 @@ class ExecutorBlockedTests(Sandbox):
         T.append_log(p, "engineer", "стоп, не могу", now=T0)
         T.write_header_updates(p, {"status": "blocked"}, now=T0)
         self.assertEqual(len(self.watch_wake(p)), 1)
+
+    def test_dispatcher_grace_silent_then_signal_once(self):  # заказ CEO 04:37: Судье 25 мин, потом сигнал CEO
+        p = self.blocked("engineer", "blocked")
+        self.tick(24)
+        self.assertEqual(self.wake_lines(), [])
+        self.tick(26)
+        self.tick(27)
+        self.assertEqual(len(self.wake_lines()), 1)
+        T.write_header_updates(p, {"next": ""}, now=T0)
+        self.tick(30)
+        self.assertEqual(len(self.wake_lines()), 1)
+
+    def test_watch_grace_silent_then_signal_with_age(self):
+        self.blocked("engineer", "ask-owner")
+        for minutes in (24, 26):
+            now = T0 + timedelta(minutes=minutes)
+            W.notify_findings(W.collect_findings(now), {}, now)
+            self.assertEqual(len(self.wake_lines()), int(minutes > 25), minutes)
+        self.assertIn("blocked 26 мин", D.CEO_INBOX.read_text(encoding="utf-8"))
+
+    def test_watch_age_in_hours(self):
+        self.blocked("researcher", "blocked")
+        now = T0 + timedelta(hours=26, minutes=10)
+        W.notify_findings(W.collect_findings(now), {}, now)
+        self.assertIn("blocked 26 ч", D.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_manual_blocked_without_result_still_wakes_ceo(self):
         p = self.ticket(status="in_progress")

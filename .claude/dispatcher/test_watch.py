@@ -233,6 +233,18 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("next")), ("in_progress", "judge"))  # повтор — Судье (В-206), не blocked → CEO
 
+    def test_orphan_silent_after_wait_released_then_returns(self):  # alpha TK-278 02:20: «ожидание снято» и orphan — одна находка
+        p = self._waiting("host:gpu1:/var/rpv/progress/rpv-b12flag.json")
+        tid = T.read_ticket(p).id
+        ws = {}
+        self.assertEqual([f.kind for f in W.collect_findings(self.now) if f.key == tid], ["orphan-ticket"])  # без снятия — сирота
+        W.triage_waits(ws, self.now, probe=lambda *a: "dead")
+        W.triage_waits(ws, self.now, probe=lambda *a: "dead")
+        self.assertIn("ожидание снято", T.read_ticket(p).log[-1].text)
+        self.assertEqual([f for f in W.collect_findings(self.now) if f.key == tid and f.kind == "orphan-ticket"], [])
+        later = self.now + timedelta(minutes=11)
+        self.assertEqual([f.kind for f in W.collect_findings(later) if f.key == tid], ["orphan-ticket"])
+
     def test_unknown_probe_does_not_count(self):
         p = self._waiting("host:gpu1:/var/rpv/progress/job-a.json")
         ws = {}

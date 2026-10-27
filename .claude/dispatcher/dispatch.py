@@ -769,20 +769,44 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     return T.read_ticket(path)
 
 
-def _awaits_judge(tkt: T.Ticket) -> bool:
+JUDGE_GRACE = timedelta(minutes=25)  # CEO 04:37: Судье на ответ по blocked исполнителя — 25 мин, потом сигнал CEO (alpha: ~22 из 61 решал CEO)
+
+
+def blocked_since(tkt: T.Ticket):
+    """С какого момента тикет в нынешнем статусе: `updated` шапки, нет — время последней записи лога, нет — None."""
+    try:
+        if tkt.header.get("updated"):
+            return T.parse_dt(tkt.header["updated"])
+    except ValueError:
+        pass
+    return tkt.log[-1].ts if tkt.log else None
+
+
+def blocked_age_text(tkt: T.Ticket, now) -> str:
+    """«26 ч» / «40 мин» — сколько тикет стоит в статусе; пусто, если момент неизвестен."""
+    since = blocked_since(tkt)
+    if since is None:
+        return ""
+    minutes = max(0, int((now - since).total_seconds() // 60))
+    return f"{minutes // 60} ч" if minutes >= 60 else f"{minutes} мин"
+
+
+def _awaits_judge(tkt: T.Ticket, now) -> bool:
     """blocked исполнителя (`result blocked|ask-owner`) идёт Судье (routes.py) — CEO о нём не знает, пока Судья не ответил
-    своим blocked/ask-owner (как с Надзирателем, 2.0.3; alpha #107 П1, #109 п.2). Судья ответил — последняя запись его."""
+    своим blocked/ask-owner (как с Надзирателем, 2.0.3; alpha #107 П1, #109 п.2). Судья ответил — последняя запись его.
+    Не ответил за JUDGE_GRACE (или момент неизвестен) — тикет больше не «ждёт Судью», сигнал CEO уходит."""
     if tkt.status != "blocked":
         return False
-    if tkt.next_role == "judge":
-        return True
     last = tkt.log[-1] if tkt.log else None
-    return bool(last and any(T.author_is(last.author, r) for r in ("engineer", "researcher"))
-                and re.match(r"\[итог:\s*(blocked|ask-owner)\]", last.text.strip()))
+    waits = tkt.next_role == "judge" or bool(
+        last and any(T.author_is(last.author, r) for r in ("engineer", "researcher"))
+        and re.match(r"\[итог:\s*(blocked|ask-owner)\]", last.text.strip()))
+    since = blocked_since(tkt)
+    return waits and since is not None and now - since < JUDGE_GRACE
 
 
 def notify_status_for_ceo(tkt: T.Ticket, state: dict, now) -> None:
-    if tkt.status not in ("blocked", "needs_owner") or _awaits_judge(tkt):
+    if tkt.status not in ("blocked", "needs_owner") or _awaits_judge(tkt, now):
         return
     notified = state.setdefault("ceo_status_notified", {})
     marker = f"{tkt.status}@{tkt.header.get('updated', '')}"
@@ -957,9 +981,17 @@ def _ceo_order_after_accept(tkt: T.Ticket, pr: int) -> bool:
                             and not re.match(r"\[итог:\s*done\]", e.text.strip()) for e in tkt.log[idx + 1:])
 
 
+def _executor_waits_after_accept(tkt: T.Ticket, idx: int) -> bool:
+    """После приёмки (запись idx) `merged:`-ожидание поставил исполнитель (`[итог: wait]` не Судьи): ждёт слияния ради шага после
+    него (выкладка, выпуск — alpha TK-258, TK-077), его и будить; ожидание, поставленное самой приёмкой, — Судьи."""
+    return any(re.match(r"\[итог:\s*wait\]", e.text.strip()) and not T.author_is(e.author, "judge") for e in tkt.log[idx + 1:])
+
+
 def close_after_merge(path: Path, tkt: T.Ticket, now) -> "T.Ticket | None":
     """alpha #107 П0: `wait_for: merged:` выполнен, приёмка Судьи стоит на голове влитого PR, заказов после неё нет — закрываем
-    сами (done, путь из приёмки), роли не будим: автор писал бы `done` ради блокнота, а Судья принимал бы повторно. Иначе None."""
+    сами (done, путь из приёмки), роли не будим: автор писал бы `done` ради блокнота, а Судья принимал бы повторно. Заказ CEO
+    04:37: только если ожидание поставил Судья (не исполнитель ради шага после слияния) и PR влит в ветку по умолчанию (не в
+    промежуточную, как alpha TK-263 в tk262). Иначе None — автора будит wait_for-met, как раньше."""
     if tkt.status != "waiting" or tkt.next_role:
         return None
     parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
@@ -967,12 +999,12 @@ def close_after_merge(path: Path, tkt: T.Ticket, now) -> "T.Ticket | None":
         return None
     repo, pr = parsed[1], parsed[2]
     idx, sha = _last_accept(tkt, pr)
-    if idx < 0 or _ceo_order_after_accept(tkt, pr):
+    if idx < 0 or _ceo_order_after_accept(tkt, pr) or _executor_waits_after_accept(tkt, idx):
         return None
     import merge_rule
-    head = merge_rule.merged_head(repo, pr)
-    if not head or not head.lower().startswith(sha.lower()):
-        return None  # не влит, не найден или влита другая голова, чем принятая — решает автор (wait_for-met)
+    merged = merge_rule.merged_pr(repo, pr)
+    if not merged or not merged["head"].lower().startswith(sha.lower()) or merged["base"] != merged["default"]:
+        return None  # не влит, не найден, влита другая голова, чем принятая, или не в ветку по умолчанию — решает автор (wait_for-met)
     proof = next((m.group(1) for e in reversed(tkt.log[:idx + 1])
                   for m in [re.search(r"(?:проверка|результат):\s*(\S+)", e.text)] if m), "")
     with T.ticket_lock(path):

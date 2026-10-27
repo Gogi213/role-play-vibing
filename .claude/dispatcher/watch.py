@@ -87,8 +87,9 @@ def check_blocked_and_needs_owner(now) -> list:
         except Exception as e:
             out.append(Finding("ticket-unreadable", path.stem, f"{path.stem}: не читается — {type(e).__name__}: {e}"))
             continue
-        if tkt.status in ("blocked", "needs_owner") and not D._awaits_judge(tkt):  # blocked исполнителя ждёт Судью, не CEO (TK-002)
-            out.append(Finding(tkt.status, tkt.id, f"{tkt.id}: status={tkt.status}"))
+        if tkt.status in ("blocked", "needs_owner") and not D._awaits_judge(tkt, now):  # blocked исполнителя ждёт Судью, не CEO (TK-002)
+            age = D.blocked_age_text(tkt, now)
+            out.append(Finding(tkt.status, tkt.id, f"{tkt.id}: status={tkt.status}" + (f" — {tkt.status} {age}" if age else "")))
     return out
 
 
