@@ -32,10 +32,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
-import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox
+import dispatch as D  # noqa: E402 — переиспользуем append_ceo_inbox
 import config as CFG  # noqa: E402
-import procs  # noqa: E402 — замок экземпляра
 import waits as W  # noqa: E402 — ssh-проба и разбор условий ожидания
+import procs  # noqa: E402 — замок экземпляра
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
@@ -134,7 +134,7 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
 DEAD_WAIT_STRIKES = 2  # подряд мёртвых проверок до действия
 AT_GRACE_MIN = 30  # допуск после времени `at:` до тревоги: диспетчер проверяет ожидания каждые ~15 с, сторож — раз в ~2 мин, 30 мин — запас на простой диспетчера
 EMPTY_WAIT_STRIKES = 3  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
-MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (waits.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
+MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (dispatch.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
 BY_GRACE_MIN = 15  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
 IDLE_WAIT_MIN = 15  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
 SSH_FAIL_STRIKES = 5  # подряд молчаний ssh до тревоги владельцу тикета
@@ -396,157 +396,208 @@ def _triage_ci_run(path, tkt, parsed, ws: dict, now, run_probe) -> bool:
     return False
 
 
-def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
-    """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
-    сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
-    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → тикет Судье (`next: judge`).
-    Молчание ssh при упавшей связи самого ПК (`link_up()` ложно) не считается: счётчик стоит, ожидание не снимается."""
-    dead = ws.setdefault("dead_wait", {})
+def _triage_empty(path: Path, tkt, ws: dict, now, empty_seen: set) -> None:
+    """waiting без условия и без next — ждать нечего, производителя нет: EMPTY_WAIT_STRIKES проверок подряд → владелец."""
+    empty = ws.setdefault("empty_wait", {})
+    if (tkt.header.get("next") or "").strip() or tkt.id in D.load_state().get("active_runs", {}):
+        empty.pop(tkt.id, None)  # next поставлен или роль по тикету сейчас работает (обычная приёмка: ci_watch снял условие, диспетчер запустил Судью) — производитель есть
+        return
+    empty_seen.add(tkt.id)
+    n = empty.get(tkt.id, 0) + 1
+    empty[tkt.id] = n
+    if n >= EMPTY_WAIT_STRIKES:
+        empty.pop(tkt.id, None)
+        _wake_owner_job(path, tkt, ws, "", f"сторож: тикет waiting без wait_for и без next {n} проверок подряд — ждать нечего", now, key="empty_wakes")
+
+
+def _triage_bad_form(path: Path, tkt, spec: str, ws: dict, now, bad_seen: set) -> None:
+    """TK-117 К1.1: форма host: не понята (напр. `host:gpu1:file:/x`) — диспетчер её не проверит, файл не разбудит никого."""
+    bad = ws.setdefault("bad_form", {})
+    bad_seen.add(tkt.id)
+    n = bad.get(tkt.id, {}).get("n", 0) + 1 if bad.get(tkt.id, {}).get("spec") == spec else 1
+    bad[tkt.id] = {"spec": spec, "n": n}
+    if n >= EMPTY_WAIT_STRIKES:
+        bad.pop(tkt.id, None)
+        _wake_owner_job(path, tkt, ws, spec, f"сторож: форма wait_for `{spec}` не понята (у host: путь только абсолютный, без `file:`) — цель никто не проверяет; "
+                        "поставь wait_for заново", now, key="bad_form_wakes")
+
+
+def _release_owner(path: Path, why: str, now) -> None:
+    """Снять ожидание тикета и разбудить владельца записью `why` (status: in_progress, wait_for пуст)."""
+    with T.ticket_lock(path):
+        T.append_log(path, "watch", why, now)
+        T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
+
+
+def _triage_ssh_error(path: Path, tkt, spec: str, ws: dict, now, link_ok) -> bool:
+    """ssh молчит: условие не проверить; SSH_FAIL_STRIKES раз подряд — владельцу тикета, не CEO. True — ожидание живо.
+    Обрыв связи ПК, а не машины (`link_ok()` ложно): страйк не засчитывается (Д-8)."""
+    if not link_ok():
+        return True
     ssh_fail = ws.setdefault("ssh_fail_wait", {})
-    alive, seen, states, empty_seen = set(), set(), {}, set()
-    bad_seen = set()
-    if run_probe is None:
-        import ci_watch
-        run_probe = ci_watch.run_state
-    job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, W._ssh_cmd))
-    owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет»
-    link = None  # связь ПК проверяется лениво, раз за проход
-    for path in T.list_tickets(CFG.TICKETS_DIR):
-        try:
-            tkt = T.read_ticket(path)
-        except Exception:
-            continue
-        if tkt.status != "waiting":
-            continue
-        if not (tkt.header.get("wait_for") or "").strip():  # waiting без условия и без next — ждать нечего, производителя нет
-            empty = ws.setdefault("empty_wait", {})
-            if (tkt.header.get("next") or "").strip() or tkt.id in D.load_state().get("active_runs", {}):
-                empty.pop(tkt.id, None)  # next поставлен или роль по тикету сейчас работает (обычная приёмка: ci_watch снял условие, диспетчер запустил Судью) — производитель есть
-                continue
-            empty_seen.add(tkt.id)
-            n = empty.get(tkt.id, 0) + 1
-            empty[tkt.id] = n
-            if n >= EMPTY_WAIT_STRIKES:
-                empty.pop(tkt.id, None)
-                _wake_owner_job(path, tkt, ws, "", f"сторож: тикет waiting без wait_for и без next {n} проверок подряд — ждать нечего", now, key="empty_wakes")
-            continue
-        spec = tkt.header["wait_for"].strip()
-        parsed = T.parse_wait_for(spec)
-        if parsed is None and spec.startswith("host:"):  # TK-117 К1.1: форма host: не понята (напр. `host:gpu1:file:/x`) — диспетчер её не проверит, файл не разбудит никого
-            bad = ws.setdefault("bad_form", {})
-            bad_seen.add(tkt.id)
-            n = bad.get(tkt.id, {}).get("n", 0) + 1 if bad.get(tkt.id, {}).get("spec") == spec else 1
-            bad[tkt.id] = {"spec": spec, "n": n}
-            if n >= EMPTY_WAIT_STRIKES:
-                bad.pop(tkt.id, None)
-                _wake_owner_job(path, tkt, ws, spec, f"сторож: форма wait_for `{spec}` не понята (у host: путь только абсолютный, без `file:`) — цель никто не проверяет; "
-                                "поставь wait_for заново", now, key="bad_form_wakes")
-            continue
-        if parsed and parsed[0] == "job":
-            if _triage_job(path, tkt, parsed, ws, now, job_probe, states, owners):
-                if states.get(f"{parsed[1]}:{parsed[2]}") != "done" and _past_deadline(path, tkt, ws, spec, now):
-                    continue
-                alive.add(tkt.id)
-            else:
-                _mark_failed_seen(ws, tkt.id, owners, parsed[2])
-            continue
-        if parsed and parsed[0] == "ci-run":
-            if _triage_ci_run(path, tkt, parsed, ws, now, run_probe):
-                alive.add(tkt.id)
-            continue
-        st = _wait_target_state(tkt, probe)
-        st = _apply_owned_jobs(path, tkt, ws, spec, st, owners, now)
-        if st == "woken":
-            continue
-        if st == "ssh-error":  # ssh молчит: условие не проверить; N раз подряд — владельцу тикета, не CEO
-            if link is None:
-                link = link_up()
-            if not link:  # обрыв связи ПК, а не машины: страйк не засчитываем, ожидание живо (Д-8)
-                alive.add(tkt.id)
-                continue
-            ent = ssh_fail.get(tkt.id) or {}
-            n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
-            ssh_fail[tkt.id] = {"spec": spec, "n": n}
-            dead.pop(tkt.id, None)
-            if n < SSH_FAIL_STRIKES:
-                alive.add(tkt.id)
-                continue
-            with T.ticket_lock(path):
-                T.append_log(path, "watch", f"сторож: ssh к машине из `{spec}` молчит {n} проверок подряд — условие "
-                             "не проверить; ожидание снято, владелец будится: проверь машину и задание, поставь wait_for заново", now)
-                T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
-            ssh_fail.pop(tkt.id, None)
-            continue
-        ssh_fail.pop(tkt.id, None)
-        met = ws.setdefault("met_since", {})
-        if st == "met":  # условие выполнено; диспетчер обязан разбудить за пару сверок — не разбудил → владелец
-            ent = met.get(tkt.id)
-            if not ent or ent.get("spec") != spec:
-                ent = met[tkt.id] = {"spec": spec, "ts": T.now_iso(now)}
-            if now - T.parse_dt(ent["ts"]) > timedelta(minutes=MET_GRACE_MIN):
-                met.pop(tkt.id, None)
-                with T.ticket_lock(path):
-                    T.append_log(path, "watch", f"сторож: условие `{spec}` выполнено, но диспетчер не разбудил за {MET_GRACE_MIN} мин "
-                                 "(сбой проверки/событий) — ожидание снято, владелец будится: продолжай с результата", now)
-                    T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
-                continue
-            alive.add(tkt.id)
-            dead.pop(tkt.id, None)
-            continue
-        met.pop(tkt.id, None)
-        if st != "dead" and (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, ws, spec, now):
-            continue
-        if st != "dead" and _idle_wait(path, tkt, ws, spec, parsed, owners, now, st):
-            continue
-        if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
-            alive.add(tkt.id)
-            dead.pop(tkt.id, None)
-            continue
-        if st != "dead":
-            continue
-        seen.add(tkt.id)
-        ent = dead.get(tkt.id) or {}
-        n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
-        dead[tkt.id] = {**ent, "spec": spec, "n": n}
-        if n < DEAD_WAIT_STRIKES:
-            continue
-        repeat = spec in ent.get("acted", [])
-        why = f"сторож: цель wait_for `{spec}` не существует и её никто не производит ({n} проверки подряд)"
+    ent = ssh_fail.get(tkt.id) or {}
+    n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+    ssh_fail[tkt.id] = {"spec": spec, "n": n}
+    ws.setdefault("dead_wait", {}).pop(tkt.id, None)
+    if n < SSH_FAIL_STRIKES:
+        return True
+    _release_owner(path, f"сторож: ssh к машине из `{spec}` молчит {n} проверок подряд — условие "
+                   "не проверить; ожидание снято, владелец будится: проверь машину и задание, поставь wait_for заново", now)
+    ssh_fail.pop(tkt.id, None)
+    return False
+
+
+def _triage_met(path: Path, tkt, spec: str, ws: dict, now) -> bool:
+    """Условие выполнено; диспетчер обязан разбудить за пару сверок — не разбудил за MET_GRACE_MIN → владелец. True — ждём."""
+    met = ws.setdefault("met_since", {})
+    ent = met.get(tkt.id)
+    if not ent or ent.get("spec") != spec:
+        ent = met[tkt.id] = {"spec": spec, "ts": T.now_iso(now)}
+    if now - T.parse_dt(ent["ts"]) <= timedelta(minutes=MET_GRACE_MIN):
+        return True
+    met.pop(tkt.id, None)
+    _release_owner(path, f"сторож: условие `{spec}` выполнено, но диспетчер не разбудил за {MET_GRACE_MIN} мин "
+                   "(сбой проверки/событий) — ожидание снято, владелец будится: продолжай с результата", now)
+    return False
+
+
+def _triage_dead(path: Path, tkt, spec: str, ws: dict, now) -> None:
+    """Цель мертва: DEAD_WAIT_STRIKES проверок подряд → владельцу; повторно та же цель → Судье."""
+    dead = ws.setdefault("dead_wait", {})
+    ent = dead.get(tkt.id) or {}
+    n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
+    dead[tkt.id] = {**ent, "spec": spec, "n": n}
+    if n < DEAD_WAIT_STRIKES:
+        return
+    repeat = spec in ent.get("acted", [])
+    why = f"сторож: цель wait_for `{spec}` не существует и её никто не производит ({n} проверки подряд)"
+    if repeat:
         with T.ticket_lock(path):
-            if repeat:
-                _to_judge(path, why, now, clear_wait=False)
-            else:
-                T.append_log(path, "watch", why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
-                T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": ""}, now)
-        dead[tkt.id] = {"spec": spec, "n": 0, "acted": ent.get("acted", []) + [spec]}
-    if states or ws.get("job_states_written"):  # состояние для диспетчера (check_wait_for); пустое тоже пишем один раз
+            _to_judge(path, why, now, clear_wait=False)
+    else:
+        _release_owner(path, why + " — ожидание снято, владелец будится: перезапусти задание или смени wait_for", now)
+    dead[tkt.id] = {"spec": spec, "n": 0, "acted": ent.get("acted", []) + [spec]}
+
+
+def _prune_wait_state(ws: dict, alive: set, seen: set, bad_seen: set, empty_seen: set) -> None:
+    """Счётчики тикетов, которых этот проход не видел (или они уже не ждут), снимаются."""
+    for key, keep in (("dead_wait", seen | alive), ("ssh_fail_wait", alive), ("met_since", alive), ("bad_form", bad_seen),
+                      ("idle_wait", alive), ("empty_wait", empty_seen)):
+        counters = ws.get(key, {})
+        for tid in [t for t in counters if t not in keep]:
+            counters.pop(tid, None)
+
+
+class _Pass:
+    """Состояние одного прохода `triage_waits`: кто жив, чьи счётчики видели, состояния заданий и ленивая проверка связи ПК."""
+
+    def __init__(self, ws: dict, now, probe, job_probe, owners: dict, run_probe, link_up):
+        self.ws, self.now, self.probe, self.job_probe, self.run_probe = ws, now, probe, job_probe, run_probe
+        self.owners, self.link_up, self._link = owners, link_up, None
+        self.alive, self.seen, self.states, self.empty_seen, self.bad_seen = set(), set(), {}, set(), set()
+
+    def link_ok(self) -> bool:
+        if self._link is None:
+            self._link = bool(self.link_up())
+        return self._link
+
+
+def _triage_job_wait(path: Path, tkt, spec: str, parsed, c: _Pass) -> None:
+    """`job:` — тикет жив, пока задание идёт/стоит в очереди/готово; просрочка срока снимает ожидание."""
+    if not _triage_job(path, tkt, parsed, c.ws, c.now, c.job_probe, c.states, c.owners):
+        _mark_failed_seen(c.ws, tkt.id, c.owners, parsed[2])
+        return
+    if c.states.get(f"{parsed[1]}:{parsed[2]}") != "done" and _past_deadline(path, tkt, c.ws, spec, c.now):
+        return
+    c.alive.add(tkt.id)
+
+
+def _settle_target(path: Path, tkt, spec: str, parsed, st: str, c: _Pass) -> None:
+    """Цель не выполнена и не молчит: срок, простой, затем «жив» (годный wait_for) или счётчик мёртвой цели."""
+    if st == "dead":
+        c.seen.add(tkt.id)
+        _triage_dead(path, tkt, spec, c.ws, c.now)
+        return
+    if (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, c.ws, spec, c.now):
+        return
+    if _idle_wait(path, tkt, c.ws, spec, parsed, c.owners, c.now, st):
+        return
+    if st in ("exists", "producer", "unknown"):  # годный wait_for: условие проверяется диспетчером — не сирота
+        c.alive.add(tkt.id)
+        c.ws["dead_wait"].pop(tkt.id, None)
+
+
+def _triage_target(path: Path, tkt, spec: str, parsed, c: _Pass) -> None:
+    """Прочие формы (file:, host:, ticket:): проба цели, ssh-молчание, выполнено, дальше — `_settle_target`."""
+    ws = c.ws
+    st = _wait_target_state(tkt, c.probe)
+    st = _apply_owned_jobs(path, tkt, ws, spec, st, c.owners, c.now)
+    if st == "woken":
+        return
+    if st == "ssh-error":
+        if _triage_ssh_error(path, tkt, spec, ws, c.now, c.link_ok):
+            c.alive.add(tkt.id)
+        return
+    ws["ssh_fail_wait"].pop(tkt.id, None)
+    if st == "met":
+        if _triage_met(path, tkt, spec, ws, c.now):
+            c.alive.add(tkt.id)
+            ws["dead_wait"].pop(tkt.id, None)
+        return
+    ws.setdefault("met_since", {}).pop(tkt.id, None)
+    _settle_target(path, tkt, spec, parsed, st, c)
+
+
+def _triage_ticket(path: Path, tkt, c: _Pass) -> None:
+    """Один waiting-тикет: по форме wait_for — к своей проверке."""
+    spec = (tkt.header.get("wait_for") or "").strip()
+    if not spec:
+        _triage_empty(path, tkt, c.ws, c.now, c.empty_seen)
+        return
+    parsed = T.parse_wait_for(spec)
+    if parsed is None and spec.startswith("host:"):
+        _triage_bad_form(path, tkt, spec, c.ws, c.now, c.bad_seen)
+    elif parsed and parsed[0] == "job":
+        _triage_job_wait(path, tkt, spec, parsed, c)
+    elif parsed and parsed[0] == "ci-run":
+        if _triage_ci_run(path, tkt, parsed, c.ws, c.now, c.run_probe):
+            c.alive.add(tkt.id)
+    else:
+        _triage_target(path, tkt, spec, parsed, c)
+
+
+def _save_job_states(ws: dict, states: dict) -> None:
+    """Состояние заданий для диспетчера (check_wait_for); пустое тоже пишем один раз."""
+    if states or ws.get("job_states_written"):
         try:
             LW.save_states(CFG.DISPATCHER_DIR, states)
         except OSError:
             pass
         ws["job_states_written"] = bool(states)
-    for tid in list(dead):
-        if tid not in seen and tid not in alive:
-            dead.pop(tid, None)
-    for tid in list(ssh_fail):
-        if tid not in alive:
-            ssh_fail.pop(tid, None)
-    met = ws.get("met_since", {})
-    for tid in list(met):
-        if tid not in alive:
-            met.pop(tid, None)
-    for tid in list(ws.get("bad_form", {})):
-        if tid not in bad_seen:
-            ws["bad_form"].pop(tid, None)
-    empty = ws.get("empty_wait", {})
-    idle = ws.get("idle_wait", {})
-    for tid in list(idle):
-        if tid not in alive:
-            idle.pop(tid, None)
-    for tid in list(empty):
-        if tid not in empty_seen:
-            empty.pop(tid, None)
-    return alive
+
+
+def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
+    """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
+    сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
+    записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → тикет Судье (`next: judge`).
+    Молчание ssh при упавшей связи самого ПК (`link_up()` ложно) не считается: счётчик стоит, ожидание не снимается."""
+    ws.setdefault("dead_wait", {})
+    ws.setdefault("ssh_fail_wait", {})
+    if run_probe is None:
+        import ci_watch
+        run_probe = ci_watch.run_state
+    job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, W._ssh_cmd))
+    c = _Pass(ws, now, probe, job_probe, _fetch_owners(owners_probe), run_probe, link_up)  # owners: {алиас: [задания]}
+    for path in T.list_tickets(CFG.TICKETS_DIR):
+        try:
+            tkt = T.read_ticket(path)
+        except Exception:
+            continue
+        if tkt.status == "waiting":
+            _triage_ticket(path, tkt, c)
+    _save_job_states(ws, c.states)
+    _prune_wait_state(ws, c.alive, c.seen, c.bad_seen, c.empty_seen)
+    return c.alive
 
 
 STRAY_WAKE_REPEAT_HOURS = 2.0  # повтор сигнала о том же прогоне: замер идёт часами, раз в 2 ч напомнить, не спамить

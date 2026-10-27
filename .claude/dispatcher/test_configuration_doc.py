@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DOC = ROOT / "docs" / "configuration.md"
-SOURCES = [p for pattern in (".claude/dispatcher/*.py", ".claude/hooks/*.py", "hooks/*", "tools/*")
+SOURCES = [p for pattern in (".claude/dispatcher/*.py", ".claude/hooks/*.py", ".claude/hooks/dguard/*.py", "hooks/*", "tools/*")
            for p in ROOT.glob(pattern) if p.is_file() and not p.name.startswith(("test_", "conftest"))]
 ENV_RE = re.compile(r"""RPV_[A-Z][A-Z0-9_]*|\b(?:P\.env|_env|env)\(\s*["']([A-Z][A-Z0-9_]*)["']""")
 KEY_RE = re.compile(r"""\bsetting\(\s*["']([a-z_]+)["']|_str_list\(data,\s*["']([a-z_]+)["']|data\.get\(["'](guard_[a-z_]+)["']""")
