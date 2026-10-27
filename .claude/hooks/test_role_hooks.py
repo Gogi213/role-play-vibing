@@ -28,6 +28,8 @@ for var in ("RPV_ROLE", "RPV_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
 sys.path.insert(0, HERE)
 import role_context as rc  # noqa: E402
 import role_memory as rm  # noqa: E402
+sys.path.insert(0, os.path.join(PLUGIN, ".claude", "dispatcher"))
+from test_plugin_version import make_install  # noqa: E402
 
 
 def tearDownModule():
@@ -131,6 +133,54 @@ class SessionStart(unittest.TestCase):
                            capture_output=True)
         self.assertEqual(r.returncode, 0)
         json.loads(r.stdout.decode("utf-8"))
+
+
+class StaleSession(unittest.TestCase):
+    """TK-039 (П2): сессия на каталоге старой версии плагина — первая строка контекста о перезапуске."""
+    LINE = "⚠ сессия на плагине 2.0.5, установлена 2.0.9 — перезапустите Claude Code"
+
+    def setUp(self):
+        for k in ("RPV_ROLE", "RPV_TICKET", "CLAUDE_CODE_HOST_SESSION_ID"):
+            os.environ.pop(k, None)
+        shutil.rmtree(rc.STATE_DIR, ignore_errors=True)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cfg, self.roots = make_install(tmp.name, ("2.0.5", "2.0.9"), [("user", None, "2.0.9")])
+
+    def env(self, version, role):
+        return {"CLAUDE_PLUGIN_ROOT": self.roots[version], "CLAUDE_CONFIG_DIR": self.cfg, "RPV_ROLE": role}
+
+    def start(self, version, role, source):
+        r = run_hook("role_context.py", {"hook_event_name": "SessionStart", "source": source, "session_id": "t-stale"},
+                     self.env(version, role))
+        return json.loads(r.stdout.decode("utf-8"))["hookSpecificOutput"]["additionalContext"]
+
+    def prompt(self, version, role="engineer", session="s-stale"):
+        r = run_hook("role_memory.py", {"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": "привет"},
+                     self.env(version, role))
+        return json.loads(r.stdout.decode("utf-8"))["hookSpecificOutput"]["additionalContext"]
+
+    def test_session_start_puts_line_first_within_limit(self):
+        for role in ("researcher", "engineer", "judge", "ceo"):
+            for source in ("startup", "clear", "resume", "compact"):
+                text = self.start("2.0.5", role, source)
+                self.assertTrue(text.startswith(self.LINE), (role, source, text[:120]))
+                self.assertIn("запреты 2.0.9 на эту сессию не действуют", text.splitlines()[0])
+                self.assertLessEqual(len(text), rc.LIMIT, (role, source))
+
+    def test_current_version_has_no_line(self):
+        for source in ("startup", "resume"):
+            self.assertNotIn("сессия на плагине", self.start("2.0.9", "engineer", source))
+        self.assertNotIn("сессия на плагине", self.prompt("2.0.9"))
+
+    def test_prompt_puts_line_first_then_repeats_every_ten_messages(self):
+        first = self.prompt("2.0.5")
+        self.assertTrue(first.startswith(self.LINE), first[:120])
+        self.assertIn("tickets.py result", first)       # строка молчания роли осталась
+        self.assertNotIn("сессия на плагине", self.prompt("2.0.5"))
+        for _ in range(rm.REPEAT_EVERY - 2):
+            self.prompt("2.0.5")
+        self.assertTrue(self.prompt("2.0.5").startswith(self.LINE))
 
 
 class RoleDetection(unittest.TestCase):

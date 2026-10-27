@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import start as S  # noqa: E402
 import hide  # noqa: E402
+import plugin_version as PV  # noqa: E402
 import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
@@ -158,6 +159,29 @@ def check_copies(project: Path, name: str, procs=None) -> tuple | None:
     return (f"копии {name}", FAIL, f"{n} копий вместо одной") if n > 1 else None
 
 
+def check_versions(project: Path, names, procs=None, config_dir=None) -> tuple | None:
+    """Версия плагина у запущенных диспетчера и сторожа против установленной (TK-039): служба на каталоге старой версии
+    держит прежние правила до перезапуска — FAIL. Службы не из каталога плагина или не запущены — не в счёт; нет ни одной — None."""
+    shown, stale, known = [], [], True
+    for name in names:
+        for _, script in S.find_scripts(f"{name}.py", project, procs):
+            root = PV.root_of(script) if os.path.isabs(script) else None
+            ver = PV.meta(root).get("version") if root else None
+            if not ver:
+                continue
+            label = {"dispatch": "диспетчер", "watch": "сторож"}.get(name, name)
+            shown.append(f"{label} {ver}")
+            got = PV.mismatch(project, root, config_dir)
+            if got:
+                stale.append(got[1])
+            known = known and PV.installed(project, root, config_dir) is not None
+    if not shown:
+        return None
+    if stale:
+        return "версии плагина", FAIL, f"{', '.join(shown)}; установлена {stale[0]} — перезапустите службы (start.py)"
+    return "версии плагина", OK, ", ".join(shown) + ("; совпадают с установленной" if known else "; установленная не найдена")
+
+
 def run_checks(project: Path, now: float | None = None, installed=scheduler_installed,
                procs=None) -> list:
     now = time.time() if now is None else now
@@ -167,6 +191,9 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
     rows = [check_service(n, sd, now) for n in names]
     rows += [c for c in (check_copies(project, n, procs) for n in names) if c]
     rows.append(check_supervise(project, sd, now, installed))
+    version_row = check_versions(project, names, procs)
+    if version_row:
+        rows.append(version_row)
     rows.append(check_idle(sd, now))
     rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
