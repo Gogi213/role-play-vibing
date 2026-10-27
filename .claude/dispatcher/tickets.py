@@ -43,7 +43,6 @@
 """
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
@@ -58,6 +57,8 @@ import errors as errors_mod  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
+import tickets_numbers as numbers_mod  # noqa: E402
+from tickets_cli import build_parser  # noqa: E402
 
 # Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
 # в main() флаг --project переключает их ещё раз. Тесты подменяют TICKETS_DIR прямо на модуле.
@@ -66,6 +67,7 @@ REF_MIN = 5  # знаков в цитате --ref; решение «В-<числ
 REF_DECISION = re.compile(r"^В-\d+")
 REF_REGISTRY = re.compile(r"^(В-\d+|G-\d{3,})\b")  # номер реестра владельца: есть реестр — номер обязан в нём быть
 PROJECT_ROOT = D.PROJECT_ROOT
+_text_numbers, _artifact_numbers, _has_number = numbers_mod.text_numbers, numbers_mod.artifact_numbers, numbers_mod.has_number
 
 
 def cmd_inbox(args) -> int:
@@ -389,135 +391,10 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
     return "", f" хвосты: {', '.join(ids)}", ""
 
 
-NUMBER = re.compile(r"[-+−]?\d+(?:[.,]\d+)?")
-NUMBER_ROW = re.compile(r"^\s*\|([^|]+)\|([^|]+)\|")
-# `--numbers -` («чисел в сдаче нет») код проверяет сам: в текстовом артефакте приёмки по --path ищет числа
-NUMBERS_TEXT_EXT = {".md", ".txt", ".csv", ".tsv", ".json", ".log"}
-NUMBERS_SCAN_FILES = 50          # каталог-артефакт: не больше стольких текстовых файлов
-NUMBERS_SCAN_BYTES = 1_000_000   # и не больше стольких байт с каждого
-# что числом не считается (метки, а не величины); каждое совпадение заменяется пробелом до поиска чисел
-_NOT_NUMBERS = tuple(re.compile(p, f) for p, f in (
-    (r"https?://\S+", 0),                                                                   # адреса
-    (r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])", 0),   # uuid
-    (r"(?<![\w./\\-])[\w./\\-]{0,200}\w\.[A-Za-z][A-Za-z0-9]{0,4}\b(?::\d+(?:[-–]\d+)?)?", 0),   # файл.расш[:строка]
-    (r"(?<!\d)\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?", 0),  # ISO
-    (r"\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
-     r"(?:\s+\d{4})?(?:\s*г\.?)?", re.I),                                                   # 14 октября 2026
-    (r"(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{4}(?!\d)", 0),                                        # ДД.ММ.ГГГГ
-    (r"(?<![\d.,])(?:0[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])(?:\.(?:\d{4}|\d{2}))?(?!\d|[.,]\d)", 0),   # ДД.ММ[.ГГ]
-    (r"(?<![\w:.,])\d{1,2}:\d{2}(?::\d{2})?(?!\d)", 0),                                      # ЧЧ:ММ[:СС]
-    (r"(?<![\w.])[vV]?\d+(?:\.\d+){2,}(?:-[A-Za-z][0-9A-Za-z.]*)?", 0),                      # версия X.Y.Z
-    (r"(?<!\w)[A-ZА-ЯЁ]{1,3}-\d+(?:\.\d+)*", 0),                                             # TK-236, В-12, G-001, E-3, UTF-8
-    (r"(?<!\w)[Pp][Rr]\s*№?\s*#?\d+|[#№]\s*\d+", 0),                                              # PR #7, #7, №7
-    (r"(?<!\w)(?:пп?|пункт\w*|§)\.?\s*\d+(?:[.,]\d+)*", 0),                                   # п.4, пункт 4
-    (r"(?<!\w)(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}(?!\w)", 0),                    # sha (7–40 hex)
-    (r"^[ \t]*(?:[-*+>][ \t]*)*\d+(?:\.\d+)*[.)](?=\s|$)", re.M),                            # «1.», «2)» в начале строки
-    (r"^[ \t]*#{1,6}[ \t]+\d+(?:\.\d+)*[.)]?(?=\s|$)", re.M),                                # ## 1
-))
-_FREE_NUMBER = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*")  # «CP9», «v2», «sha256» — метки, а не числа
-
-
-def _text_numbers(text: str) -> list[str]:
-    """Числа в тексте сдачи — всё, что не дата, время, номер (TK-/В-/G-/E-/PR #/п.), версия X.Y.Z, sha, файл:строка,
-    адрес, номер пункта списка и заголовка. Метка с буквой слева («CP9», «v2») числом не считается."""
-    for rx in _NOT_NUMBERS:
-        text = rx.sub(" ", text)
-    return [m.group(0) for m in _FREE_NUMBER.finditer(text)]
-
-
-def _artifact_numbers(target: Path | None) -> list[str]:
-    """Числа в текстовом артефакте (md, txt, csv, tsv, json, log) или в текстовых файлах каталога (до
-    NUMBERS_SCAN_FILES файлов); не текст — пусто: код читать нечем, это держит проверка Судьи."""
-    if target is None:
-        return []
-    if target.is_file():
-        files = [target]
-    else:
-        files = []
-        for dirpath, dirnames, names in os.walk(target):
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
-            files += [Path(dirpath) / n for n in sorted(names) if Path(n).suffix.lower() in NUMBERS_TEXT_EXT]
-            if len(files) >= NUMBERS_SCAN_FILES:
-                break
-    found: list[str] = []
-    for f in files[:NUMBERS_SCAN_FILES]:
-        if f.suffix.lower() not in NUMBERS_TEXT_EXT:
-            continue
-        try:
-            found += _text_numbers(f.read_bytes()[:NUMBERS_SCAN_BYTES].decode("utf-8", errors="replace"))
-        except OSError:
-            continue
-    return found
-
-
-def _has_number(text: str, num: str) -> bool:
-    """Число `num` есть в `text` целым числом (3 — не в 13 и не в 0,3); запятая и точка — одно."""
-    text = text.replace("−", "-")
-    return any(re.search(r"(?<![\d.,])" + re.escape(v) + r"(?!\d|[.,]\d)", text)
-               for v in {num, num.replace(",", "."), num.replace(".", ",")})
-
-
 def _numbers_ack(args, tid: str) -> tuple[str, str]:
-    """CP9 (критерий 4): приёмка Судьи в V2-проекте — с таблицей ключевых чисел сдачи `| число | файл:строка |`
-    (`--numbers <файл>`) или `--numbers -` (чисел нет). Номер строки обязателен: число обязано быть в названной строке ±2
-    своего источника, иначе оно «из головы», отказ. `--numbers -` при приёмке по --path (без PR) код проверяет сам: в текстовом
-    артефакте есть числа — отказ. Пути — от worktree тикета, если он есть, иначе от корня проекта."""
-    if not registry_mod.decisions_file(PROJECT_ROOT).exists():
-        return "", ""
-    raw = (getattr(args, "numbers", None) or "").strip()
-    root = PROJECT_ROOT.resolve()
-    wt = root / ".claude" / "worktrees" / tid
+    """Таблица ключевых чисел приёмки (`--numbers`): сверка — `tickets_numbers.numbers_ack`, корень проекта — тот, что у модуля."""
+    return numbers_mod.numbers_ack(args, tid, PROJECT_ROOT)
 
-    def find(rel: str, dirs: bool = False):
-        for base in ((wt, root) if wt.is_dir() else (root,)):
-            f = (Path(rel) if Path(rel).is_absolute() else base / rel).resolve()
-            if (f.is_file() or (dirs and f.is_dir())) and f.is_relative_to(root):
-                return f
-        return None
-
-    if raw in ("-", "—"):
-        art = (getattr(args, "path", None) or "").strip()
-        if art and not (getattr(args, "pr", None) or getattr(args, "sha", None)):  # приёмка по PR (код) — без этой проверки
-            nums = list(dict.fromkeys(_artifact_numbers(find(art, dirs=True))))
-            if nums:
-                return (f"в сдаче есть числа (первые: {', '.join(nums[:5])}) — нужна таблица --numbers <файл с таблицей "
-                        f"«| число | файл:строка |»>; --numbers - только когда чисел в {art} нет"), ""
-        return "", " числа: нет"
-    if not raw:
-        return ("приёмка — с таблицей ключевых чисел: --numbers <файл с таблицей «| число | файл:строка |»> или "
-                "--numbers - (чисел в сдаче нет); число без источника владельцу не уходит"), ""
-    table = find(raw)
-    if not table:
-        return f"--numbers {raw}: файла нет в проекте", ""
-    rows = []
-    for ln in table.read_text(encoding="utf-8", errors="replace").splitlines():
-        m = NUMBER_ROW.match(ln)
-        num = NUMBER.search(m.group(1)) if m else None
-        if num:
-            rows.append((num.group(0).replace("−", "-"), m.group(2).strip().strip("`").strip()))
-    if not rows:
-        return f"--numbers {raw}: нет строк таблицы «| число | файл:строка |»", ""
-    bad = []
-    for num, src in rows:
-        at = re.fullmatch(r"(.+?):(\d+)", src)
-        f = find(at.group(1) if at else src)
-        if not f:
-            bad.append(f"{num} — источника {src} нет")
-            continue
-        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
-        if not at:  # номер строки обязателен: короткое «3» иначе найдётся в любом месте файла
-            hit = [str(i) for i, ln in enumerate(lines, 1) if _has_number(ln, num)][:3]
-            bad.append(f"{num} — у {src} нет номера строки, пиши файл:строка"
-                       + (f" (число есть в строках {', '.join(hit)})" if hit else " (такого числа в файле нет)"))
-            continue
-        n = int(at.group(2))
-        if not 1 <= n <= len(lines):
-            bad.append(f"{num} — в {at.group(1)} нет строки {n} (строк: {len(lines)})")
-        elif not _has_number("\n".join(lines[max(n - 3, 0):n + 2]), num):
-            bad.append(f"{num} — нет в {src} (строки {max(n - 2, 1)}–{min(n + 2, len(lines))})")
-    if bad:
-        return "числа не сходятся с источником (число «из головы» владельцу не уходит): " + "; ".join(bad[:8]), ""
-    return "", f" числа: сверено {len(rows)} ({raw})"
 
 
 def _set_due(path: Path, due, said: str = "") -> None:
@@ -883,143 +760,22 @@ def cmd_status(args) -> int:
     return 0
 
 
+def _handlers() -> dict:
+    """Подкоманда → обработчик; собирается при вызове, чтобы тесты могли подменять обработчики на модуле."""
+    return {"new": cmd_new, "comment": cmd_comment, "accept": cmd_accept, "result": cmd_result, "start": cmd_start,
+            "wait": cmd_wait, "due": cmd_due, "stop": cmd_stop, "allow": cmd_allow, "allow-delete": cmd_allow_delete,
+            "config": cmd_config, "inbox": cmd_inbox, "status": cmd_status}
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    p = argparse.ArgumentParser(prog="tickets.py")
-    p.add_argument("--project", default=None,
-                   help="корень проекта (иначе RPV_PROJECT, CLAUDE_PROJECT_DIR, ближайший каталог вверх с .claude/roles); "
-                        "перед подкомандой")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    p_new = sub.add_parser("new")
-    p_new.add_argument("--owner", required=True, choices=["researcher", "engineer", "judge"])
-    p_new.add_argument("--title", required=True)
-    p_new.add_argument("--reviewer", choices=["researcher", "engineer", "judge"],
-                        help="ревьюер; по умолчанию Судья (у Haiku-задач и тикетов Судьи — никого)")
-    p_new.add_argument("--no-reviewer", action="store_true",
-                        help="только с --executor haiku (там и так без Судьи); иначе отказ — Судью снимает владелец")
-    p_new.add_argument("--effort", choices=list(T.VALID_EFFORTS), default=None,
-                        help="усилие запусков по этому тикету; без поля — исследователь/инженер high, Судья xhigh")
-    p_new.add_argument("--ref", default="", help="обязательно: цель G-NNN или решение В-N из реестра владельца "
-                                                  "(без реестра — цитата владельца или В-##)")
-    p_new.add_argument("--due", default=None, help="срок, названный владельцу: ЧЧ:ММ или ISO (GMT+4)")
-    p_new.add_argument("--said", default=None, help="как срок сказан владельцу (дословно)")
-    p_new.add_argument("--desc", default="")
-    p_new.add_argument("--wait-for", dest="wait_for", default="")
-    p_new.add_argument("--force", action="store_true", help="создать, даже если за час есть тикет с похожим заголовком")
-    p_new.add_argument("--backlog", action="store_true",
-                        help="создать сразу в backlog (перенос из TASKS.md) — диспетчер её не трогает до `start`")
-    p_new.add_argument("--executor", choices=["haiku"], default=None,
-                        help="claude-haiku-5-5 для чисто механических задач — требует --kind")
-    p_new.add_argument("--kind", choices=sorted(D.HAIKU_ALLOWED_KINDS), default=None,
-                        help="вид задачи для --executor haiku")
-    p_new.set_defaults(func=cmd_new)
-
-    p_comment = sub.add_parser("comment")
-    p_comment.add_argument("id")
-    p_comment.add_argument("--author", required=True)
-    p_comment.add_argument("--text", required=True)
-    p_comment.add_argument("--next", choices=["researcher", "engineer", "judge", "ceo"], default=None,
-                            help="разбудить эту роль один раз (ceo — только blocked/нужно решение владельца)")
-    p_comment.set_defaults(func=cmd_comment)
-
-    p_accept = sub.add_parser("accept", help="Судья: принято, PR N на голове SHA (вливает merge_rule по правилу)")
-    p_accept.add_argument("id")
-    p_accept.add_argument("--pr", type=int, required=True)
-    p_accept.add_argument("--sha", required=True)
-    p_accept.add_argument("--text", default="")
-    p_accept.add_argument("--repo", default=None, help="<владелец/репо> PR (иначе ci_repo в .claude/rpv.json)")
-    p_accept.add_argument("--decisions", default=None, help="решения владельца, с которыми сверено: В-N[,В-M] или - (связанных нет)")
-    p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл:строка |» или - (чисел нет)")
-    p_accept.add_argument("--tail", default=None, help="хвосты: - (нет) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
-    p_accept.add_argument("--live", default=None, help="договор с [вживую]: файл живой проверки (что увидит владелец)")
-    p_accept.set_defaults(func=cmd_accept)
-
-    p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
-    p_result.add_argument("id")
-    p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait | continue")
-    p_result.add_argument("--why", default="", help="зачем/почему, ≤ 200 знаков (обязательно)")
-    p_result.add_argument("--pr", type=int, default=None, help="pr, accept: номер PR")
-    p_result.add_argument("--sha", default=None, help="pr, accept, return: голова PR (7–40 hex)")
-    p_result.add_argument("--path", default=None, help="done: файл/каталог результата")
-    p_result.add_argument("--form", default=None, help="wait: форма wait_for")
-    p_result.add_argument("--why-owner", dest="why_owner", default=None, choices=list(routes_mod.OWNER_REASONS),
-                          help="ask-owner Судьи: повод вопроса владельцу (деньги|направление|необратимое|бизнес-правило)")
-    p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
-    p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
-    p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе ci_repo в .claude/rpv.json)")
-    p_result.add_argument("--decisions", default=None,
-                          help="accept: решения владельца, с которыми сверена сдача: В-N[,В-M] или - (связанных нет)")
-    p_result.add_argument("--numbers", default=None,
-                          help="accept: файл с таблицей ключевых чисел «| число | файл:строка |» или - (чисел нет; код проверяет по --path)")
-    p_result.add_argument("--tail", default=None,
-                          help="accept: хвосты — - (нет; сверяется со сдачей исполнителя) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
-    p_result.add_argument("--live", default=None,
-                          help="accept: договор с [вживую] — файл живой проверки на настоящих данных (что увидит владелец)")
-    p_result.set_defaults(func=cmd_result)
-
-    p_start = sub.add_parser("start")
-    p_start.add_argument("id")
-    p_start.set_defaults(func=cmd_start)
-
-    p_wait = sub.add_parser("wait", help="status: waiting + wait_for (форма проверяется)")
-    p_wait.add_argument("--allow-met", dest="allow_met", action="store_true",
-                        help="ждать условие, уже выполненное при постановке (по умолчанию отказ)")
-    p_wait.add_argument("id")
-    p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
-    p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
-    p_wait.add_argument("--on-met", default=None,
-                        help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
-    p_wait.set_defaults(func=cmd_wait)
-
-    p_due = sub.add_parser("due", help="только CEO: срок, названный владельцу (первый остаётся в due_first)")
-    p_due.add_argument("id")
-    p_due.add_argument("--by", required=True, help="ЧЧ:ММ или ISO (GMT+4)")
-    p_due.add_argument("--said", default=None, help="как срок сказан владельцу (дословно)")
-    p_due.set_defaults(func=cmd_due)
-
-    p_stop = sub.add_parser("stop", help="только CEO: остановить запущенную роль тикета и дать новую постановку")
-    p_stop.add_argument("id")
-    p_stop.add_argument("--text", required=True, help="новая постановка — запись CEO в лог тикета")
-    p_stop.add_argument("--next", choices=["researcher", "engineer", "judge"], default=None,
-                        help="роль, которая стартует сразу (тикет станет todo); без --next — status: stopped, не будить")
-    p_stop.set_defaults(func=cmd_stop)
-
-    p_allow = sub.add_parser("allow", help="только CEO: согласие владельца на публикацию по тикету (или --revoke)")
-    p_allow.add_argument("id")
-    p_allow.add_argument("what", nargs="?", choices=["publish"], help="что разрешено: публикации (выпуск, слияние PR, пуш в main, пакеты)")
-    p_allow.add_argument("--ref", default="", help="решение владельца В-N из реестра (`registry.py decide`)")
-    p_allow.add_argument("--revoke", action="store_true", help="снять согласие")
-    p_allow.set_defaults(func=cmd_allow)
-    p_alld = sub.add_parser("allow-delete", help="только CEO: согласие владельца на удаление веток на удалённом (на час; main/master — никогда)")
-    p_alld.add_argument("branches", nargs="+", help="точные имена веток")
-    p_alld.add_argument("--ref", default="", help="решение владельца В-N из реестра (`registry.py decide`)")
-    p_alld.add_argument("--revoke", action="store_true", help="снять согласие")
-    p_alld.set_defaults(func=cmd_allow_delete)
-
-    p_cfg = sub.add_parser("config", help="CEO: set — правка .claude/rpv.json по закрытому списку ключей (Судья проверяет, "
-                                          "через 2 ч без приёмки откат); Судья: accept CFG-N")
-    p_cfg.add_argument("action", choices=["set", "accept"])
-    p_cfg.add_argument("key", help="set: ключ rpv.json; accept: номер правки CFG-N")
-    p_cfg.add_argument("value", nargs="?", default=None, help="set: значение (JSON или строка)")
-    p_cfg.add_argument("--why", default="", help="зачем правка (Судья сверяет со словом владельца)")
-    p_cfg.add_argument("--ref", default="", help="решение владельца В-N из реестра: цитата попадёт в журнал и отчёт")
-    p_cfg.set_defaults(func=cmd_config)
-
-    p_inbox = sub.add_parser("inbox", help="CEO: новые строки ceo-inbox.md с прошлого чтения")
-    p_inbox.add_argument("--peek", action="store_true", help="только показать, не считать прочитанным")
-    p_inbox.set_defaults(func=cmd_inbox)
-
-    p_status = sub.add_parser("status")
-    p_status.set_defaults(func=cmd_status)
-
-    args = p.parse_args(argv)
+    args = build_parser().parse_args(argv)
     if not D.ensure_project(["--project", args.project] if args.project else [], "tickets"):
         return 2                                 # нет проекта — ошибка с подсказкой, тикет не создаётся
     if args.project:
         global TICKETS_DIR, PROJECT_ROOT
         TICKETS_DIR, PROJECT_ROOT = D.TICKETS_DIR, D.PROJECT_ROOT
-    return args.func(args)
+    return _handlers()[args.cmd](args)
 
 
 if __name__ == "__main__":
