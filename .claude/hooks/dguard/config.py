@@ -79,15 +79,23 @@ def machine_rules(data):
             closed, e1 or e2 or e3)
 
 
+def push_scope_rule(data):
+    """`guard_push_scope` — пуш в main/master уносит только коммиты принятого тикета (нет ключа — выключено, как раньше) →
+    (включено, ошибка). Не true/false — ошибка (fail-closed, как у `protected_paths`)."""
+    raw = data.get("guard_push_scope", False)
+    return (raw, None) if isinstance(raw, bool) else (False, "guard_push_scope — не true/false")
+
+
 def configure(project_dir):
-    global LOCAL_ROOTS, WRITE_HOME_ROOTS, PROJECT_DIR, PROTECTED, PROTECTED_ERROR, REMOTE_ROOTS, STAGE, CLOSED_RE
+    global LOCAL_ROOTS, WRITE_HOME_ROOTS, PROJECT_DIR, PROTECTED, PROTECTED_ERROR, REMOTE_ROOTS, STAGE, CLOSED_RE, PUSH_SCOPE
     LOCAL_ROOTS = project_roots(project_dir)
     WRITE_HOME_ROOTS = memory_roots(project_dir)
     PROJECT_DIR = str(project_dir)
     rpv = _load_rpv(project_dir)
     PROTECTED, PROTECTED_ERROR = load_protected(project_dir, rpv)
     REMOTE_ROOTS, STAGE, CLOSED_RE, err = machine_rules(rpv[0])
-    PROTECTED_ERROR = PROTECTED_ERROR or err
+    PUSH_SCOPE, scope_err = push_scope_rule(rpv[0])
+    PROTECTED_ERROR = PROTECTED_ERROR or err or scope_err
 
 
 _PROJECT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
@@ -95,7 +103,7 @@ SCRATCH = "/appdata/local/temp/claude/"
 # пути проекта, защищённые пути и удалённые машины — из `<проект>/.claude/rpv.json`; проект сам решает, что в них
 # вписать; нет настройки — защиты и удалённых корней нет. PROJECT_DIR — тикеты запуска (согласие на публикацию).
 LOCAL_ROOTS = WRITE_HOME_ROOTS = REMOTE_ROOTS = PROTECTED = ()
-PROJECT_DIR, STAGE, CLOSED_RE, PROTECTED_ERROR = str(_PROJECT), "", None, None
+PROJECT_DIR, STAGE, CLOSED_RE, PROTECTED_ERROR, PUSH_SCOPE = str(_PROJECT), "", None, None, False
 
 
 configure(_PROJECT)

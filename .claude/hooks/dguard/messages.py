@@ -42,6 +42,13 @@ REASON_PUBLISH = ("Публикация ({t}) запуску роли закры
                   "ask-owner --why \"...\" --why-owner необратимое`; слово владельца CEO заносит в реестр (`registry.py decide`) и "
                   "ставит согласие `tickets.py allow <ID> publish --ref В-N`. Пуш рабочей ветки разрешён (ветку назови явно: "
                   "`git push origin <ветка>`); PR вливает программа (merge_rule) после приёмки Судьи.")
+REASON_PUSH_SCOPE = ("Пуш в основную ветку ({t}) уносит {n} коммит(ов) вне принятого тикета (приёмка Судьи, `accepted:` в шапке: {who}): "
+                     "{shown}. Завести этим коммитам тикет (Судья принимает — sha в `accepted`) или пушить отдельно: рабочая "
+                     "ветка и PR (`git push origin <ветка>`), PR вливает программа (merge_rule). Настройка `guard_push_scope` "
+                     "(.claude/rpv.json).")
+REASON_PUSH_SCOPE_UNKNOWN = ("Пуш в основную ветку ({t}): коммиты не сверить с принятым тикетом — {why} (`guard_push_scope`, "
+                             "fail-closed). Пуш рабочей ветки разрешён; пуш в main/master — из репозитория проекта, после "
+                             "`git fetch`, с явной веткой (`git push origin main`).")
 REASON_CONSENT = ("Согласие на публикацию запуск диспетчера в шапку тикета не пишет: строку `allow:` ставит только CEO командой "
                   "`tickets.py allow <ID> publish --ref В-N` после слова владельца. Нужна публикация — `tickets.py result <ID> "
                   "ask-owner --why \"...\" --why-owner необратимое`.")
@@ -75,7 +82,13 @@ class Forbid(str):
 
 class Publish(Forbid):
     """Публикация (выпуск, слияние PR, пуш в main/master или тега, публикация пакета): запуску роли — только с согласием
-    владельца по тикету (`allow: publish` в шапке), сессиям CEO и владельца можно. Подкласс Forbid: те же ветки find/ssh."""
+    владельца по тикету (`allow: publish` в шапке), сессиям CEO и владельца можно. Подкласс Forbid: те же ветки find/ssh.
+    `main` — для пуша в main/master: куда и какие ветки уходят (`PushRefs`), чтобы сверить коммиты (`guard_push_scope`)."""
+
+    def __new__(cls, label, main=None):
+        self = super().__new__(cls, label)
+        self.main = main
+        return self
 
 
 class BranchDelete(Forbid):
