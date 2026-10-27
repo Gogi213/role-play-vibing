@@ -335,24 +335,25 @@ def _parse_header(text: str):
     return P.frontmatter(text)
 
 
-def _parse_log(rest: str):
+def parse_entries(body: str, pattern=ENTRY_RE, parse=parse_dt) -> list:
+    """Записи лога: заголовок по `pattern` (1 — время, 2 — автор) и текст до следующего заголовка. Заголовок с
+    временем, которое `parse` не разобрал, не запись. Читатель строже (Надзиратель) передаёт свой `pattern`."""
     entries = []
-    heading = LOG_HEADING_RE.search(rest)
-    if not heading:
-        return entries
-    body = rest[heading.end():]
-    matches = list(ENTRY_RE.finditer(body))
+    matches = list(pattern.finditer(body))
     for i, m in enumerate(matches):
         ts_raw, author = m.group(1), m.group(2).strip()
-        start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        entry_text = body[start:end].strip("\n")
         try:
-            ts = parse_dt(ts_raw)
+            ts = parse(ts_raw)
         except ValueError:
             continue  # не запись лога (например, случайный `### ...` в описании) — пропустить
-        entries.append(LogEntry(ts=ts, ts_raw=ts_raw, author=author, text=entry_text))
+        entries.append(LogEntry(ts=ts, ts_raw=ts_raw, author=author, text=body[m.end():end].strip("\n")))
     return entries
+
+
+def _parse_log(rest: str):
+    heading = LOG_HEADING_RE.search(rest)
+    return parse_entries(rest[heading.end():]) if heading else []
 
 
 def author_is(author: str, role: str) -> bool:

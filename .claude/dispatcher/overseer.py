@@ -119,19 +119,14 @@ class Ticket:
 
 def parse_log(text: str) -> list:
     """Записи лога: `### <ISO> <роль>` и текст до следующего такого заголовка. Что до первого заголовка — не запись."""
-    ms = list(HDR.finditer(text))
-    out = []
-    for i, m in enumerate(ms):
-        end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
-        out.append(Entry(parse_ts(m.group(1)), m.group(2), text[m.end():end].strip()))
-    return out
+    return [Entry(e.ts, e.author, e.text.strip()) for e in T.parse_entries(text, HDR, parse_ts)]
 
 
 def split_ticket(text: str) -> tuple:
     """Файл тикета → (шапка, описание, текст лога). Описание — между шапкой и `## Лог`."""
     fm = P.frontmatter(text)
     head, body = (fm[0], text[fm[1]:]) if fm else ({}, text)
-    lg = re.search(r"^## Лог[ \t]*$", body, re.M)
+    lg = T.LOG_HEADING_RE.search(body)
     if not lg:
         return head, body.strip(), ""
     return head, body[:lg.start()].strip(), body[lg.end():]
