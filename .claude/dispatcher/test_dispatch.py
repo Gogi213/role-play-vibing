@@ -2861,17 +2861,17 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_record_job_outcome_format_and_dedup(self):
         now = dt("2026-10-06T12:00:00+04:00")
-        self.assertTrue(D.record_job_outcome("TK-1", "host:gpu1:/a.rc", "overdue", now=now))
-        self.assertFalse(D.record_job_outcome("TK-1", "host:gpu1:/a.rc", "overdue", now=now))
-        self.assertTrue(D.record_job_outcome("TK-1", "host:gpu1:/a.rc", "met", "SERVICE_RESULT=success EXIT_STATUS=0", now=now),
+        self.assertTrue(W.record_job_outcome("TK-1", "host:gpu1:/a.rc", "overdue", now=now, where=W.project_where()))
+        self.assertFalse(W.record_job_outcome("TK-1", "host:gpu1:/a.rc", "overdue", now=now, where=W.project_where()))
+        self.assertTrue(W.record_job_outcome("TK-1", "host:gpu1:/a.rc", "met", "SERVICE_RESULT=success EXIT_STATUS=0", now=now, where=W.project_where()),
                         "поздний конец после просрочки — тоже исход")
-        self.assertTrue(D.record_job_outcome("TK-1", "host:gpu1:/b.rc", "met", now=now))
-        self.assertTrue(D.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now))
+        self.assertTrue(W.record_job_outcome("TK-1", "host:gpu1:/b.rc", "met", now=now, where=W.project_where()))
+        self.assertTrue(W.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now, where=W.project_where()))
         self.assertEqual(self.jobs()[0], {"ts": T.now_iso(now), "ticket": "TK-1", "wait_for": "host:gpu1:/a.rc", "outcome": "overdue", "rc": None})
         self.assertEqual(len(self.jobs()), 4)
         with open(CFG.DISPATCHER_DIR / W.JOBS_LOG_NAME, "a", encoding="utf-8") as fh:
             fh.write("битая строка\n")
-        self.assertFalse(D.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now), "битые строки счёт не ломают")
+        self.assertFalse(W.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now, where=W.project_where()), "битые строки счёт не ломают")
 
 
 class TicketsCliStartTests(unittest.TestCase):
@@ -4011,7 +4011,7 @@ class WaitForNoticeTests(unittest.TestCase):
 
     def test_cli_wait_sets_status_and_checks_form(self):
         path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
-        with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(D, "check_wait_for", return_value=False):  # без настоящего ssh
+        with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(W, "check_wait_for", return_value=False):  # без настоящего ssh
             self.assertEqual(TK.main(["wait", path.stem, "host:gpu1:/var/rpv/progress/tk044.json", "--by", "2099-01-01T00:00+04:00"]), 0)
         tkt = T.read_ticket(path)
         self.assertEqual((tkt.status, tkt.header["wait_for"]), ("waiting", "host:gpu1:/var/rpv/progress/tk044.json"))

@@ -827,7 +827,7 @@ class ErrorsTests(unittest.TestCase):
         import tickets
         with mock.patch.object(tickets.errors_mod, "gate", return_value="") as g:
             self.assertFalse(tickets._regression("TK-5", "accept"))
-        self.assertIs(g.call_args.kwargs["signal"], tickets.D.append_ceo_inbox)
+        self.assertIs(g.call_args.kwargs["signal"], tickets.SIG.append_ceo_inbox)
 
     # --- fixed_sha не предок проверяемой головы: исправление ещё не влито
     def unmerged_fix(self, title="Цена"):

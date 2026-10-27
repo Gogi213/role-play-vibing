@@ -523,7 +523,7 @@ class ResultTests(unittest.TestCase):
         """Хвост, который ролям не сделать (TK-240: регистрация хука в settings.json), — строкой CEO."""
         self._v2_done("Хук готов. Не сделано (закрыто ролям): регистрация в settings.json")
         self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail="ceo:")
-        with mock.patch.object(TK.D, "append_ceo_inbox") as sig:
+        with mock.patch.object(TK.SIG, "append_ceo_inbox") as sig:
             self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-",
                                       tail='ceo:"вписать хук в settings.json"'), 0)
         sig.assert_called_once_with(self.tid, "хвост", "вписать хук в settings.json")

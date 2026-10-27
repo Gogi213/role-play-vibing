@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import blind
+import config as CFG
 import hide
 import project as P
 import ticket as T
@@ -24,6 +25,10 @@ class Where(NamedTuple):
     root: Path
     dispatcher_dir: Path
     tickets_dir: Path
+
+
+def project_where() -> Where:
+    return Where(CFG.PROJECT_ROOT, CFG.DISPATCHER_DIR, CFG.TICKETS_DIR)
 
 
 # --- wait_for ---------------------------------------------------------------------------------

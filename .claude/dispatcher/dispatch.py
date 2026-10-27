@@ -179,25 +179,13 @@ from config import load_state, save_state  # noqa: E402,F401 — файл сос
 
 # --- wait_for: само ожидание — waits.py; здесь обёртки подставляют пути проекта --------------------------------
 
-def _where() -> W.Where:
-    return W.Where(CFG.PROJECT_ROOT, CFG.DISPATCHER_DIR, CFG.TICKETS_DIR)
-
-
 def check_wait_for(spec: str) -> bool:
     """Условие `wait_for` выполнено? Формы — `ticket.parse_wait_for` (README, «v4»); см. waits.check_wait_for."""
-    return W.check_wait_for(spec, _where())
-
-
-def record_job_outcome(tid: str, spec: str, outcome: str, rc: str = "", now=None) -> bool:
-    return W.record_job_outcome(tid, spec, outcome, rc, now, where=_where())
-
-
-def note_wait_met(path: Path, tkt: T.Ticket, now) -> T.Ticket:
-    return W.note_wait_met(path, tkt, now, _where())
+    return W.check_wait_for(spec, W.project_where())
 
 
 def _blind_tick() -> None:
-    W.blind_tick(_where(), _mech_log)
+    W.blind_tick(W.project_where(), _mech_log)
 
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
@@ -681,7 +669,7 @@ def _collect_candidates(state: dict, now) -> tuple:
             if tid in RUNNING:
                 continue
             if tkt.status == "waiting" and not tkt.next_role:
-                tkt = note_wait_met(path, tkt, now)  # CP6: задание кончилось — исход в jobs.jsonl, итог (.rc) — в лог тикета
+                tkt = W.note_wait_met(path, tkt, now, W.project_where())  # CP6: задание кончилось — исход в jobs.jsonl, итог (.rc) — в лог тикета
             if (tkt.status == "waiting" and not tkt.next_role and (tkt.header.get("on_met") or "").strip()
                     and check_wait_for(tkt.header.get("wait_for", ""))):
                 try:

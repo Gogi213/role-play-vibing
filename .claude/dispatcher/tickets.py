@@ -52,7 +52,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
 import cfg as cfg_mod  # noqa: E402
-import dispatch as D  # noqa: E402
 import signals as SIG  # noqa: E402
 import cost as COST  # noqa: E402
 import stop as STOP  # noqa: E402
@@ -62,6 +61,7 @@ import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
+import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
@@ -191,8 +191,8 @@ def cmd_comment(args) -> int:
 def _regression(tid: str, cmd: str) -> bool:
     """V2-3: приёмка Судьи — только при зелёных проверках всех исправленных ошибок (`errors.py`). True — отказ (причина уже
     в stderr, в тикет ничего не пишем). Нет реестра ошибок или исправленных в нём — ничего не запускается. Проверка, что «не
-    запустилась», — тоже отказ (не проверено), а повтор сверх потолка зовёт CEO (`D.append_ceo_inbox`)."""
-    err = errors_mod.gate(PROJECT_ROOT, tid, signal=D.append_ceo_inbox)
+    запустилась», — тоже отказ (не проверено), а повтор сверх потолка зовёт CEO (`SIG.append_ceo_inbox`)."""
+    err = errors_mod.gate(PROJECT_ROOT, tid, signal=SIG.append_ceo_inbox)
     if err:
         print(f"{cmd}: {err}", file=sys.stderr)
     return bool(err)
@@ -269,7 +269,7 @@ def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_c
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
     if tail_ceo:
-        D.append_ceo_inbox(args.id, "хвост", tail_ceo)
+        SIG.append_ceo_inbox(args.id, "хвост", tail_ceo)
     upd = routes_mod.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                            owner_last=routes_mod.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
@@ -492,7 +492,7 @@ def cmd_accept(args) -> int:
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:
-        D.append_ceo_inbox(args.id, "хвост", tail_ceo)
+        SIG.append_ceo_inbox(args.id, "хвост", tail_ceo)
     tkt = T.read_ticket(path)
     prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))} | {int(args.pr)}
     if (routes.last_owner_result(tkt) == "done" and prs <= merge_rule.landed_prs(tkt) | {int(args.pr)}
@@ -566,7 +566,7 @@ def cmd_wait(args) -> int:
     # (маркер прошлого прогона). Осознанно ждать готовое — `--allow-met`.
     if parsed and parsed[0] in ("file", "host", "ticket") and not getattr(args, "allow_met", False):
         try:
-            met = D.check_wait_for(spec)
+            met = W.check_wait_for(spec, W.project_where())
         except Exception:  # нет ssh/алиаса в окружении — проверка недоступна, не мешаем
             met = False
         if met:
@@ -746,7 +746,7 @@ def cmd_config(args) -> int:
 
 
 def cmd_status(args) -> int:
-    state = D.load_state()
+    state = CFG.load_state()
     rows = []
     for path in T.list_tickets(TICKETS_DIR):
         try:
@@ -755,7 +755,7 @@ def cmd_status(args) -> int:
             rows.append((path.stem, f"<ошибка разбора: {e}>", "", "", "", "", ""))
             continue
         tid = tkt.id
-        spent_col = f"${D.ticket_cost_spent(state, tid):.2f}"  # учёт, не лимит (В-173)
+        spent_col = f"${COST.ticket_cost_spent(state, tid):.2f}"  # учёт, не лимит (В-173)
         rows.append((tid, tkt.header.get("title", "")[:40], tkt.owner, tkt.status,
                      tkt.reviewer, spent_col, tkt.header.get("updated", "")))
     if not rows:
