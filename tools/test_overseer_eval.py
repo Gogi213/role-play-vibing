@@ -26,7 +26,7 @@ def iso(h, m=0, s=0, day=8):
 
 
 def E(h, m, role="engineer", text="текст", day=8):
-    return ov.Entry(at(h, m, day), role, text)
+    return ov.core.Entry(at(h, m, day), role, text)
 
 
 class NoClaude(unittest.TestCase):
@@ -40,7 +40,7 @@ class ParseTests(NoClaude):
     def test_log_entries_and_stray_headings(self):
         text = ("# TK-1 — архив\n\nпредисловие\n\n### 2026-10-08T01:55:06+04:00 ceo\nпервая\nстрока\n\n"
                 "### Не запись\nэто часть первой\n\n### 2026-10-08T02:02:25+04:00 judge  \n[итог: return] ещё\n")
-        es = ov.parse_log(text)
+        es = ov.core.parse_log(text)
         self.assertEqual([(e.role, e.ts) for e in es], [("ceo", at(1, 55, day=8).replace(second=6)),
                                                           ("judge", at(2, 2).replace(second=25))])
         self.assertEqual(es[0].text, "первая\nстрока\n\n### Не запись\nэто часть первой")
@@ -48,20 +48,20 @@ class ParseTests(NoClaude):
         self.assertEqual(es[0].norm, "первая строка ### Не запись это часть первой")
 
     def test_naive_timestamp_is_owner_time(self):
-        es = ov.parse_log("### 2026-10-08T01:00:00 ceo\nx")
+        es = ov.core.parse_log("### 2026-10-08T01:00:00 ceo\nx")
         self.assertEqual(es[0].ts.utcoffset(), timedelta(hours=4))
 
     def test_split_ticket(self):
-        head, desc, log = ov.split_ticket("---\nid: TK-1\ntitle: Заголовок: с двоеточием\nstatus: done\n---\n\nЦель владельца.\nВторая.\n\n"
+        head, desc, log = ov.core.split_ticket("---\nid: TK-1\ntitle: Заголовок: с двоеточием\nstatus: done\n---\n\nЦель владельца.\nВторая.\n\n"
                                           "## Лог\n\n### 2026-10-08T01:00:00+04:00 ceo\nх\n")
         self.assertEqual((head["title"], head["status"]), ("Заголовок: с двоеточием", "done"))
         self.assertEqual(desc, "Цель владельца.\nВторая.")
         self.assertIn("### 2026-10-08T01:00:00+04:00 ceo", log)
-        self.assertEqual(ov.split_ticket("---\nid: TK-2\n---\nтолько описание\n")[1:], ("только описание", ""))
+        self.assertEqual(ov.core.split_ticket("---\nid: TK-2\n---\nтолько описание\n")[1:], ("только описание", ""))
 
     def test_merge_sorts_and_dedupes(self):
         a, b = [E(2, 0, text="a"), E(1, 0, text="старая")], [E(2, 0, text="a"), E(3, 0, text="b")]
-        self.assertEqual([e.text for e in ov.merge_entries(a, b)], ["старая", "a", "b"])
+        self.assertEqual([e.text for e in ov.core.merge_entries(a, b)], ["старая", "a", "b"])
 
     def test_runs_cost_resolved_then_cumulative_then_dash(self):
         log = "\n".join([
@@ -72,7 +72,7 @@ class ParseTests(NoClaude):
             f"{iso(5)} TK-1 on_met reason=on_met attempt=0 session=- cost_usd=- resolved_cost=0.0000",
             f"{iso(6)} TK-2 engineer reason=todo cost_usd=0.2 resolved_cost=0.0000 status=ok",
             "мусор", ""])
-        rs = ov.parse_runs(log)
+        rs = ov.core.parse_runs(log)
         self.assertEqual([r.cost for r in rs["TK-1"]], [1.0, 0.5, 0.0, 2.0])  # 1.0 + 1.5 из cost_usd посчитали бы 2.5 вместо 1.5
         self.assertEqual([r.raw for r in rs["TK-1"]], [1.0, 1.5, 0.0, 2.0])
         self.assertEqual(rs["TK-2"][0].cost, 0.0)  # resolved_cost=0 — это ноль, а не «берём cost_usd»
@@ -97,7 +97,7 @@ class WindowTests(NoClaude):
     def test_stats_count_only_up_to_the_moment(self):
         es = [E(10, 0, "ceo"), E(10, 5, "judge", "[итог: return] нет"), E(10, 20, "judge", "[итог: accept] да"),
               E(10, 25, "engineer", "[итог: return] инженер не Судья"), E(11, 0, "judge", "[итог: return] позже")]
-        rs = ov.parse_runs("\n".join([
+        rs = ov.core.parse_runs("\n".join([
             f"{iso(10, 1)} T engineer reason=a resolved_cost=1.0000 status=ok",
             f"{iso(10, 10)} T judge reason=a resolved_cost=0.5000 status=ok",
             f"{iso(16, 30)} T engineer reason=a resolved_cost=2.0000 status=ok",
@@ -110,15 +110,15 @@ class WindowTests(NoClaude):
         self.assertAlmostEqual(s2.hours, 7.0)
 
     def test_start_is_earlier_of_first_entry_and_first_run(self):
-        rs = [ov.Run(at(9, 30), "engineer", 1.0)]
+        rs = [ov.core.Run(at(9, 30), "engineer", 1.0)]
         self.assertEqual(ov.ticket_start([E(10, 0)], rs), at(9, 30))
         self.assertEqual(ov.stats_at(at(10, 30), [E(10, 0)], rs).hours, 1.0)
 
     def test_stats_text_and_days(self):
-        rs = [ov.Run(at(10, 0, day=d), "engineer", 1.5) for d in range(1, 10)]
+        rs = [ov.core.Run(at(10, 0, day=d), "engineer", 1.5) for d in range(1, 10)]
         s = ov.stats_at(at(12, 0, day=9), [E(10, 0, day=1)], rs)
-        self.assertEqual(len(s.days), ov.DAYS_SHOWN)
-        txt = ov.stats_text(s)
+        self.assertEqual(len(s.days), ov.core.DAYS_SHOWN)
+        txt = ov.core.stats_text(s)
         self.assertTrue(txt.startswith("к этому моменту: запусков 9, потрачено $13.50, часов от начала 194.0, возвратов Судьи 0."))
         self.assertIn("2026-10-09 — запусков 1, $1.50", txt)
         self.assertNotIn("2026-10-02", txt)
@@ -127,7 +127,7 @@ class WindowTests(NoClaude):
 class PromptTests(NoClaude):
     def setUp(self):
         super().setUp()
-        self.t = ov.Ticket("TK-9", "Заголовок", "done", "Владелец: «сделай быстрее».", [
+        self.t = ov.core.Ticket("TK-9", "Заголовок", "done", "Владелец: «сделай быстрее».", [
             E(10, 0, "ceo", "старая запись про цель"), E(10, 20, "engineer", "ход инженера " * 40),
             E(10, 40, "judge", "[итог: return] вернул"), E(12, 0, "engineer", "ПОЗЖЕ окна")])
         self.w = ov.make_windows(self.t.entries, 15)[2]  # окно 10:30–10:45 с записью судьи
@@ -144,7 +144,7 @@ class PromptTests(NoClaude):
         self.assertNotIn("10:40 judge", p.split("## Новые записи")[0])  # новая запись не повторяется в ходе тикета
 
     def test_context_is_truncated_with_note(self):
-        t = ov.Ticket("TK-9", "З", "done", "д", [E(10, i, text=f"запись {i}") for i in range(50)] + [E(11, 30, text="новая")])
+        t = ov.core.Ticket("TK-9", "З", "done", "д", [E(10, i, text=f"запись {i}") for i in range(50)] + [E(11, 30, text="новая")])
         w = ov.make_windows(t.entries, 15)[-1]
         p = ov.build_prompt(t, w, ov.stats_at(w.end, t.entries, []), ctx_lines=5)
         self.assertIn("показаны последние 5 из 50", p)
@@ -153,22 +153,22 @@ class PromptTests(NoClaude):
         self.assertIn("Записей до этого окна нет.", ov.build_prompt(t, ov.make_windows(t.entries, 15)[0], ov.stats_at(at(10, 15), t.entries, []), ctx_lines=0))
 
     def test_long_entry_and_new_part_are_cut_with_marks(self):
-        self.assertEqual(ov.cut("коротко", 100), "коротко")
-        c = ov.cut("а" * 1000, 100)
+        self.assertEqual(ov.core.cut("коротко", 100), "коротко")
+        c = ov.core.cut("а" * 1000, 100)
         self.assertIn("⟦обрезано: показано 100 из 1000 знаков⟧", c)
         self.assertEqual((len(c.split(" ⟦")[0]), len(c.split("⟧ ")[1])), (60, 40))  # начало и конец, не только начало
         new = [E(10, 0, text=f"запись {i} " + "я" * 200) for i in range(10)]
-        blocks, dropped = ov.pick_new(new, 1200, 2500)
+        blocks, dropped = ov.core.pick_new(new, 1200, 2500)
         self.assertEqual(len(blocks) + dropped, 10)
         self.assertGreater(dropped, 0)
         self.assertIn("запись 9", blocks[-1])  # остались последние
         w = ov.make_windows(new, 15)[0]
-        p = ov.build_prompt(ov.Ticket("TK-9", "З", "done", "д", new), w, ov.stats_at(w.end, new, []), max_kb=1.2)
+        p = ov.build_prompt(ov.core.Ticket("TK-9", "З", "done", "д", new), w, ov.stats_at(w.end, new, []), max_kb=1.2)
         self.assertIn("⟦пропущено старых записей окна:", p)
-        self.assertEqual(ov.gist("а" * 300, 20), "а" * 20 + " ⟦обрезано⟧")
+        self.assertEqual(ov.core.gist("а" * 300, 20), "а" * 20 + " ⟦обрезано⟧")
 
     def test_one_huge_entry_still_shown(self):
-        blocks, dropped = ov.pick_new([E(10, 0, text="х" * 50000)], 100, 500)
+        blocks, dropped = ov.core.pick_new([E(10, 0, text="х" * 50000)], 100, 500)
         self.assertEqual((len(blocks), dropped), (1, 0))
 
 
@@ -185,12 +185,12 @@ class AnswerTests(NoClaude):
         return ov.grade(raw, "TK-9", self.ENTRIES, until, "к этому моменту: запусков 7, потрачено $3.00")
 
     def test_parse_answer_variants(self):
-        self.assertEqual(ov.parse_answer('{"verdict":"тихо"}')["verdict"], "тихо")
-        self.assertEqual(ov.parse_answer('Вот:\n```json\n{"verdict":"тихо"}\n```\nвсё')["verdict"], "тихо")
-        self.assertEqual(ov.parse_answer('{"a":1} {"verdict":"находка","kind":"x"}')["kind"], "x")
-        self.assertIsNone(ov.parse_answer("тихо"))
-        self.assertIsNone(ov.parse_answer('{"verdict": '))
-        self.assertIsNone(ov.parse_answer(""))
+        self.assertEqual(ov.core.parse_answer('{"verdict":"тихо"}')["verdict"], "тихо")
+        self.assertEqual(ov.core.parse_answer('Вот:\n```json\n{"verdict":"тихо"}\n```\nвсё')["verdict"], "тихо")
+        self.assertEqual(ov.core.parse_answer('{"a":1} {"verdict":"находка","kind":"x"}')["kind"], "x")
+        self.assertIsNone(ov.core.parse_answer("тихо"))
+        self.assertIsNone(ov.core.parse_answer('{"verdict": '))
+        self.assertIsNone(ov.core.parse_answer(""))
 
     def test_quiet(self):
         self.assertEqual(self.g('{"verdict":"Тихо"}')["outcome"], "quiet")
@@ -219,9 +219,9 @@ class AnswerTests(NoClaude):
         r = self.g(self.finding(action="остановить: уже 7 запусков и $99 впустую"))
         self.assertEqual((r["outcome"], r["invented_numbers"]), ("accepted", ["99"]))
         self.assertEqual(self.g(self.finding(action="вернуть роли с В-183 по TK-12, запусков 7"))["invented_numbers"], [])
-        self.assertEqual(ov.invented_numbers("1,2× и 3.00", "потрачено $3.00; ускорение 1,2×"), [])
-        self.assertEqual(ov.invented_numbers("ускорение 1.2 при 3,00", "потрачено $3.00; ускорение 1,2×"), [])  # запятая и точка — одно
-        self.assertEqual(ov.invented_numbers("33 ч и $3.5", "часов от начала 33.0, потрачено $3.50"), [])
+        self.assertEqual(ov.core.invented_numbers("1,2× и 3.00", "потрачено $3.00; ускорение 1,2×"), [])
+        self.assertEqual(ov.core.invented_numbers("ускорение 1.2 при 3,00", "потрачено $3.00; ускорение 1,2×"), [])  # запятая и точка — одно
+        self.assertEqual(ov.core.invented_numbers("33 ч и $3.5", "часов от начала 33.0, потрачено $3.50"), [])
 
 
 class SetTests(NoClaude):
@@ -273,16 +273,16 @@ class AgentTests(NoClaude):
     def test_overseer_definition(self):
         d = ov.load_agent("overseer")
         self.assertEqual((d["model"], d["effort"], d["tools"]), ("claude-haiku-5-5", "xhigh", []))
-        for kind in ov.KINDS:
+        for kind in ov.core.KINDS:
             self.assertIn(kind, d["prompt"])
         self.assertIn('{"verdict":"тихо"}', d["prompt"])
 
     def test_claude_bin_follows_env(self):
         with mock.patch.dict(ov.core.os.environ, {"CLAUDE_BIN": "/нет/такого/claude"}):
-            self.assertEqual(ov.claude_bin(), "/нет/такого/claude")
+            self.assertEqual(ov.core.claude_bin(), "/нет/такого/claude")
         with mock.patch.dict(ov.core.os.environ, {}, clear=False):
             ov.core.os.environ.pop("CLAUDE_BIN", None)
-            self.assertTrue(ov.claude_bin())
+            self.assertTrue(ov.core.claude_bin())
 
 
 class FakeProject(NoClaude):

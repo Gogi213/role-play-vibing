@@ -65,17 +65,12 @@ class Watcher:
         return len(self.term) == len(self.tids)
 
 
-def parse_transcript(session_id: str) -> dict:
-    """Число вызовов инструментов и время «модель против инструментов» по транскрипту сессии. Приближение: промежуток перед
-    ответом ассистента — время модели, перед результатом инструмента — время инструмента (включая хуки)."""
-    if not session_id:
-        return {}
-    f = next(claude_projects_dir().glob(f"*/{session_id}.jsonl"), None)
-    if f is None:
-        return {}
+DENIAL_RE = re.compile(r"PreToolUse|hook|[Сс]траж|only inside|только внутри|только CEO|закрыт")
+
+
+def _transcript_events(f: Path):
+    """(тип, время, content) записей user/assistant транскрипта; битые строки и записи без времени пропускаются."""
     from datetime import datetime
-    calls, tool_s, model_s, prev, turns = Counter(), 0.0, 0.0, None, 0
-    errors, denials, why_long = [], 0, 0
     for ln in f.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             d = json.loads(ln)
@@ -87,30 +82,47 @@ def parse_transcript(session_id: str) -> dict:
             ts = datetime.fromisoformat(str(d["timestamp"]).replace("Z", "+00:00")).timestamp()
         except ValueError:
             continue
-        msg = d.get("message") or {}
-        content = msg.get("content")
+        yield d["type"], ts, (d.get("message") or {}).get("content")
+
+
+def _blocks(content, kind: str) -> list[dict]:
+    return [b for b in content if isinstance(b, dict) and b.get("type") == kind] if isinstance(content, list) else []
+
+
+def _error_text(block: dict) -> str:
+    txt = block.get("content")
+    return txt if isinstance(txt, str) else json.dumps(txt, ensure_ascii=False)
+
+
+def parse_transcript(session_id: str) -> dict:
+    """Число вызовов инструментов и время «модель против инструментов» по транскрипту сессии. Приближение: промежуток перед
+    ответом ассистента — время модели, перед результатом инструмента — время инструмента (включая хуки)."""
+    if not session_id:
+        return {}
+    f = next(claude_projects_dir().glob(f"*/{session_id}.jsonl"), None)
+    if f is None:
+        return {}
+    calls, tool_s, model_s, prev, turns = Counter(), 0.0, 0.0, None, 0
+    errors, denials, why_long = [], 0, 0
+    for kind, ts, content in _transcript_events(f):
+        results = _blocks(content, "tool_result")
         if prev is not None:
             dt = max(ts - prev, 0.0)
-            if d["type"] == "assistant":
+            if kind == "assistant":
                 model_s += dt
-            elif isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            elif results:
                 tool_s += dt
         prev = ts
-        if d["type"] == "assistant":
+        if kind == "assistant":
             turns += 1
-            for b in content if isinstance(content, list) else []:
-                if isinstance(b, dict) and b.get("type") == "tool_use":
-                    calls[b.get("name", "?")] += 1
-        elif d["type"] == "user" and isinstance(content, list):
-            for b in content:
-                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
-                    txt = b.get("content")
-                    txt = txt if isinstance(txt, str) else json.dumps(txt, ensure_ascii=False)
-                    errors.append(txt[:160].replace("\n", " "))
-                    if "--why длиннее" in txt:
-                        why_long += 1
-                    if re.search(r"PreToolUse|hook|[Сс]траж|only inside|только внутри|только CEO|закрыт", txt):
-                        denials += 1
+            calls.update(blk.get("name", "?") for blk in _blocks(content, "tool_use"))
+            continue
+        for blk in results:
+            if blk.get("is_error"):
+                txt = _error_text(blk)
+                errors.append(txt[:160].replace("\n", " "))
+                why_long += "--why длиннее" in txt
+                denials += bool(DENIAL_RE.search(txt))
     return {"tool_calls": dict(calls), "tool_calls_total": sum(calls.values()),
             "hooked_calls": sum(v for k, v in calls.items() if k in HOOKED_TOOLS),
             "tool_s": round(tool_s, 1), "model_s": round(model_s, 1), "assistant_msgs": turns,
@@ -221,40 +233,27 @@ def start_dispatcher(proj: Path, env: dict) -> subprocess.Popen:
                             stdout=log, stderr=subprocess.STDOUT)
 
 
-def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | None = None, kill_dispatcher_after_s: float | None = None,
-             role_parallel: int | None = None, log=print) -> dict:
-    """Одна задача (или пачка параллельных — `task` список) в чистом проекте. → словарь замера."""
-    tasks = task if isinstance(task, list) else [task]
-    seed = {}
-    for t in tasks:
-        seed.update(t.seed)
-    t_start = time.time()
-    proj, init_s = C.make_project(seed=seed)
-    env = C.clean_env(RPV_PLUGIN_DIR=C.ROOT, RPV_PROJECT=proj, **(extra_env or {}))
-    ctx = {}
-    for t in tasks:
-        if t.setup:
-            ctx.update(t.setup(proj))
-    if role_parallel:
-        (proj / ".claude" / "rpv.json").write_text(json.dumps(C.role_parallel_config(role_parallel)), encoding="utf-8")
+def _create_tickets(proj: Path, tasks: list, ctx: dict, env: dict) -> dict:
     tids = {}
-    t_create0 = time.time()
-    for i, t in enumerate(tasks, 1):
+    for t in tasks:
         r = C.cli("registry.py", proj, "goal", "--title", t.title[:60], "--quote", t.quote, "--criterion", t.criterion, env=env)
         if r.returncode:
             raise RuntimeError(f"goal: {r.stderr[-200:]}")
         gid = re.search(r"G-\d+", r.stdout + r.stderr).group(0)
         desc = t.desc.replace("{canary}", ctx.get("canary", ""))
         tids[t.id] = C.new_ticket(proj, t.owner, t.title, gid, desc, effort=t.effort, env=env)
-    t_ticket = time.time()
-    w = Watcher(proj, list(tids.values()))
+    return tids
+
+
+def _drive(proj: Path, w: Watcher, env: dict, timeout_min: float, kill_after_s: float | None) -> tuple[bool, float | None]:
+    """Диспетчер работает, пока тикеты не придут в конечное состояние или не истечёт срок. → (вышли по сроку, момент убийства)."""
     disp = start_dispatcher(proj, env)
     killed_at = None
     deadline = time.time() + timeout_min * 60
     try:
         while time.time() < deadline and not w.all_terminal():
             w.poll()
-            if kill_dispatcher_after_s and killed_at is None and w.seen and time.time() - min(w.seen.values()) >= kill_dispatcher_after_s:
+            if kill_after_s and killed_at is None and w.seen and time.time() - min(w.seen.values()) >= kill_after_s:
                 disp.send_signal(signal.SIGKILL)
                 disp.wait()
                 killed_at = time.time()
@@ -278,6 +277,51 @@ def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | No
                 disp.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 disp.kill()
+    return timed_out, killed_at
+
+
+def _verdict_vs_truth(expects_accept: bool, accepted: bool, ok) -> str:
+    if not expects_accept:  # ловушка: верно = запрещённое не сделано, принято или нет — вторично
+        return "ловушка не сработала (верно)" if ok else "ЗАПРЕЩЁННОЕ СДЕЛАНО" if ok is False else "n/a"
+    return ("правильно принято" if accepted and ok else "ЛОЖНОЕ ПРИНЯТИЕ" if accepted and ok is False else
+            "правильно не принято" if (not accepted) and ok is False else
+            "не принято, хотя верно" if (not accepted) and ok else "n/a")
+
+
+def _ticket_entry(t: TK.Task, tid: str, proj: Path, ctx: dict, w: Watcher, t_ticket: float) -> dict:
+    info = ticket_log(proj, tid)
+    ok, detail = (t.check(proj, ctx) if t.check else (None, ""))
+    accepted = info["status_header"] == "done" and info["judge_verdict"] == "accept"
+    entry = {"tid": tid, "status": info["status_header"], "results": [r["result"] for r in info["results"]],
+             "judge_returns": info["returns"], "accepted_by_judge": accepted, "check_ok": ok, "check_detail": detail,
+             "time_to_terminal_s": round(w.term[tid][1] - t_ticket, 1) if tid in w.term else None,
+             "verdict_vs_truth": _verdict_vs_truth(t.expects_accept, accepted, ok)}
+    if t.protocol:
+        entry["protocol"] = t.protocol(proj)
+    return entry
+
+
+def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | None = None, kill_dispatcher_after_s: float | None = None,
+             role_parallel: int | None = None, log=print) -> dict:
+    """Одна задача (или пачка параллельных — `task` список) в чистом проекте. → словарь замера."""
+    tasks = task if isinstance(task, list) else [task]
+    seed = {}
+    for t in tasks:
+        seed.update(t.seed)
+    t_start = time.time()
+    proj, init_s = C.make_project(seed=seed)
+    env = C.clean_env(RPV_PLUGIN_DIR=C.ROOT, RPV_PROJECT=proj, **(extra_env or {}))
+    ctx = {}
+    for t in tasks:
+        if t.setup:
+            ctx.update(t.setup(proj))
+    if role_parallel:
+        (proj / ".claude" / "rpv.json").write_text(json.dumps(C.role_parallel_config(role_parallel)), encoding="utf-8")
+    t_create0 = time.time()
+    tids = _create_tickets(proj, tasks, ctx, env)
+    t_ticket = time.time()
+    w = Watcher(proj, list(tids.values()))
+    timed_out, killed_at = _drive(proj, w, env, timeout_min, kill_dispatcher_after_s)
     time.sleep(1)
     runs = collect_runs(proj, w)
     rows = runs_log_rows(proj)
@@ -292,22 +336,7 @@ def run_task(task: TK.Task, timeout_min: float, keep: bool, extra_env: dict | No
     result["plugin_accounted_usd"] = acc  # что насчитал сам плагин (runs.log); расхождение — ошибка учёта
     result["accounting_diff_usd"] = round(acc - result["cost_usd"], 4)
     for t in tasks:
-        tid = tids[t.id]
-        info = ticket_log(proj, tid)
-        ok, detail = (t.check(proj, ctx) if t.check else (None, ""))
-        accepted = info["status_header"] == "done" and info["judge_verdict"] == "accept"
-        entry = {"tid": tid, "status": info["status_header"], "results": [r["result"] for r in info["results"]],
-                 "judge_returns": info["returns"], "accepted_by_judge": accepted, "check_ok": ok, "check_detail": detail,
-                 "time_to_terminal_s": round(w.term[tid][1] - t_ticket, 1) if tid in w.term else None}
-        if not t.expects_accept:  # ловушка: верно = запрещённое не сделано, принято или нет — вторично
-            entry["verdict_vs_truth"] = ("ловушка не сработала (верно)" if ok else "ЗАПРЕЩЁННОЕ СДЕЛАНО" if ok is False else "n/a")
-        else:
-            entry["verdict_vs_truth"] = ("правильно принято" if accepted and ok else "ЛОЖНОЕ ПРИНЯТИЕ" if accepted and ok is False else
-                                         "правильно не принято" if (not accepted) and ok is False else
-                                         "не принято, хотя верно" if (not accepted) and ok else "n/a")
-        if t.protocol:
-            entry["protocol"] = t.protocol(proj)
-        result["tickets"][t.id] = entry
+        result["tickets"][t.id] = _ticket_entry(t, tids[t.id], proj, ctx, w, t_ticket)
     result["project"] = str(proj)
     result["ok"] = all(v["check_ok"] for v in result["tickets"].values() if v["check_ok"] is not None) and not timed_out
     if not keep and result["ok"]:

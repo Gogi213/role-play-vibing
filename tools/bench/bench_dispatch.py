@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".claude" / "dispatcher"))
 import dispatch as D  # noqa: E402
+import procs  # noqa: E402
 
 if os.environ.get("BENCH_POLL_S"):
     D.POLL_INTERVAL = float(os.environ["BENCH_POLL_S"])

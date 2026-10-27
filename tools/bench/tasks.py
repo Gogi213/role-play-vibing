@@ -7,10 +7,8 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path

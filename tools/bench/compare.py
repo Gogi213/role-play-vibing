@@ -73,9 +73,9 @@ def render(results: list[dict]) -> str:
     return "\n".join(md)
 
 
-def _micro(R: list[dict]) -> str:
-    L = [r["label"] for r in R]
-    out = ["\n## Микробенчи (без моделей)\n", "Время — медиана, мс; ⚠ — машины расходятся ≥ 1,5×.\n"]
+def _micro_cold(R: list[dict], L: list[str]) -> list[str]:
+    """Холодный старт скриптов и самые дорогие импорты."""
+    out = []
     names = list(g(R[0], "micro", "cold_start", default={}).keys())
     out.append("### Холодный старт скриптов\n")
     out.append(table(["команда", *[f"{l} p50 мс" for l in L], *[f"{l} p95" for l in L], *[f"{l} CPU мс" for l in L], *[f"{l} RSS МиБ" for l in L]],
@@ -87,6 +87,12 @@ def _micro(R: list[dict]) -> str:
     imp = g(R[0], "micro", "import_cost", "top_cumulative_ms")
     if imp:
         out.append("Самые дорогие импорты диспетчера (мс, накопленно): " + ", ".join(f"{n} {ms}" for n, ms in imp[:6]) + "\n")
+    return out
+
+
+def _micro_ops_hooks(R: list[dict], L: list[str]) -> list[str]:
+    """Операции с тикетами и хуки."""
+    out = []
     out.append("### Операции с тикетами (запуск процесса на операцию, p50 / p95 мс)\n")
     out.append(table(["операция", *[f"{l} p50" for l in L], *[f"{l} p95" for l in L]],
                      [[op, *[fmt(g(r, "micro", "tickets_ops", op, "p50")) for r in R], *[fmt(g(r, "micro", "tickets_ops", op, "p95")) for r in R]]
@@ -99,6 +105,12 @@ def _micro(R: list[dict]) -> str:
     p50 = g(R[0], "micro", "hooks", "PreToolUse Bash (ls)", "wall_ms", "p50")
     if p50:
         out.append(f"PreToolUse висит на каждом Bash/Write/Edit роли: при {p50:.0f} мс и 40 вызовах за запуск это ≈ {p50 * 40 / 1000:.1f} с на запуск.\n")
+    return out
+
+
+def _micro_context(R: list[dict]) -> list[str]:
+    """Что плагин кладёт в начало сессии роли."""
+    out = []
     ctx = g(R[0], "micro", "injected_context")
     if ctx:
         out.append("### Что плагин кладёт в начало каждой сессии роли (байты; токены — в живом прогоне)\n")
@@ -106,6 +118,12 @@ def _micro(R: list[dict]) -> str:
                          [[k, fmt(v["hook_output_bytes"]), fmt(v["role_files_bytes"]), fmt(v["total_bytes"]), fmt(v["words"]),
                            fmt(v["approx_tokens_cyrillic_2_5_chars"])] for k, v in ctx.items()]))
         out.append("\\* грубо: кириллица ≈ 2 байта на знак и 2,5 знака на токен.\n")
+    return out
+
+
+def _micro_guard(R: list[dict], L: list[str]) -> list[str]:
+    """Страж: ожидание против факта; подмена роли в CLI."""
+    out = []
     gm = g(R[0], "micro", "guard_matrix")
     if gm:
         out.append("### Страж: ожидание против факта (чёрный ящик, полный путь hooks.json)\n")
@@ -124,6 +142,12 @@ def _micro(R: list[dict]) -> str:
     if ic:
         parts = [r["label"] + " " + str(g(r, "micro", "identity_cli", "match")) + "/" + str(g(r, "micro", "identity_cli", "cases")) for r in R]
         out.append("Подмена роли в CLI (по записи диспетчера): " + ", ".join(parts) + ".\n")
+    return out
+
+
+def _micro_scale(R: list[dict]) -> list[str]:
+    """Рост времени от числа закрытых тикетов."""
+    out = []
     sc = g(R[0], "micro", "scale", default={})
     if sc:
         out.append("### Рост времени от числа закрытых тикетов (p50, мс)\n")
@@ -141,6 +165,12 @@ def _micro(R: list[dict]) -> str:
                 rows.append([f"{nm} · {r['label']}", *vals])
         out.append(table(["", *[f"{s} тикетов" for s in sizes]], rows))
         out.append(table(["", *[f"{s}" for s in sizes]], [[f"строк в ceo-inbox после первого тика · {r['label']}", *[fmt(g(r, 'micro', 'scale', s, 'first_tick_ceo_inbox_lines')) for s in sizes]] for r in R]))
+    return out
+
+
+def _micro_tests(R: list[dict], L: list[str]) -> list[str]:
+    """Набор тестов плагина."""
+    out = []
     ts = g(R[0], "micro", "test_suite")
     if ts:
         out.append("### Набор тестов плагина\n")
@@ -153,6 +183,14 @@ def _micro(R: list[dict]) -> str:
         for r in R:
             for fl in g(r, "micro", "test_suite", "failures", default=[]):
                 out.append(f"- ❌ {r['label']}: {fl}\n")
+    return out
+
+
+def _micro(R: list[dict]) -> str:
+    L = [r["label"] for r in R]
+    out = ["\n## Микробенчи (без моделей)\n", "Время — медиана, мс; ⚠ — машины расходятся ≥ 1,5×.\n"]
+    for part in (_micro_cold(R, L), _micro_ops_hooks(R, L), _micro_context(R), _micro_guard(R, L), _micro_scale(R), _micro_tests(R, L)):
+        out += part
     errs = [(r["label"], k, v["error"]) for r in R for k, v in (r.get("micro") or {}).items() if isinstance(v, dict) and "error" in v]
     for lab, k, e in errs:
         out.append(f"- ❌ {lab}: раздел `{k}` упал: {e}\n")
@@ -201,19 +239,30 @@ def _stub(R: list[dict]) -> str:
     return "\n".join(out)
 
 
-def _e2e(R: list[dict]) -> str:
-    out = ["\n## Живой прогон (настоящие модели)\n"]
+def _e2e_header(R: list[dict]) -> list[str]:
+    """Строка на машину: набор, повторы, потрачено."""
+    out = []
     for r in R:
         e = r.get("e2e")
         if not e:
             continue
         out.append(f"**{r['label']}**: набор `{e['suite']}`, повторов {e['repeat']}, потрачено **${e['spent_usd']:.2f}** из потолка ${e['budget_usd']}"
                    + (f"; не запущены из-за потолка: {', '.join(e['skipped_for_budget'])}" if e["skipped_for_budget"] else "") + "\n")
+    return out
+
+
+def _scenarios(R: list[dict]) -> list:
     scen = []
     for r in R:
         for run in g(r, "e2e", "runs", default=[]):
             if run.get("scenario") not in scen:
                 scen.append(run.get("scenario"))
+    return scen
+
+
+def _e2e_matrix(R: list[dict], scen: list) -> list[str]:
+    """Задача × машина: время, цена, качество."""
+    out = []
     out.append("### Задача × машина: время, цена, качество\n")
     rows = []
     for sc in scen:
@@ -230,6 +279,12 @@ def _e2e(R: list[dict]) -> str:
                          fmt(sum(costs) / len(costs), 2), fmt(100 * sum(dead) / len(dead) if dead else None, 0, "%"),
                          "; ".join(sorted({t for t in truth if t and t != "n/a"})) or "—"])
     out.append(table(["задача", "машина", "результат верен", "время, с (мед.)", "цена, $ (ср.)", "мёртвое время", "Судья против проверки кодом"], rows))
+    return out
+
+
+def _e2e_tokens(R: list[dict]) -> list[str]:
+    """Токены и цена по ролям и моделям."""
+    out = []
     out.append("### Токены и цена по ролям и моделям (сумма за все запуски набора)\n")
     out.append("Токены — как их считает CLI; на машине с чужими навыками и MCP (облачная песочница) кэш-чтение раздуто их описаниями, "
                "так что между ОС сравнивать только прогоны в одинаково чистом окружении (CI).\n")
@@ -252,6 +307,12 @@ def _e2e(R: list[dict]) -> str:
             mrows.append([r["label"], f"модель {model}", "—", fmt(v.get("in")), fmt(v.get("out")), fmt(v.get("cache_read")),
                           fmt(v.get("cache_write")), "—", fmt(v.get("cost_usd"), 3)])
     out.append(table(["машина", "срез", "запусков", "вход", "выход", "кэш-чтение", "кэш-запись", "время в запусках, с", "$"], mrows))
+    return out
+
+
+def _e2e_calls(R: list[dict]) -> list[str]:
+    """Куда уходит время запуска и сколько вызовов инструментов."""
+    out = []
     out.append("### Куда уходит время запуска и сколько вызовов инструментов\n")
     trows = []
     for r in R:
@@ -273,6 +334,12 @@ def _e2e(R: list[dict]) -> str:
             est = f"≈ {a['hooked'] * hook_ms / 1000:.0f} с" if hook_ms else "—"
             trows.append([r["label"], role, a["n"], fmt(a["model_s"]), fmt(a["tool_s"]), fmt(a["calls"]), fmt(a["hooked"]), fmt(a["denials"]), f"{a['errors']} (из них --why>200: {a['why_long']})", est])
     out.append(table(["машина", "роль", "запусков", "модель, с", "инструменты, с", "вызовов", "из них под стражем", "отказов стража/устава", "ошибок инструментов", "оценка цены стража"], trows))
+    return out
+
+
+def _e2e_phases(R: list[dict], scen: list) -> list[str]:
+    """Фазы тикета по часам опроса."""
+    out = []
     out.append("### Фазы тикета (по часам опроса, с)\n")
     prow = []
     for sc in scen:
@@ -285,6 +352,10 @@ def _e2e(R: list[dict]) -> str:
                              fmt(x.get("goal_to_result_s"), 1), f"{x.get('cost_usd', 0):.2f}",
                              " → ".join(g(x, "tickets", t, "status", default="?") for t in (x.get("tickets") or {})) + ("  ⏱ТАЙМАУТ" if x.get("timed_out") else "")])
     out.append(table(["задача", "машина", "повтор", "всего", "до первого запуска", "в запусках", "паузы между запусками", "мёртвое", "от git init", "$", "статус"], prow))
+    return out
+
+
+def _e2e_problems(R: list[dict]) -> list[str]:
     bad = []
     for r in R:
         for x in g(r, "e2e", "runs", default=[]):
@@ -297,6 +368,15 @@ def _e2e(R: list[dict]) -> str:
                     bad.append(f"- ⚠️ {r['label']} {x.get('scenario')}: плагин насчитал ${x.get('plugin_accounted_usd')} против ${x.get('cost_usd')} по итогам запусков — учёт расходится")
                 if v.get("protocol"):
                     bad.append(f"- ℹ️ {r['label']} {x.get('scenario')}: устав — {v['protocol']}")
+    return bad
+
+
+def _e2e(R: list[dict]) -> str:
+    out = ["\n## Живой прогон (настоящие модели)\n"]
+    out += _e2e_header(R)
+    scen = _scenarios(R)
+    out += _e2e_matrix(R, scen) + _e2e_tokens(R) + _e2e_calls(R) + _e2e_phases(R, scen)
+    bad = _e2e_problems(R)
     if bad:
         out.append("\n".join(bad) + "\n")
     return "\n".join(out)

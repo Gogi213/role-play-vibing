@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -324,13 +323,7 @@ def run(variants: list[str], repeat: int, budget: float, workers: int, cases: li
 
 # --- отчёт ----------------------------------------------------------------------------------------
 
-def render(data: dict) -> str:
-    res = [r for r in data["results"] if r.get("label") != "ИСКЛЮЧЕНИЕ"]
-    variants = list(data["variants"])
-    out = ["# A/B Судьи: модель и усилие против цены и качества\n",
-           f"Сдач: {len(set(r['case'] for r in res))} (верных по договору {sum(1 for c in CASES if c.expect == 'accept')}, "
-           f"с дефектом {sum(1 for c in CASES if c.expect == 'return')}), повторов {data['repeat']}, потрачено **${data['spent_usd']:.2f}** "
-           f"из ${data['budget_usd']}.\n"]
+def _variant_rows(res: list[dict], data: dict, variants: list[str]) -> list[list]:
     rows = []
     base = None
     for v in variants:
@@ -350,26 +343,42 @@ def render(data: dict) -> str:
                      f"{caught}/{len(bad)}", f"${cost:.3f}", f"{100 * (cost / base - 1):+.0f}%" if base else "—",
                      round(sum(r["turns"] or 0 for r in rs) / n, 1), round(sum(r["duration_s"] or 0 for r in rs) / n),
                      round(sum(r["out_tokens"] or 0 for r in rs) / n)])
-    out.append(_table(["вариант", "модель / усилие", "запусков", "верно", "ЛОЖНЫХ ПРИНЯТИЙ", "ложных отказов", "дефектов пойман (return)",
-                       "цена запуска", "к первому", "ходов", "время, с", "выход, ток."], rows))
-    out.append("\n## По сдачам: вердикт и цена запуска\n")
-    cases = [c.id for c in CASES if any(r["case"] == c.id for r in res)]
-    mrows = []
-    for cid in cases:
+    return rows
+
+
+def _case_rows(res: list[dict], variants: list[str]) -> list[list]:
+    rows = []
+    for cid in [c.id for c in CASES if any(r["case"] == c.id for r in res)]:
         row = [cid, BY_ID[cid].expect]
         for v in variants:
             rs = [r for r in res if r["case"] == cid and r["variant"] == v]
             row.append(" · ".join(f"{('✓' if r['label'] == 'верно' else '✗ ' + (r['verdict'] or '?'))} ${r['judge_cost_usd'] or 0:.2f}" for r in rs) or "—")
-        mrows.append(row)
-    out.append(_table(["сдача", "надо", *variants], mrows))
+        rows.append(row)
+    return rows
+
+
+def _misses(res: list[dict]) -> list[str]:
     misses = [r for r in res if r["label"] != "верно"]
-    if misses:
-        out.append("\n## Промахи и что написал Судья\n")
-        for r in misses:
-            out.append(f"- **{r['variant']} · {r['case']} #{r['rep']}**: {r['label']} (вердикт {r['verdict']}). " + r["entry"][:380].replace("\n", " ") + "\n")
-    errs = [r for r in data["results"] if r.get("label") == "ИСКЛЮЧЕНИЕ"]
-    for r in errs:
-        out.append(f"- ❌ {r['variant']}/{r['case']}: {r['error']}\n")
+    if not misses:
+        return []
+    return ["\n## Промахи и что написал Судья\n"] + [
+        f"- **{r['variant']} · {r['case']} #{r['rep']}**: {r['label']} (вердикт {r['verdict']}). " + r["entry"][:380].replace("\n", " ") + "\n"
+        for r in misses]
+
+
+def render(data: dict) -> str:
+    res = [r for r in data["results"] if r.get("label") != "ИСКЛЮЧЕНИЕ"]
+    variants = list(data["variants"])
+    out = ["# A/B Судьи: модель и усилие против цены и качества\n",
+           f"Сдач: {len(set(r['case'] for r in res))} (верных по договору {sum(1 for c in CASES if c.expect == 'accept')}, "
+           f"с дефектом {sum(1 for c in CASES if c.expect == 'return')}), повторов {data['repeat']}, потрачено **${data['spent_usd']:.2f}** "
+           f"из ${data['budget_usd']}.\n"]
+    out.append(_table(["вариант", "модель / усилие", "запусков", "верно", "ЛОЖНЫХ ПРИНЯТИЙ", "ложных отказов", "дефектов пойман (return)",
+                       "цена запуска", "к первому", "ходов", "время, с", "выход, ток."], _variant_rows(res, data, variants)))
+    out.append("\n## По сдачам: вердикт и цена запуска\n")
+    out.append(_table(["сдача", "надо", *variants], _case_rows(res, variants)))
+    out += _misses(res)
+    out += [f"- ❌ {r['variant']}/{r['case']}: {r['error']}\n" for r in data["results"] if r.get("label") == "ИСКЛЮЧЕНИЕ"]
     if data["skipped_for_budget"]:
         out.append(f"\nНе запущены из-за потолка: {len(data['skipped_for_budget'])}\n")
     return "\n".join(out)

@@ -44,7 +44,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -54,11 +53,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
 import overseer as core  # noqa: E402  ядро — общее с живым Надзирателем (`.claude/dispatcher/overseer.py`)
-from overseer import (  # noqa: E402,F401
-    DAYS_SHOWN, DEFAULT_TZ, HDR, KINDS, MIN_QUOTE, RECENT_H, RETURN, Entry, Run, Stats, Ticket, Window, _numbers,
-    _pct, build_prompt, call_overseer, claude_bin, closed_scale, cut, entry_block, gist, grade, invented_numbers, is_judge_return,
-    load_agent, load_runs, load_ticket, make_windows, merge_entries, norm_ws, parse_answer, parse_log, parse_runs, parse_ts,
-    pick_new, quote_found, scale_text, split_ticket, stats_at, stats_text, ticket_ids, ticket_start)
+from overseer import (  # noqa: E402
+    build_prompt, call_overseer, closed_scale, grade, is_judge_return, load_agent, load_runs, load_ticket,
+    make_windows, parse_ts, scale_text, stats_at, ticket_ids, ticket_start)
 BAD = ("TK-048", "TK-049", "TK-063", "TK-065", "TK-071", "TK-076", "TK-079", "TK-087", "TK-100", "TK-120")
 NORMAL_N, NORMAL_SEED, NORMAL_MAX_RUNS = 20, 14, 6
 MECHANICAL = ("watch", "dispatcher", "ci", "merge")  # записи кода, не ролей: для оценки «сколько окон без них»
@@ -249,12 +246,7 @@ def fit_cost(rows: list) -> tuple:
     return my - b * mx, b
 
 
-def cmd_plan(a) -> int:
-    project = Path(a.project).resolve()
-    tickets, runs = load_all(project)
-    only = [x for x in a.tickets.split(",") if x] if a.tickets else None
-    chosen = choose(tickets, runs, only, a.group)
-    jobs = plan_jobs(tickets, runs, chosen, a)
+def _plan_table(a, chosen: list, tickets: dict, runs: dict, jobs: list) -> list[str]:
     mech = tuple(MECHANICAL)
     md = ["| тикет | группа | статус | запусков | цена $ (resolved_cost) | Σ cost_usd $ | записей | часов | окон (шаг %d) | без механических | шаг 30 | шаг 60 | тыс. знаков промптов |" % a.step_min,
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
@@ -271,19 +263,29 @@ def cmd_plan(a) -> int:
         for i, v in enumerate((len(wins), w_mech, w30, w60, kb)):
             tot[i] += v
     md.append(f"| **итого** | | | | | | | | **{tot[0]}** | {tot[1]} | {tot[2]} | {tot[3]} | {tot[4]:.0f} |")
+    return md
+
+
+def _plan_history(a, tickets: dict, runs: dict, jobs: list) -> tuple[list[str], float]:
+    """Строки о всей истории проекта и набор в сутки (нужен оценке цены)."""
     allw = [w for t in tickets.values() for w in make_windows(t.entries, a.step_min)]
     ts = [e.ts for t in tickets.values() for e in t.entries]
     days = (max(ts) - min(ts)).total_seconds() / 86400 if ts else 0
     per_day = len(allw) / days if days else 0
     every = [r for rs in runs.values() for r in rs]
     sizes = sorted(len(j["prompt"]) for j in jobs)
-    md += ["", f"Все запуски проекта: {len(every)}; цена по resolved_cost ${sum(r.cost for r in every):.0f}; "
-               f"если складывать cost_usd (итог сессии с начала, при --resume считается повторно) ${sum(r.raw for r in every):.0f}.",
-           f"Вся история: тикетов {len(tickets)}, окон (шаг {a.step_min} мин) {len(allw)} за {days:.1f} суток — {per_day:.0f} в сутки.",
-           f"Обычные: кандидатов по правилу (done, 1–{NORMAL_MAX_RUNS} запусков, без возвратов Судьи) "
-           f"{len(normal_pool(ticket_info(tickets, runs)))}; выбрано {NORMAL_N}, seed {NORMAL_SEED}."]
+    md = ["", f"Все запуски проекта: {len(every)}; цена по resolved_cost ${sum(r.cost for r in every):.0f}; "
+              f"если складывать cost_usd (итог сессии с начала, при --resume считается повторно) ${sum(r.raw for r in every):.0f}.",
+          f"Вся история: тикетов {len(tickets)}, окон (шаг {a.step_min} мин) {len(allw)} за {days:.1f} суток — {per_day:.0f} в сутки.",
+          f"Обычные: кандидатов по правилу (done, 1–{NORMAL_MAX_RUNS} запусков, без возвратов Судьи) "
+          f"{len(normal_pool(ticket_info(tickets, runs)))}; выбрано {NORMAL_N}, seed {NORMAL_SEED}."]
     if sizes:
         md.append(f"Промпт набора: средний {sum(sizes) / len(sizes):.0f} знаков, медиана {sizes[len(sizes) // 2]}, максимум {sizes[-1]}.")
+    return md, per_day
+
+
+def _plan_estimates(a, jobs: list, per_day: float) -> list[str]:
+    md = []
     if a.fit:
         rows = [r for d in a.fit.split(",") if d for r in read_rows(Path(d).resolve())]
         al, be = fit_cost(rows)
@@ -295,7 +297,18 @@ def cmd_plan(a) -> int:
                f"В сутки по всей истории ({per_day:.0f} окон): ${per_day * mean:.2f} по среднему вызову."]
     if a.per_call:
         md.append(f"По заданной цене вызова ${a.per_call}: окон {len(jobs)} → ${len(jobs) * a.per_call:.2f}.")
-    emit("\n".join(md))
+    return md
+
+
+def cmd_plan(a) -> int:
+    project = Path(a.project).resolve()
+    tickets, runs = load_all(project)
+    only = [x for x in a.tickets.split(",") if x] if a.tickets else None
+    chosen = choose(tickets, runs, only, a.group)
+    jobs = plan_jobs(tickets, runs, chosen, a)
+    md = _plan_table(a, chosen, tickets, runs, jobs)
+    history, per_day = _plan_history(a, tickets, runs, jobs)
+    emit("\n".join(md + history + _plan_estimates(a, jobs, per_day)))
     return 0
 
 
@@ -351,17 +364,8 @@ def summarize(rows: list) -> dict:
     return tickets
 
 
-def cmd_report(a) -> int:
-    out = Path(a.out).resolve()
-    rows = read_rows(out)
-    if not rows:
-        raise SystemExit(f"{out}: нет windows.jsonl")
-    last = {r["key"]: r for r in rows}
-    calls = [r for r in last.values()]
-    costs = [r["cost"] or 0 for r in calls]
-    tk = summarize(rows)
-    md = ["# Замер Надзирателя", "",
-          "| тикет | группа | окон | первое окно с принятой находкой | вид | потрачено к тому моменту | доля цены тикета | часов от начала | "
+def _report_tickets(tk: dict) -> list[str]:
+    md = ["| тикет | группа | окон | первое окно с принятой находкой | вид | потрачено к тому моменту | доля цены тикета | часов от начала | "
           "принято | раз в сутки | отброшено | ошибок | цена замера $ |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for tid, v in sorted(tk.items()):
         f = v["first"]
@@ -370,6 +374,11 @@ def cmd_report(a) -> int:
         md.append("| " + " | ".join([tid, v["group"], str(v["windows"])] + first + [
             str(v["accepted"]), str(v["accepted_daily"]), str(v["rejected"]), str(v["errors"]), f"{v['cost']:.4f}"]) + " |")
     md.append("")
+    return md
+
+
+def _report_groups(tk: dict) -> list[str]:
+    md = []
     bad = {t: v for t, v in tk.items() if v["group"] == "bad"}
     norm = {t: v for t, v in tk.items() if v["group"] == "normal"}
     if bad:
@@ -380,24 +389,43 @@ def cmd_report(a) -> int:
         fa = [t for t, v in norm.items() if v["accepted"]]
         md.append(f"Обычные: тикетов с принятой находкой (ложная тревога) — {len(fa)} из {len(norm)} ({', '.join(fa) or '—'}); "
                   f"принятых находок всего {sum(v['accepted'] for v in norm.values())}, после правила раз в сутки {sum(v['accepted_daily'] for v in norm.values())}.")
+    return md
+
+
+def _report_calls(calls: list) -> list[str]:
+    costs = [r["cost"] or 0 for r in calls]
     reasons = {}
     for r in calls:
         if r["outcome"] in ("rejected", "error"):
             reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
     inv = sum(1 for r in calls if r["outcome"] == "accepted" and r.get("invented_numbers"))
-    md += ["", f"Вызовов (окон): {len(calls)}; цена замера ${sum(costs):.4f}; цена вызова: средняя ${sum(costs) / len(costs):.4f}, "
-               f"минимум ${min(costs):.4f}, максимум ${max(costs):.4f}.",
-           f"Исходы: тихо {sum(r['outcome'] == 'quiet' for r in calls)}, принято {sum(r['outcome'] == 'accepted' for r in calls)}, "
-           f"отброшено {sum(r['outcome'] == 'rejected' for r in calls)}, ошибок {sum(r['outcome'] == 'error' for r in calls)}"
-           + (f" (причины: {json.dumps(reasons, ensure_ascii=False)})" if reasons else "") + f"; принятых, где в action есть число, которого не было в промпте: {inv}.",
-           f"Среднее время вызова {sum(r['dur'] for r in calls) / len(calls):.1f} с; токенов на вызов: вход {sum(r.get('in_tok') or 0 for r in calls) / len(calls):.0f}, "
-           f"выход {sum(r.get('out_tok') or 0 for r in calls) / len(calls):.0f} (из них мысли {sum(r.get('think_tok') or 0 for r in calls) / len(calls):.0f})."]
+    return ["", f"Вызовов (окон): {len(calls)}; цена замера ${sum(costs):.4f}; цена вызова: средняя ${sum(costs) / len(costs):.4f}, "
+                f"минимум ${min(costs):.4f}, максимум ${max(costs):.4f}.",
+            f"Исходы: тихо {sum(r['outcome'] == 'quiet' for r in calls)}, принято {sum(r['outcome'] == 'accepted' for r in calls)}, "
+            f"отброшено {sum(r['outcome'] == 'rejected' for r in calls)}, ошибок {sum(r['outcome'] == 'error' for r in calls)}"
+            + (f" (причины: {json.dumps(reasons, ensure_ascii=False)})" if reasons else "") + f"; принятых, где в action есть число, которого не было в промпте: {inv}.",
+            f"Среднее время вызова {sum(r['dur'] for r in calls) / len(calls):.1f} с; токенов на вызов: вход {sum(r.get('in_tok') or 0 for r in calls) / len(calls):.0f}, "
+            f"выход {sum(r.get('out_tok') or 0 for r in calls) / len(calls):.0f} (из них мысли {sum(r.get('think_tok') or 0 for r in calls) / len(calls):.0f})."]
+
+
+def _report_findings(calls: list) -> list[str]:
     finds = [r for r in sorted(calls, key=lambda r: (r["ticket"], r["end"])) if r["outcome"] in ("accepted", "rejected")]
-    if finds:
-        md += ["", "## Находки", ""]
-        for r in finds:
-            md.append(f"- {r['ticket']} окно {r['window']} ({r['end'][5:16]}), {r['outcome']}"
-                      + (f" [{r['reason']}]" if r["outcome"] == "rejected" else "") + f", {r['kind']}: «{r['quote']}» → {r['action']}")
+    if not finds:
+        return []
+    return ["", "## Находки", ""] + [
+        f"- {r['ticket']} окно {r['window']} ({r['end'][5:16]}), {r['outcome']}"
+        + (f" [{r['reason']}]" if r["outcome"] == "rejected" else "") + f", {r['kind']}: «{r['quote']}» → {r['action']}"
+        for r in finds]
+
+
+def cmd_report(a) -> int:
+    out = Path(a.out).resolve()
+    rows = read_rows(out)
+    if not rows:
+        raise SystemExit(f"{out}: нет windows.jsonl")
+    calls = list({r["key"]: r for r in rows}.values())
+    tk = summarize(rows)
+    md = ["# Замер Надзирателя", ""] + _report_tickets(tk) + _report_groups(tk) + _report_calls(calls) + _report_findings(calls)
     (out / "summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     emit("\n".join(md))
     return 0
