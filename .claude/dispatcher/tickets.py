@@ -55,26 +55,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
 import cfg as cfg_mod  # noqa: E402
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
 
-# Проект и тикеты берутся у диспетчера (D.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
+# Проект и тикеты берутся у диспетчера (CFG.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
 # в main() флаг --project переключает их ещё раз. Тесты подменяют TICKETS_DIR прямо на модуле.
-TICKETS_DIR = D.TICKETS_DIR
+TICKETS_DIR = CFG.TICKETS_DIR
 REF_MIN = 5  # знаков в цитате --ref; решение «В-<число>» (REF_DECISION) проходит любой длины, «да»/пусто — нет
 REF_DECISION = re.compile(r"^В-\d+")
 REF_REGISTRY = re.compile(r"^(В-\d+|G-\d{3,})\b")  # номер реестра владельца: есть реестр — номер обязан в нём быть
-PROJECT_ROOT = D.PROJECT_ROOT
+PROJECT_ROOT = CFG.PROJECT_ROOT
 
 
 def cmd_inbox(args) -> int:
     """Очередь CEO: новые строки ceo-inbox.md с прошлого чтения (отметка `.ceo-inbox-seen` — общая с хуком сессии);
     `--peek` отметку не двигает."""
-    seen_f = D.CEO_INBOX.parent / CI.SEEN_NAME
-    lines, seen = CI.read(D.CEO_INBOX, seen_f)
+    seen_f = CFG.CEO_INBOX.parent / CI.SEEN_NAME
+    lines, seen = CI.read(CFG.CEO_INBOX, seen_f)
     for ln in lines[seen:]:
         print(ln)
     if len(lines) == seen:
@@ -275,7 +276,7 @@ def cmd_result(args) -> int:
 def _caller_role() -> str:
     """Роль вызывающей сессии: `RPV_ROLE` запуска роли, а стёрта — по дереву процессов (`project.caller_role`); у CEO и
     владельца её нет."""
-    return D.P.caller_role(D.PROJECT_ROOT)
+    return D.P.caller_role(CFG.PROJECT_ROOT)
 
 
 def _decisions_ack(args) -> tuple[str, str]:
@@ -763,7 +764,7 @@ def cmd_allow_delete(args) -> int:
             print(f"allow-delete: {name} — основную ветку удалять нельзя никому", file=sys.stderr)
             return 1
         names.append(name)
-    path = D.DISPATCHER_DIR / BRANCH_CONSENT_FILE
+    path = CFG.DISPATCHER_DIR / BRANCH_CONSENT_FILE
     now = datetime.now().astimezone()
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -1002,11 +1003,11 @@ def main(argv=None) -> int:
     p_status.set_defaults(func=cmd_status)
 
     args = p.parse_args(argv)
-    if not D.ensure_project(["--project", args.project] if args.project else [], "tickets"):
+    if not CFG.ensure_project(["--project", args.project] if args.project else [], "tickets"):
         return 2                                 # нет проекта — ошибка с подсказкой, тикет не создаётся
     if args.project:
         global TICKETS_DIR, PROJECT_ROOT
-        TICKETS_DIR, PROJECT_ROOT = D.TICKETS_DIR, D.PROJECT_ROOT
+        TICKETS_DIR, PROJECT_ROOT = CFG.TICKETS_DIR, CFG.PROJECT_ROOT
     return args.func(args)
 
 

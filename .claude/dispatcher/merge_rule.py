@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -21,7 +22,7 @@ _TRANSIENT = re.compile(r"HTTP 5\d\d|timed out|timeout|connection", re.I)
 
 
 def merge_state_path() -> Path:
-    return D.STATE_FILE.parent / "merge-state.json"
+    return CFG.STATE_FILE.parent / "merge-state.json"
 
 
 def _load() -> dict:
@@ -72,7 +73,7 @@ def _note_not_found(repo: str, number: int) -> None:
     только в журнале диспетчера. Повторный опрос того же ожидания вторую запись не пишет."""
     text = f"PR #{number} не найден в {repo} — ожидание merged: снято; проверь номер PR и репозиторий (ci_repo в .claude/rpv.json)."
     want = f"merged:{repo}#{number}"
-    for p in T.list_tickets(D.TICKETS_DIR):
+    for p in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(p)
         except Exception:
@@ -168,7 +169,7 @@ def merge_once(repo: str, gh=C.gh_api) -> list:
     """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
     st, out = _load(), []
     tickets = []
-    for p in T.list_tickets(D.TICKETS_DIR):
+    for p in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tickets.append(T.read_ticket(p))
         except Exception:

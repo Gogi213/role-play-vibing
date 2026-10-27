@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
+import config as CFG  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import transcript  # noqa: E402
@@ -45,48 +46,6 @@ import report as REPORT  # noqa: E402
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
 CODE_DIR = Path(__file__).resolve().parent  # где лежит сам диспетчер (папка плагина) — к проекту отношения не имеет
-# Пути проекта (PROJECT_ROOT, TICKETS_DIR, DISPATCHER_DIR — каталог СОСТОЯНИЯ в проекте и остальные файлы) выставляет
-# configure_project(): при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/текущему каталогу, в main() — по флагу.
-PROJECT_ROOT = DISPATCHER_DIR = TICKETS_DIR = STATE_FILE = PID_FILE = RUNS_DIR = RUNS_LOG = None
-CEO_INBOX = CEO_WAKE_LOG = STOP_DIR = None
-PROJECT_FOUND = False  # проект найден при импорте (флаг/окружение/поиск вверх); False — CLI откажет с подсказкой
-
-
-def configure_project(root) -> Path:
-    """Корень проекта и все пути состояния от него (ничего не создаёт — каталоги появляются при записи)."""
-    global PROJECT_ROOT, DISPATCHER_DIR, TICKETS_DIR, STATE_FILE, PID_FILE, RUNS_DIR, RUNS_LOG, CEO_INBOX, CEO_WAKE_LOG, STOP_DIR
-    PROJECT_ROOT = Path(root).expanduser().resolve()
-    P.set_root(PROJECT_ROOT)  # CP8: настройки проекта — `.claude/rpv.json` (P.setting)
-    DISPATCHER_DIR = PROJECT_ROOT / ".claude" / "dispatcher"
-    TICKETS_DIR = PROJECT_ROOT / ".claude" / "tickets"
-    STATE_FILE = DISPATCHER_DIR / "state.json"
-    PID_FILE = DISPATCHER_DIR / "dispatch.pid"  # замок единственного экземпляра диспетчера (см. acquire_instance_lock)
-    RUNS_DIR = DISPATCHER_DIR / "runs"
-    RUNS_LOG = DISPATCHER_DIR / "runs.log"
-    CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
-    CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # короткая копия каждой строки ceo-inbox — CEO держит на ней Monitor
-    STOP_DIR = DISPATCHER_DIR / "stop"  # заявки `tickets.py stop` (<ID>.json): диспетчер разбирает их на ближайшем тике
-    return PROJECT_ROOT
-
-
-try:
-    configure_project(P.resolve_project())
-    PROJECT_FOUND = True
-except P.ProjectNotFound:                 # импорт не падает; пути — заглушка от cwd, ничего не создаётся
-    configure_project(Path.cwd())
-
-
-def ensure_project(argv, prog: str) -> bool:
-    """Точка входа CLI: проект задан флагом `--project` (переключаем пути) или найден при импорте; иначе —
-    подсказка в stderr и False (вызывающий выходит с кодом 2, не создав ни одного каталога)."""
-    explicit = P.project_arg(argv)
-    if explicit:
-        configure_project(explicit)
-        return True
-    if not PROJECT_FOUND:
-        print(f"[{prog}] ошибка: {P.NOT_FOUND_HINT}", file=sys.stderr)
-        return False
-    return True
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"  # имя из PATH, без зашитых путей
 POLL_INTERVAL = 15.0
@@ -247,17 +206,17 @@ class Decision:
 # --- состояние ------------------------------------------------------------------------------
 
 def load_state() -> dict:
-    return P.read_json(STATE_FILE, {})
+    return P.read_json(CFG.STATE_FILE, {})
 
 
 def save_state(state: dict) -> None:
-    P.write_json(STATE_FILE, state, sort_keys=True)   # с повторами: на Windows читатель держит файл
+    P.write_json(CFG.STATE_FILE, state, sort_keys=True)   # с повторами: на Windows читатель держит файл
 
 
 # --- wait_for: само ожидание — waits.py; здесь обёртки подставляют пути проекта --------------------------------
 
 def _where() -> W.Where:
-    return W.Where(PROJECT_ROOT, DISPATCHER_DIR, TICKETS_DIR)
+    return W.Where(CFG.PROJECT_ROOT, CFG.DISPATCHER_DIR, CFG.TICKETS_DIR)
 
 
 def check_wait_for(spec: str) -> bool:
@@ -281,10 +240,10 @@ def _blind_tick() -> None:
 
 # Сигнал CEO — строка в ceo-inbox.md (детали; читает `tickets.py inbox`) и короткая копия в ceo-wake.log (на нём Monitor CEO).
 def _ceo_file_write(tid: str, kind: str, note: str, now=None) -> None:
-    CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-    with open(CEO_INBOX, "a", encoding="utf-8") as fh:
+    CFG.CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
+    with open(CFG.CEO_INBOX, "a", encoding="utf-8") as fh:
         fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
-    with open(CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
+    with open(CFG.CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
         fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
 
 
@@ -295,8 +254,8 @@ MECH_KINDS = {"blind", "idle-slo", "нет-хода", "цикл-ожиданий
 
 def _mech_log(tid: str, kind: str, note: str, now=None) -> None:
     try:
-        DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
-        with (DISPATCHER_DIR / "mechanics.log").open("a", encoding="utf-8") as f:
+        CFG.DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+        with (CFG.DISPATCHER_DIR / "mechanics.log").open("a", encoding="utf-8") as f:
             f.write(f"{T.now_iso(now)} {tid} [{kind}] {' '.join(str(note).split())}\n")
     except OSError:
         pass
@@ -534,7 +493,7 @@ def baseline_done_notified(state: dict) -> None:
     if "ceo_done_notified" in state:
         return
     notified = state.setdefault("ceo_done_notified", {})
-    for path in T.list_tickets(TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception:
@@ -950,14 +909,14 @@ def role_mcp_args(run_stem: str) -> list[str]:
     if word in ("all", "none"):
         return [] if word == "all" else ["--strict-mcp-config"]
     names = [str(n).strip() for n in (mode if isinstance(mode, list) else str(mode).split(",")) if str(n).strip()]
-    servers = _read_mcp_servers(Path.home() / ".claude.json", str(PROJECT_ROOT))
-    servers.update(_read_mcp_servers(PROJECT_ROOT / ".mcp.json"))
+    servers = _read_mcp_servers(Path.home() / ".claude.json", str(CFG.PROJECT_ROOT))
+    servers.update(_read_mcp_servers(CFG.PROJECT_ROOT / ".mcp.json"))
     picked = {n: servers[n] for n in names if n in servers}
     for n in names:
         if n not in picked:
             print(f"[dispatch] rpv.json role_mcp: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
                   file=sys.stderr, flush=True)
-    cfg = RUNS_DIR / f"{run_stem}.mcp.json"
+    cfg = CFG.RUNS_DIR / f"{run_stem}.mcp.json"
     cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=2), encoding="utf-8")
     return ["--strict-mcp-config", "--mcp-config", str(cfg)]
 
@@ -1003,10 +962,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
                extra_note: str = None) -> None:
     ticket_path = Path(ticket_path)
     tid = ticket_path.stem
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    CFG.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     ts = now.strftime("%Y%m%d-%H%M%S")
-    run_file = RUNS_DIR / f"{ts}-{tid}-{role}.json"
-    err_file = RUNS_DIR / f"{ts}-{tid}-{role}.err.log"
+    run_file = CFG.RUNS_DIR / f"{ts}-{tid}-{role}.json"
+    err_file = CFG.RUNS_DIR / f"{ts}-{tid}-{role}.err.log"
 
     store = _resume_store(state, tid, role)
     sid = store.get("session_id")
@@ -1068,7 +1027,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     # хуки (role_context/role_memory) ведут состояние и конспект прошлой сессии по тикету
     env["RPV_ROLE"] = role
     env["RPV_TICKET"] = tid
-    env["RPV_PROJECT"] = str(PROJECT_ROOT)  # tickets.py роли берёт проект отсюда (и из cwd запуска)
+    env["RPV_PROJECT"] = str(CFG.PROJECT_ROOT)  # tickets.py роли берёт проект отсюда (и из cwd запуска)
 
     out_fh = open(run_file, "w", encoding="utf-8")
     err_fh = open(err_file, "w", encoding="utf-8")
@@ -1084,7 +1043,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     save_state(state)
     # своя группа процессов (на Windows параметр без действия): остановка CEO снимает роль вместе с потомками
     try:
-        popen = _popen(cmd, cwd=str(PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
+        popen = _popen(cmd, cwd=str(CFG.PROJECT_ROOT), env=env, stdout=out_fh, stderr=err_fh, text=True,
                        **hide.hidden_console())
     except BaseException:
         state.get("active_runs", {}).pop(tid, None)
@@ -1153,7 +1112,7 @@ def _transcript_usage_since(session_id, started) -> dict:
 
 def _log_run_summary(tid: str, info: dict, result: dict, now, timed_out: bool, resolved_cost: float,
                       ticket_spent: float, cost_note: bool = False, stopped: bool = False) -> None:
-    RUNS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    CFG.RUNS_LOG.parent.mkdir(parents=True, exist_ok=True)
     usage = result.get("usage") or {}
     src = "json"
     if not usage:  # таймаут/убит: токены — из транскрипта сессии с момента старта запуска
@@ -1175,7 +1134,7 @@ def _log_run_summary(tid: str, info: dict, result: dict, now, timed_out: bool, r
             f"ctx_last={_context_tokens_last(result)} ctx_sum={_context_tokens_sum(usage)} "
             f"terminal_reason={result.get('terminal_reason') or '-'} is_error={result.get('is_error', '-')} "
             f"status={status}\n")
-    with open(RUNS_LOG, "a", encoding="utf-8") as fh:
+    with open(CFG.RUNS_LOG, "a", encoding="utf-8") as fh:
         fh.write(line)
 
 
@@ -1235,7 +1194,7 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
           and transcript.find(CLAUDE_PROJECTS_DIR, info["session_id"]) is not None):
         store["session_id"] = info["session_id"]  # убитая новая сессия: транскрипт есть — повтор продолжит её, не с нуля
 
-    path = TICKETS_DIR / f"{tid}.md"
+    path = CFG.TICKETS_DIR / f"{tid}.md"
     if not path.exists():
         save_state(state)
         return
@@ -1366,7 +1325,7 @@ def _handle_api_error(tid: str, info: dict, state: dict, now, result: dict) -> N
     state.setdefault("sessions", {}).setdefault(key, {})["retries"] = 0
     print(f"[dispatch] {T.now_iso(now)} ошибка API на {tid} ({role}) x{n}: {text}; запуски на паузе до {T.now_iso(until)}",
           file=sys.stderr, flush=True)
-    path = TICKETS_DIR / f"{tid}.md"
+    path = CFG.TICKETS_DIR / f"{tid}.md"
     if _auth_error(result):
         append_ceo_inbox(tid, "auth", f"{role}: вход Claude истёк — {text}. Войти заново (`claude /login`)", now)
     elif n >= MAX_API_ERRORS and path.exists():
@@ -1409,13 +1368,13 @@ def _limit_paused(state: dict, now) -> bool:
 
 
 def _last_run_was_limit(tid: str) -> bool:
-    runs = sorted(RUNS_DIR.glob(f"*-{tid}-*.json")) if RUNS_DIR.exists() else []
+    runs = sorted(CFG.RUNS_DIR.glob(f"*-{tid}-*.json")) if CFG.RUNS_DIR.exists() else []
     return bool(runs) and _limit_hit(_read_run_result(runs[-1]))
 
 
 def unblock_limit_victims(now) -> None:
     """blocked из-за холостых запусков, чей последний запуск — 429 лимита сессии: вернуть в in_progress (тикет не виноват)."""
-    for path in T.list_tickets(TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
             if tkt.status != "blocked" or tkt.id in RUNNING or not _last_run_was_limit(tkt.id):
@@ -1572,15 +1531,15 @@ def recover_active_runs(state: dict, now) -> None:
 def write_stop_request(tid: str, next_role: str, text: str, now=None) -> Path:
     """`tickets.py stop`: заявка `stop/<ID>.json` — время, роль для `--next` (или пусто) и текст новой постановки. Диспетчер
     разбирает её на ближайшем тике (process_stop_requests); новая заявка по тому же тикету заменяет прежнюю."""
-    STOP_DIR.mkdir(parents=True, exist_ok=True)
-    path = STOP_DIR / f"{tid}.json"
+    CFG.STOP_DIR.mkdir(parents=True, exist_ok=True)
+    path = CFG.STOP_DIR / f"{tid}.json"
     P.write_json(path, {"at": T.now_iso(now), "next": next_role or "", "text": text})
     return path
 
 
 def _stop_requests() -> list:
     out = []
-    for path in sorted(STOP_DIR.glob("*.json")) if STOP_DIR.exists() else []:
+    for path in sorted(CFG.STOP_DIR.glob("*.json")) if CFG.STOP_DIR.exists() else []:
         try:
             req = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -1637,7 +1596,7 @@ def process_stop_requests(state: dict, now) -> None:
     не читается — заявку не трогаем (битый тикет заметит основной цикл; чужой корень заявку не съест)."""
     for req_path, req in _stop_requests():
         tid = req_path.stem
-        path = TICKETS_DIR / f"{tid}.md"
+        path = CFG.TICKETS_DIR / f"{tid}.md"
         try:
             T.read_ticket(path)
         except Exception:
@@ -1676,7 +1635,7 @@ def _candidate_sort_key(state: dict, tkt: T.Ticket, decision: Decision):
 
 def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
     """`on_met.run_on_met` с путями текущего проекта."""
-    return ON_MET.run_on_met(path, tkt, state, now, PROJECT_ROOT, RUNS_LOG)
+    return ON_MET.run_on_met(path, tkt, state, now, CFG.PROJECT_ROOT, CFG.RUNS_LOG)
 
 
 
@@ -1798,7 +1757,7 @@ def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
     parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
     if not parsed or parsed[0] != "ticket":
         return
-    cycle = T.wait_cycle(TICKETS_DIR, tkt.id, parsed[1])
+    cycle = T.wait_cycle(CFG.TICKETS_DIR, tkt.id, parsed[1])
     if not cycle or tkt.id != min(cycle[:-1]):
         return
     STALLED.append(_stall_title(tkt))
@@ -1847,7 +1806,7 @@ def _stall_alarm(state: dict, now, stalled: list) -> None:
                 + ". CEO разбирается; если сессии CEO нет — откройте её и скажите «почему стоит работа».")
 
     notify.episode(st, "sent", firing=bool(stalled) and mins() >= STALL_ALARM_MIN, cleared=not stalled, down=down,
-                   up=lambda: f"Работа снова идёт (стояла {mins():.0f} мин).", log_dir=DISPATCHER_DIR,
+                   up=lambda: f"Работа снова идёт (стояла {mins():.0f} мин).", log_dir=CFG.DISPATCHER_DIR,
                    ceo_down=lambda text: append_ceo_inbox("*", "работа-стоит", text, now),
                    ceo_up=lambda text: append_ceo_inbox("*", "работа-идёт", text, now))
     state["stall"] = st if stalled else {}
@@ -1872,11 +1831,11 @@ def _daily_report(state: dict, now) -> None:
     if not REPORT.due(last, now, str(P.setting("report_at", REPORT_AT))):
         return
     state["last_report_at"] = T.now_iso(now)
-    cmd = [sys.executable, str(CODE_DIR / "report.py"), "--project", str(PROJECT_ROOT), "--since", last,
+    cmd = [sys.executable, str(CODE_DIR / "report.py"), "--project", str(CFG.PROJECT_ROOT), "--since", last,
            "--until", T.now_iso(now)]
-    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
-    with open(DISPATCHER_DIR / "report.log", "a", encoding="utf-8") as log:
-        _REPORT_PROC = _popen(cmd, cwd=str(PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
+    CFG.DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CFG.DISPATCHER_DIR / "report.log", "a", encoding="utf-8") as log:
+        _REPORT_PROC = _popen(cmd, cwd=str(CFG.PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
 
 
 OWNER_ASK = re.compile(r"^\[итог:\s*ask-owner\]")
@@ -1886,7 +1845,7 @@ def _owner_questions(state: dict, now) -> None:
     """Критерии 5 и 9: вопрос Судьи владельцу (тикет `needs_owner`) — сразу одним сообщением в Telegram, а не только строкой
     CEO: сессии CEO может не быть. Повод и сам вопрос; отвечают CEO. Один раз на вопрос (тикет и время записи вопроса)."""
     sent = state.setdefault("owner_asked", {})
-    for path in T.list_tickets(TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception:
@@ -1900,7 +1859,7 @@ def _owner_questions(state: dict, now) -> None:
         body = re.sub(r"^\[итог:\s*ask-owner\]\s*(?:повод: [\w-]+)?\s*[—-]?\s*", "", q.text.strip())
         title = " ".join((tkt.header.get("title") or tkt.id).split())[:80]
         notify.send(f"Вопрос вам ({why.group(1) if why else 'без повода'}): «{title}» — {' '.join(body.split())[:400]} "
-                    f"Ответьте CEO.", log_dir=DISPATCHER_DIR)
+                    f"Ответьте CEO.", log_dir=CFG.DISPATCHER_DIR)
         sent[tkt.id] = q.ts_raw
 
 
@@ -1921,14 +1880,14 @@ def _overseer(state: dict, now) -> None:
         return
     if (now - T.parse_dt(last)).total_seconds() < OVERSEER_EVERY_S:
         return
-    changed = max((f.stat().st_mtime for f in TICKETS_DIR.glob("TK-*.md")), default=0.0)
+    changed = max((f.stat().st_mtime for f in CFG.TICKETS_DIR.glob("TK-*.md")), default=0.0)
     if changed <= T.parse_dt(last).timestamp():
         return
     state["overseer_at"] = T.now_iso(now)
-    cmd = [sys.executable, str(CODE_DIR / "overseer.py"), "--project", str(PROJECT_ROOT)]
-    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
-    with open(DISPATCHER_DIR / "overseer.run.log", "a", encoding="utf-8") as log:
-        _OVERSEER_PROC = _popen(cmd, cwd=str(PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
+    cmd = [sys.executable, str(CODE_DIR / "overseer.py"), "--project", str(CFG.PROJECT_ROOT)]
+    CFG.DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CFG.DISPATCHER_DIR / "overseer.run.log", "a", encoding="utf-8") as log:
+        _OVERSEER_PROC = _popen(cmd, cwd=str(CFG.PROJECT_ROOT), stdout=log, stderr=log, **hide.hidden())
 
 
 def _account_downtime(state: dict, now, **flags) -> None:
@@ -1942,13 +1901,13 @@ def sweep_closed_worktrees() -> None:
     """TK-104: копии закрытых тикетов убираются (грязное — коммитом в ветку); ошибка уборки тик не роняет."""
     try:
         status = {}
-        for p in T.list_tickets(TICKETS_DIR):
+        for p in T.list_tickets(CFG.TICKETS_DIR):
             try:
                 t = T.read_ticket(p)
                 status[t.id] = t.status
             except Exception:
                 continue
-        for line in WH.sweep(PROJECT_ROOT, status):
+        for line in WH.sweep(CFG.PROJECT_ROOT, status):
             print(f"[dispatch] worktree: {line}", flush=True)
     except Exception as e:
         print(f"[dispatch] worktree sweep: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
@@ -1969,7 +1928,7 @@ def tick(now=None) -> int:
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — ниже
     STALLED.clear()
     waiting_nocond = False  # TK-076 п.4: роль ждёт без условия (ни wait_for, ни next) дольше IDLE_GRACE_S
-    for path in T.list_tickets(TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception as e:
@@ -2071,15 +2030,15 @@ def main(argv=None) -> int:
     if "--help" in argv or "-h" in argv:  # раньше любой аргумент запускал боевой цикл
         print(USAGE)
         return 0
-    if not ensure_project(argv, "dispatch"):     # нет проекта — ошибка с подсказкой, каталоги не создаём
+    if not CFG.ensure_project(argv, "dispatch"):     # нет проекта — ошибка с подсказкой, каталоги не создаём
         return 2
-    DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
-    TICKETS_DIR.mkdir(parents=True, exist_ok=True)
-    ok, why = acquire_instance_lock(PID_FILE)
+    CFG.DISPATCHER_DIR.mkdir(parents=True, exist_ok=True)
+    CFG.TICKETS_DIR.mkdir(parents=True, exist_ok=True)
+    ok, why = acquire_instance_lock(CFG.PID_FILE)
     if not ok:                                   # второй диспетчер (в т. ч. ручной --once при живом цикле) — не стартуем
         print(f"[dispatch] {why}", file=sys.stderr)
         return 1
-    atexit.register(release_instance_lock, PID_FILE)
+    atexit.register(release_instance_lock, CFG.PID_FILE)
     if "--once" in argv:
         n = tick()
         print(f"[dispatch] once: launched={n} running={len(RUNNING)}")

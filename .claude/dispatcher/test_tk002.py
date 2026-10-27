@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import ticket as T  # noqa: E402
 import watch as W  # noqa: E402
@@ -23,23 +24,23 @@ ATTRS = ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DI
 class Sandbox(unittest.TestCase):
     def setUp(self):
         base = Path(tempfile.mkdtemp())
-        saved = {k: getattr(D, k) for k in ATTRS}
-        self.addCleanup(lambda: [setattr(D, k, v) for k, v in saved.items()])
-        D.TICKETS_DIR, D.PROJECT_ROOT, D.DISPATCHER_DIR = base / "tickets", base, base / "dispatcher"
-        D.TICKETS_DIR.mkdir()
-        D.DISPATCHER_DIR.mkdir()
-        D.STATE_FILE, D.RUNS_DIR, D.RUNS_LOG = D.DISPATCHER_DIR / "state.json", D.DISPATCHER_DIR / "runs", D.DISPATCHER_DIR / "runs.log"
-        D.CEO_INBOX, D.CEO_WAKE_LOG, D.STOP_DIR = D.DISPATCHER_DIR / "ceo-inbox.md", D.DISPATCHER_DIR / "ceo-wake.log", D.DISPATCHER_DIR / "stop"
+        saved = {k: getattr(CFG, k) for k in ATTRS}
+        self.addCleanup(lambda: [setattr(CFG, k, v) for k, v in saved.items()])
+        CFG.TICKETS_DIR, CFG.PROJECT_ROOT, CFG.DISPATCHER_DIR = base / "tickets", base, base / "dispatcher"
+        CFG.TICKETS_DIR.mkdir()
+        CFG.DISPATCHER_DIR.mkdir()
+        CFG.STATE_FILE, CFG.RUNS_DIR, CFG.RUNS_LOG = CFG.DISPATCHER_DIR / "state.json", CFG.DISPATCHER_DIR / "runs", CFG.DISPATCHER_DIR / "runs.log"
+        CFG.CEO_INBOX, CFG.CEO_WAKE_LOG, CFG.STOP_DIR = CFG.DISPATCHER_DIR / "ceo-inbox.md", CFG.DISPATCHER_DIR / "ceo-wake.log", CFG.DISPATCHER_DIR / "stop"
         D.RUNNING.clear()
         self.addCleanup(D.RUNNING.clear)
 
     def ticket(self, status="waiting", wait_for="", owner="engineer"):
-        p = T.create_ticket(D.TICKETS_DIR, owner=owner, title="t", reviewer="judge", now=T0)
+        p = T.create_ticket(CFG.TICKETS_DIR, owner=owner, title="t", reviewer="judge", now=T0)
         T.write_header_updates(p, {"status": status, "wait_for": wait_for}, now=T0)
         return p
 
     def wake_lines(self):
-        return D.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines() if D.CEO_WAKE_LOG.exists() else []
+        return CFG.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines() if CFG.CEO_WAKE_LOG.exists() else []
 
 
 class CloseAfterMergeTests(Sandbox):
@@ -189,7 +190,7 @@ class ExecutorBlockedTests(Sandbox):
         T.write_header_updates(p, {"next": ""}, now=T0 + timedelta(minutes=3))
         self.assertEqual(len(self.watch_wake(p)), 1)
         p.unlink()
-        D.CEO_WAKE_LOG.unlink()
+        CFG.CEO_WAKE_LOG.unlink()
         p = self.ticket(status="in_progress")
         T.append_log(p, "engineer", "стоп, не могу", now=T0)
         T.write_header_updates(p, {"status": "blocked"}, now=T0)
@@ -212,13 +213,13 @@ class ExecutorBlockedTests(Sandbox):
             now = T0 + timedelta(minutes=minutes)
             W.notify_findings(W.collect_findings(now), {}, now)
             self.assertEqual(len(self.wake_lines()), int(minutes > 25), minutes)
-        self.assertIn("blocked 26 мин", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("blocked 26 мин", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_watch_age_in_hours(self):
         self.blocked("researcher", "blocked")
         now = T0 + timedelta(hours=26, minutes=10)
         W.notify_findings(W.collect_findings(now), {}, now)
-        self.assertIn("blocked 26 ч", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("blocked 26 ч", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_manual_blocked_without_result_still_wakes_ceo(self):
         p = self.ticket(status="in_progress")

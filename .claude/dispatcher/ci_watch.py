@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import procs  # noqa: E402
 import project as P  # noqa: E402
 import hide  # noqa: E402
@@ -27,7 +28,7 @@ ACTIVE = ("todo", "in_progress", "in_review", "waiting")
 
 
 def state_path() -> Path:
-    return D.STATE_FILE.parent / "ci-state.json"
+    return CFG.STATE_FILE.parent / "ci-state.json"
 
 
 def load_state() -> dict:
@@ -117,7 +118,7 @@ def run_once(repo: str, gh=gh_api) -> list:
     """Один проход. Возвращает список (PR, sha7, state, кого разбудили)."""
     st, out = load_state(), []
     tickets = []
-    for p in T.list_tickets(D.TICKETS_DIR):
+    for p in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tickets.append(T.read_ticket(p))
         except Exception:
@@ -178,20 +179,20 @@ def run_done(repo: str, run_id: int, gh=gh_api) -> bool:
 
 
 def write_heartbeat() -> None:
-    f = D.STATE_FILE.parent / "ci-heartbeat.json"
+    f = CFG.STATE_FILE.parent / "ci-heartbeat.json"
     T.atomic_write_text(f, json.dumps({"ts": T.now_iso()}))
 
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if not D.ensure_project(argv, "ci_watch"):
+    if not CFG.ensure_project(argv, "ci_watch"):
         return 2
     repo = next((a.split("=", 1)[1] for a in argv if a.startswith("--repo=")), None) or P.setting("ci_repo", "")
     if not repo:
         print("ci_watch: нужен --repo=<владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 2
     if "--once" not in argv:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра supervise (TK-090 Д-1)
-        lock = D.DISPATCHER_DIR / "ci_watch.pid"
+        lock = CFG.DISPATCHER_DIR / "ci_watch.pid"
         ok, why = procs.acquire_instance_lock(lock)
         if not ok:
             print(f"[ci_watch] {why}", file=sys.stderr)

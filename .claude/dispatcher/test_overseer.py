@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import overseer as O  # noqa: E402
 import report as R  # noqa: E402
 import ticket as T  # noqa: E402
@@ -228,12 +229,12 @@ class DispatcherHookTests(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="rpv-overseer-d-"))
         self.addCleanup(shutil.rmtree, self.root, True)
         (self.root / ".claude" / "tickets").mkdir(parents=True)
-        saved = (D.PROJECT_ROOT, D.TICKETS_DIR, D.DISPATCHER_DIR, D._OVERSEER_PROC)
+        saved = (CFG.PROJECT_ROOT, CFG.TICKETS_DIR, CFG.DISPATCHER_DIR, D._OVERSEER_PROC)
         self.addCleanup(lambda: setattr(D, "_OVERSEER_PROC", saved[3]))
-        self.addCleanup(lambda: (setattr(D, "PROJECT_ROOT", saved[0]), setattr(D, "TICKETS_DIR", saved[1]),
-                                 setattr(D, "DISPATCHER_DIR", saved[2])))
-        D.PROJECT_ROOT, D.TICKETS_DIR = self.root, self.root / ".claude" / "tickets"
-        D.DISPATCHER_DIR, D._OVERSEER_PROC = self.root / ".claude" / "dispatcher", None
+        self.addCleanup(lambda: (setattr(CFG, "PROJECT_ROOT", saved[0]), setattr(CFG, "TICKETS_DIR", saved[1]),
+                                 setattr(CFG, "DISPATCHER_DIR", saved[2])))
+        CFG.PROJECT_ROOT, CFG.TICKETS_DIR = self.root, self.root / ".claude" / "tickets"
+        CFG.DISPATCHER_DIR, D._OVERSEER_PROC = self.root / ".claude" / "dispatcher", None
         self.spawned = []
 
         class Proc:
@@ -265,16 +266,16 @@ class OwnerQuestionTests(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="rpv-owner-q-"))
         self.addCleanup(shutil.rmtree, self.root, True)
         (self.root / ".claude" / "tickets").mkdir(parents=True)
-        saved = (D.TICKETS_DIR, D.DISPATCHER_DIR)
-        self.addCleanup(lambda: (setattr(D, "TICKETS_DIR", saved[0]), setattr(D, "DISPATCHER_DIR", saved[1])))
-        D.TICKETS_DIR, D.DISPATCHER_DIR = self.root / ".claude" / "tickets", self.root / ".claude" / "dispatcher"
+        saved = (CFG.TICKETS_DIR, CFG.DISPATCHER_DIR)
+        self.addCleanup(lambda: (setattr(CFG, "TICKETS_DIR", saved[0]), setattr(CFG, "DISPATCHER_DIR", saved[1])))
+        CFG.TICKETS_DIR, CFG.DISPATCHER_DIR = self.root / ".claude" / "tickets", self.root / ".claude" / "dispatcher"
         self.sent = []
         p = mock.patch.object(D.notify, "send", lambda text, **kw: self.sent.append(text))
         p.start()
         self.addCleanup(p.stop)
 
     def write(self, status, entries):
-        (D.TICKETS_DIR / "TK-300.md").write_text(ticket_text("TK-300", status, entries), encoding="utf-8")
+        (CFG.TICKETS_DIR / "TK-300.md").write_text(ticket_text("TK-300", status, entries), encoding="utf-8")
 
     def test_one_message_per_question(self):
         ask = (T0, "judge", "[итог: ask-owner] повод: деньги — сервер на месяц $40: брать?")

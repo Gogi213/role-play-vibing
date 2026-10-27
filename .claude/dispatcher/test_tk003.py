@@ -9,7 +9,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 
-from test_dispatch import D, T, dt  # песочница проекта поднимает test_dispatch при импорте
+from test_dispatch import CFG, D, T, dt  # песочница проекта поднимает test_dispatch при импорте
 
 NOW = dt("2026-10-27T12:00:00+04:00")
 ECONNRESET = {"session_id": "s1", "is_error": True, "terminal_reason": "api_error", "api_error_status": None,
@@ -29,10 +29,10 @@ class ApiErrorTests(unittest.TestCase):
         self.disp.mkdir()
         names = ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG", "CEO_INBOX",
                  "CEO_WAKE_LOG", "STOP_DIR")
-        self._orig = {k: getattr(D, k) for k in names}
-        D.TICKETS_DIR, D.PROJECT_ROOT, D.DISPATCHER_DIR = self.tickets_dir, base, self.disp
-        D.STATE_FILE, D.RUNS_DIR, D.RUNS_LOG = self.disp / "state.json", self.disp / "runs", self.disp / "runs.log"
-        D.CEO_INBOX, D.CEO_WAKE_LOG, D.STOP_DIR = self.disp / "ceo-inbox.md", self.disp / "ceo-wake.log", self.disp / "stop"
+        self._orig = {k: getattr(CFG, k) for k in names}
+        CFG.TICKETS_DIR, CFG.PROJECT_ROOT, CFG.DISPATCHER_DIR = self.tickets_dir, base, self.disp
+        CFG.STATE_FILE, CFG.RUNS_DIR, CFG.RUNS_LOG = self.disp / "state.json", self.disp / "runs", self.disp / "runs.log"
+        CFG.CEO_INBOX, CFG.CEO_WAKE_LOG, CFG.STOP_DIR = self.disp / "ceo-inbox.md", self.disp / "ceo-wake.log", self.disp / "stop"
         D.RUNNING.clear()
         self._orig_popen = D._popen
         D._popen = lambda cmd, **kw: subprocess.Popen([sys.executable, "-c", "pass"], **kw)
@@ -41,7 +41,7 @@ class ApiErrorTests(unittest.TestCase):
         D._popen = self._orig_popen
         D.RUNNING.clear()
         for k, v in self._orig.items():
-            setattr(D, k, v)
+            setattr(CFG, k, v)
         self.tmp.cleanup()
 
     def finish(self, path, result, n=0, state=None):
@@ -62,13 +62,13 @@ class ApiErrorTests(unittest.TestCase):
         T.append_log(path, "engineer", "готово", now=NOW)
         T.write_header_updates(path, {"status": "in_progress"}, now=NOW)  # запись есть, статус не todo: повтора нет
         self.finish(path, OK)
-        line = D.RUNS_LOG.read_text(encoding="utf-8").splitlines()[-1]
+        line = CFG.RUNS_LOG.read_text(encoding="utf-8").splitlines()[-1]
         self.assertIn("terminal_reason=completed is_error=False status=ok", line)
 
     def test_runs_log_api_error_is_not_ok(self):
         path = self.ticket()
         self.finish(path, ECONNRESET)
-        line = D.RUNS_LOG.read_text(encoding="utf-8").splitlines()[-1]
+        line = CFG.RUNS_LOG.read_text(encoding="utf-8").splitlines()[-1]
         self.assertIn("terminal_reason=api_error is_error=True status=api_error", line)
 
     def test_econnreset_is_pause_not_idle_run(self):
@@ -89,7 +89,7 @@ class ApiErrorTests(unittest.TestCase):
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "blocked")
         self.assertIn("ECONNRESET", tkt.log_raw)
-        self.assertIn("ECONNRESET", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("ECONNRESET", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_good_run_resets_api_error_count(self):
         path = self.ticket()
@@ -104,7 +104,7 @@ class ApiErrorTests(unittest.TestCase):
     def test_auth_error_signals_ceo_at_once(self):
         path = self.ticket()
         state = self.finish(path, AUTH)
-        self.assertIn("auth", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("auth", CFG.CEO_INBOX.read_text(encoding="utf-8"))
         self.assertEqual(T.read_ticket(path).status, "todo", "тикет не виноват и не blocked")
         self.assertTrue(D._limit_paused(state, NOW + timedelta(minutes=20)))
 

@@ -33,6 +33,7 @@ import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox
+import config as CFG  # noqa: E402
 import procs  # noqa: E402 — замок экземпляра
 import waits as W  # noqa: E402 — ssh-проба и разбор условий ожидания
 import project as P  # noqa: E402
@@ -40,13 +41,13 @@ import hide  # noqa: E402
 import ticket as T  # noqa: E402
 
 # Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
-# D.configure_project() при импорте dispatch (по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd) и в main().
+# CFG.configure_project() при импорте dispatch (по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd) и в main().
 DISPATCHER_DIR = WATCH_HEARTBEAT_FILE = WATCH_PID_FILE = WATCH_STATE_FILE = None
 
 
 def _set_paths() -> None:
     global DISPATCHER_DIR, WATCH_HEARTBEAT_FILE, WATCH_PID_FILE, WATCH_STATE_FILE
-    DISPATCHER_DIR = D.DISPATCHER_DIR
+    DISPATCHER_DIR = CFG.DISPATCHER_DIR
     WATCH_HEARTBEAT_FILE = DISPATCHER_DIR / "watch-heartbeat.json"
     WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (procs.acquire_instance_lock)
     WATCH_STATE_FILE = DISPATCHER_DIR / "watch-state.json"
@@ -57,9 +58,9 @@ _set_paths()
 
 def configure_project(root) -> Path:
     """Переключает проект диспетчера и сторожа (пути состояния — от `<root>/.claude/dispatcher/`)."""
-    D.configure_project(root)
+    CFG.configure_project(root)
     _set_paths()
-    return D.PROJECT_ROOT
+    return CFG.PROJECT_ROOT
 
 
 WATCH_INTERVAL_S = 120.0
@@ -84,7 +85,7 @@ def check_blocked_and_needs_owner(now) -> list:
     """п.2б: blocked/needs_owner — сторож пересобирает список сам (не полагаясь только на то, что
     dispatch.py однажды уже написал в ceo-inbox — вдруг тот запуск и был тем, что легло)."""
     out = []
-    for path in T.list_tickets(D.TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception as e:
@@ -105,7 +106,7 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
     (а') это значило «замерла навсегда»; правило (а') её теперь будит, но сторож всё равно следит на
     случай, если тикет застрял по другой причине — троттлинг/сама роль не отвечает)."""
     out = []
-    for path in T.list_tickets(D.TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception:
@@ -197,7 +198,7 @@ def _wait_target_state(tkt, probe) -> str:
         late = datetime.now().astimezone() - parsed[1] > timedelta(minutes=AT_GRACE_MIN)
         return "dead" if late else "exists"
     if parsed[0] == "ticket":
-        return "exists" if (D.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
+        return "exists" if (CFG.TICKETS_DIR / f"{parsed[1]}.md").exists() else "dead"
     if parsed[0] == "host":
         return probe(parsed[1], parsed[2], parsed[3])
     return "unknown"
@@ -233,7 +234,7 @@ def _fetch_owners(owners_probe) -> dict:
             res[alias] = got
     if res:
         try:
-            LW.save_owners(D.DISPATCHER_DIR, res)
+            LW.save_owners(CFG.DISPATCHER_DIR, res)
         except OSError:
             pass
     return res
@@ -410,7 +411,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, W._ssh_cmd))
     owners = _fetch_owners(owners_probe)  # {алиас: [задания]}: общее сопоставление «задание → тикет»
     link = None  # связь ПК проверяется лениво, раз за проход
-    for path in T.list_tickets(D.TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception:
@@ -520,7 +521,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         dead[tkt.id] = {"spec": spec, "n": 0, "acted": ent.get("acted", []) + [spec]}
     if states or ws.get("job_states_written"):  # состояние для диспетчера (check_wait_for); пустое тоже пишем один раз
         try:
-            LW.save_states(D.DISPATCHER_DIR, states)
+            LW.save_states(CFG.DISPATCHER_DIR, states)
         except OSError:
             pass
         ws["job_states_written"] = bool(states)
@@ -569,7 +570,7 @@ def check_strays(ws: dict, now, probe=None) -> list:
                     pass
             seen[key] = T.now_iso(now)
             why = f"сторож: на {alias} идёт прогон мимо планировщика поверх чужого задания — {desc[:200]}"
-            path = D.TICKETS_DIR / f"{tid}.md"
+            path = CFG.TICKETS_DIR / f"{tid}.md"
             if tid and path.exists():
                 try:
                     with T.ticket_lock(path):
@@ -623,14 +624,14 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
     запись watch и `next: judge` (Судья, не CEO). Один раз на последний запуск (ws['stall'])."""
     done = ws.setdefault("stall", {})
     acted = []
-    for path in T.list_tickets(D.TICKETS_DIR):
+    for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
         except Exception:
             continue
         if tkt.status != "in_progress":
             continue
-        rows = _recent_runs(runs_path or D.RUNS_LOG, tkt.id, STALL_RUNS + 1)
+        rows = _recent_runs(runs_path or CFG.RUNS_LOG, tkt.id, STALL_RUNS + 1)
         if len(rows) < STALL_RUNS or done.get(tkt.id) == T.now_iso(rows[-1][0]):
             continue
         last = rows[-STALL_RUNS:]
@@ -727,7 +728,7 @@ def run_once(now=None, probes=True) -> list:
     except Exception as e:
         print(f"[watch] triage_stalls: {type(e).__name__}: {e}", file=sys.stderr)
     try:
-        cfg_mod.rollback_due(D.PROJECT_ROOT, now)          # TK-007: непринятая Судьёй правка настроек за 2 ч откатывается
+        cfg_mod.rollback_due(CFG.PROJECT_ROOT, now)          # TK-007: непринятая Судьёй правка настроек за 2 ч откатывается
     except Exception as e:
         print(f"[watch] rollback_due: {type(e).__name__}: {e}", file=sys.stderr)
     stray_findings = []
@@ -745,7 +746,7 @@ def run_once(now=None, probes=True) -> list:
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if not D.ensure_project(argv, "watch"):      # нет проекта — ошибка с подсказкой, каталоги не создаём
+    if not CFG.ensure_project(argv, "watch"):      # нет проекта — ошибка с подсказкой, каталоги не создаём
         return 2
     if P.project_arg(argv):                      # проект переключён флагом — пути сторожа от него
         _set_paths()

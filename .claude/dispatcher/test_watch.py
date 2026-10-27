@@ -21,6 +21,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import waits as WAITS  # noqa: E402
 import procs  # noqa: E402
 import ticket as T  # noqa: E402
@@ -42,14 +43,14 @@ class WatchSandbox(unittest.TestCase):
         self.tickets_dir = base / "tickets"
         self.tickets_dir.mkdir(parents=True)
         self._orig = {
-            "TICKETS_DIR": D.TICKETS_DIR, "STATE_FILE": D.STATE_FILE, "CEO_INBOX": D.CEO_INBOX,
-            "CEO_WAKE_LOG": D.CEO_WAKE_LOG, "DISPATCHER_DIR": D.DISPATCHER_DIR,
+            "TICKETS_DIR": CFG.TICKETS_DIR, "STATE_FILE": CFG.STATE_FILE, "CEO_INBOX": CFG.CEO_INBOX,
+            "CEO_WAKE_LOG": CFG.CEO_WAKE_LOG, "DISPATCHER_DIR": CFG.DISPATCHER_DIR,
         }
-        D.TICKETS_DIR = self.tickets_dir
-        D.STATE_FILE = base / "state.json"
-        D.CEO_INBOX = base / "ceo-inbox.md"
-        D.CEO_WAKE_LOG = base / "ceo-wake.log"
-        D.DISPATCHER_DIR = base  # job-state.json / job-owners.json сторожа — в песочницу
+        CFG.TICKETS_DIR = self.tickets_dir
+        CFG.STATE_FILE = base / "state.json"
+        CFG.CEO_INBOX = base / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = base / "ceo-wake.log"
+        CFG.DISPATCHER_DIR = base  # job-state.json / job-owners.json сторожа — в песочницу
         W.WATCH_STATE_FILE = base / "watch-state.json"
         W.WATCH_HEARTBEAT_FILE = base / "watch-heartbeat.json"
         self.now = dt("2026-09-27T12:00:00+04:00")
@@ -62,7 +63,7 @@ class WatchSandbox(unittest.TestCase):
 
     def tearDown(self):
         for k, v in self._orig.items():
-            setattr(D, k, v)
+            setattr(CFG, k, v)
         self.tmp.cleanup()
 
 
@@ -168,7 +169,7 @@ class DedupTests(WatchSandbox):
         ws = {}
         posted = W.notify_findings([W.Finding("blocked", "TK-1", "TK-1: status=blocked")], ws, self.now)
         self.assertEqual(len(posted), 1)
-        self.assertIn("TK-1", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("TK-1", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_repeat_within_window_is_suppressed(self):
         ws = {}
@@ -504,9 +505,9 @@ class TriageWaitsTests(WatchSandbox):
         p = self._waiting(self.SPEC)
         ws = {}
         self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("running"))), 1)
-        self.assertFalse(lifewatch.job_done(D.DISPATCHER_DIR, "gpu1", "0108041500123"))
+        self.assertFalse(lifewatch.job_done(CFG.DISPATCHER_DIR, "gpu1", "0108041500123"))
         W.triage_waits(ws, self.now, job_probe=self._job("done"))
-        self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "gpu1", "0108041500123"))
+        self.assertTrue(lifewatch.job_done(CFG.DISPATCHER_DIR, "gpu1", "0108041500123"))
         self.assertTrue(D.check_wait_for(self.SPEC))
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
@@ -544,7 +545,7 @@ class TriageWaitsTests(WatchSandbox):
         T.write_header_updates(p, {"status": "waiting", "wait_for": "host:gpu1:/data/x/other-name.done"})
         W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
         self.assertEqual(T.read_ticket(p).status, "waiting")  # то же упавшее задание второй раз не будит
-        data = json.loads((D.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
+        data = json.loads((CFG.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
         self.assertEqual(data["gpu1"][0]["ticket"], tid)
 
     def test_old_failed_job_after_job_form_wake_does_not_block_for_ceo(self):
@@ -687,7 +688,7 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", ""), t.header.get("wait_by", "")), ("in_progress", "", ""))
         self.assertIn("срок ожидания", t.log[-1].text)
-        rows = [json.loads(ln) for ln in (D.DISPATCHER_DIR / "jobs.jsonl").read_text(encoding="utf-8").splitlines()]  # CP6: счёт для отчёта
+        rows = [json.loads(ln) for ln in (CFG.DISPATCHER_DIR / "jobs.jsonl").read_text(encoding="utf-8").splitlines()]  # CP6: счёт для отчёта
         self.assertEqual(rows, [{"ts": T.now_iso(by + timedelta(minutes=W.BY_GRACE_MIN + 1)), "ticket": t.id,
                                  "wait_for": "host:gpu1:/data/x/tier1.done", "outcome": "overdue", "rc": None}])
 
@@ -696,7 +697,7 @@ class TriageWaitsTests(WatchSandbox):
         T.write_header_updates(p, {"wait_by": (self.now - timedelta(hours=3)).isoformat(timespec="seconds")})
         W.triage_waits({}, self.now, probe=lambda *a: "met", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")  # цель выполнена — будит диспетчер, не срок
-        self.assertFalse((D.DISPATCHER_DIR / "jobs.jsonl").exists())
+        self.assertFalse((CFG.DISPATCHER_DIR / "jobs.jsonl").exists())
 
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
@@ -888,7 +889,7 @@ class WatchLogTests(WatchSandbox):
         state = {"ceo_handoffs": {tid: T.now_iso(self.now - timedelta(minutes=1))}}
         self.assertTrue(D._ceo_handoff_pending(T.read_ticket(p), state, self.now + timedelta(hours=1)))
         self.assertIn(tid, state["ceo_handoffs"])
-        self.assertIn("[ждёт-ceo]", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("[ждёт-ceo]", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_watch_entries_do_not_reset_orphan_timer(self):
         # запись сторожа (напоминание, ssh-тревога) не сбрасывает таймер сироты (ревью #27)

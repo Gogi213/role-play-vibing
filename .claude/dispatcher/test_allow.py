@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE))
 import registry as R  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402
+import config as CFG  # noqa: E402
 
 HOOKS = HERE.parent / "hooks"
 
@@ -184,7 +185,7 @@ class AllowDeleteTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.file = self.root / ".claude" / "dispatcher" / "branch-delete.json"
         for p in (mock.patch.object(TK, "TICKETS_DIR", self.root / ".claude" / "tickets"), mock.patch.object(TK, "PROJECT_ROOT", self.root),
-                  mock.patch.object(TK.D, "DISPATCHER_DIR", self.root / ".claude" / "dispatcher"), mock.patch.dict(os.environ)):
+                  mock.patch.object(CFG, "DISPATCHER_DIR", self.root / ".claude" / "dispatcher"), mock.patch.dict(os.environ)):
             p.start()
             self.addCleanup(p.stop)
         os.environ.pop("RPV_ROLE", None)

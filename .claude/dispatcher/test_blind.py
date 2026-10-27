@@ -55,11 +55,12 @@ def test_flap_keeps_original_since():
 def test_alert_file_removed_when_target_leaves_active(tmp_path, monkeypatch):
     import time
     import dispatch as D
+    import config as CFG  # noqa: E402
     import waits as W
-    monkeypatch.setattr(D, "DISPATCHER_DIR", tmp_path)
-    monkeypatch.setattr(D, "CEO_INBOX", tmp_path / "ceo-inbox.md")
-    monkeypatch.setattr(D, "CEO_WAKE_LOG", tmp_path / "ceo-wake.log")
-    monkeypatch.setattr(D, "TICKETS_DIR", tmp_path / "tickets")
+    monkeypatch.setattr(CFG, "DISPATCHER_DIR", tmp_path)
+    monkeypatch.setattr(CFG, "CEO_INBOX", tmp_path / "ceo-inbox.md")
+    monkeypatch.setattr(CFG, "CEO_WAKE_LOG", tmp_path / "ceo-wake.log")
+    monkeypatch.setattr(CFG, "TICKETS_DIR", tmp_path / "tickets")
     monkeypatch.setattr(W, "_blind_sound", lambda: None)
     monkeypatch.setattr(W, "BLIND", blind.Tracker(alert_s=300, repeat_s=1800))
     monkeypatch.setattr(W, "_WAIT_WATCH", {("gpu1", "host", "x"): 1})

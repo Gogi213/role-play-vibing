@@ -19,6 +19,7 @@ atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402
@@ -35,10 +36,10 @@ class MergeRuleBase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
         (base / "tickets").mkdir()
-        self._orig = (D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR)
-        D.TICKETS_DIR, D.STATE_FILE = base / "tickets", base / "state.json"
-        TK.TICKETS_DIR = D.TICKETS_DIR
-        self.path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="Тикет", status="todo", now=NOW)
+        self._orig = (CFG.TICKETS_DIR, CFG.STATE_FILE, TK.TICKETS_DIR)
+        CFG.TICKETS_DIR, CFG.STATE_FILE = base / "tickets", base / "state.json"
+        TK.TICKETS_DIR = CFG.TICKETS_DIR
+        self.path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="Тикет", status="todo", now=NOW)
         T.write_header_updates(self.path, {"status": "in_review", "accepted": f"7@{SHA}"}, now=NOW)
         self.tid = self.path.stem
         self.head, self.base, self.mergeable, self.merged = SHA, "main", True, True
@@ -52,7 +53,7 @@ class MergeRuleBase(unittest.TestCase):
 
     def tearDown(self):
         M.check_pr = self._chk
-        D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR = self._orig
+        CFG.TICKETS_DIR, CFG.STATE_FILE, TK.TICKETS_DIR = self._orig
         self.tmp.cleanup()
 
     def gh(self, path, method="GET", **f):

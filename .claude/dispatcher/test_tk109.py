@@ -13,6 +13,7 @@ import test_merge_rule as TM  # noqa: E402  (песочница проекта �
 
 Base = TM.MergeRuleBase  # песочница без тестов: тесты test_merge_rule.py здесь не повторяются
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import routes as R  # noqa: E402
 import ticket as T  # noqa: E402
@@ -95,7 +96,7 @@ class ProofTests(unittest.TestCase):  # п.3
 
 class TickIsolationTests(Base):  # п.15 (песочница тикетов — из MergeRuleTests.setUp)
     def test_exception_on_one_ticket_does_not_stop_others(self):
-        second = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="Второй", status="todo", now=TM.NOW)
+        second = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="Второй", status="todo", now=TM.NOW)
         seen = []
         real = D.handle_next_ceo
 
