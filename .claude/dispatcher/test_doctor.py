@@ -10,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import doctor as D  # noqa: E402
+from test_plugin_version import make_install  # noqa: E402
 
 
 def iso(ts):
@@ -125,6 +126,25 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(rows["копии dispatch"][1], D.FAIL)
         self.assertNotIn("копии watch", rows)
 
+
+    def test_versions_row_dispatcher_and_watch_against_installed(self):
+        """TK-039: служба на каталоге старой версии — FAIL со строкой версий; совпадает — OK; нет служб — строки нет."""
+        cfg, roots = make_install(Path(self.tmp.name) / "cfg", ("2.0.5", "2.0.9"), [("user", None, "2.0.9")])
+        proj = str(self.project)
+
+        def procs(dispatch, watch):
+            return [(31, f'python -u "{roots[dispatch]}/.claude/dispatcher/dispatch.py" --project {proj}'),
+                    (32, f'python -u "{roots[watch]}/.claude/dispatcher/watch.py" --project {proj}')]
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            self.assertNotIn("версии плагина", self.rows(procs=[]))
+            row = self.rows(procs=procs("2.0.5", "2.0.9"))["версии плагина"]
+            self.assertEqual(row[1], D.FAIL)
+            self.assertIn("диспетчер 2.0.5", row[2])
+            self.assertIn("сторож 2.0.9", row[2])
+            self.assertIn("установлена 2.0.9", row[2])
+            row = self.rows(procs=procs("2.0.9", "2.0.9"))["версии плагина"]
+            self.assertEqual(row[1], D.OK)
+            self.assertIn("диспетчер 2.0.9, сторож 2.0.9", row[2])
 
 
 if __name__ == "__main__":

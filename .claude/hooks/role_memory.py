@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from role_context import (ROLE_NAMES, ROLES, ROOT, STATE_DIR, env_role, find_title, read_label,  # noqa: E402
-                          ticket_id, write_label)
+                          stale_line, ticket_id, write_label)
 
 LOG_DIR = os.path.join(ROOT, ".claude", "roles", "log")
 GMT4 = datetime.timezone(datetime.timedelta(hours=4))
@@ -337,7 +337,8 @@ def on_prompt_all(hook_in, role):
     if state.get("cli") != cli_id:
         state = {"cli": cli_id, "transcript": hook_in.get("transcript_path"), "n": 0}
     state["n"] = state.get("n", 0) + 1
-    parts = []
+    stale = stale_line()
+    parts = [throttled(state, "plugin_version", stale, stale)] if stale else []
     if role != "ceo":
         parts.append(SILENT_TEXT)
     else:

@@ -211,8 +211,8 @@ def short_context(role, title, source):
     return "\n".join(lines)
 
 
-def full_context(role, title, source, hook_in):
-    """startup/clear: личность + устав роли + конец блокнота + пути; итог ≤ LIMIT."""
+def full_context(role, title, source, hook_in, reserve=0):
+    """startup/clear: личность + устав роли + конец блокнота + пути; итог ≤ LIMIT (`reserve` знаков — под строку сверху)."""
     dispatcher = env_role() is not None
     name = ROLE_NAMES[role]
     shown = name if dispatcher else title
@@ -262,7 +262,7 @@ def full_context(role, title, source, hook_in):
         paths.append(f"Тикет — {tp}.")
     must = "\n".join(head + paths)
 
-    budget = LIMIT - len(must) - 80   # 80 — заголовки блоков и переводы строк
+    budget = LIMIT - reserve - len(must) - 80   # 80 — заголовки блоков и переводы строк
     charter_rel = f".claude/roles/{role}.md"
     notebook_rel = f".claude/roles/notes/{role}.md"
     blocks = [must]
@@ -297,18 +297,32 @@ def fit(text):
     return text[:LIMIT - len(mark)] + mark
 
 
+def stale_line():
+    """Строка «сессия на старой версии плагина» (TK-039) или пустая; сбой — пустая."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+        import plugin_version
+        return plugin_version.stale_line(ROOT) or ""
+    except Exception:
+        return ""
+
+
 def context(source, hook_in):
+    stale = stale_line()
+    reserve = len(stale) + 1 if stale else 0
     role, title, text = detect(hook_in)
     if role is None:
-        return fit(text)
-    if source in SHORT_SOURCES:
+        body = text
+    elif source in SHORT_SOURCES:
         try:  # догнать конспект прошлой сессии, если она оборвалась (без вывода)
             from role_memory import on_session_start
             on_session_start(hook_in, role, title)
         except Exception:
             pass
-        return fit(short_context(role, title, source))
-    return fit(full_context(role, title, source, hook_in))
+        body = short_context(role, title, source)
+    else:
+        body = full_context(role, title, source, hook_in, reserve)
+    return fit(f"{stale}\n{body}" if stale else body)
 
 
 def main():
