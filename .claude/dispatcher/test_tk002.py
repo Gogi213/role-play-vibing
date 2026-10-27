@@ -148,6 +148,31 @@ class ExecutorBlockedTests(Sandbox):
         self.tick(5)
         self.assertEqual(len(self.wake_lines()), 1)
 
+    def watch_wake(self, p):
+        W.notify_findings(W.collect_findings(T0 + timedelta(minutes=10)), {}, T0 + timedelta(minutes=10))
+        return self.wake_lines()
+
+    def test_watch_executor_blocked_and_ask_owner_do_not_wake_ceo(self):  # E-002: сторож не будит CEO на blocked исполнителя
+        for role in ("engineer", "researcher"):
+            for result in ("blocked", "ask-owner"):
+                p = self.blocked(role, result)
+                self.assertEqual(self.watch_wake(p), [], f"{role} {result} next=judge")
+                T.write_header_updates(p, {"next": ""}, now=T0)  # Судья запущен, поле очищено; статус пока blocked
+                self.assertEqual(self.watch_wake(p), [], f"{role} {result} next пуст")
+                p.unlink()
+
+    def test_watch_wakes_ceo_on_judge_blocked_and_manual_blocked(self):
+        p = self.blocked("engineer", "blocked")
+        T.append_log(p, "judge", "[итог: blocked] нужен доступ", now=T0 + timedelta(minutes=3))
+        T.write_header_updates(p, {"next": ""}, now=T0 + timedelta(minutes=3))
+        self.assertEqual(len(self.watch_wake(p)), 1)
+        p.unlink()
+        D.CEO_WAKE_LOG.unlink()
+        p = self.ticket(status="in_progress")
+        T.append_log(p, "engineer", "стоп, не могу", now=T0)
+        T.write_header_updates(p, {"status": "blocked"}, now=T0)
+        self.assertEqual(len(self.watch_wake(p)), 1)
+
     def test_manual_blocked_without_result_still_wakes_ceo(self):
         p = self.ticket(status="in_progress")
         T.append_log(p, "engineer", "стоп, не могу", now=T0)
