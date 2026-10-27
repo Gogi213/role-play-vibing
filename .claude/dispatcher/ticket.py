@@ -46,7 +46,7 @@ try:
 except ImportError:
     fcntl = None
 
-HEADER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
+HEADER_RE = P.FRONTMATTER
 LOG_HEADING_RE = re.compile(r"^##\s*Лог\s*$", re.M)
 ENTRY_RE = re.compile(r"^###\s+(\S+)\s+(.+?)\s*$", re.M)
 ROLE_TOKENS = (*P.ROLES, "ceo")
@@ -78,11 +78,7 @@ _CI_RE = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d+)$")
 
 def parse_at(text: str):
     """Время из `at:<ISO>` → aware datetime; без пояса — местное время машины; не разобрать — None."""
-    try:
-        dt = datetime.fromisoformat((text or "").strip())
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.astimezone()
+    return parse_time(text or "")
 
 
 def at_left_text(spec: str, now: datetime | None = None) -> str:
@@ -223,6 +219,8 @@ def file_wait_problem(spec: str) -> str:
     return ""
 
 
+# Закрытый тикет: работа не идёт и не ждётся. Единственное определение (watch, worktree_hygiene, поиск дублей).
+CLOSED_STATUSES = ("done", "stopped")
 DUP_WINDOW_S = 3600
 DUP_RATIO = 0.8
 
@@ -236,10 +234,10 @@ def similar_recent_ticket(tickets_dir, title: str, now: datetime | None = None) 
     for path in list_tickets(tickets_dir):
         try:
             tkt = read_ticket(path)
-            upd = datetime.fromisoformat(str(tkt.header.get("updated") or ""))
+            upd = P.parse_time(tkt.header.get("updated") or "", strict=True)
         except Exception:
             continue
-        if tkt.status in ("done", "stopped") or (now - upd).total_seconds() > DUP_WINDOW_S:
+        if tkt.status in CLOSED_STATUSES or (now - upd).total_seconds() > DUP_WINDOW_S:
             continue
         have = " ".join(str(tkt.header.get("title") or "").lower().split())
         if want and difflib.SequenceMatcher(None, want, have).ratio() >= DUP_RATIO:
@@ -263,16 +261,13 @@ def check_wait_for_format(spec: str) -> None:
         raise ValueError(f"wait_for не понят: {spec!r}.{hint} Допустимо: {WAIT_FOR_FORMATS}")
 
 
-def now_iso(now: datetime | None = None) -> str:
-    dt = now or datetime.now().astimezone()
-    return dt.isoformat(timespec="seconds")
+now_iso = P.now_iso
+parse_time = P.parse_time
 
 
 def parse_dt(value: str) -> datetime:
-    dt = datetime.fromisoformat(value.strip())
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+    """Время записи тикета: без пояса — UTC; не разобрать — ValueError."""
+    return parse_time(value, timezone.utc, strict=True)
 
 
 @dataclass
@@ -336,34 +331,29 @@ def _match_header(text: str):
 
 
 def _parse_header(text: str):
-    m = _match_header(text)
-    header = {}
-    for line in m.group(1).splitlines():
-        if not line.strip():
-            continue
-        key, _, value = line.partition(":")
-        header[key.strip()] = value.strip()
-    return header, m.end()
+    _match_header(text)  # нет шапки — ValueError
+    return P.frontmatter(text)
+
+
+def parse_entries(body: str, pattern=ENTRY_RE, parse=parse_dt) -> list:
+    """Записи лога: заголовок по `pattern` (1 — время, 2 — автор) и текст до следующего заголовка. Заголовок с
+    временем, которое `parse` не разобрал, не запись. Читатель строже (Надзиратель) передаёт свой `pattern`."""
+    entries = []
+    matches = list(pattern.finditer(body))
+    for i, m in enumerate(matches):
+        ts_raw, author = m.group(1), m.group(2).strip()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        try:
+            ts = parse(ts_raw)
+        except ValueError:
+            continue  # не запись лога (например, случайный `### ...` в описании) — пропустить
+        entries.append(LogEntry(ts=ts, ts_raw=ts_raw, author=author, text=body[m.end():end].strip("\n")))
+    return entries
 
 
 def _parse_log(rest: str):
-    entries = []
     heading = LOG_HEADING_RE.search(rest)
-    if not heading:
-        return entries
-    body = rest[heading.end():]
-    matches = list(ENTRY_RE.finditer(body))
-    for i, m in enumerate(matches):
-        ts_raw, author = m.group(1), m.group(2).strip()
-        start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        entry_text = body[start:end].strip("\n")
-        try:
-            ts = parse_dt(ts_raw)
-        except ValueError:
-            continue  # не запись лога (например, случайный `### ...` в описании) — пропустить
-        entries.append(LogEntry(ts=ts, ts_raw=ts_raw, author=author, text=entry_text))
-    return entries
+    return parse_entries(rest[heading.end():]) if heading else []
 
 
 def author_is(author: str, role: str) -> bool:
@@ -379,28 +369,7 @@ def role_entry_keys(tkt: "Ticket", role: str) -> list:
     return [f"{e.ts_raw} {e.author}" for e in tkt.log if author_is(e.author, role)]
 
 
-def atomic_write_text(path, text: str, retries: int = 8) -> None:
-    """Запись через временный файл + os.replace. На Windows replace падает с PermissionError, пока
-    другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи
-    оставляет прежний файл целым и не оставляет `.tmp`."""
-    path = Path(path)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8", newline="\n")
-        for i in range(retries):
-            try:
-                os.replace(tmp, path)
-                return
-            except PermissionError:
-                if i == retries - 1:
-                    raise
-                time.sleep(0.05 * (i + 1))
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+atomic_write_text = P.atomic_write_text   # одна запись с повтором — в project.py
 
 
 # --- блокировка на тикет (аудит 03.10): диспетчер, tickets.py и роли пишут один файл из разных процессов ------------

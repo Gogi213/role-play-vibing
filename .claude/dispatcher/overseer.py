@@ -36,7 +36,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import haiku_aux as HA  # noqa: E402
+import project as P  # noqa: E402
 import registry  # noqa: E402
+import runs as RL  # noqa: E402
 import ticket as T  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]  # корень плагина: agents/overseer.md
@@ -47,7 +49,6 @@ RECENT_H = 6
 DAYS_SHOWN = 7
 
 HDR = re.compile(r"^### (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?) (\S+)[ \t]*$", re.M)
-RUN_KV = re.compile(r"\b(\w+)=(\S*)")
 RETURN = re.compile(r"^\[итог:\s*return\]")
 
 # --- живая работа ----------------------------------------------------------------------------------------------
@@ -79,8 +80,7 @@ def claude_bin() -> str:
 # ------------------------------------------------------------------------------------------------------------
 
 def parse_ts(s: str) -> datetime:
-    t = datetime.fromisoformat(s.replace("Z", "+00:00"))
-    return t if t.tzinfo else t.replace(tzinfo=DEFAULT_TZ)
+    return T.parse_time(s, DEFAULT_TZ, strict=True)
 
 
 def norm_ws(s: str) -> str:
@@ -119,24 +119,14 @@ class Ticket:
 
 def parse_log(text: str) -> list:
     """Записи лога: `### <ISO> <роль>` и текст до следующего такого заголовка. Что до первого заголовка — не запись."""
-    ms = list(HDR.finditer(text))
-    out = []
-    for i, m in enumerate(ms):
-        end = ms[i + 1].start() if i + 1 < len(ms) else len(text)
-        out.append(Entry(parse_ts(m.group(1)), m.group(2), text[m.end():end].strip()))
-    return out
+    return [Entry(e.ts, e.author, e.text.strip()) for e in T.parse_entries(text, HDR, parse_ts)]
 
 
 def split_ticket(text: str) -> tuple:
     """Файл тикета → (шапка, описание, текст лога). Описание — между шапкой и `## Лог`."""
-    m = re.match(r"^---\n(.*?)\n---\n?(.*)$", text, re.S)
-    head, body = {}, text
-    if m:
-        for ln in m.group(1).splitlines():
-            k, _, v = ln.partition(":")
-            head[k.strip()] = v.strip()
-        body = m.group(2)
-    lg = re.search(r"^## Лог[ \t]*$", body, re.M)
+    fm = P.frontmatter(text)
+    head, body = (fm[0], text[fm[1]:]) if fm else ({}, text)
+    lg = T.LOG_HEADING_RE.search(body)
     if not lg:
         return head, body.strip(), ""
     return head, body[:lg.start()].strip(), body[lg.end():]
@@ -165,28 +155,20 @@ def ticket_ids(project: Path) -> list:
     return sorted(p.stem for p in (project / ".claude" / "tickets").glob("TK-*.md"))
 
 
-def _num(s):
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return None
-
-
 def parse_runs(text: str) -> dict:
     """runs.log → {тикет: [Run по времени]}. `on_met` — команда проекта, не запуск модели. Цена — resolved_cost, иначе cost_usd."""
     out = {}
     for ln in text.splitlines():
-        p = ln.split()
-        if len(p) < 3 or p[2] == "on_met":
+        row = RL.split(ln)
+        if row is None or row[2] == RL.ON_MET:
             continue
+        stamp, tid, role, kv = row
         try:
-            ts = parse_ts(p[0])
+            ts = parse_ts(stamp)
         except ValueError:
             continue
-        kv = dict(RUN_KV.findall(ln))
-        raw = _num(kv.get("cost_usd")) or 0.0
-        cost = _num(kv.get("resolved_cost"))
-        out.setdefault(p[1], []).append(Run(ts, p[2], raw if cost is None else cost, kv.get("status", ""), raw))
+        cost, raw = RL.costs(kv)
+        out.setdefault(tid, []).append(Run(ts, role, cost, kv.get("status", ""), raw))
     for lst in out.values():
         lst.sort(key=lambda r: r.ts)
     return out
@@ -449,15 +431,15 @@ def call_overseer(prompt: str, agents_file: Path, workdir: Path, model: str, eff
     t0 = time.time()
     raw = ""
     try:
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", cwd=str(workdir), timeout=timeout)
-        raw = r.stdout
+        r = HA.run_claude(cmd, prompt, timeout, cwd=str(workdir))
+        raw = (r.stdout or b"").decode("utf-8", "replace")
     except (subprocess.TimeoutExpired, OSError) as e:
         res = {"is_error": True, "result": f"{type(e).__name__}: {e}"}
     else:
         try:
             res = json.loads(raw)
         except ValueError:
-            res = {"is_error": True, "result": (raw or r.stderr)[-1000:]}
+            res = {"is_error": True, "result": (raw or (r.stderr or b"").decode("utf-8", "replace"))[-1000:]}
     u = res.get("usage") or {}
     ans = res.get("result") or ""
     return {"answer": ans, "cost": res.get("total_cost_usd"), "dur": round(time.time() - t0, 1),
@@ -476,19 +458,12 @@ def _dispatcher_dir(root: Path) -> Path:
 
 
 def load_state(root: Path) -> dict:
-    try:
-        data = json.loads((_dispatcher_dir(root) / STATE_NAME).read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    data = P.read_json(_dispatcher_dir(root) / STATE_NAME, {})
+    return data if isinstance(data, dict) else {}
 
 
 def save_state(root: Path, st: dict) -> None:
-    d = _dispatcher_dir(root)
-    d.mkdir(parents=True, exist_ok=True)
-    tmp = d / (STATE_NAME + ".tmp")
-    tmp.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, d / STATE_NAME)
+    P.write_json(_dispatcher_dir(root) / STATE_NAME, st)
 
 
 def log_row(root: Path, row: dict) -> None:
@@ -718,7 +693,7 @@ def main(argv=None) -> int:
     root = Path(a.project).expanduser().resolve()
     if a.dry_run:
         rows = look(root, route=lambda tid, text: print(text) or True, dry=True)
-        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
     look(root)
     return 0

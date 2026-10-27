@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
+import transcript  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import blind  # noqa: E402
 import downtime  # noqa: E402
@@ -233,7 +234,7 @@ PROMPT_TEMPLATE = (
 
 RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, out_fh, err_fh, reason}
 # popen=None у записей, восстановленных из state.json["active_runs"] после перезапуска диспетчера
-# (recover_active_runs) — тогда живость и остановка идут по pid (_pid_alive/_pid_kill), не по Popen.
+# (recover_active_runs) — тогда живость и остановка идут по pid (_pid_alive/_kill), не по Popen.
 
 
 @dataclass
@@ -246,17 +247,11 @@ class Decision:
 # --- состояние ------------------------------------------------------------------------------
 
 def load_state() -> dict:
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
+    return P.read_json(STATE_FILE, {})
 
 
 def save_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    T.atomic_write_text(STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True))  # с повторами: на Windows читатель держит файл
+    P.write_json(STATE_FILE, state, sort_keys=True)   # с повторами: на Windows читатель держит файл
 
 
 # --- wait_for ---------------------------------------------------------------------------------
@@ -1081,10 +1076,7 @@ def _resume_store(state: dict, tid: str, role: str) -> dict:
     return state.setdefault("ticket_sessions", {}).setdefault(f"{tid}::{role}", {})
 
 
-def _tokens_of(d: dict) -> int:
-    d = d or {}
-    return (int(d.get("input_tokens") or 0) + int(d.get("cache_read_input_tokens") or 0) +
-            int(d.get("cache_creation_input_tokens") or 0))
+_tokens_of = transcript.context_of
 
 
 def _context_tokens_sum(usage: dict) -> int:
@@ -1095,34 +1087,8 @@ def _context_tokens_sum(usage: dict) -> int:
 
 def _transcript_last_turn_tokens(session_id) -> int:
     """Контекст ПОСЛЕДНЕГО хода сессии по её транскрипту (usage последнего ответа модели); 0 — транскрипта нет."""
-    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
-        return 0
-    try:
-        path = next(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
-        if path is None:
-            return 0
-        with open(path, "rb") as fh:
-            fh.seek(0, 2)
-            start = max(0, fh.tell() - 600_000)
-            fh.seek(start)
-            lines = fh.read().decode("utf-8", "replace").splitlines()
-        if start:
-            lines = lines[1:]  # первая строка хвоста может быть оборвана
-        for line in reversed(lines):
-            if '"usage"' not in line:
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if row.get("isSidechain"):
-                continue
-            n = _tokens_of((row.get("message") or {}).get("usage"))
-            if n:
-                return n
-    except Exception:
-        pass
-    return 0
+    path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
+    return transcript.last_turn_tokens(path) if path else 0
 
 
 def _context_tokens_last(result: dict) -> int:
@@ -1428,17 +1394,19 @@ def _pid_alive_posix(pid, expect_name: str = None) -> bool:
     return True if comm is None else expect_name.lower() in comm.lower()  # имя узнать нельзя — не валим живость
 
 
-def _pid_kill(pid) -> None:
+def _kill(pid, tree: bool = False, force: bool = False) -> None:
+    """Единственный способ снять процесс. tree — со всеми потомками: Windows `taskkill /T`, POSIX — SIGKILL группе роли
+    (запуск со `start_new_session=True`, группа = pid; не лидер своей группы — только он сам: killpg по такой группе
+    снял бы и сам диспетчер). force — SIGKILL вместо SIGTERM (Windows: taskkill всегда `/F`)."""
     if not pid:
         return
-    if os.name == "nt":
-        try:
-            hide.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=5)
-        except Exception:
-            pass
-        return
     try:
-        os.kill(pid, 15)
+        if os.name == "nt":
+            hide.run(["taskkill", *(["/T"] if tree else []), "/F", "/PID", str(pid)], capture_output=True, timeout=15)
+        elif tree and os.getpgid(pid) == pid:
+            os.killpg(pid, getattr(signal, "SIGKILL", 9))
+        else:
+            os.kill(pid, getattr(signal, "SIGKILL", 9) if tree or force else 15)
     except Exception:
         pass
 
@@ -1453,52 +1421,27 @@ def acquire_instance_lock(pid_file, expect_name: str = "py"):
     me = os.getpid()
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     mx = pid_file.with_name(pid_file.name + ".mx")
-    deadline = time.time() + 40
-    while True:
-        try:
-            os.close(os.open(str(mx), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            break
-        except FileExistsError:
-            try:
-                if time.time() - mx.stat().st_mtime > 30:   # мьютекс держит умерший процесс (секция — миллисекунды)
-                    mx.unlink()
-                    continue
-            except OSError:
-                continue
-            if time.time() > deadline:
-                return False, f"не удалось взять замок {pid_file}: занят мьютекс {mx.name}"
-            time.sleep(0.01)
+    if not P.take_lock_file(mx, wait_s=40, stale_s=30, poll_s=0.01):   # мьютекс старше 30 с держит умерший процесс (секция — миллисекунды)
+        return False, f"не удалось взять замок {pid_file}: занят мьютекс {mx.name}"
     try:
-        try:
-            other = int(pid_file.read_text(encoding="utf-8").strip() or 0)
-        except (OSError, ValueError):
-            other = 0
+        other = P.read_pid(pid_file)
         if other == me:
             return True, ""
         if other and _pid_alive(other, expect_name):
             return False, f"уже запущен (pid {other}, файл {pid_file.name}) — второй экземпляр не нужен, выхожу"
-        tmp = pid_file.with_name(f"{pid_file.name}.{me}.tmp")
         try:
-            tmp.write_text(str(me), encoding="utf-8")
-            os.replace(tmp, pid_file)   # осиротевший/битый замок забираем, свой пишем целиком
+            P.atomic_write_text(pid_file, str(me))   # осиротевший/битый замок забираем, свой пишем целиком
         except OSError as e:
             return False, f"не удалось взять замок {pid_file}: {e}"
         return True, ""
     finally:
-        try:
-            mx.unlink()
-        except OSError:
-            pass
+        P.drop_lock_file(mx)
 
 
 def release_instance_lock(pid_file) -> None:
     """Снять замок, если он наш (чужой pid не трогаем)."""
-    pid_file = Path(pid_file)
-    try:
-        if int(pid_file.read_text(encoding="utf-8").strip() or 0) == os.getpid():
-            pid_file.unlink()
-    except (OSError, ValueError):
-        pass
+    if P.read_pid(pid_file) == os.getpid():
+        P.drop_lock_file(pid_file)
 
 
 def _proc_alive(info: dict) -> bool:
@@ -1515,35 +1458,7 @@ def _kill_proc(info: dict) -> None:
         except Exception:
             pass
     else:
-        _pid_kill(info.get("pid"))
-
-
-def _kill_tree_nt(pid) -> None:
-    """Windows: `taskkill /T /F /PID` — процесс и все его потомки."""
-    try:
-        hide.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
-    except Exception:
-        pass
-
-
-def _kill_tree_posix(pid) -> None:
-    """Linux/macOS: SIGKILL всей группе процессов роли — запуск идёт со `start_new_session=True`, группа = pid. Процесс не
-    лидер своей группы (запущен до этой правки и сидит в группе диспетчера) — только он сам: killpg по такой группе
-    снял бы и сам диспетчер."""
-    sig = getattr(signal, "SIGKILL", 9)
-    try:
-        if os.getpgid(pid) == pid:
-            os.killpg(pid, sig)
-        else:
-            os.kill(pid, sig)
-    except Exception:
-        pass
-
-
-def _kill_tree(pid) -> None:
-    if not pid:
-        return
-    (_kill_tree_nt if os.name == "nt" else _kill_tree_posix)(pid)
+        _kill(info.get("pid"))
 
 
 def _stop_run(info: dict) -> bool:
@@ -1551,7 +1466,7 @@ def _stop_run(info: dict) -> bool:
     Уже мёртвый процесс не трогаем: его pid ОС могла отдать чужому."""
     pid = info.get("pid") or (info["popen"].pid if info.get("popen") is not None else None)
     if _proc_alive(info):
-        _kill_tree(pid)
+        _kill(pid, tree=True)
     deadline = time.time() + STOP_VERIFY_S
     while _proc_alive(info):
         if time.time() >= deadline:
@@ -1602,7 +1517,7 @@ def role_mcp_args(run_stem: str) -> list[str]:
             print(f"[dispatch] rpv.json role_mcp: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
                   file=sys.stderr, flush=True)
     cfg = RUNS_DIR / f"{run_stem}.mcp.json"
-    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=1), encoding="utf-8")
+    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=2), encoding="utf-8")
     return ["--strict-mcp-config", "--mcp-config", str(cfg)]
 
 
@@ -1765,13 +1680,11 @@ def _transcript_usage_since(session_id, started) -> dict:
     """Токены запуска по транскрипту сессии (TK-055): сумма usage ответов модели с отметкой >= started (ISO или
     datetime), по одному на message.id (потоковые дубли — последний). Для запусков без JSON (таймаут/убит): {} —
     сессии/транскрипта нет."""
-    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
-        return {}
     try:
-        path = next(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
+        path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
         if path is None:
             return {}
-        t0 = started if isinstance(started, datetime) else datetime.fromisoformat(str(started))
+        t0 = started if isinstance(started, datetime) else P.parse_time(started, strict=True)
         if t0.tzinfo is None:
             t0 = t0.astimezone()
         per = {}
@@ -1781,7 +1694,7 @@ def _transcript_usage_since(session_id, started) -> dict:
                     continue
                 try:
                     row = json.loads(line)
-                    ts = datetime.fromisoformat(str(row["timestamp"]).replace("Z", "+00:00"))
+                    ts = P.parse_time(row["timestamp"], strict=True)
                 except Exception:
                     continue
                 msg = row.get("message") or {}
@@ -1877,7 +1790,8 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     store = _resume_store(state, tid, role)
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
-    elif timed_out and info.get("session_id") and not store.get("session_id") and             next(CLAUDE_PROJECTS_DIR.glob(f"*/{info['session_id']}.jsonl"), None) is not None:
+    elif (timed_out and info.get("session_id") and not store.get("session_id")
+          and transcript.find(CLAUDE_PROJECTS_DIR, info["session_id"]) is not None):
         store["session_id"] = info["session_id"]  # убитая новая сессия: транскрипт есть — повтор продолжит её, не с нуля
 
     path = TICKETS_DIR / f"{tid}.md"
@@ -2150,31 +2064,12 @@ def _find_pid_by_session(session_id) -> "int | None":
     `--session-id`/`--resume <id>` в командной строке (id известен до запуска)."""
     if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
         return None
-    try:
-        pairs = []  # (pid, ppid) совпавших процессов
-        if os.name == "nt":
-            ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
-                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
-                  "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
-            out = hide.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
-                                 encoding="utf-8", errors="replace", timeout=30).stdout
-            for ln in out.splitlines():
-                f = ln.split()
-                if len(f) == 2 and all(x.isdigit() for x in f):
-                    pairs.append((int(f[0]), int(f[1])))
-        else:
-            out = hide.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
-                                 encoding="utf-8", errors="replace", timeout=10).stdout
-            for ln in out.splitlines():
-                f = ln.split(None, 2)
-                if len(f) == 3 and f[0].isdigit() and f[1].isdigit() and str(session_id) in f[2]:
-                    pairs.append((int(f[0]), int(f[1])))
-        pairs = [(p, pp) for p, pp in pairs if p != os.getpid()]
-        found = {p for p, _ in pairs}
-        roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
-        return min(roots or found) if found else None
-    except Exception:
-        return None
+    sid = str(session_id).lower()
+    pairs = [(p, pp) for p, pp, cmd in P.scan_processes()
+             if p != os.getpid() and sid in cmd.lower() and "get-ciminstance" not in cmd.lower()]  # сам сканер — не роль
+    found = {p for p, _ in pairs}
+    roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
+    return min(roots or found) if found else None
 
 
 def recover_active_runs(state: dict, now) -> None:
@@ -2238,8 +2133,7 @@ def write_stop_request(tid: str, next_role: str, text: str, now=None) -> Path:
     разбирает её на ближайшем тике (process_stop_requests); новая заявка по тому же тикету заменяет прежнюю."""
     STOP_DIR.mkdir(parents=True, exist_ok=True)
     path = STOP_DIR / f"{tid}.json"
-    T.atomic_write_text(path, json.dumps({"at": T.now_iso(now), "next": next_role or "", "text": text},
-                                         ensure_ascii=False, indent=2))
+    P.write_json(path, {"at": T.now_iso(now), "next": next_role or "", "text": text})
     return path
 
 
@@ -2347,9 +2241,7 @@ ON_MET_DIRS = ("tools", ".claude")
 
 
 def _git_tracked(rel: str) -> bool:
-    r = hide.run(["git", "-C", str(PROJECT_ROOT), "ls-files", "--error-unmatch", "--", rel],
-                       capture_output=True, timeout=20)
-    return r.returncode == 0
+    return hide.git(PROJECT_ROOT, "ls-files", "--error-unmatch", "--", rel, timeout=20).returncode == 0
 
 
 def _on_met_argv(spec: str):
@@ -2416,7 +2308,7 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
             out, err = proc.communicate(timeout=ON_MET_TIMEOUT_S)
             code = proc.returncode
         except subprocess.TimeoutExpired:
-            _kill_tree(proc.pid)
+            _kill(proc.pid, tree=True)
             status = "timeout"
             try:
                 out, err = proc.communicate(timeout=10)
@@ -2602,27 +2494,25 @@ def _guarded(label: str, fn, *args) -> None:
 
 def _stall_alarm(state: dict, now, stalled: list) -> None:
     """CP5 (критерии 8, 9, 10): одна тревога владельцу — в Telegram (`notify.py`) и строкой CEO — когда готовая работа
-    стоит STALL_ALARM_MIN минут подряд; одна на эпизод. Пошла снова — короткое «снова идёт»."""
+    стоит STALL_ALARM_MIN минут подряд; одна на эпизод (`notify.episode`). Пошла снова — короткое «снова идёт»."""
     st = state.get("stall") or {}
-    if not stalled:
-        if st.get("sent"):
-            mins = (now - T.parse_dt(st["since"])).total_seconds() / 60
-            text = f"Работа снова идёт (стояла {mins:.0f} мин)."
-            notify.send(text, log_dir=DISPATCHER_DIR)
-            append_ceo_inbox("*", "работа-идёт", text, now)
-        state["stall"] = {}
-        return
-    st.setdefault("since", T.now_iso(now))
-    mins = (now - T.parse_dt(st["since"])).total_seconds() / 60
-    if mins >= STALL_ALARM_MIN and not st.get("sent"):
+    if stalled:
+        st.setdefault("since", T.now_iso(now))
+
+    def mins() -> float:
+        return (now - T.parse_dt(st["since"])).total_seconds() / 60
+
+    def down() -> str:
         names = sorted(set(stalled))
-        text = (f"Работа стоит {mins:.0f} мин: {len(names)} задач(и) ждут, их никто не делает — "
+        return (f"Работа стоит {mins():.0f} мин: {len(names)} задач(и) ждут, их никто не делает — "
                 + "; ".join(f"«{n}»" for n in names[:3]) + (f" и ещё {len(names) - 3}" if len(names) > 3 else "")
                 + ". CEO разбирается; если сессии CEO нет — откройте её и скажите «почему стоит работа».")
-        notify.send(text, log_dir=DISPATCHER_DIR)
-        append_ceo_inbox("*", "работа-стоит", text, now)
-        st["sent"] = True
-    state["stall"] = st
+
+    notify.episode(st, "sent", firing=bool(stalled) and mins() >= STALL_ALARM_MIN, cleared=not stalled, down=down,
+                   up=lambda: f"Работа снова идёт (стояла {mins():.0f} мин).", log_dir=DISPATCHER_DIR,
+                   ceo_down=lambda text: append_ceo_inbox("*", "работа-стоит", text, now),
+                   ceo_up=lambda text: append_ceo_inbox("*", "работа-идёт", text, now))
+    state["stall"] = st if stalled else {}
 
 
 REPORT_AT = "10:00"  # CP10: местное время ежедневного отчёта владельцу, ЧЧ:ММ; проект — `report_at` в rpv.json

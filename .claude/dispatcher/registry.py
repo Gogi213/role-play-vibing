@@ -70,12 +70,8 @@ def decisions(root: Path) -> dict[str, str]:
 
 
 def goal_header(path: Path) -> dict:
-    m = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.S)
-    out = {}
-    for ln in (m.group(1).splitlines() if m else []):
-        k, _, v = ln.partition(":")
-        out[k.strip()] = v.strip()
-    return out
+    fm = P.frontmatter(path.read_text(encoding="utf-8"))
+    return fm[0] if fm else {}
 
 
 def goals(root: Path) -> dict[str, Path]:

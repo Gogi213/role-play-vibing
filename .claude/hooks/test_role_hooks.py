@@ -300,10 +300,14 @@ class Prompts(unittest.TestCase):
         inbox = rm.DISPATCHER_CEO_INBOX
         with open(inbox, "w", encoding="utf-8") as fh:
             fh.write("[blocked] TK-1 очень длинная строка " + "x" * 500 + "\n[needs_owner] TK-2 y\n")
-        with open(rm.DISPATCHER_CEO_INBOX_SEEN, "w", encoding="utf-8") as fh:
+        seen_f = os.path.join(os.path.dirname(inbox), ".ceo-inbox-seen")
+        with open(seen_f, "w", encoding="utf-8") as fh:
             fh.write("0")
-        first = rm.ceo_inbox_alert()
-        self.assertEqual(first, "[диспетчер] 2 новых в .claude/dispatcher/ceo-inbox.md")
+        msg = "[диспетчер] 2 новых в .claude/dispatcher/ceo-inbox.md"
+        self.assertEqual(rm.ceo_inbox_alert(), msg)
+        self.assertEqual(rm.ceo_inbox_alert(), msg)      # хук отметку не двигает: пока CEO не прочитал, подсказка есть
+        with open(seen_f, "w", encoding="utf-8") as fh:
+            fh.write("2")                                # CEO прочитал (`tickets.py inbox`)
         self.assertIsNone(rm.ceo_inbox_alert())          # ничего нового — тишина
         with open(inbox, "a", encoding="utf-8") as fh:
             fh.write("[blocked] TK-3\n")
@@ -331,7 +335,30 @@ class Prompts(unittest.TestCase):
         self.assertIsNotNone(rm.context_advice(big, state))
 
     def test_context_tokens_single_line_transcript(self):
-        self.assertEqual(rm.context_tokens(self.transcript(1000)), 1010)
+        self.assertEqual(rm.context_tokens(self.transcript(1000)), 1001)  # вход + кэш; вывод (9) — не контекст, как у диспетчера (TK-010)
+
+    def test_context_tokens_skips_sidechain(self):
+        path = os.path.join(TMP, "tr-side.jsonl")
+        usage = lambda n: {"input_tokens": n, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"message": {"usage": usage(300)}}) + chr(10))
+            fh.write(json.dumps({"isSidechain": True, "message": {"usage": usage(9000)}}) + chr(10))
+        self.assertEqual(rm.context_tokens(path), 300)
+
+    def test_watch_alert_uses_supervise_threshold(self):
+        """Сердцебиение сторожа старше 240 с, но моложе 600 с — не тревога: сторож служб перезапустит его только после 600 с."""
+        import datetime as dt
+        hb_file = os.path.join(TMP, "watch-hb.json")
+        old = rm.WATCH_HEARTBEAT_FILE
+        rm.WATCH_HEARTBEAT_FILE = hb_file
+        try:
+            for age, expect in ((300, None), (700, "stale")):
+                with open(hb_file, "w", encoding="utf-8") as fh:
+                    json.dump({"ts": (dt.datetime.now().astimezone() - dt.timedelta(seconds=age)).isoformat()}, fh)
+                got = rm.watch_alert()
+                self.assertEqual(got[0] if got else None, expect, age)
+        finally:
+            rm.WATCH_HEARTBEAT_FILE = old
 
     def test_no_deck_alert_and_no_reminders(self):
         for name in ("deck_alert", "on_prompt", "consolidate_due", "CONSOLIDATE_TEXT", "on_skill"):

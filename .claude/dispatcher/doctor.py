@@ -75,11 +75,9 @@ def _log_lines_since(path: Path, since: float) -> list:
     out = []
     try:
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            try:
-                if datetime.fromisoformat(line.split(" ", 1)[0]).timestamp() >= since:
-                    out.append(line)
-            except ValueError:
-                continue
+            stamp = T.parse_time(line.split(" ", 1)[0])
+            if stamp is not None and stamp.timestamp() >= since:
+                out.append(line)
     except OSError:
         pass
     return out
@@ -191,7 +189,7 @@ def main(argv=None) -> int:
         print(P.NOT_FOUND_HINT, file=sys.stderr)
         return 2
     rows = run_checks(Path(project))
-    print(json.dumps([dict(zip(("check", "status", "detail"), r)) for r in rows], ensure_ascii=False, indent=1)
+    print(json.dumps([dict(zip(("check", "status", "detail"), r)) for r in rows], ensure_ascii=False, indent=2)
           if a.json else render(rows))
     return 1 if any(r[1] == FAIL for r in rows) else 0
 

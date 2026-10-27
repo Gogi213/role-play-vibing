@@ -2,19 +2,21 @@
   python .claude/dispatcher/usage.py [--by ticket|role|reason|day] [--since 2026-10-05] [--top N]
 Старые строки (до TK-055) без cr/cw: кэш-чтение+запись = ctx_sum - in_tok, раздельно не известны (колонка cache_all)."""
 import argparse
-import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import runs as RL  # noqa: E402
+
 RUNS_LOG = Path(__file__).resolve().parent / "runs.log"
-_KV = re.compile(r"(\w+)=(\S+)")
 
 
 def parse(line: str):
-    parts = line.split()
-    if len(parts) < 4:
+    row = RL.split(line)
+    if row is None:
         return None
-    kv = dict(_KV.findall(line))
+    stamp, tid, role, kv = row
 
     def num(k):
         try:
@@ -29,7 +31,7 @@ def parse(line: str):
     else:
         cr, cw = cr or 0, cw or 0
         cache_all = cr + cw
-    return {"ts": parts[0], "tid": parts[1], "role": parts[2], "reason": kv.get("reason", "?"),
+    return {"ts": stamp, "tid": tid, "role": role, "reason": kv.get("reason", "?"),
             "status": kv.get("status", "?"), "in": inp, "out": out, "cr": cr, "cw": cw, "cache_all": cache_all}
 
 

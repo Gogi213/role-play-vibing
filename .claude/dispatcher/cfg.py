@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -79,10 +78,7 @@ def read_log(root: Path) -> list:
 
 
 def _atomic(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    P.write_json(path, data)
 
 
 def _read_rpv(root: Path):
@@ -193,7 +189,7 @@ def rollback_due(root: Path, now=None) -> list:
         if e.get("state") != "pending":
             continue
         try:
-            late = datetime.fromisoformat(e["deadline"]).astimezone() <= now
+            late = P.parse_time(e["deadline"], strict=True) <= now
         except (KeyError, ValueError):
             continue
         if not late:
@@ -222,7 +218,7 @@ def report_lines(root: Path, since, until) -> list:
     lines = []
     for e in read_log(root):
         try:
-            at = datetime.fromisoformat(e["at"]).astimezone()
+            at = P.parse_time(e["at"], strict=True)
         except (KeyError, ValueError):
             continue
         if not (since < at <= until):

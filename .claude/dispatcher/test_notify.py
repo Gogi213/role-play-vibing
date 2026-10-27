@@ -91,5 +91,37 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(len(seen["text"]), N.LIMIT)
 
 
+class EpisodeTests(unittest.TestCase):
+    """TK-010: одна тревога на эпизод — общая для диспетчера (`_stall_alarm`) и присмотра (`supervise._alarm`)."""
+
+    def run_episode(self, st, firing, cleared, **kw):
+        sent = []
+        with mock.patch.object(N, "send", side_effect=lambda text, **k: sent.append(text)):
+            N.episode(st, "flag", firing, cleared, down=lambda: "стоит", up=lambda: "идёт", **kw)
+        return sent
+
+    def test_once_per_episode_then_recovery(self):
+        st, ceo = {}, []
+        kw = {"ceo_down": lambda t: ceo.append(("down", t)), "ceo_up": lambda t: ceo.append(("up", t))}
+        self.assertEqual(self.run_episode(st, False, False, **kw), [])
+        self.assertEqual(self.run_episode(st, True, False, **kw), ["стоит"])
+        self.assertEqual(self.run_episode(st, True, False, **kw), [], "второй раз в том же эпизоде — тишина")
+        self.assertEqual(self.run_episode(st, False, False, **kw), [], "ни стоит, ни ожило — флаг держится")
+        self.assertEqual(self.run_episode(st, False, True, **kw), ["идёт"])
+        self.assertEqual(self.run_episode(st, False, True, **kw), [], "«ожило» без тревоги не шлют")
+        self.assertEqual(ceo, [("down", "стоит"), ("up", "идёт")])
+        self.assertEqual(self.run_episode(st, True, False, **kw), ["стоит"], "новый эпизод — новая тревога")
+
+    def test_ceo_line_is_optional(self):
+        st = {}
+        self.assertEqual(self.run_episode(st, True, False), ["стоит"])
+        self.assertEqual(self.run_episode(st, False, True), ["идёт"])
+
+    def test_both_alarms_use_it(self):
+        """Обе тревоги идут через `notify.episode`: ни у одной нет своей копии «флаг + отправка»."""
+        for name in ("dispatch.py", "supervise.py"):
+            self.assertIn("notify.episode(", (HERE / name).read_text(encoding="utf-8"), name)
+
+
 if __name__ == "__main__":
     unittest.main()
