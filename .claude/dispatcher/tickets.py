@@ -172,7 +172,7 @@ def cmd_comment(args) -> int:
             # владельцу; done, stopped, needs_owner, blocked — не будим. Непустой `next` (заказ CEO, ещё не исполненный) не затираем
             tkt = T.read_ticket(path)
             kept = (tkt.header.get("next") or "").strip()
-            if not kept and tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
+            if not kept and tkt.status in T.ACTIVE_STATUSES and tkt.owner in ("researcher", "engineer"):
                 nxt, auto_next = tkt.owner, True
         if nxt:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)

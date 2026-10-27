@@ -2198,7 +2198,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_effort_defaults_by_role_and_ticket_header_overrides(self):
         """Слово владельца 14.10: Судья — high, Инженер — xhigh, Исследователь — high. Судья и Инженер жёстко: `effort:` тикета
         их не меняет (раньше `effort: medium` молча понижал Судью); Исследователю поле по-прежнему действует."""
-        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
+        self.assertEqual(RA.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
         cases = [("researcher", None, "high"), ("engineer", None, "xhigh"), ("judge", None, "high"),
                  ("researcher", "medium", "medium"), ("researcher", "xhigh", "xhigh"),
                  ("engineer", "low", "xhigh"), ("engineer", "medium", "xhigh"), ("engineer", "high", "xhigh"),
@@ -3465,13 +3465,13 @@ class MoneyControlsTests(unittest.TestCase):
     def test_role_effort_mapping(self):
         # слово владельца 14.10: Судья high, Инженер xhigh, Исследователь high
         if not P.env("DISPATCH_EFFORT"):
-            self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
+            self.assertEqual(RA.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
 
     def test_role_effort_and_model_defaults(self):
         # v1.6.1: Судья — Opus 5.5 (проверка всех не ослабляется; усилие с 14.10 high), остальные — CLAUDE_MODEL high; CP8 — константы
         self.assertEqual(D.ROLE_MODEL, {"judge": "claude-opus-5-5", "engineer": D.CLAUDE_MODEL,
                                         "researcher": D.CLAUDE_MODEL})
-        self.assertEqual(D.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
+        self.assertEqual(RA.ROLE_EFFORT, {"judge": "high", "engineer": "xhigh", "researcher": "high"})
 
     def test_expected_model_family_follows_role_model(self):
         orig_role_model = D.ROLE_MODEL
@@ -3593,7 +3593,7 @@ class ContextTokensTests(unittest.TestCase):
             },
         }
         # контекст последнего хода — только третья итерация, не сумма usage целиком (333 886)
-        self.assertEqual(D._context_tokens_last(result), 162 + 50_000 + 2_000)
+        self.assertEqual(RUNLOG.context_tokens_last(result, D.CLAUDE_PROJECTS_DIR), 162 + 50_000 + 2_000)
         self.assertEqual(RUNLOG.context_tokens_sum(result["usage"]), 300 + 300_000 + 33_586)
 
     def test_last_without_iterations_and_transcript_is_only_a_lower_estimate(self):
@@ -3602,8 +3602,8 @@ class ContextTokensTests(unittest.TestCase):
         result = {"num_turns": 5, "usage": {"input_tokens": 162, "cache_read_input_tokens": 300_000,
                                              "cache_creation_input_tokens": 33_724}}
         total = RUNLOG.context_tokens_sum(result["usage"])
-        self.assertEqual(D._context_tokens_last(result), total // 5)
-        self.assertLess(D._context_tokens_last(result), total)  # не завышен суммой всех ходов
+        self.assertEqual(RUNLOG.context_tokens_last(result, D.CLAUDE_PROJECTS_DIR), total // 5)
+        self.assertLess(RUNLOG.context_tokens_last(result, D.CLAUDE_PROJECTS_DIR), total)  # не завышен суммой всех ходов
 
     def write_transcript(self, root, session_id, turns):
         proj = Path(root) / "any-project-slug"
@@ -3625,24 +3625,24 @@ class ContextTokensTests(unittest.TestCase):
             orig = D.CLAUDE_PROJECTS_DIR
             D.CLAUDE_PROJECTS_DIR = Path(d)
             try:
-                self.assertEqual(D._context_tokens_last(result), 7 + 70_000 + 3_000)
+                self.assertEqual(RUNLOG.context_tokens_last(result, D.CLAUDE_PROJECTS_DIR), 7 + 70_000 + 3_000)
             finally:
                 D.CLAUDE_PROJECTS_DIR = orig
         self.assertNotEqual(7 + 70_000 + 3_000, (162 + 300_000 + 33_724) // 5)
 
     def test_last_falls_back_to_sum_when_num_turns_missing_or_zero(self):
         result = {"usage": {"input_tokens": 100}}
-        self.assertEqual(D._context_tokens_last(result), 100)
+        self.assertEqual(RUNLOG.context_tokens_last(result, D.CLAUDE_PROJECTS_DIR), 100)
         result_zero = {"num_turns": 0, "usage": {"input_tokens": 100}}
-        self.assertEqual(D._context_tokens_last(result_zero), 100)  # 0 ходов — не делить на ноль
+        self.assertEqual(RUNLOG.context_tokens_last(result_zero, D.CLAUDE_PROJECTS_DIR), 100)  # 0 ходов — не делить на ноль
 
     def test_last_handles_empty_result(self):
-        self.assertEqual(D._context_tokens_last({}), 0)
+        self.assertEqual(RUNLOG.context_tokens_last({}, D.CLAUDE_PROJECTS_DIR), 0)
 
     def test_single_turn_run_sum_equals_last(self):
         """Однократный запуск (как в большинстве фейковых тестов) — сумма и последний ход совпадают."""
         result = {"usage": {"input_tokens": 250_001}}
-        self.assertEqual(D._context_tokens_last(result), RUNLOG.context_tokens_sum(result["usage"]))
+        self.assertEqual(RUNLOG.context_tokens_last(result, D.CLAUDE_PROJECTS_DIR), RUNLOG.context_tokens_sum(result["usage"]))
 
 
 class HostSshTests(unittest.TestCase):

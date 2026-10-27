@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DISP = ROOT / ".claude" / "dispatcher"
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
-from common import ticket_state  # noqa: E402  одна копия — в bench/common.py
+from common import find_bash, init_script, ticket_state  # noqa: E402  одна копия — в bench/common.py
 
 GOAL_QUOTE = "нужен скрипт hello.py, который печатает слово привет"
 CRITERION = "python hello.py печатает «привет»"
@@ -34,27 +33,6 @@ CRITERION = "python hello.py печатает «привет»"
 
 def sh(cmd, cwd, **kw):
     return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
-
-
-def find_bash() -> str:
-    """На Windows `bash` из System32 — заглушка WSL; `/rpv-init` идёт в Git Bash, как у Claude Code."""
-    cands = [shutil.which("bash")]
-    if os.name == "nt":
-        git = shutil.which("git")
-        roots = [Path(git).resolve().parent.parent] if git else []
-        roots += [Path(b) / "Git" for b in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")) if b]
-        cands = [str(r / "bin" / "bash.exe") for r in roots] + cands
-    for c in cands:
-        if c and os.path.isfile(c) and "system32" not in c.lower():
-            return c
-    raise SystemExit("не найден bash (на Windows нужен Git Bash)")
-
-
-def init_script() -> str:
-    """Bash-блок из commands/rpv-init.md — проверяется сама команда, а не её пересказ."""
-    text = (ROOT / "commands" / "rpv-init.md").read_text(encoding="utf-8")
-    block = re.search(r"```\n(.*?)\n```", text, re.S).group(1)
-    return block.replace("${CLAUDE_PLUGIN_ROOT}", ROOT.as_posix())
 
 
 def run_jsons(runs_dir: Path) -> list[Path]:

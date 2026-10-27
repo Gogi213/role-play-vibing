@@ -78,6 +78,6 @@ print(dict(c), "взглядов", looks, f"${cost:.3f}")
 
 ## Настройки
 
-Частота, окно, число тикетов, повтор, модель, потолок цены вызова и пороги правил — в [configuration.md](configuration.md) (`dispatch.OVERSEER_EVERY_S`, `overseer.ACTIVE_H`, `MAX_TICKETS`, `MAX_COSTLY`, `SUPPRESS_H`, `MODEL`, `EFFORT`, `PER_CALL_USD`, `COST_STEPS`, `MIN_CLOSED`, `SPIKE_H`, `SPIKE_K`, `SPIKE_MIN`).
+Частота, окно, число тикетов, повтор, модель, потолок цены вызова и пороги правил — в [configuration.md](configuration.md) (`alarms.OVERSEER_EVERY_S`, `overseer.ACTIVE_H`, `MAX_TICKETS`, `MAX_COSTLY`, `SUPPRESS_H`, `MODEL`, `EFFORT`, `PER_CALL_USD`, `COST_STEPS`, `MIN_CLOSED`, `SPIKE_H`, `SPIKE_K`, `SPIKE_MIN`).
 
 Замер до встраивания и пороги — в [v2/checkpoints.md](v2/checkpoints.md), раздел CP14; повторить замер на истории проекта — `tools/overseer_eval.py`.

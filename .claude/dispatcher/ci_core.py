@@ -17,7 +17,6 @@ import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
 _TK_RE = re.compile(r"\bTK-?(\d+)\b", re.I)
-ACTIVE = ("todo", "in_progress", "in_review", "waiting")
 
 
 def state_path() -> Path:

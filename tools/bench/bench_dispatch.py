@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".claude" / "dispatcher"))
 import dispatch as D  # noqa: E402
+import role_args  # noqa: E402
 import procs  # noqa: E402
 
 if os.environ.get("BENCH_POLL_S"):
@@ -22,7 +23,7 @@ if os.environ.get("BENCH_PID_NAME"):
 if os.environ.get("BENCH_JUDGE_MODEL"):
     D.ROLE_MODEL["judge"] = os.environ["BENCH_JUDGE_MODEL"]  # словарь меняется на месте: launch_run читает его при каждом запуске
 if os.environ.get("BENCH_JUDGE_EFFORT"):
-    D.ROLE_EFFORT["judge"] = os.environ["BENCH_JUDGE_EFFORT"]
+    role_args.ROLE_EFFORT["judge"] = os.environ["BENCH_JUDGE_EFFORT"]
 
 if __name__ == "__main__":
     if not sys.stdout.isatty():
