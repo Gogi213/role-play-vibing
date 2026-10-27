@@ -1,0 +1,8 @@
+TK-020 · PR #129@e1acd1f · проверки Судьи в копии tk020
+radon E/F в .claude/ на PR: 0 (python -m radon cc -s -n E .claude/)
+макс. файл в .claude/ без тестов: 827 строк (watch.py), следующий tickets.py 805
+макс. функция в .claude/: 83 строки (dispatch.launch_run, AST)
+delete_guard.py: import * — 0; dispatch.py: 800 строк, noqa F401 — 1 блок (role_args)
+pyflakes «imported but unused» в боевом .claude/: 1 (dispatch.py:38 ROLE_EFFORT — читают тесты и tools/bench)
+pytest -n auto: 1303 passed, 8 skipped in 151.94s
+CI e1acd1f: ubuntu, windows, macos, systemd, ci-ok — SUCCESS

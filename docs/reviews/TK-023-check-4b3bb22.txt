@@ -1,0 +1,14 @@
+head: 4b3bb2230ab778ca75e960c222d7a3ed9363aa6e
+pytest -n auto .claude tools: 1316 passed, 9 skipped in 139.66s
+radon cc -n E .claude tools: пусто
+radon E/F count: 0
+longest function: 83 .claude/dispatcher/dispatch.py:launch_run
+longest file: 827 .claude/dispatcher/watch.py
+pyflakes (dispatch, ci_watch, bench/common, e2e_clean_project, helper_eval): только tools/bench/common.py:101 'resource' (намеренный)
+grep старых имён (ci_core.ACTIVE, overseer.OPEN, helper_eval.OPEN_STATUSES, D.ROLE_EFFORT, _context_tokens_last, tags=, dispatch.OVERSEER_EVERY_S/WAIT_RECON_S/_on_met_argv): 0
+CI PR 133:
+tests (ubuntu-latest, py3.12): pass
+tests (windows-latest, py3.12): pass
+tests (macos-latest, py3.12): pass
+jobrun на настоящем systemd: pass
+ci-ok: pass

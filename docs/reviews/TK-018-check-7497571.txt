@@ -1,0 +1,6 @@
+# TK-018 PR #127@7497571 — pytest test_tk018.py
+7 passed in 3.33s
+# полный набор -n auto .claude на 7497571 (вывод сессии Судьи)
+1251 passed, 2 skipped in 211.81s
+# test_tk018.py на origin/main 085f98e
+5 failed, 2 passed (repeat без проверки текста: AssertionError 2 != 1 — второй done)
