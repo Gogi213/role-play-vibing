@@ -7,6 +7,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import plistlib
+import shutil
 import subprocess
 import sys
 import time
@@ -70,6 +72,21 @@ def check_supervise(project: Path, state_dir: Path, now: float, installed=schedu
     if inst is None:
         return "присмотр ОС", WARN, "не смог проверить планировщик" + tail
     return "присмотр ОС", OK, "планировщик установлен" + tail
+
+
+def check_launchd_path(plist: Path, which=shutil.which) -> tuple | None:
+    """plist присмотра (macOS) без PATH или с PATH, где нет `claude` — FAIL: launchd стартует с /usr/bin:/bin, диспетчер
+    не находит `claude`, роли не стартуют (П3, 13.10/16.10/27.10). Нет plist — нечего проверять (это видит check_supervise)."""
+    try:
+        env = plistlib.loads(plist.read_bytes()).get("EnvironmentVariables") or {}
+    except (OSError, ValueError):
+        return None
+    path, claude = env.get("PATH"), env.get("CLAUDE_BIN")
+    if not path:
+        return "присмотр ОС: PATH", FAIL, f"в {plist.name} нет EnvironmentVariables.PATH — `python supervise.py --install`"
+    if not (which("claude", path=path) or (claude and Path(claude).is_file())):
+        return "присмотр ОС: PATH", FAIL, f"`claude` не находится по PATH из {plist.name} ({path}) — `python supervise.py --install`"
+    return "присмотр ОС: PATH", OK, "в plist есть PATH с `claude`"
 
 
 def _log_lines_since(path: Path, since: float) -> list:
@@ -194,6 +211,8 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
     version_row = check_versions(project, names, procs)
     if version_row:
         rows.append(version_row)
+    if sys.platform == "darwin" and (row := check_launchd_path(SV.plist_path(SV.launchd_label(project)))):
+        rows.append(row)
     rows.append(check_idle(sd, now))
     rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]

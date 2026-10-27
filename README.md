@@ -40,15 +40,13 @@ Platform details, manual start and project-root lookup: [docs/install.md](docs/i
 
 ### Updating
 
-1. Update the plugin and restart Claude Code:
+One command in the project (the CEO session; put the owner's word about the update into the registry first, its `В-N` goes into `--ref`):
 
-   ```
-   claude plugin marketplace update role-play-vibing
-   claude plugin update role-play-vibing@role-play-vibing
-   ```
+```
+/rpv-update
+```
 
-2. Run `/rpv-start` in the project: it restarts the dispatcher and the watcher on the new code.
-3. Bring the role charters up to date. `/rpv-init` never overwrites `.claude/roles/`, so new rules from a release reach an existing project only through `python <plugin>/.claude/dispatcher/tickets.py charter sync [--file <name>.md] --ref В-N` (`--ref` — the owner's decision already in the registry, required; the CEO's guard rejects copying by hand; the release's entry in [CHANGELOG.md](CHANGELOG.md) names the changed files). Sync replaces a charter with the template's text; the lines it removed and the template lacks are printed ("move to the add-on"). Project rules for a role live in an add-on `.claude/roles/project/<role>.md` (and `project/README.md`) that sync never touches and the role's startup context appends after its charter: `python <plugin>/.claude/dispatcher/tickets.py charter addon <role|README> --text "..." --ref В-N` (CEO only, logged in `charter-log.json`).
+It runs `claude plugin marketplace update` and `claude plugin update`, then, from the new version, restarts the dispatcher and the watcher, reinstalls OS supervision (on macOS the plist gets `PATH` and `CLAUDE_BIN`), runs `tickets.py charter sync --ref В-N` (role charters; `/rpv-init` never overwrites `.claude/roles/`, and the CEO's guard rejects copying by hand) and `doctor.py`. The result is one table; any `FAIL` is named as is. Already on the latest version: it says so and still checks the services. Last line: restart Claude Code — until then the open session runs the old version's hooks. The release's entry in [CHANGELOG.md](CHANGELOG.md) names the changed charters. Sync replaces a charter with the template's text; the lines it removed and the template lacks are printed ("move to the add-on"). Project rules for a role live in an add-on `.claude/roles/project/<role>.md` (and `project/README.md`) that sync never touches and the role's startup context appends after its charter: `python <plugin>/.claude/dispatcher/tickets.py charter addon <role|README> --text "..." --ref В-N` (CEO only, logged in `charter-log.json`).
 
 ## How it works
 
@@ -96,6 +94,7 @@ Full charter: [`templates/roles/README.md`](templates/roles/README.md) (Russian;
 | `/rpv-init` | Prepares a project: `.claude/roles`, `notes/`, `tickets/`, the owner's registry, the error registry `errors/`, `.gitignore` entries. Existing files are kept. |
 | `/ceo` | Marks the session as the CEO (hooks read the mark; it survives `/clear` in Desktop). |
 | `/rpv-start` | Starts or restarts the dispatcher and the watcher in the background. |
+| `/rpv-update` | Updates the plugin, services, OS supervision and role charters in one command, then runs `doctor`. |
 | `/rpv-doctor` | One table with the health of the team: dispatcher, watcher, plugin version of the running services vs the installed one, OS supervision, queue, errors of the last day. Read-only. |
 
 Scripts run from the plugin folder with `--project <project>`:
@@ -108,6 +107,7 @@ Scripts run from the plugin folder with `--project <project>`:
 | `dispatcher/report.py` | the daily report to the owner; `--dry-run` only prints ([docs/daily-report.md](docs/daily-report.md), Russian) |
 | `dispatcher/notify.py` | a Telegram message to the owner: `send "text"`, `test` |
 | `dispatcher/supervise.py` | OS supervision of the dispatcher and the watcher: `--install`, `--uninstall` |
+| `dispatcher/update.py` | `/rpv-update`: plugin, services, supervision, charters, `doctor` in one run; `--ref В-N` for the charter sync |
 | `dispatcher/release.py` | manual release: `bump` (version, commit, tag), `check` ([docs/release.md](docs/release.md), Russian) |
 
 ## Configuration
