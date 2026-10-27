@@ -165,14 +165,15 @@ def cmd_comment(args) -> int:
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
-    nxt, auto_next = args.next, False
+    nxt, auto_next, kept = args.next, False, ""
     with T.ticket_lock(path):  # запись, `next` и сжатие лога — одним куском (диспетчер правит шапку тем же замком)
         T.append_log(path, args.author, args.text)
         if not nxt and T.author_is(args.author, "judge"):
             # Судья вернул тикет без `--next`: пока тикет в todo/in_progress/in_review/waiting, ход возвращается
-            # владельцу; done, stopped, needs_owner, blocked — не будим
+            # владельцу; done, stopped, needs_owner, blocked — не будим. Непустой `next` (заказ CEO, ещё не исполненный) не затираем
             tkt = T.read_ticket(path)
-            if tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
+            kept = (tkt.header.get("next") or "").strip()
+            if not kept and tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
                 nxt, auto_next = tkt.owner, True
         if nxt:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
@@ -183,6 +184,7 @@ def cmd_comment(args) -> int:
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
           + (f"; next проставлен автоматически (запись Судьи без --next → владелец тикета: {nxt})" if auto_next else "")
+          + (f"; next оставлен: {kept}" if kept else "")
           + (f"; в архив перенесено записей: {moved}" if moved else ""))
     return 0
 
@@ -303,6 +305,11 @@ def _decisions_ack(args) -> tuple[str, str]:
 # Судья принял). Приёмка в V2-проекте — с явным ответом про хвосты; «хвостов нет» сверяется с последней сдачей исполнителя.
 TAIL_WORDS = re.compile(r"не\s+сделан|не\s+достигнут|не\s+доделан|не\s+выполнен|не\s+реализован|не\s+закончен|не\s+действует|"
                         r"не\s+работает|\bхвост|\bосталось\b|отдельн\w*\s+тикет", re.I)
+# Отрицание хвоста — не хвост (alpha TK-264: «… Хвостов нет» + `--tail -` отклонялось корнем `хвост`). Гасим только законченный
+# оборот: «хвост: нет метрик у 431 строки» или «хвост нет метрик» — по-прежнему хвост; «не осталось времени доделать» —
+# тоже (гасится только «ничего не осталось», E-001).
+TAIL_NEGATION = re.compile(r"хвост\w*\s+нет\b(?!\s+[\w])|\bнет\s+хвост\w*|\bбез\s+хвост\w*|\bничего\s+не\s+осталось\b(?!\s+\w)|"
+                           r"\bосталось\s+(?:0|ноль)\b(?![.,]\d)", re.I)
 TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
              "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
 
@@ -361,6 +368,7 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
     if raw in ("-", "—"):
         path = TICKETS_DIR / f"{tid}.md"
         sub = _owner_submission(T.read_ticket(path)) if path.exists() else ""
+        sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), sub)  # длина та же: цитата в отказе берётся из этого же текста
         hit = TAIL_WORDS.search(sub)
         if hit:
             return (f"--tail -: в сдаче исполнителя «{sub[max(0, hit.start() - 40):hit.end() + 60].strip()}» — это хвост. "
