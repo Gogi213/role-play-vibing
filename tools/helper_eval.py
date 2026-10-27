@@ -29,6 +29,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
+import haiku_aux as HA  # noqa: E402
 CLAUDE = shutil.which("claude") or "claude"
 WRITERS = {"secretary"}  # помощники, которые пишут в проект: каждому запуску — своя копия заготовки
 OPEN_STATUSES = ("todo", "in_progress", "in_review", "waiting", "blocked", "needs_owner")
@@ -57,15 +59,11 @@ def registry_cmd(work: Path) -> str:
 
 def load_agent(name: str) -> dict:
     """agents/<name>.md → {description, prompt, tools, model, effort} (фронтматтер YAML-подобный, плоский)."""
-    text = (ROOT / "agents" / f"{name}.md").read_text(encoding="utf-8")
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.S)
-    if not m:
-        raise SystemExit(f"agents/{name}.md: нет фронтматтера")
-    meta = {}
-    for ln in m.group(1).splitlines():
-        k, _, v = ln.partition(":")
-        meta[k.strip()] = v.strip().strip('"')
-    out = {"description": meta.get("description", name), "prompt": m.group(2).strip()}
+    try:
+        meta, prompt = HA.agent_meta(ROOT / "agents" / f"{name}.md")
+    except ValueError as e:
+        raise SystemExit(str(e))
+    out = {"description": meta.get("description", name), "prompt": prompt}
     if meta.get("tools"):
         out["tools"] = [t.strip() for t in meta["tools"].split(",") if t.strip()]
     for k in ("model", "effort"):

@@ -81,10 +81,7 @@ class TicketParsingTests(unittest.TestCase):
         self.assertIn("Описание задачи", tkt.description)
         self.assertEqual(len(tkt.log), 2)
         self.assertEqual(tkt.log[0].author, "researcher")
-        self.assertEqual(tkt.log[0].mentions, {"judge"})
         self.assertEqual(tkt.log[1].author, "judge")
-        self.assertTrue(tkt.logged_since("judge", dt("2026-09-27T10:06:00+04:00")))
-        self.assertFalse(tkt.logged_since("judge", dt("2026-09-27T10:11:00+04:00")))
 
     def test_no_header_raises(self):
         with self.assertRaises(ValueError):
@@ -425,7 +422,6 @@ class TicketMutationTests(unittest.TestCase):
         T.append_log(p1, "researcher", "Сделал X. @judge глянь.", now=dt("2026-09-27T09:10:00+04:00"))
         tkt = T.read_ticket(p1)
         self.assertEqual(len(tkt.log), 1)
-        self.assertEqual(tkt.log[0].mentions, {"judge"})
 
     def test_next_id_survives_gaps(self):
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -1554,25 +1550,24 @@ class DispatchRunTests(unittest.TestCase):
         fin.assert_not_called()
         self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
 
-    def _find_by_session(self, os_name, stdout, sid="sid-tree-1"):
+    def _find_by_session(self, rows, sid="sid-tree-1"):
         from unittest import mock
-        res = mock.Mock(stdout=stdout)
-        with mock.patch.object(D.os, "name", os_name), mock.patch.object(D.os, "getpid", return_value=1),                 mock.patch.object(D.subprocess, "run", return_value=res):
+        with mock.patch.object(D.os, "getpid", return_value=1), mock.patch.object(D.P, "scan_processes", return_value=rows):
             return D._find_pid_by_session(sid)
 
-    def test_find_pid_by_session_picks_tree_root_posix(self):
-        out = ("  100 1 supervisor\n"
-               "  200 999 sh -c claude --session-id sid-tree-1\n"
-               "  300 200 node claude --session-id sid-tree-1\n"
-               "  400 300 node worker --session-id sid-tree-1\n")
-        self.assertEqual(self._find_by_session("posix", out), 200)
-
-    def test_find_pid_by_session_picks_tree_root_windows(self):
-        self.assertEqual(self._find_by_session("nt", "5000 4000\n4000 1\n"), 4000)
+    def test_find_pid_by_session_picks_tree_root(self):
+        rows = [(100, 1, "supervisor"), (200, 999, "sh -c claude --session-id sid-tree-1"),
+                (300, 200, "node claude --session-id sid-tree-1"), (400, 300, "node worker --session-id sid-tree-1")]
+        self.assertEqual(self._find_by_session(rows), 200)
 
     def test_find_pid_by_session_two_independent_roots_takes_min(self):
-        out = "  700 1 claude --session-id sid-tree-1\n  300 1 claude --resume sid-tree-1\n"
-        self.assertEqual(self._find_by_session("posix", out), 300)
+        rows = [(700, 1, "claude --session-id sid-tree-1"), (300, 1, "claude --resume sid-tree-1")]
+        self.assertEqual(self._find_by_session(rows), 300)
+
+    def test_find_pid_by_session_skips_scanner_and_self(self):
+        rows = [(1, 0, "dispatcher sid-tree-1"), (9, 1, "powershell Get-CimInstance sid-tree-1"), (5, 1, "claude sid-tree-1")]
+        self.assertEqual(self._find_by_session(rows), 5)
+        self.assertIsNone(self._find_by_session([(9, 1, "powershell Get-CimInstance sid-tree-1")]))
 
     def test_recover_no_process_but_output_is_finished_as_completed(self):
         from unittest import mock
@@ -1701,7 +1696,7 @@ class DispatchRunTests(unittest.TestCase):
             child.kill()
             child.wait(timeout=10)
 
-    def test_pid_alive_name_windows_tasklist_oem_bytes_do_not_break_decode(self):
+    def test_pid_alive_windows_tasklist_oem_bytes_do_not_break_decode(self):
         """Windows: tasklist печатает в OEM-кодировке (cp866), а под PYTHONUTF8=1 text=True читал её как utf-8 — поток
         чтения падал, stdout пустой, живой pid считался мёртвым (doctor: ложный FAIL диспетчера, подхват «как завершённый»)."""
         raw = b'"python.exe","4444","Console","1","35\xa0176 \x8a"\r\n'
@@ -1715,8 +1710,8 @@ class DispatchRunTests(unittest.TestCase):
             return real_run(cmd, **kw)
 
         with mock.patch.object(D.os, "name", "nt"), mock.patch.object(D.subprocess, "run", fake_run):
-            self.assertTrue(D._pid_alive_name(4444, "python"))
-            self.assertFalse(D._pid_alive_name(4445, "python"))
+            self.assertTrue(D._pid_alive(4444, "python"))
+            self.assertFalse(D._pid_alive(4445, "python"))
 
     def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
         """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
@@ -1827,7 +1822,7 @@ class DispatchRunTests(unittest.TestCase):
         while not (pid_file.exists() and pid_file.read_text().strip()) and time.time() < deadline:
             time.sleep(0.05)
         child = int(pid_file.read_text().strip())
-        self.addCleanup(D._kill_tree, child)  # тест упал — потомок не остаётся жить
+        self.addCleanup(D._kill, child, True)  # тест упал — потомок не остаётся жить
         return path, child
 
     def _stop_next_launch_cmd(self, tid):
@@ -1916,10 +1911,10 @@ class DispatchRunTests(unittest.TestCase):
     def test_stop_that_cannot_kill_keeps_request_and_tells_ceo_once(self):
         path, _ = self.start_tree_run()
         tid = path.stem
-        real_kill = D._kill_tree
-        D._kill_tree = lambda pid: None
+        real_kill = D._kill
+        D._kill = lambda pid, **kw: None
         D.STOP_VERIFY_S = 0.3
-        self.addCleanup(setattr, D, "_kill_tree", real_kill)
+        self.addCleanup(setattr, D, "_kill", real_kill)
         D.write_stop_request(tid, "", "x")
         D.tick()
         D.tick()
@@ -1927,7 +1922,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertTrue((D.STOP_DIR / f"{tid}.json").exists(), "заявка ждёт следующего тика")
         self.assertEqual(T.read_ticket(path).status, "in_progress")
         self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("[stop-failed]"), 1)
-        D._kill_tree = real_kill
+        D._kill = real_kill
         D.tick()
         self.assertNotIn(tid, D.RUNNING)
         self.assertEqual(T.read_ticket(path).status, "stopped")
@@ -1964,35 +1959,35 @@ class DispatchRunTests(unittest.TestCase):
         else:
             self.assertIs(seen.get("start_new_session"), True)
 
-    def test_kill_tree_dispatches_by_platform(self):
+    def test_kill_nt_is_taskkill_force_with_tree_flag(self):
         from unittest import mock
-        with mock.patch.object(D, "_kill_tree_nt") as nt, mock.patch.object(D, "_kill_tree_posix") as px:
-            with mock.patch.object(os, "name", "nt"):
-                D._kill_tree(11)
-            with mock.patch.object(os, "name", "posix"):
-                D._kill_tree(22)
-            D._kill_tree(0)
-        nt.assert_called_once_with(11)
-        px.assert_called_once_with(22)
+        with mock.patch.object(os, "name", "nt"), mock.patch.object(D.subprocess, "run") as run:
+            D._kill(777, tree=True)
+            self.assertEqual(run.call_args[0][0], ["taskkill", "/T", "/F", "/PID", "777"])
+            D._kill(778)
+            self.assertEqual(run.call_args[0][0], ["taskkill", "/F", "/PID", "778"])
+            run.reset_mock()
+            D._kill(0)
+            run.assert_not_called()
 
-    def test_kill_tree_nt_is_taskkill_tree_force(self):
-        from unittest import mock
-        with mock.patch.object(D.subprocess, "run") as run:
-            D._kill_tree_nt(777)
-        self.assertEqual(run.call_args[0][0], ["taskkill", "/T", "/F", "/PID", "777"])
-
-    def test_kill_tree_posix_kills_group_of_leader_and_only_pid_of_non_leader(self):
+    def test_kill_posix_group_of_leader_only_pid_of_non_leader_term_unless_force(self):
         from unittest import mock
         sig = getattr(D.signal, "SIGKILL", 9)
-        with mock.patch.object(os, "getpgid", create=True, return_value=4242) as gp, \
+        with mock.patch.object(os, "name", "posix"), mock.patch.object(os, "getpgid", create=True, return_value=4242) as gp, \
                 mock.patch.object(os, "killpg", create=True) as kg, mock.patch.object(os, "kill") as kill:
-            D._kill_tree_posix(4242)  # запущен со start_new_session: группа = pid
+            D._kill(4242, tree=True)  # запущен со start_new_session: группа = pid
             kg.assert_called_once_with(4242, sig)
             kill.assert_not_called()
             kg.reset_mock()
             gp.return_value = 1  # сидит в чужой группе (запущен до правки): killpg снял бы и диспетчер
-            D._kill_tree_posix(4242)
+            D._kill(4242, tree=True)
             kg.assert_not_called()
+            kill.assert_called_once_with(4242, sig)
+            kill.reset_mock()
+            D._kill(4242)
+            kill.assert_called_once_with(4242, 15)
+            kill.reset_mock()
+            D._kill(4242, force=True)
             kill.assert_called_once_with(4242, sig)
 
     def test_stopped_status_wakes_nobody_but_explicit_next_still_works(self):
@@ -4211,7 +4206,6 @@ class ProjectRootTests(unittest.TestCase):
         self.assertEqual(P.resolve_project([]), b)
         self.assertEqual(P.resolve_project(["--once", "--project", str(a)]), a)
         self.assertEqual(P.resolve_project([f"--project={a}"]), a)
-        self.assertEqual(P.strip_project_arg(["--project", str(a), "--once"]), ["--once"])
 
     def chdir(self, path):
         """Контекст: текущий каталог процесса — `path` (возврат — в конце)."""

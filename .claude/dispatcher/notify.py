@@ -16,7 +16,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -39,7 +38,7 @@ def _log(project, line: str, log_dir=None) -> None:
         d = Path(log_dir) if log_dir else Path(project) / ".claude" / "dispatcher"
         d.mkdir(parents=True, exist_ok=True)
         with (d / "notify.log").open("a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')}\t{line}\n")
+            f.write(f"{P.now_iso()}\t{line}\n")
     except OSError:
         pass
 
@@ -74,6 +73,24 @@ def send(text: str, project=None, opener=urllib.request.urlopen, sleep=time.slee
             sleep(2 * (i + 1))
     _log(project, f"не отправлено ({err}): {text[:120]}", log_dir)
     return False
+
+
+def episode(st: dict, flag: str, firing: bool, cleared: bool, down, up, log_dir=None, ceo_down=None, ceo_up=None) -> None:
+    """Одна тревога на эпизод (TK-010): `firing` и флага `st[flag]` нет — `down()` уходит владельцу (и в `ceo_down(text)`, если
+    задана строка CEO), флаг встаёт; `cleared` и флаг есть — `up()` уходит так же, флаг снимается. Пока ни то ни другое —
+    ничего. Текст строится функцией только в момент отправки: поле, которого нет вне эпизода, тревоге не мешает."""
+    if firing and not st.get(flag):
+        text = down()
+        send(text, log_dir=log_dir)
+        if ceo_down:
+            ceo_down(text)
+        st[flag] = True
+    elif cleared and st.get(flag):
+        text = up()
+        send(text, log_dir=log_dir)
+        if ceo_up:
+            ceo_up(text)
+        st[flag] = False
 
 
 def main(argv=None) -> int:

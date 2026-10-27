@@ -51,9 +51,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ceo_inbox as CI  # noqa: E402
 import cfg as cfg_mod  # noqa: E402
 import dispatch as D  # noqa: E402
 import errors as errors_mod  # noqa: E402
+import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
@@ -71,25 +73,16 @@ _text_numbers, _artifact_numbers, _has_number = numbers_mod.text_numbers, number
 
 
 def cmd_inbox(args) -> int:
-    """Очередь CEO: новые строки ceo-inbox.md с прошлого чтения (отметка `.ceo-inbox-fallback-seen` — имя осталось от шины);
+    """Очередь CEO: новые строки ceo-inbox.md с прошлого чтения (отметка `.ceo-inbox-seen` — общая с хуком сессии);
     `--peek` отметку не двигает."""
-    inbox, seen_f = D.CEO_INBOX, D.CEO_INBOX.parent / ".ceo-inbox-fallback-seen"
-    try:
-        lines = inbox.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        lines = []
-    try:
-        seen = int(seen_f.read_text(encoding="utf-8").strip() or 0)
-    except (OSError, ValueError):
-        seen = 0
-    if seen > len(lines):
-        seen = 0
+    seen_f = D.CEO_INBOX.parent / CI.SEEN_NAME
+    lines, seen = CI.read(D.CEO_INBOX, seen_f)
     for ln in lines[seen:]:
         print(ln)
     if len(lines) == seen:
         print("очередь CEO пуста (новых строк в ceo-inbox.md нет)")
     elif not args.peek:
-        seen_f.write_text(str(len(lines)), encoding="utf-8")
+        CI.mark(seen_f, len(lines))
     return 0
 
 
@@ -182,7 +175,7 @@ def cmd_comment(args) -> int:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
             T.write_header_updates(path, {"next": nxt}, stamp_updated=False)
             # №15 аудита: blocked + next: роль — запись без запуска; ход роли снимает blocked (иначе тикет висит с будильником)
-            if nxt in ("researcher", "engineer", "judge") and T.read_ticket(path).status == "blocked":
+            if nxt in D.P.ROLES and T.read_ticket(path).status == "blocked":
                 T.write_header_updates(path, {"status": "in_progress"}, stamp_updated=False)
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
@@ -675,17 +668,12 @@ def cmd_allow_delete(args) -> int:
 
 
 def _consent_alive(until: str, now) -> bool:
-    try:
-        return datetime.fromisoformat(str(until)).astimezone() > now
-    except ValueError:
-        return False
+    stamp = T.parse_time(until)
+    return stamp is not None and stamp > now
 
 
 def _write_consents(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    P.write_json(path, data)
 
 
 def cmd_config(args) -> int:

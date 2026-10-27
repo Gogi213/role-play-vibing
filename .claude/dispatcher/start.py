@@ -27,15 +27,13 @@ import os
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import dispatch as D  # noqa: E402 — _pid_alive/_pid_kill; импорт ничего не создаёт
+import dispatch as D  # noqa: E402 — _pid_alive/_kill; импорт ничего не создаёт
 import project as P  # noqa: E402
 import hide  # noqa: E402
 
@@ -55,8 +53,6 @@ LOCK_IMAGE = "py"                  # подстрока имени образа 
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом
 
-CREATE_NEW_PROCESS_GROUP = 0x00000200
-CREATE_NO_WINDOW = 0x08000000
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -76,11 +72,7 @@ _CIM_CREATE = (
     "if ($r.ReturnValue -ne 0) { [Console]::Error.WriteLine('ReturnValue=' + $r.ReturnValue); exit 2 }; $r.ProcessId")
 
 
-def read_pid(pid_file: Path) -> int:
-    try:
-        return int(pid_file.read_text(encoding="utf-8").strip() or 0)
-    except (OSError, ValueError):
-        return 0
+read_pid = P.read_pid
 
 
 def _cmdline(pid: int) -> str | None:
@@ -107,28 +99,8 @@ def _cmdline(pid: int) -> str | None:
 
 
 def _list_procs() -> list:
-    """[(pid, командная строка)] всех процессов; не получилось — пусто. Linux — /proc, macOS — ps, Windows — CIM."""
-    try:
-        if os.name == "nt":
-            out = hide.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                                  "Get-CimInstance Win32_Process | Where-Object CommandLine | ForEach-Object "
-                                  "{ \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
-                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60).stdout
-            rows = [l.split("	", 1) for l in out.splitlines() if "	" in l]
-        elif Path("/proc/self").exists():
-            rows = []
-            for d in Path("/proc").iterdir():
-                if d.name.isdigit():
-                    try:
-                        rows.append((d.name, (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")))
-                    except OSError:
-                        pass
-        else:
-            out = hide.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True, timeout=20).stdout
-            rows = [l.strip().split(None, 1) for l in out.splitlines() if l.strip()]
-        return [(int(p), c) for p, c in rows if len(p) and str(p).isdigit()]
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return []
+    """[(pid, командная строка)] процессов, у которых она известна; не получилось — пусто."""
+    return [(pid, cmd) for pid, _, cmd in P.scan_processes() if cmd]
 
 
 def _norm(p: str) -> str:
@@ -341,20 +313,17 @@ def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT
     stopped = stop_unit(unit) if unit else 0
     pid = read_pid(pid_file)
     if is_ours(pid, script_name):
-        D._pid_kill(pid)
+        D._kill(pid)
         deadline = time.time() + timeout
         while D._pid_alive(pid, LOCK_IMAGE) and time.time() < deadline:
             time.sleep(0.1)
         if D._pid_alive(pid, LOCK_IMAGE) and os.name != "nt":
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+            D._kill(pid, force=True)
             time.sleep(0.3)
         stopped = pid
     for extra in (find_copies(script_name, project) if project else []):   # копия без pid-файла (упавший старт) — тоже гасим
         if extra != pid:
-            D._pid_kill(extra)
+            D._kill(extra)
             stopped = stopped or extra
     if read_pid(pid_file) == pid:   # перезапись другим процессом (свежий диспетчер) не стираем (В-209 Д-2)
         try:
@@ -371,7 +340,7 @@ def _popen_detached(cmd: list, project: Path, log: Path) -> Started:
         common = dict(cwd=str(project), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
                       close_fds=True)
         if os.name == "nt":
-            base = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+            base = hide.CREATE_NO_WINDOW | hide.CREATE_NEW_PROCESS_GROUP
             try:   # выйти из job-объекта родителя, чтобы процесс пережил закрытие сессии; не разрешено — без выхода
                 p = subprocess.Popen(cmd, creationflags=base | CREATE_BREAKAWAY_FROM_JOB, **common)
             except OSError:
@@ -392,7 +361,7 @@ def spawn(script: Path, project: Path, log: Path) -> Started:
     systemd, иначе Popen; не получилось — запасной путь Popen); вывод — в `log` (дописывается)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
-        out.write(f"\n=== {datetime.now().astimezone().isoformat(timespec='seconds')} старт {script.name} ===\n"
+        out.write(f"\n=== {P.now_iso()} старт {script.name} ===\n"
                   .encode("utf-8"))
     cmd = [_python(), "-u", str(script), "--project", str(project)]
     how = _launcher()
@@ -412,28 +381,11 @@ def restart_lock(state_dir: Path, wait_s: float = 60.0, stale_s: float = 180.0):
     """Общий замок start.py и присмотра на «остановить + запустить»: без него два перезапуска идут вперемешку — двойной
     диспетчер и стёртый свежий pid-файл (В-209 Д-2). Файл `restart.lock` создаётся O_EXCL; старше `stale_s` — бесхозный."""
     lock = state_dir / "restart.lock"
-    deadline = time.time() + wait_s
-    while True:
-        try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            break
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime > stale_s:
-                    lock.unlink()
-                    continue
-            except OSError:
-                pass
-            if time.time() >= deadline:
-                break   # замок не отдали — работаем без него, а не стоим вечно
-            time.sleep(0.2)
+    P.take_lock_file(lock, wait_s=wait_s, stale_s=stale_s, poll_s=0.2)   # не отдали — работаем без него, а не стоим вечно
     try:
         yield
     finally:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+        P.drop_lock_file(lock)
 
 
 def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) -> list[dict]:

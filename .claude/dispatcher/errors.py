@@ -55,6 +55,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hide  # noqa: E402
 import project as P  # noqa: E402
+import ticket as T  # noqa: E402
 
 ERROR_ID = re.compile(r"^E-(\d{3,})$")
 INTERPRETERS = ("python", "python3", "bash")   # то же правило, что у on_met диспетчера (`dispatch._on_met_argv`)
@@ -77,12 +78,8 @@ def _now() -> str:
 
 
 def header(path: Path) -> dict:
-    m = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.S)
-    out = {}
-    for ln in (m.group(1).splitlines() if m else []):
-        k, _, v = ln.partition(":")
-        out[k.strip()] = v.strip()
-    return out
+    fm = P.frontmatter(path.read_text(encoding="utf-8"))
+    return fm[0] if fm else {}
 
 
 def errors(root: Path) -> dict[str, Path]:
@@ -91,15 +88,17 @@ def errors(root: Path) -> dict[str, Path]:
 
 
 def _set_header(path: Path, updates: dict) -> None:
-    """Правка полей только в шапке записи (тело с `check:` в тексте не трогаем)."""
-    text = path.read_text(encoding="utf-8")
-    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
-    head = m.group(1)
-    for k, v in updates.items():
-        head, n = re.subn(rf"^{k}:.*$", lambda _: f"{k}: {v}", head, count=1, flags=re.M)
-        if not n:                                      # запись прежней версии без этого поля — дописываем в конец шапки
-            head += f"\n{k}: {v}"
-    path.write_text(f"---\n{head}\n---\n" + text[m.end():], encoding="utf-8")
+    """Правка полей только в шапке записи (тело с `check:` в тексте не трогаем). Под замком записи: две правки подряд
+    (приёмка и сторож) не теряют друг друга."""
+    with T.ticket_lock(path):
+        text = path.read_text(encoding="utf-8")
+        m = P.FRONTMATTER.match(text)
+        head = m.group(1)
+        for k, v in updates.items():
+            head, n = re.subn(rf"^{k}:.*$", lambda _: f"{k}: {v}", head, count=1, flags=re.M)
+            if not n:                                  # запись прежней версии без этого поля — дописываем в конец шапки
+                head += f"\n{k}: {v}"
+        P.atomic_write_text(path, f"---\n{head}\n---\n" + text[m.end():])
 
 
 def _one_line(s) -> str:
@@ -109,8 +108,7 @@ def _one_line(s) -> str:
 # --- допустимая команда проверки ---------------------------------------------------------------
 
 def _tracked(cwd: Path, rel: str) -> bool:
-    r = hide.run(["git", "-C", str(cwd), "ls-files", "--error-unmatch", "--", rel], capture_output=True, timeout=20)
-    return r.returncode == 0
+    return hide.git(cwd, "ls-files", "--error-unmatch", "--", rel, timeout=20).returncode == 0
 
 
 def _rel_ok(rel: str) -> bool:
@@ -196,7 +194,7 @@ def run_check(argv, cwd: Path, timeout: float) -> tuple[bool | None, str]:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             import dispatch
-            dispatch._kill_tree(proc.pid)
+            dispatch._kill(proc.pid, tree=True)
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -222,7 +220,7 @@ def _seconds(v) -> float:
 def _git(cwd: Path, *args, timeout: float = 60):
     """git в `cwd` → CompletedProcess (байты) или None, если git не запустился или завис."""
     try:
-        return hide.run(["git", "-C", str(cwd), *args], capture_output=True, timeout=timeout)
+        return hide.git(cwd, *args, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -432,7 +430,7 @@ def _log_line(root: Path, tid: str, eids: list, mark: str = "") -> None:
         d = root / ".claude" / "dispatcher"
         d.mkdir(parents=True, exist_ok=True)
         with (d / "regressions.log").open("a", encoding="utf-8") as f:
-            f.write("\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), tid or "-", ",".join(eids),
+            f.write("\t".join((P.now_iso(), tid or "-", ",".join(eids),
                                *([mark] if mark else []))) + "\n")
     except OSError:
         pass
@@ -537,7 +535,7 @@ def cmd_add(a, root: Path) -> int:
 
 def _head_sha(cwd: Path) -> str:
     try:
-        r = hide.run(["git", "-C", str(cwd), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=20)
+        r = hide.git(cwd, "rev-parse", "--short", "HEAD", text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""

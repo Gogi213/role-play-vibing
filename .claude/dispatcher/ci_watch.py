@@ -11,7 +11,6 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -22,7 +21,6 @@ import ticket as T  # noqa: E402
 
 INTERVAL_S = 60.0
 RED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale")
-GREEN = ("success", "skipped", "neutral")
 _TK_RE = re.compile(r"\bTK-?(\d+)\b", re.I)
 ACTIVE = ("todo", "in_progress", "in_review", "waiting")
 
@@ -32,14 +30,11 @@ def state_path() -> Path:
 
 
 def load_state() -> dict:
-    try:
-        return json.loads(state_path().read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return P.read_json(state_path(), {})
 
 
 def save_state(st: dict) -> None:
-    T.atomic_write_text(state_path(), json.dumps(st, ensure_ascii=False, indent=1))
+    P.write_json(state_path(), st)
 
 
 def gh_api(path: str, method: str = "GET", **fields):
@@ -183,7 +178,7 @@ def run_done(repo: str, run_id: int, gh=gh_api) -> bool:
 
 def write_heartbeat() -> None:
     f = D.STATE_FILE.parent / "ci-heartbeat.json"
-    T.atomic_write_text(f, json.dumps({"ts": datetime.now().astimezone().isoformat(timespec="seconds")}))
+    T.atomic_write_text(f, json.dumps({"ts": T.now_iso()}))
 
 
 def main(argv=None) -> int:

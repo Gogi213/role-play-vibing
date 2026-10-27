@@ -16,7 +16,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
-import ticket as T  # noqa: E402
 import hide  # noqa: E402
 
 JOB_STATES = ("running", "queued", "done", "failed", "missing")
@@ -46,7 +45,7 @@ def _path(dispatcher_dir) -> Path:
 def save_states(dispatcher_dir, states: dict) -> None:
     """`{"<алиас>:<id>": "<состояние>"}` — только то, что сторож проверил в этом цикле."""
     p = _path(dispatcher_dir)
-    T.atomic_write_text(p, json.dumps(states, ensure_ascii=False, sort_keys=True))
+    P.write_json(p, states, sort_keys=True)
 
 
 def job_done(dispatcher_dir, alias: str, jid: str) -> bool:
@@ -97,7 +96,7 @@ def fetch_owners(alias: str, ssh_cmd, timeout: float = 25.0):
 def save_owners(dispatcher_dir, owners: dict) -> None:
     """`{алиас: [задания]}` — снимок «кто хозяин юнита» в `job-owners.json`."""
     p = Path(dispatcher_dir) / OWNERS_NAME
-    T.atomic_write_text(p, json.dumps(owners, ensure_ascii=False, sort_keys=True))
+    P.write_json(p, owners, sort_keys=True)
 
 
 # --- прогоны мимо планировщика поверх чужих (п.5 CEO 05:45) -----------------------------------------------------

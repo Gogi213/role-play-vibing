@@ -10,14 +10,13 @@ import subprocess
 from pathlib import Path
 
 import hide
+import ticket as T
 
-CLOSED = ("done", "stopped")
 TOKEN = re.compile(r"tk0*(\d+)", re.I)
 
 
 def _git(project: Path, *a, cwd=None, timeout=60):
-    return hide.run(["git", *a], cwd=str(cwd or project), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
+    return hide.git(cwd or project, *a, text=True, timeout=timeout)
 
 
 def list_worktrees(project: Path) -> list:
@@ -55,10 +54,10 @@ def ticket_of_branch(branch: str | None) -> str | None:
 
 def is_closed(path: Path, branch: str | None, status_of: dict) -> bool:
     """Копия закрыта, только если имя папки И ветка (если в ней есть токен тикета) указывают на закрытые тикеты."""
-    if status_of.get(ticket_of(path)) not in CLOSED:
+    if status_of.get(ticket_of(path)) not in T.CLOSED_STATUSES:
         return False
     bt = ticket_of_branch(branch)
-    return bt is None or status_of.get(bt) in CLOSED
+    return bt is None or status_of.get(bt) in T.CLOSED_STATUSES
 
 
 def findings(project: Path, status_of: dict) -> tuple:

@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -42,11 +41,11 @@ import notify  # noqa: E402
 import project as P  # noqa: E402
 import registry  # noqa: E402
 import routes  # noqa: E402
+import runs as RL  # noqa: E402
 import ticket as T  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = PLUGIN_ROOT / "agents"
-SEMVER = re.compile(r"\d+\.\d+\.\d+")
 MAX_LINES = 25             # строк в сообщении владельцу
 CLAUDE_TIMEOUT_S = 240.0   # пересказ reporter; дольше — отчёт уходит с названиями тикетов
 BUDGET_USD = 1.0           # потолок цены одного пересказа (`--max-budget-usd`)
@@ -60,7 +59,6 @@ RESULT = re.compile(r"\[итог: ([\w-]+)\]")
 RETURN_BLOCKED = re.compile(r"\[итог: (?:return|blocked)\]")
 CONFLICT = re.compile(r"конфликт|rebase|merge conflict", re.I)
 NUM = re.compile(r"\d+(?:[.,]\d+)?")
-RUN_KV = re.compile(r"(\w+)=(\S+)")
 REF_IN_TEXT = re.compile(r"\b(?:TK|G|E)-\d+|В-\d+")
 
 
@@ -79,11 +77,7 @@ class Period:
 
 def _ts(text):
     """Время из строки (ISO или `ГГГГ-ММ-ДД ЧЧ:ММ`); без пояса — местное, как в реестре целей и журналах. Не разобрать — None."""
-    try:
-        dt = datetime.fromisoformat(str(text).strip())
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.astimezone()
+    return T.parse_time(text)
 
 
 def _span(seconds: float) -> str:
@@ -171,9 +165,8 @@ def _facts(groups: list) -> str:
 
 def _agent_def(name: str) -> dict:
     """agents/<name>.md → определение для `claude --agents` (как tools/helper_eval.py): модель и усилие — из фронтматтера."""
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", (AGENTS_DIR / f"{name}.md").read_text(encoding="utf-8"), re.S)
-    meta = {k.strip(): v.strip().strip('"') for k, _, v in (ln.partition(":") for ln in m.group(1).splitlines())}
-    return {"description": meta.get("description", name), "prompt": m.group(2).strip(),
+    meta, prompt = HA.agent_meta(AGENTS_DIR / f"{name}.md")
+    return {"description": meta.get("description", name), "prompt": prompt,
             "model": meta["model"], "effort": meta["effort"]}
 
 
@@ -183,7 +176,6 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
     claude = claude if claude is not None else HA._claude()
     if not claude:
         return None
-    env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}
     try:
         agent = _agent_def("reporter")
         with tempfile.TemporaryDirectory() as tmp:
@@ -192,9 +184,9 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
             cmd = [claude, "-p", "--agents", str(defs), "--agent", "reporter", "--model", agent["model"], "--effort",
                    agent["effort"], "--output-format", "json", "--no-session-persistence", "--tools", "",
                    "--max-budget-usd", str(BUDGET_USD)]
-            r = runner(cmd, input=prompt.encode("utf-8"), capture_output=True, timeout=CLAUDE_TIMEOUT_S, cwd=tmp, env=env)
+            r = HA.run_claude(cmd, prompt, CLAUDE_TIMEOUT_S, cwd=tmp, runner=runner)
         out = json.loads((r.stdout or b"").decode("utf-8", "replace"))
-    except (OSError, KeyError, AttributeError, ValueError, subprocess.SubprocessError):
+    except (OSError, KeyError, ValueError, subprocess.SubprocessError):
         return None
     return out if r.returncode == 0 and isinstance(out, dict) and not out.get("is_error") and out.get("result") else None
 
@@ -337,17 +329,13 @@ def read_runs(root: Path):
         return None
     rows = []
     for ln in lines:
-        parts = ln.split()
-        ts = _ts(parts[0]) if len(parts) >= 4 else None
-        if not ts or parts[2] == "on_met":    # on_met — команда проекта, не запуск модели
+        row = RL.split(ln)
+        ts = _ts(row[0]) if row else None
+        if not ts or row[2] == RL.ON_MET:    # on_met — команда проекта, не запуск модели
             continue
-        kv = dict(RUN_KV.findall(ln))
-        try:
-            cost = float(kv.get("resolved_cost") or kv.get("cost_usd") or 0)
-        except ValueError:
-            cost = 0.0
-        rows.append({"ts": ts, "tid": parts[1], "role": parts[2], "reason": kv.get("reason", ""),
-                     "status": kv.get("status", "?"), "cost": cost})
+        _, tid, role, kv = row
+        rows.append({"ts": ts, "tid": tid, "role": role, "reason": kv.get("reason", ""),
+                     "status": kv.get("status", "?"), "cost": RL.costs(kv)[0]})
     return sorted(rows, key=lambda r: r["ts"])
 
 
@@ -444,10 +432,10 @@ def m_conflicts(p: Period) -> str:
 def m_plugin(p: Period) -> str:
     """Критерий 16. Версии плагина, поставленные за 7 дней: соседние каталоги `…/<плагин>/X.Y.Z` в кэше Claude Code с изменением
     за неделю. Запуск не из кэша (каталог плагина не версия) — версии нигде не копятся."""
-    if not SEMVER.fullmatch(PLUGIN_ROOT.name):
+    if not P.SEMVER.fullmatch(PLUGIN_ROOT.name):
         return _nodata("плагин запущен не из кэша Claude Code, версии не копятся")
     new = sorted((d.stat().st_mtime, d.name) for d in PLUGIN_ROOT.parent.iterdir()
-                 if d.is_dir() and SEMVER.fullmatch(d.name) and d.stat().st_mtime > (p.until - WEEK).timestamp())
+                 if d.is_dir() and P.SEMVER.fullmatch(d.name) and d.stat().st_mtime > (p.until - WEEK).timestamp())
     return f"новых версий: {len(new)}" + (f" ({', '.join(n for _, n in new)})" if new else "") + f"; сейчас {PLUGIN_ROOT.name}"
 
 

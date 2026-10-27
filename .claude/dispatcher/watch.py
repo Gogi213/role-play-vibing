@@ -5,7 +5,7 @@ WATCH_DEDUP_REPEAT_HOURS, пока проблема не снята (п.2г). П
 при находке; сердцебиение (`watch-heartbeat.json`) обновляется каждый цикл независимо от находок —
 его возраст проверяет хук `role_memory.py` (кто сторожит сторожа, п.2а).
 
-v2 (02.10): orphan по закрытым (done/cancelled) тикетам молчат, по открытым повторяются не чаще раза в сутки.
+v2 (02.10): orphan по закрытым (done/stopped) тикетам молчат, по открытым повторяются не чаще раза в сутки.
 v3 (03.10, В-173): проверки трат (суточный/часовой расход, бюджет тикета) удалены — лимитов денег нет.
 v4 (TK-100 №6/№26): блок «вторая машина» (ALERT-*/HOLD/очередь/заморозка по ssh) и check_dispatcher_alive удалены —
 «диспетчер жив» остаётся у supervise и doctor.
@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
+import runs as RL  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
 import hide  # noqa: E402
@@ -65,7 +66,6 @@ WATCH_DEDUP_REPEAT_HOURS = 2.0
 # диспетчер уже сообщил один раз (`ceo-inbox`), сторож лишь страхует — раз в сутки
 WATCH_LONG_REPEAT_HOURS = 24.0
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner"}
-CLOSED_TICKET_STATUSES = ("done", "cancelled")
 ORPHAN_TICKET_HOURS = 2.0
 
 
@@ -108,7 +108,7 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
             tkt = T.read_ticket(path)
         except Exception:
             continue
-        if tkt.status in CLOSED_TICKET_STATUSES or tkt.status not in ("in_progress", "waiting", "in_review"):
+        if tkt.status in T.CLOSED_STATUSES or tkt.status not in ("in_progress", "waiting", "in_review"):
             continue
         if tkt.id in skip_ids:  # цель wait_for жива (TK-056 п.4): долгое ожидание — не сирота
             continue
@@ -152,7 +152,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     if what != "path" or not arg.startswith("/") or not pat:
         return "unknown"
     q = D._remote_test_arg(arg)
-    cat = f"; cat {q}" if arg.endswith(".json") else ""  # содержимое нужно, чтобы отличить файл хода «идёт» от «готов»
+    cat = f"; cat {q}" if D._reads_body(arg) else ""  # содержимое нужно: файл хода «идёт»/«готов», файл итога `.rc` — как у диспетчера
     remote = (f"if test -e {q}; then echo exists{cat}; "
               f"elif {{ systemctl list-units --all --plain --no-legend --state=active,activating 2>/dev/null; "
               f"ps -eo args 2>/dev/null; }} | grep -q -e '{pat}'; then echo producer; else echo dead; fi")
@@ -165,8 +165,7 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     if r.returncode != 0 or not out or out[0] not in ("exists", "producer", "dead"):
         return "ssh-error"
     if out[0] == "exists":  # как у диспетчера (_host_probe): файл хода — готов при done>=total, прочее — достаточно наличия
-        prog = D._progress_done("\n".join(out[1:])) if arg.endswith(".json") else None
-        return "producer" if prog is False else "met"
+        return "met" if D._path_met((alias, what, arg), "\n".join(out[1:])) else "producer"
     return out[0]
 
 
@@ -594,7 +593,7 @@ def check_strays(ws: dict, now, probe=None) -> list:
                 try:
                     with T.ticket_lock(path):
                         tkt = T.read_ticket(path)
-                        if tkt.owner in ("researcher", "engineer", "judge"):
+                        if tkt.owner in P.ROLES:
                             T.append_log(path, "watch", why + ". Замер искажён: останови его и подай через планировщик.", now)
                             T.write_header_updates(path, {"next": tkt.owner}, stamp_updated=False)
                             continue
@@ -615,7 +614,6 @@ def _stale(ts: str, now) -> bool:
 
 # --- счётчик застоя по runs.log (TK-056 п.4) -----------------------------------------------------
 STALL_RUNS = 2  # подряд таймаутов / холостых запусков до блока
-_RUN_KV = re.compile(r"(\w+)=(\S+)")
 
 
 def _recent_runs(runs_path, tid: str, limit: int) -> list:
@@ -626,13 +624,13 @@ def _recent_runs(runs_path, tid: str, limit: int) -> list:
         return []
     rows = []
     for ln in reversed(lines[-4000:]):
-        parts = ln.split()
-        if len(parts) < 4 or parts[1] != tid or parts[2] == "on_met":
+        row = RL.split(ln)
+        if row is None or row[1] != tid or row[2] == RL.ON_MET:
             continue
-        st = dict(_RUN_KV.findall(ln)).get("status", "?")
+        st = row[3].get("status", "?")
         if st == "stopped":
             continue
-        rows.append((T.parse_dt(parts[0]), parts[2], st))
+        rows.append((T.parse_dt(row[0]), row[2], st))
         if len(rows) >= limit:
             break
     return rows[::-1]

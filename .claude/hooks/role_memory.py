@@ -79,10 +79,11 @@ def load_state(role=None):
 
 def save_state(state, role=None):
     os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = state_path(role) + ".tmp"
+    path = state_path(role)
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(state, fh, ensure_ascii=False)
-    os.replace(tmp, state_path(role))
+    os.replace(tmp, path)
 
 
 def stamp(iso):
@@ -220,11 +221,18 @@ def throttled(state, key, sig, text):
     return text
 
 
+def _dispatcher_module(name):
+    """Модуль из .claude/dispatcher/ без импортов диспетчера (ceo_inbox, transcript, heartbeat): общий с кодом диспетчера, не копия."""
+    path = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+    if path not in sys.path:
+        sys.path.append(path)
+    return __import__(name)
+
+
 # Судья TK-002 п.2а («кто сторожит сторожа», v1.4): сторож .claude/dispatcher/watch.py пишет отметку
 # сердцебиения на каждый цикл; здесь только её возраст (сам сторож — свой процесс, не этот хук).
 DISPATCHER_DIR = os.path.join(ROOT, ".claude", "dispatcher")  # для проверок
 WATCH_HEARTBEAT_FILE = os.path.join(DISPATCHER_DIR, "watch-heartbeat.json")
-WATCH_STALE_S = 2 * 120  # 2 интервала сторожа (WATCH_INTERVAL_S по умолчанию в watch.py — 120 с)
 
 
 def watch_alert():
@@ -236,39 +244,24 @@ def watch_alert():
         return ("missing", "[сторож] .claude/dispatcher/watch-heartbeat.json не найден — сторож CEO (watch.py) "
                            "ни разу не отчитался или не запущен.")
     try:
-        ts = datetime.datetime.fromisoformat(str(hb.get("ts", "")).replace("Z", "+00:00"))
-        age = (datetime.datetime.now(ts.tzinfo) - ts).total_seconds()
+        heartbeat = _dispatcher_module("heartbeat")  # порог тот же, что у supervise: он перезапускает сторожа на нём
+        age = heartbeat.age_of(hb.get("ts", ""), time.time())
     except Exception:
         return "broken", "[сторож] watch-heartbeat.json повреждён — не разобрать время последнего цикла."
-    if age > WATCH_STALE_S:
+    if age > heartbeat.STALE_S:
         return "stale", f"[сторож] сердцебиение watch.py устарело на {age / 60:.0f} мин — проверить, жив ли сторож."
     return None
 
 
 # Диспетчер задач (.claude/dispatcher/): непрочитанные строки ceo-inbox.md — одна короткая строка; сами строки CEO
-# читает из файла. Отметка прочитанного — число уже показанных строк; пока новых нет, подсказки нет.
+# читает из файла (`tickets.py inbox`, он и двигает отметку; хук её не трогает, пока CEO не прочитал — подсказка повторяется).
 DISPATCHER_CEO_INBOX = os.path.join(DISPATCHER_DIR, "ceo-inbox.md")
-DISPATCHER_CEO_INBOX_SEEN = os.path.join(DISPATCHER_DIR, ".ceo-inbox-seen")
 
 
 def ceo_inbox_alert():
-    try:
-        with open(DISPATCHER_CEO_INBOX, encoding="utf-8") as f:
-            lines = f.readlines()
-    except OSError:
-        return None
-    try:
-        with open(DISPATCHER_CEO_INBOX_SEEN, encoding="utf-8") as f:
-            seen = int(f.read().strip() or 0)
-    except (OSError, ValueError):
-        seen = 0
+    ceo_inbox = _dispatcher_module("ceo_inbox")
+    lines, seen = ceo_inbox.read(DISPATCHER_CEO_INBOX, os.path.join(DISPATCHER_DIR, ceo_inbox.SEEN_NAME))
     new = [ln for ln in lines[seen:] if ln.strip()]
-    if len(lines) != seen:
-        try:
-            with open(DISPATCHER_CEO_INBOX_SEEN, "w", encoding="utf-8") as f:
-                f.write(str(len(lines)))
-        except OSError:
-            pass
     if not new:
         return None
     return f"[диспетчер] {len(new)} новых в .claude/dispatcher/ceo-inbox.md"
@@ -319,29 +312,9 @@ def pending_permissions():
 CONTEXT_WARN_TOKENS = 400000
 
 
-def context_tokens(transcript):
-    """Размер контекста по последнему ответу модели в транскрипте (вход + кэш + вывод)."""
-    if not transcript or not os.path.isfile(transcript):
-        return 0
-    with open(transcript, "rb") as fh:
-        fh.seek(0, 2)
-        start = max(0, fh.tell() - 600_000)
-        fh.seek(start)
-        lines = fh.read().decode("utf-8", "replace").splitlines()
-        if start:
-            lines = lines[1:]  # первая строка хвоста может быть оборвана
-    for line in reversed(lines):
-        if '"usage"' not in line:
-            continue
-        try:
-            usage = (json.loads(line).get("message") or {}).get("usage") or {}
-        except Exception:
-            continue
-        total = sum(int(usage.get(k) or 0) for k in (
-            "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
-        if total:
-            return total
-    return 0
+def context_tokens(path):
+    """Размер контекста по последнему ходу модели в транскрипте — то же определение, что у диспетчера (transcript.py)."""
+    return _dispatcher_module("transcript").last_turn_tokens(path) if path else 0
 
 
 def context_advice(hook_in, state):

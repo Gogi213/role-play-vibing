@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hide  # noqa: E402
+import project as P  # noqa: E402
 
 RESULTS = ("done", "pr", "accept", "return", "blocked", "ask-owner", "wait", "continue")
 WHY_MAX = 200
@@ -15,9 +20,9 @@ RULES = {
     "pr": ({"engineer", "researcher"}, "pr+sha"),
     "accept": ({"judge"}, "pr+sha|path"),
     "return": ({"judge"}, "sha|path"),
-    "blocked": ({"researcher", "engineer", "judge"}, ""),
-    "ask-owner": ({"researcher", "engineer", "judge"}, ""),
-    "wait": ({"researcher", "engineer", "judge"}, "form"),
+    "blocked": (set(P.ROLES), ""),
+    "ask-owner": (set(P.ROLES), ""),
+    "wait": (set(P.ROLES), "form"),
     "continue": ({"researcher", "engineer"}, ""),  # TK-090 в: длинная работа кусками — следующий запуск той же роли
 }
 OWNER_REASONS = ("деньги", "направление", "необратимое", "бизнес-правило")  # V2-1: поводы вопроса владельцу (TK-233 п.4; «направление» вместо «видимого»)
@@ -44,7 +49,7 @@ PROOF_SHORT = {  # доказательство итога в одну стро�
 def verbs_for(role: str) -> list:
     """Итоги, которые роль вправе сдавать (по RULES): Инженеру и Исследователю не показываем accept/return, Судье — done/pr/continue.
     CEO и роль не из таблицы — все (их сессии не запускает диспетчер)."""
-    if role not in ("researcher", "engineer", "judge"):
+    if role not in P.ROLES:
         return list(RESULTS)
     return [r for r in RESULTS if role in RULES[r][0]]
 
@@ -142,7 +147,7 @@ def tracked_at_head(root: Path, path: str) -> tuple[str, str]:
         rel = f.relative_to(base).as_posix()
 
         def git(*a):
-            return subprocess.run(["git", "-C", str(base), *a], capture_output=True, text=True, timeout=30)
+            return hide.git(base, *a, text=True, timeout=30)
         if git("ls-files", "--error-unmatch", "--", rel).returncode or git("cat-file", "-e", f"HEAD:{rel}").returncode:
             return "", f"{hint}: {rel} не в git на HEAD"
         if git("diff", "--quiet", "HEAD", "--", rel).returncode:

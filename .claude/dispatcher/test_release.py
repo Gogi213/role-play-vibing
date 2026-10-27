@@ -55,10 +55,10 @@ class ReleaseTests(unittest.TestCase):
 
     def test_run_timeout_returns_124_not_hang(self):
         """Б3: git без предела держал процесс часами."""
-        def hang(cmd, **kw):
+        def hang(cwd, *a, **kw):
             self.assertIn("timeout", kw)
-            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
-        r = release._run(["git", "push", "x"], hang)
+            raise subprocess.TimeoutExpired(a, kw["timeout"])
+        r = release._git("push", "x", run=hang)
         self.assertEqual(r.returncode, 124)
 
 

@@ -32,10 +32,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 
-DISPATCH_ROLES = ("researcher", "engineer", "judge")
 DECISION = re.compile(r"^## В-(\d+) · (.+)$", re.M)
 GOAL_ID = re.compile(r"^G-(\d{3,})$")
-REF = re.compile(r"^(?:В-\d+|G-\d{3,})$")
 NOT_NAMED = "не названо — спросить владельца"
 SHORT_QUOTE = 15       # слово владельца короче — ответ на вопрос CEO: без вопроса суть не проверить
 QUESTION = "Вопрос CEO: "
@@ -72,12 +70,8 @@ def decisions(root: Path) -> dict[str, str]:
 
 
 def goal_header(path: Path) -> dict:
-    m = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.S)
-    out = {}
-    for ln in (m.group(1).splitlines() if m else []):
-        k, _, v = ln.partition(":")
-        out[k.strip()] = v.strip()
-    return out
+    fm = P.frontmatter(path.read_text(encoding="utf-8"))
+    return fm[0] if fm else {}
 
 
 def goals(root: Path) -> dict[str, Path]:
@@ -99,7 +93,7 @@ def ref_exists(root: Path, ref: str) -> bool:
 def _refuse_role() -> str:
     role = P.caller_role()  # RPV_ROLE, а стёрта — по дереву процессов: запуск роли CEO не притворится
     return (f"реестр владельца пишет только CEO; запуск роли {role} — только читает (`show`, `list`). Нужна запись — "
-            f"`tickets.py result <ID> ask-owner`") if role in DISPATCH_ROLES else ""
+            f"`tickets.py result <ID> ask-owner`") if role in P.ROLES else ""
 
 
 def _read_quote(a) -> None:
