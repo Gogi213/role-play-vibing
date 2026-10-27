@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import alarms as AL
 import config as CFG  # noqa: E402
 import overseer as O  # noqa: E402
 import report as R  # noqa: E402
@@ -229,12 +230,12 @@ class DispatcherHookTests(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="rpv-overseer-d-"))
         self.addCleanup(shutil.rmtree, self.root, True)
         (self.root / ".claude" / "tickets").mkdir(parents=True)
-        saved = (CFG.PROJECT_ROOT, CFG.TICKETS_DIR, CFG.DISPATCHER_DIR, D._OVERSEER_PROC)
-        self.addCleanup(lambda: setattr(D, "_OVERSEER_PROC", saved[3]))
+        saved = (CFG.PROJECT_ROOT, CFG.TICKETS_DIR, CFG.DISPATCHER_DIR, AL._OVERSEER_PROC)
+        self.addCleanup(lambda: setattr(AL, "_OVERSEER_PROC", saved[3]))
         self.addCleanup(lambda: (setattr(CFG, "PROJECT_ROOT", saved[0]), setattr(CFG, "TICKETS_DIR", saved[1]),
                                  setattr(CFG, "DISPATCHER_DIR", saved[2])))
         CFG.PROJECT_ROOT, CFG.TICKETS_DIR = self.root, self.root / ".claude" / "tickets"
-        CFG.DISPATCHER_DIR, D._OVERSEER_PROC = self.root / ".claude" / "dispatcher", None
+        CFG.DISPATCHER_DIR, AL._OVERSEER_PROC = self.root / ".claude" / "dispatcher", None
         self.spawned = []
 
         class Proc:
