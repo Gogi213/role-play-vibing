@@ -22,7 +22,6 @@ import ticket as T  # noqa: E402
 
 INTERVAL_S = 60.0
 RED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale")
-GREEN = ("success", "skipped", "neutral")
 _TK_RE = re.compile(r"\bTK-?(\d+)\b", re.I)
 ACTIVE = ("todo", "in_progress", "in_review", "waiting")
 

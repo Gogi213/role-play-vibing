@@ -208,14 +208,3 @@ def resolve_project(argv=None) -> Path:
     return found
 
 
-def strip_project_arg(argv) -> list:
-    """Аргументы без `--project <путь>` (для разборщиков, которым флаг не нужен)."""
-    out, skip = [], False
-    for arg in argv:
-        if skip:
-            skip = False
-        elif arg == "--project":
-            skip = True
-        elif not arg.startswith("--project="):
-            out.append(arg)
-    return out

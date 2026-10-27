@@ -35,7 +35,6 @@ import project as P  # noqa: E402
 DISPATCH_ROLES = ("researcher", "engineer", "judge")
 DECISION = re.compile(r"^## В-(\d+) · (.+)$", re.M)
 GOAL_ID = re.compile(r"^G-(\d{3,})$")
-REF = re.compile(r"^(?:В-\d+|G-\d{3,})$")
 NOT_NAMED = "не названо — спросить владельца"
 SHORT_QUOTE = 15       # слово владельца короче — ответ на вопрос CEO: без вопроса суть не проверить
 QUESTION = "Вопрос CEO: "
