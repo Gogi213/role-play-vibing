@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import project_paths as CFG
+import plugin_version as PV
 import project as P
 import routes as ROUTES
 
@@ -59,7 +60,7 @@ def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
     if project_key and isinstance(data, dict):
         projects = data.get("projects") or {}
         for k, v in projects.items():
-            if isinstance(v, dict) and os.path.normcase(os.path.normpath(k)) == os.path.normcase(os.path.normpath(project_key)):
+            if isinstance(v, dict) and PV.norm(k) == PV.norm(project_key):
                 out.update(v.get("mcpServers") or {})
     return out
 
