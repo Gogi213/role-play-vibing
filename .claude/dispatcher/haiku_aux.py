@@ -38,6 +38,12 @@ def clean_env() -> dict:
     return {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}
 
 
+def run_claude(cmd: list, prompt: str, timeout: float, cwd=None, runner=hide.run):
+    """Единственный запуск `claude -p` служебной модели (помощник, отчёт, Надзиратель): скрытое окно, окружение без RPV_*,
+    вход — байты, вывод — байты. Не запустился или завис — исключение вызывающему."""
+    return runner(cmd, input=prompt.encode("utf-8"), capture_output=True, timeout=timeout, cwd=cwd, env=clean_env())
+
+
 def agent_meta(path: Path) -> tuple:
     """`agents/<имя>.md` → (плоский фронтматтер {ключ: значение}, текст промпта). Нет фронтматтера — ValueError."""
     m = re.match(r"^---\n(.*?)\n---\n(.*)$", path.read_text(encoding="utf-8"), re.S)
@@ -54,10 +60,9 @@ def ask(system: str, text: str, runner=hide.run, claude: str | None = None, time
         return None
     cmd = [claude, "-p", "--model", MODEL, "--effort", EFFORT, "--system-prompt", system, "--tools", "",
            "--no-session-persistence"]
-    env = clean_env()
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            r = runner(cmd, input=text[-MAX_IN:].encode("utf-8"), capture_output=True, timeout=timeout, cwd=tmp, env=env)
+            r = run_claude(cmd, text[-MAX_IN:], timeout, cwd=tmp, runner=runner)
     except (OSError, subprocess.SubprocessError):
         return None
     out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace").strip()

@@ -441,15 +441,15 @@ def call_overseer(prompt: str, agents_file: Path, workdir: Path, model: str, eff
     t0 = time.time()
     raw = ""
     try:
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", cwd=str(workdir), timeout=timeout)
-        raw = r.stdout
+        r = HA.run_claude(cmd, prompt, timeout, cwd=str(workdir))
+        raw = (r.stdout or b"").decode("utf-8", "replace")
     except (subprocess.TimeoutExpired, OSError) as e:
         res = {"is_error": True, "result": f"{type(e).__name__}: {e}"}
     else:
         try:
             res = json.loads(raw)
         except ValueError:
-            res = {"is_error": True, "result": (raw or r.stderr)[-1000:]}
+            res = {"is_error": True, "result": (raw or (r.stderr or b"").decode("utf-8", "replace"))[-1000:]}
     u = res.get("usage") or {}
     ans = res.get("result") or ""
     return {"answer": ans, "cost": res.get("total_cost_usd"), "dur": round(time.time() - t0, 1),

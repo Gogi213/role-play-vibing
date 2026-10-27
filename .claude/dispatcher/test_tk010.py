@@ -395,5 +395,32 @@ def hide_kwargs() -> dict:
     return {"start_new_session": True} if os.name != "nt" else {}
 
 
+class ClaudeRunOnce(unittest.TestCase):
+    """`claude -p` служебных моделей — один запуск `haiku_aux.run_claude`: скрытое окно и окружение без RPV_* у всех троих."""
+
+    def test_overseer_runs_hidden_with_clean_env(self):
+        from unittest import mock
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen.update(kw, cmd=cmd)
+            return mock.Mock(stdout=json.dumps({"result": "тихо", "usage": {}}).encode("utf-8"), stderr=b"", returncode=0)
+        with mock.patch.dict(os.environ, {"RPV_PROBE": "1", "CLAUDE_PROJECT_DIR": "x"}), \
+                mock.patch("subprocess.run", fake_run), tempfile.TemporaryDirectory() as d:
+            res = OV.call_overseer("p", Path(d) / "a.json", Path(d), "haiku", "low", 0.1, 5)
+        self.assertEqual(res["answer"], "тихо")
+        self.assertEqual(seen["input"], "p".encode("utf-8"))
+        self.assertFalse([k for k in seen["env"] if k.startswith("RPV_") or k == "CLAUDE_PROJECT_DIR"])
+        if os.name == "nt":
+            self.assertTrue(seen["creationflags"] & 0x08000000)
+
+    def test_no_bare_claude_launches(self):
+        here = Path(__file__).resolve().parent
+        for name in ("overseer", "report", "haiku_aux"):
+            src = (here / f"{name}.py").read_text(encoding="utf-8")
+            self.assertNotIn("subprocess.run(cmd", src, name)
+            self.assertNotIn("env=env", src, name)
+
+
 if __name__ == "__main__":
     unittest.main()

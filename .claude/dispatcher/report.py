@@ -176,7 +176,6 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
     claude = claude if claude is not None else HA._claude()
     if not claude:
         return None
-    env = HA.clean_env()
     try:
         agent = _agent_def("reporter")
         with tempfile.TemporaryDirectory() as tmp:
@@ -185,7 +184,7 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
             cmd = [claude, "-p", "--agents", str(defs), "--agent", "reporter", "--model", agent["model"], "--effort",
                    agent["effort"], "--output-format", "json", "--no-session-persistence", "--tools", "",
                    "--max-budget-usd", str(BUDGET_USD)]
-            r = runner(cmd, input=prompt.encode("utf-8"), capture_output=True, timeout=CLAUDE_TIMEOUT_S, cwd=tmp, env=env)
+            r = HA.run_claude(cmd, prompt, CLAUDE_TIMEOUT_S, cwd=tmp, runner=runner)
         out = json.loads((r.stdout or b"").decode("utf-8", "replace"))
     except (OSError, KeyError, ValueError, subprocess.SubprocessError):
         return None
