@@ -13,8 +13,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project as P  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
-SEMVER = re.compile(r"\d+\.\d+\.\d+")
 GIT_TIMEOUT_S = 120.0     # git без предела держал клон и блокировал установку (Б3 КТ-3)
 GIT_STALL_ENV = {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "30", "GIT_TERMINAL_PROMPT": "0"}
 
@@ -33,7 +35,7 @@ def check(root: Path = ROOT) -> str | None:
 
 
 def bump(version: str, root: Path = ROOT) -> None:
-    if not SEMVER.fullmatch(version):
+    if not P.SEMVER.fullmatch(version):
         raise SystemExit(f"версия должна быть X.Y.Z, получено {version!r}")
     if not re.search(rf"(?m)^## {re.escape(version)}\b", (root / "CHANGELOG.md").read_text(encoding="utf-8")):
         raise SystemExit(f"в CHANGELOG.md нет раздела «## {version}» — сначала запись об изменениях")

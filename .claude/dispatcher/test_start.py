@@ -27,6 +27,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import hide  # noqa: E402
 import start as S  # noqa: E402
 
 FAKE = textwrap.dedent("""\
@@ -198,7 +199,7 @@ class StartTests(unittest.TestCase):
 
         def fake_cim(cmdline, cwd):
             bare = {k: v for k, v in os.environ.items() if k not in ("RPV_START_TEST", "PYTHONUTF8", "PYTHONIOENCODING")}
-            p = subprocess.Popen(cmdline, cwd=cwd, env=bare, creationflags=S.CREATE_NO_WINDOW)
+            p = subprocess.Popen(cmdline, cwd=cwd, env=bare, creationflags=hide.CREATE_NO_WINDOW)
             seen.append((cmdline, cwd, p.pid))
             self.pids.append(p.pid)
             return p.pid

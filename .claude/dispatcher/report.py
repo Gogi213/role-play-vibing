@@ -46,7 +46,6 @@ import ticket as T  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = PLUGIN_ROOT / "agents"
-SEMVER = re.compile(r"\d+\.\d+\.\d+")
 MAX_LINES = 25             # строк в сообщении владельцу
 CLAUDE_TIMEOUT_S = 240.0   # пересказ reporter; дольше — отчёт уходит с названиями тикетов
 BUDGET_USD = 1.0           # потолок цены одного пересказа (`--max-budget-usd`)
@@ -434,10 +433,10 @@ def m_conflicts(p: Period) -> str:
 def m_plugin(p: Period) -> str:
     """Критерий 16. Версии плагина, поставленные за 7 дней: соседние каталоги `…/<плагин>/X.Y.Z` в кэше Claude Code с изменением
     за неделю. Запуск не из кэша (каталог плагина не версия) — версии нигде не копятся."""
-    if not SEMVER.fullmatch(PLUGIN_ROOT.name):
+    if not P.SEMVER.fullmatch(PLUGIN_ROOT.name):
         return _nodata("плагин запущен не из кэша Claude Code, версии не копятся")
     new = sorted((d.stat().st_mtime, d.name) for d in PLUGIN_ROOT.parent.iterdir()
-                 if d.is_dir() and SEMVER.fullmatch(d.name) and d.stat().st_mtime > (p.until - WEEK).timestamp())
+                 if d.is_dir() and P.SEMVER.fullmatch(d.name) and d.stat().st_mtime > (p.until - WEEK).timestamp())
     return f"новых версий: {len(new)}" + (f" ({', '.join(n for _, n in new)})" if new else "") + f"; сейчас {PLUGIN_ROOT.name}"
 
 

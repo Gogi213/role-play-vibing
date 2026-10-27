@@ -232,5 +232,23 @@ class IsoTime(unittest.TestCase):
             self.assertNotIn("astimezone().isoformat(timespec", src, name)
 
 
+class ConstantsOnce(unittest.TestCase):
+    """Флаги создания процесса — в hide.py, версия X.Y.Z — в project.SEMVER; других определений нет."""
+
+    def test_definitions_once(self):
+        here = Path(__file__).resolve().parent
+        for token in ("CREATE_NO_WINDOW = ", "CREATE_NEW_PROCESS_GROUP = ", "SEMVER = "):
+            owners = [p.name for p in sorted(here.glob("*.py"))
+                      if not p.name.startswith("test_") and token in p.read_bytes().decode("utf-8")]
+            self.assertEqual(len(owners), 1, (token, owners))
+
+    def test_readers_use_the_one(self):
+        import release as REL
+        import start as ST
+        self.assertFalse(hasattr(ST, "CREATE_NO_WINDOW"))
+        self.assertTrue(P.SEMVER.fullmatch("2.0.7"))
+        self.assertFalse(hasattr(REL, "SEMVER") or hasattr(RP, "SEMVER"))
+
+
 if __name__ == "__main__":
     unittest.main()

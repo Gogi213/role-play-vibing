@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -84,6 +85,7 @@ def setting(key: str, default=None, root=None):
     return default if value is None or value == "" else value
 
 
+SEMVER = re.compile(r"\d+\.\d+\.\d+")  # версия плагина (release, report)
 ROLES = ("researcher", "engineer", "judge")  # роли, которых запускает диспетчер; единственный список (ceo — человек/CEO-сессия)
 
 

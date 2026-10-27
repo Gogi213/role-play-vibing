@@ -54,8 +54,6 @@ LOCK_IMAGE = "py"                  # подстрока имени образа 
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом
 
-CREATE_NEW_PROCESS_GROUP = 0x00000200
-CREATE_NO_WINDOW = 0x08000000
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -370,7 +368,7 @@ def _popen_detached(cmd: list, project: Path, log: Path) -> Started:
         common = dict(cwd=str(project), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, env=env,
                       close_fds=True)
         if os.name == "nt":
-            base = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+            base = hide.CREATE_NO_WINDOW | hide.CREATE_NEW_PROCESS_GROUP
             try:   # выйти из job-объекта родителя, чтобы процесс пережил закрытие сессии; не разрешено — без выхода
                 p = subprocess.Popen(cmd, creationflags=base | CREATE_BREAKAWAY_FROM_JOB, **common)
             except OSError:
