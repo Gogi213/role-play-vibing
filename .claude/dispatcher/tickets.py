@@ -191,8 +191,9 @@ def cmd_comment(args) -> int:
 
 def _regression(tid: str, cmd: str) -> bool:
     """V2-3: приёмка Судьи — только при зелёных проверках всех исправленных ошибок (`errors.py`). True — отказ (причина уже
-    в stderr, в тикет ничего не пишем). Нет реестра ошибок или исправленных в нём — ничего не запускается."""
-    err = errors_mod.gate(PROJECT_ROOT, tid)
+    в stderr, в тикет ничего не пишем). Нет реестра ошибок или исправленных в нём — ничего не запускается. Проверка, что «не
+    запустилась», — тоже отказ (не проверено), а повтор сверх потолка зовёт CEO (`D.append_ceo_inbox`)."""
+    err = errors_mod.gate(PROJECT_ROOT, tid, signal=D.append_ceo_inbox)
     if err:
         print(f"{cmd}: {err}", file=sys.stderr)
     return bool(err)

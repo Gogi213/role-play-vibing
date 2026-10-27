@@ -243,6 +243,9 @@ class MeasureTests(ReportCase):
         self.write(".claude/dispatcher/regressions.log",
                    f"{at(13, 11).isoformat()}\tTK-002\tE-001,E-004\n{at(12, 11).isoformat()}\tTK-002\tE-001\n{at(14, 9).isoformat()}\tTK-003\tE-001\n")
         self.assertEqual(R.m_regressions(self.period()), "3 (отказов приёмки из-за регресса 2, заведено заново 1)")
+        with (self.root / ".claude" / "dispatcher" / "regressions.log").open("a", encoding="utf-8") as f:   # «не запустилась» — не регресс
+            f.write(f"{at(13, 12).isoformat()}\tTK-002\tE-001\tinfra\n{at(13, 13).isoformat()}\tTK-002\t\tok\n")
+        self.assertEqual(R.m_regressions(self.period()), "3 (отказов приёмки из-за регресса 2, заведено заново 1)")
 
     def test_idle_minutes_from_state(self):
         self.assertIn("нет данных", R.m_idle(self.period()))
