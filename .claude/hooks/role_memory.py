@@ -134,9 +134,10 @@ def _atomic_write(path, text):
     os.replace(tmp, path)
 
 
-def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
+def write_digest(transcript, role, title, cli_id, why, dispatcher=None, abstract=True):
     """Конспект разговора из транскрипта; возвращает путь или None (пустой разговор).
-    Запуск диспетчера: сообщения пользователя в транскрипте — промпты диспетчера, не владельца."""
+    Запуск диспетчера: сообщения пользователя в транскрипте — промпты диспетчера, не владельца.
+    abstract=False — без Haiku: `claude -p` выходит сразу после ответа и отменяет SessionEnd-хук («Hook cancelled»)."""
     if not transcript or not cli_id or not os.path.isfile(transcript):
         return None
     if dispatcher is None:
@@ -172,9 +173,9 @@ def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
             f"без инструментов и рассуждений. Читать секциями/грепом, не целиком.\n\n")
     body = "\n".join(turns)
     _atomic_write(path, head + body)                      # сначала без Haiku: убитый по таймауту хук не теряет конспект
-    abstract = haiku_abstract(turns)
-    if abstract:
-        _atomic_write(path, head + abstract + body)
+    summary = haiku_abstract(turns) if abstract else ""
+    if summary:
+        _atomic_write(path, head + summary + body)
     return path
 
 
@@ -423,7 +424,7 @@ def main():
             on_notification(hook_in, role)
         elif event == "SessionEnd":
             write_digest(hook_in.get("transcript_path"), role, title, hook_in.get("session_id"),
-                         f"закрытие: {hook_in.get('reason', '?')}")
+                         f"закрытие: {hook_in.get('reason', '?')}", abstract=env_role() is None)
     except Exception:
         pass
     return 0
