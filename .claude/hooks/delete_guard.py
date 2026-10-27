@@ -171,6 +171,14 @@ REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): тол�
 REASON_BRANCH_DELETE = ("Удаление веток на удалённом ({t}) без слова владельца закрыто и для CEO: {why}. Слово владельца дословно — "
                         "`registry.py decide` (его пишет `secretary`), затем `tickets.py allow-delete <ветка>… --ref В-N`: согласие на "
                         "названные ветки действует час; main/master удалять нельзя. Запуску роли — только через CEO.")
+REASON_DECIDE = ("Решение владельца в реестр (`registry.py decide`) из сессии CEO пишет только помощник `secretary` (слово владельца "
+                 "дословно, суть — его): CEO суть своими словами не пишет (В-7: без самодеятельности). Передай секретарю слова "
+                 "владельца и команду; слово короче 15 знаков («да») — с вопросом CEO дословно: `--question \"...\"`.")
+REASON_CONFIG_LOG = ("Журнал правок настроек config-log.json пишет только команда `tickets.py config` (ни роль, ни CEO руками).")
+REASON_CEO_CONFIG = ("Настройки плагина и уставы ролей ({t}) CEO напрямую не правит (слово владельца В-7: менять можно, но без "
+                     "самодеятельности). Настройки — `tickets.py config set <ключ> <значение> --why \"...\"` (закрытый список "
+                     "ключей, Судья проверяет, без его приёмки правка через 2 ч откатывается); уставы `.claude/roles/*.md` не "
+                     "правятся, кроме строк таблицы зон в README. Блокнот `notes/ceo.md` — свободно.")
 REASON_BRANCH_CONSENT_FILE = ("Согласия на удаление веток пишет только команда `tickets.py allow-delete` после слова владельца: файл "
                               "branch-delete.json руками не правится (ни ролью, ни CEO).")
 REASON_PUBLISH = ("Публикация ({t}) запуску роли закрыта без согласия владельца по тикету {who}: выпуск, слияние PR, пуш в "
@@ -1365,6 +1373,7 @@ def delete_branch_names(rest, pos):
     return tuple(names) or None
 
 
+CONFIG_LOG_NAMES = ("config-log.json",)               # журнал правок настроек (TK-007): пишет только `tickets.py config`
 BRANCH_CONSENT_NAMES = ("branch-delete.json",)       # согласия на удаление веток: пишет только `tickets.py allow-delete`
 
 
@@ -2187,6 +2196,32 @@ def settings_file(t, ctx):
     return len(segs) >= 2 and segs[-2] == ".claude" and segs[-1] in SETTINGS_NAMES
 
 
+def charter_file(t, ctx):
+    """Цель — устав роли `.claude/roles/<имя>.md` (блокнот `roles/notes/…` — не устав)."""
+    segs = [x for x in _abs_norm(t, ctx).split("/") if x]
+    return len(segs) >= 3 and segs[-2] == "roles" and segs[-3] == ".claude" and segs[-1].endswith(".md")
+
+
+def charter_table_edit(tool, ti):
+    """Edit строк таблицы (`| … |`) в `.claude/roles/README.md` — таблица зон с путями проекта; остальное в уставе закрыто."""
+    path = (file_target(ti) or "").replace("\\", "/").lower() if tool == "Edit" else ""
+    if not path.endswith(".claude/roles/readme.md"):
+        return False
+    rows = [ln for k in ("old_string", "new_string") for ln in str(ti.get(k) or "").splitlines() if ln.strip()]
+    return bool(rows) and all(ln.lstrip().startswith("|") for ln in rows)
+
+
+REGISTRY_DECIDE = re.compile(r"""registry\.py["']?(?:\s+--project(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+))?\s+decide\b""")
+
+
+def decide_outside_secretary(tool, ti, data):
+    """`registry.py decide` из сессии CEO (не помощник `secretary`: в событии хука `agent_type`) — суть пишет секретарь по
+    слову владельца, а не CEO своими словами. Запуск роли реестр отказывает сам."""
+    if tool not in SHELL_TOOLS or not REGISTRY_DECIDE.search(str(ti.get("command") or "")):
+        return False
+    return str(data.get("agent_type") or "").rsplit(":", 1)[-1].strip().lower() != "secretary"
+
+
 def owner_record(t, ctx):
     """Цель — слово владельца (V2): `CLAUDE.md` в любом каталоге, реестр решений `.claude/decisions.md`, цели
     `.claude/goals/…` — и реестр ошибок `.claude/errors/…` (CP1: записи пишет только `errors.py`; прямая правка проверки
@@ -2376,6 +2411,8 @@ def protected(t, ctx, role, deleting):
         return REASON_SETTINGS.format(t=t)
     if role and owner_record(t, ctx):
         return REASON_OWNER_RECORD.format(t=t)
+    if role is None and (charter_file(t, ctx) or (rpv_config(t, ctx) and not PROTECTED_ERROR))             and (deleting or may_exist(t, ctx)):         # TK-007: CEO правит настройки командой; сломанный файл — руками
+        return REASON_CEO_CONFIG.format(t=t)
     return protected_path(t, ctx, deleting)
 
 
@@ -2593,6 +2630,12 @@ def check_tool(data, trace=None):
             return _deny(trace, "ceo-signal", REASON_CEO_SIGNAL)
         if ceo_signal_write(tool, ti, BRANCH_CONSENT_NAMES):
             return _deny(trace, "ceo-signal", REASON_BRANCH_CONSENT_FILE)
+        if ceo_signal_write(tool, ti, CONFIG_LOG_NAMES):
+            return _deny(trace, "protected", REASON_CONFIG_LOG)
+        if dispatcher_role() is None and charter_table_edit(tool, ti):
+            return None
+        if dispatcher_role() is None and decide_outside_secretary(tool, ti, data):
+            return _deny(trace, "protected", REASON_DECIDE)
         if dispatcher_role() and owner_record_write(tool, ti):
             return _deny(trace, "protected", REASON_OWNER_RECORD.format(t="CLAUDE.md / .claude/decisions.md / .claude/goals / .claude/errors / dispatcher/state.json"))
         if dispatcher_role() and consent_forge(tool, ti):

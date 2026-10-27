@@ -1648,8 +1648,54 @@ class ProtectedPaths(unittest.TestCase):
         for name in ("Write", "Edit", "MultiEdit"):
             self.assertIn("Настройки Claude Code и плагина", self.tool(name, ".claude/rpv.json"), name)
         self.no("cp notes.txt .claude/rpv.json", expect="Настройки Claude Code и плагина")
-        self.as_role(None)                                                          # CEO — владелец настройки
-        self.assertIsNone(self.tool("Edit", ".claude/rpv.json"))
+        self.as_role(None)                                                          # CEO — только командой `config set` (TK-007)
+        self.assertIn("config set", self.tool("Edit", ".claude/rpv.json"))
+
+    def test_ceo_edits_neither_config_nor_charters_directly(self):
+        """TK-007 (В-7): сессия CEO не пишет rpv.json и уставы .claude/roles/*.md; блокнот и таблица зон README — можно."""
+        self.rpv({"protected_paths": ["data/raw"]})
+        Path(self.d, ".claude", "roles", "notes").mkdir(parents=True, exist_ok=True)
+        for name in ("README.md", "engineer.md", "notes/ceo.md"):
+            Path(self.d, ".claude", "roles", name).write_text("x", encoding="utf-8")
+        for tool in ("Write", "Edit", "MultiEdit"):
+            for f in (".claude/rpv.json", ".claude/roles/README.md", ".claude/roles/engineer.md"):
+                self.assertIn("config set", self.tool(tool, f), (tool, f))
+        self.no("echo '{}' > .claude/rpv.json", expect="config set")
+        self.no("echo x > .claude/roles/README.md", expect="config set")
+        self.no("rm .claude/roles/engineer.md", expect="config set")
+        for tool in ("Write", "Edit"):
+            self.assertIsNone(self.tool(tool, ".claude/roles/notes/ceo.md"), tool)    # блокнот CEO пишется свободно
+        self.ok("echo x > .claude/roles/notes/ceo.md")
+        self.ok("cat .claude/rpv.json")
+        # таблица зон README: Edit строк `| … |` — можно, текст устава — нет
+        ev = lambda old, new: {"tool_name": "Edit", "cwd": self.d, "tool_input": {
+            "file_path": str(Path(self.d, ".claude", "roles", "README.md")), "old_string": old, "new_string": new}}
+        self.assertIsNone(dg.check_tool(ev("| engineer | src/ |", "| engineer | src/, tools/ |")))
+        self.assertIsNotNone(dg.check_tool(ev("правило", "другое правило")))
+        self.assertIsNotNone(dg.check_tool(ev("| a |\nправило", "| a |\nдругое")))
+
+    def test_ceo_decide_only_through_secretary(self):
+        """TK-007 п.3 (В-7): `registry.py decide` из сессии CEO отказан; тот же вызов помощника `secretary` — пропущен."""
+        self.as_role(None)
+        cmd = ('python "C:/plugin/.claude/dispatcher/registry.py" --project "C:/proj" decide --at "2026-10-27 05:00" '
+               '--gist "суть" --quote - <<\'EOF\'\nдавай\nEOF')
+        ev = lambda tool="Bash", command=cmd, **extra: {"tool_name": tool, "cwd": self.d, "tool_input": {"command": command}, **extra}
+        self.assertIn("secretary", dg.check_tool(ev()) or "")                                      # CEO сам
+        self.assertIn("secretary", dg.check_tool(ev("PowerShell")) or "")
+        self.assertIn("secretary", dg.check_tool(ev(agent_type="general-purpose")) or "")           # другой помощник
+        self.assertIn("secretary", dg.check_tool(ev(command="python registry.py decide --quote x --gist y")) or "")
+        for agent in ("secretary", "role-play-vibing:secretary"):
+            self.assertIsNone(dg.check_tool(ev(agent_id="a1", agent_type=agent)), agent)
+        for command in ("python registry.py list", 'python registry.py show В-3', "git log --grep decide",
+                        'python registry.py goal --title t --quote "x y"'):                         # чтение и прочие подкоманды — не decide
+            self.assertIsNone(dg.check_tool(ev(command=command)), command)
+
+    def test_config_log_is_written_by_command_only(self):
+        for tool in ("Write", "Edit"):
+            self.assertIn("config-log.json", self.tool(tool, ".claude/dispatcher/config-log.json"), tool)
+        reason = dg.check_tool({"tool_name": "Bash", "cwd": self.d,
+                                "tool_input": {"command": "echo '[]' > .claude/dispatcher/config-log.json"}})
+        self.assertIn("config-log.json", reason or "")
 
     def test_load_protected_directly(self):
         self.assertEqual(dg.load_protected(self.d), ((), None))                    # файла нет

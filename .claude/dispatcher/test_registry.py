@@ -49,12 +49,31 @@ class RegistryTests(unittest.TestCase):
         R.decisions_file(self.root).parent.mkdir(parents=True)
         R.decisions_file(self.root).write_text("# Решения владельца\n\n## В-41 · 2026-10-01 09:00\n> x y\n",
                                                encoding="utf-8")
-        self.assertEqual(self.run_cli("decide", "--quote", "новое", "--gist", "g")[1], "В-42")
+        self.assertEqual(self.run_cli("decide", "--quote", "новое решение владельца", "--gist", "g")[1], "В-42")
 
     def test_decide_refuses_unknown_replaces_and_empty_quote(self):
-        self.assertEqual(self.run_cli("decide", "--quote", "a b", "--gist", "g", "--replaces", "В-9")[0], 1)
+        self.assertEqual(self.run_cli("decide", "--quote", "a b c d e f g h", "--gist", "g", "--replaces", "В-9")[0], 1)
         self.assertEqual(self.run_cli("decide", "--quote", " ", "--gist", "g")[0], 1)
         self.assertFalse(R.decisions_file(self.root).exists())
+
+    def test_short_answer_needs_the_question(self):
+        """TK-007 (дополнение 05:09): слово короче 15 знаков — ответ на вопрос CEO; без `--question` отказ с подсказкой."""
+        for quote in ("да", "1 - да", "  да,\nда  ", "14 знаков-----"):
+            code, _, err = self.run_cli("decide", "--quote", quote, "--gist", "g")
+            self.assertEqual(code, 1, quote)
+            self.assertIn("--question", err)
+        self.assertFalse(R.decisions_file(self.root).exists())
+        self.assertEqual(self.run_cli("decide", "--quote", "да", "--gist", "g", "--question", " ")[0], 1)   # пустой вопрос — не вопрос
+        code, out, _ = self.run_cli("decide", "--quote", "да", "--gist", "оба сразу", "--at", "2026-10-27 04:41",
+                                    "--question", "какой из двух вариантов\nили оба сразу")
+        self.assertEqual((code, out), (0, "В-1"))
+        text = R.decisions_file(self.root).read_text(encoding="utf-8")
+        self.assertIn("## В-1 · 2026-10-27 04:41\n> да\nВопрос CEO: какой из двух вариантов или оба сразу\nСуть: оба сразу\n", text)
+        self.assertEqual(R.question_of(R.decisions(self.root)["В-1"]), "какой из двух вариантов или оба сразу")
+        # цитата от 15 знаков — вопрос не нужен; его строки нет, если не дан
+        self.assertEqual(self.run_cli("decide", "--quote", "ровно пятнадцать", "--gist", "g")[0], 0)
+        self.assertEqual(R.question_of(R.decisions(self.root)["В-2"]), "")
+        self.assertNotIn("Вопрос CEO", R.decisions(self.root)["В-2"])
 
     def test_goal_file_and_not_named_criteria(self):
         code, out, _ = self.run_cli("goal", "--title", "Ускорение ×4", "--quote", "нужно еще раза в 4 быстрее",
@@ -71,7 +90,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_accept_and_drop_goal_and_ref_exists(self):
         self.run_cli("goal", "--title", "t", "--quote", "q q")
-        self.run_cli("decide", "--quote", "a b", "--gist", "g")
+        self.run_cli("decide", "--quote", "a b c d e f g h", "--gist", "g")
         self.assertTrue(R.ref_exists(self.root, "G-001"))
         self.assertTrue(R.ref_exists(self.root, "В-1"))
         self.assertFalse(R.ref_exists(self.root, "В-2"))
@@ -86,10 +105,10 @@ class RegistryTests(unittest.TestCase):
         self.assertIn("## Снята владельцем\n> не надо", text)
 
     def test_roles_only_read(self):
-        self.run_cli("decide", "--quote", "a b", "--gist", "g")
+        self.run_cli("decide", "--quote", "a b c d e f g h", "--gist", "g")
         for role in ("researcher", "engineer", "judge"):
             with mock.patch.dict(os.environ, {"RPV_ROLE": role}):
-                for args in (("decide", "--quote", "x y", "--gist", "g"), ("goal", "--title", "t", "--quote", "x y"),
+                for args in (("decide", "--quote", "x y x y x y x y", "--gist", "g"), ("goal", "--title", "t", "--quote", "x y"),
                              ("accept-goal", "G-001")):
                     code, _, err = self.run_cli(*args)
                     self.assertEqual(code, 1, (role, args))
@@ -139,8 +158,8 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(f"> {quote}\n", R.decisions_file(self.root).read_text(encoding="utf-8"))
 
     def test_repeat_marks_existing_decision_without_new_number(self):
-        self.run_cli("decide", "--quote", "первое", "--gist", "г1", "--at", "2026-10-14 10:00")
-        self.run_cli("decide", "--quote", "второе", "--gist", "г2", "--at", "2026-10-14 11:00")
+        self.run_cli("decide", "--quote", "первое решение владельца", "--gist", "г1", "--at", "2026-10-14 10:00")
+        self.run_cli("decide", "--quote", "второе решение владельца", "--gist", "г2", "--at", "2026-10-14 11:00")
         code, out, _ = self.run_cli("repeat", "В-1", "--quote", "я же говорил: первое", "--at", "2026-10-15 09:00")
         self.assertEqual((code, out), (0, "В-1: повтор №1"))
         self.run_cli("repeat", "В-2", "--quote", "второе!", "--at", "2026-10-15 09:30")
@@ -156,7 +175,7 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(self.run_cli("repeat", "В-1", "--quote", "x y")[0], 1)
 
     def test_bad_time(self):
-        code, _, err = self.run_cli("decide", "--quote", "a b", "--gist", "g", "--at", "14.10 10:00")
+        code, _, err = self.run_cli("decide", "--quote", "a b c d e f g h", "--gist", "g", "--at", "14.10 10:00")
         self.assertEqual(code, 1)
         self.assertIn("ГГГГ-ММ-ДД", err)
 

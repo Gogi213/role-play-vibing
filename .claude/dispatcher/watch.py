@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
@@ -725,6 +726,10 @@ def run_once(now=None, probes=True) -> list:
         triage_stalls(ws, now)
     except Exception as e:
         print(f"[watch] triage_stalls: {type(e).__name__}: {e}", file=sys.stderr)
+    try:
+        cfg_mod.rollback_due(D.PROJECT_ROOT, now)          # TK-007: непринятая Судьёй правка настроек за 2 ч откатывается
+    except Exception as e:
+        print(f"[watch] rollback_due: {type(e).__name__}: {e}", file=sys.stderr)
     stray_findings = []
     try:
         if probes:  # тесты выключают — боевые машины не трогают
