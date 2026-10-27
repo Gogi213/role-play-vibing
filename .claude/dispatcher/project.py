@@ -312,3 +312,39 @@ def read_json(path, default=None):
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return default
+
+
+def read_pid(pid_file) -> int:
+    """Pid из файла замка; нет файла, пусто, не число — 0."""
+    try:
+        return int(Path(pid_file).read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def take_lock_file(path, wait_s: float, stale_s: float, poll_s: float) -> bool:
+    """Замок-файл: создаётся `O_EXCL`; старше `stale_s` секунд — бесхозный (держал умерший процесс), снимается.
+    Не отдали за `wait_s` — False (вызывающий решает: отказ или работа без замка). Снимает `drop_lock_file`."""
+    path = Path(path)
+    deadline = time.time() + wait_s
+    while True:
+        try:
+            os.close(os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - path.stat().st_mtime > stale_s:
+                    path.unlink()
+                    continue
+            except OSError:
+                pass
+            if time.time() >= deadline:
+                return False
+            time.sleep(poll_s)
+
+
+def drop_lock_file(path) -> None:
+    try:
+        Path(path).unlink()
+    except OSError:
+        pass

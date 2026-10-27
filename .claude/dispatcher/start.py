@@ -72,11 +72,7 @@ _CIM_CREATE = (
     "if ($r.ReturnValue -ne 0) { [Console]::Error.WriteLine('ReturnValue=' + $r.ReturnValue); exit 2 }; $r.ProcessId")
 
 
-def read_pid(pid_file: Path) -> int:
-    try:
-        return int(pid_file.read_text(encoding="utf-8").strip() or 0)
-    except (OSError, ValueError):
-        return 0
+read_pid = P.read_pid
 
 
 def _cmdline(pid: int) -> str | None:
@@ -385,28 +381,11 @@ def restart_lock(state_dir: Path, wait_s: float = 60.0, stale_s: float = 180.0):
     """Общий замок start.py и присмотра на «остановить + запустить»: без него два перезапуска идут вперемешку — двойной
     диспетчер и стёртый свежий pid-файл (В-209 Д-2). Файл `restart.lock` создаётся O_EXCL; старше `stale_s` — бесхозный."""
     lock = state_dir / "restart.lock"
-    deadline = time.time() + wait_s
-    while True:
-        try:
-            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            break
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime > stale_s:
-                    lock.unlink()
-                    continue
-            except OSError:
-                pass
-            if time.time() >= deadline:
-                break   # замок не отдали — работаем без него, а не стоим вечно
-            time.sleep(0.2)
+    P.take_lock_file(lock, wait_s=wait_s, stale_s=stale_s, poll_s=0.2)   # не отдали — работаем без него, а не стоим вечно
     try:
         yield
     finally:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+        P.drop_lock_file(lock)
 
 
 def start(project: Path, code_dir: Path = CODE_DIR, settle: float = SETTLE_S) -> list[dict]:

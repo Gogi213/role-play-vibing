@@ -1421,26 +1421,10 @@ def acquire_instance_lock(pid_file, expect_name: str = "py"):
     me = os.getpid()
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     mx = pid_file.with_name(pid_file.name + ".mx")
-    deadline = time.time() + 40
-    while True:
-        try:
-            os.close(os.open(str(mx), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            break
-        except FileExistsError:
-            try:
-                if time.time() - mx.stat().st_mtime > 30:   # мьютекс держит умерший процесс (секция — миллисекунды)
-                    mx.unlink()
-                    continue
-            except OSError:
-                continue
-            if time.time() > deadline:
-                return False, f"не удалось взять замок {pid_file}: занят мьютекс {mx.name}"
-            time.sleep(0.01)
+    if not P.take_lock_file(mx, wait_s=40, stale_s=30, poll_s=0.01):   # мьютекс старше 30 с держит умерший процесс (секция — миллисекунды)
+        return False, f"не удалось взять замок {pid_file}: занят мьютекс {mx.name}"
     try:
-        try:
-            other = int(pid_file.read_text(encoding="utf-8").strip() or 0)
-        except (OSError, ValueError):
-            other = 0
+        other = P.read_pid(pid_file)
         if other == me:
             return True, ""
         if other and _pid_alive(other, expect_name):
@@ -1453,20 +1437,13 @@ def acquire_instance_lock(pid_file, expect_name: str = "py"):
             return False, f"не удалось взять замок {pid_file}: {e}"
         return True, ""
     finally:
-        try:
-            mx.unlink()
-        except OSError:
-            pass
+        P.drop_lock_file(mx)
 
 
 def release_instance_lock(pid_file) -> None:
     """Снять замок, если он наш (чужой pid не трогаем)."""
-    pid_file = Path(pid_file)
-    try:
-        if int(pid_file.read_text(encoding="utf-8").strip() or 0) == os.getpid():
-            pid_file.unlink()
-    except (OSError, ValueError):
-        pass
+    if P.read_pid(pid_file) == os.getpid():
+        P.drop_lock_file(pid_file)
 
 
 def _proc_alive(info: dict) -> bool:
