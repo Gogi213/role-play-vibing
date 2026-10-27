@@ -107,19 +107,25 @@ def _norm(p: str) -> str:
     return p.replace("\\", "/").lower().rstrip("/")
 
 
-def find_copies(script_name: str, project: Path, procs=None) -> list:
-    """pid живых копий службы проекта по командной строке `python … <script> --project <проект>`, не только из pid-файла.
-    Имя скрипта — отдельный токен (`watch.py` не `ci_watch.py`); обёртки `cmd /c`, `sh -c` — не копия (exe не python)."""
+def find_scripts(script_name: str, project: Path, procs=None) -> list:
+    """[(pid, путь скрипта)] живых копий службы проекта по командной строке `python … <script> --project <проект>`, не только
+    из pid-файла. Имя скрипта — отдельный токен (`watch.py` не `ci_watch.py`); обёртки `cmd /c`, `sh -c` — не копия (exe не python)."""
     proj, out = _norm(str(project)), []
     for pid, line in (_list_procs() if procs is None else procs):
         toks = [t.strip('"') for t in re.findall(r'"[^"]*"|\S+', line)]
         if pid == os.getpid() or not toks or "python" not in _norm(toks[0]).rsplit("/", 1)[-1]:
             continue
-        if script_name.lower() not in (_norm(t).rsplit("/", 1)[-1] for t in toks):
+        script = next((t for t in toks if _norm(t).rsplit("/", 1)[-1] == script_name.lower()), None)
+        if script is None:
             continue
         if any(t == "--project" and i + 1 < len(toks) and _norm(toks[i + 1]) == proj for i, t in enumerate(toks)):
-            out.append(pid)
+            out.append((pid, script))
     return out
+
+
+def find_copies(script_name: str, project: Path, procs=None) -> list:
+    """pid живых копий службы проекта (`find_scripts` без путей)."""
+    return [pid for pid, _ in find_scripts(script_name, project, procs)]
 
 
 def is_ours_state(pid: int, script_name: str):

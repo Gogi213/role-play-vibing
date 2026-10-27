@@ -95,7 +95,7 @@ Full charter: [`templates/roles/README.md`](templates/roles/README.md) (Russian;
 | `/ceo` | Marks the session as the CEO (hooks read the mark; it survives `/clear` in Desktop). |
 | `/rpv-start` | Starts or restarts the dispatcher and the watcher in the background. |
 | `/rpv-update` | Updates the plugin, services, OS supervision and role charters in one command, then runs `doctor`. |
-| `/rpv-doctor` | One table with the health of the team: dispatcher, watcher, OS supervision, queue, errors of the last day. Read-only. |
+| `/rpv-doctor` | One table with the health of the team: dispatcher, watcher, plugin version of the running services vs the installed one, OS supervision, queue, errors of the last day. Read-only. |
 
 Scripts run from the plugin folder with `--project <project>`:
 
