@@ -4,7 +4,6 @@
 Windows замеряется отдельно (`tools/e2e_clean_project.py`)."""
 from __future__ import annotations
 
-import json
 import os
 import platform
 import re
@@ -22,6 +21,7 @@ PY = sys.executable
 GIT_ID = ["-c", "user.name=bench", "-c", "user.email=bench@example.invalid"]
 sys.path.insert(0, str(DISP))
 import haiku_aux as HA  # noqa: E402  одна копия clean_env — в плагине
+import plugin_version as PV  # noqa: E402  `plugin.json` читает плагин
 
 
 def sh(cmd, cwd=None, env=None, timeout=None, input=None):
@@ -63,7 +63,7 @@ def env_info() -> dict:
         "git": first_line(["git", "--version"]), "claude": first_line([os.environ.get("CLAUDE_BIN") or "claude", "--version"]),
         "bash": first_line(["bash", "--version"]),
         "plugin_commit": first_line(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"]),
-        "plugin_version": json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version", ""),
+        "plugin_version": PV.meta(ROOT).get("version", ""),
         "runner": os.environ.get("RUNNER_NAME") or ("github-hosted" if os.environ.get("GITHUB_ACTIONS") else "local"),
         "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
