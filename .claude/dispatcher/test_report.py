@@ -225,7 +225,7 @@ class MeasureTests(ReportCase):
     def test_decision_repeats(self):
         self.assertIn("нет данных", R.m_repeats(self.period()))
         self.reg("decide", "--quote", "Только после проверки", "--gist", "проверка", "--at", "2026-10-01 10:00")
-        self.reg("decide", "--quote", "Без выходных", "--gist", "выходные", "--at", "2026-10-02 10:00")
+        self.reg("decide", "--quote", "Без выходных и праздников", "--gist", "выходные", "--at", "2026-10-02 10:00")
         self.assertEqual(R.m_repeats(self.period()), "0")
         self.reg("repeat", "В-1", "--quote", "ещё раз: только после проверки", "--at", "2026-10-05 10:00")   # раньше периода
         self.reg("repeat", "В-2", "--quote", "я же говорил про выходные", "--at", "2026-10-13 15:00")
