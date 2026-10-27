@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import charter as charter_mod  # noqa: E402
 import rpv_config as cfg_mod  # noqa: E402
 import downtime  # noqa: E402
 import errors as errors_mod  # noqa: E402
@@ -484,7 +485,7 @@ def _measure(what: str, fn, norm: str, p: Period) -> str:
 
 def _config_changes(p: Period) -> list:
     try:
-        return cfg_mod.report_lines(p.root, p.since, p.until)[:5]
+        return (cfg_mod.report_lines(p.root, p.since, p.until) + charter_mod.report_lines(p.root, p.since, p.until))[:5]
     except Exception:  # noqa: BLE001 — битый журнал не лишает владельца отчёта
         return []
 

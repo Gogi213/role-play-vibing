@@ -125,6 +125,14 @@ def _add_control_parsers(sub) -> None:
     p_cfg.add_argument("--why", default="", help="зачем правка (Судья сверяет со словом владельца)")
     p_cfg.add_argument("--ref", default="", help="решение владельца В-N из реестра: цитата попадёт в журнал и отчёт")
 
+    p_char = sub.add_parser("charter", help="CEO: sync — перенос уставов из templates/roles/ плагина в .claude/roles/ как есть "
+                                            "(строки таблицы зон README остаются проектными)")
+    p_char.add_argument("action", choices=["sync"])
+    p_char.add_argument("--file", action="append", default=None, metavar="ИМЯ.md",
+                        help="только этот файл шаблонов (можно несколько раз); без флага — все")
+    p_char.add_argument("--why", default="", help="зачем перенос (по умолчанию — версия плагина)")
+    p_char.add_argument("--ref", default="", help="решение владельца В-N из реестра: цитата попадёт в журнал и отчёт")
+
     p_inbox = sub.add_parser("inbox", help="CEO: новые строки ceo-inbox.md с прошлого чтения")
     p_inbox.add_argument("--peek", action="store_true", help="только показать, не считать прочитанным")
 
