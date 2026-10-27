@@ -74,6 +74,15 @@ class CharterGuard(unittest.TestCase):
                     'cd .claude && cd roles && cp /tmp/x *.md'):
             self.no(cmd)
 
+    def test_cd_corner_cases_pinned_before_sharing_cwd_tracking_with_dguard(self):
+        """TK-033: слежение за каталогом после `cd` — как у dguard (`join_cwd`); расхождения закреплены."""
+        self.no('cd $ROOT/.claude/roles && cp /tmp/x judge.md')              # переменная в пути к уставам — известна по хвосту
+        self.assertNotIn("charter sync", self.shell('cd - && cp /tmp/x judge.md') or "")   # прежний каталог не определить: не устав
+        self.ok('cd /tmp && cp /tmp/x judge.md')
+        for cmd in ('cd .claude/roles && popd && cp /tmp/x judge.md', 'cd .claude/roles; popd; cp /tmp/x judge.md',
+                    'pushd .claude/roles; popd; cp /tmp/x .claude/roles/judge.md'):
+            self.no(cmd)                                                        # `popd` без стека каталог не меняет — запись всё ещё в уставы
+
     def test_copying_a_directory_over_claude_overwrites_the_charters(self):
         b = self.base
         for cmd in ('cp -r /tmp/roles .claude/', 'cp -r /tmp/roles .claude', f'cp -R /tmp/backup/roles "{b}/.claude/"', 'rsync -a /tmp/roles/ .claude/',
