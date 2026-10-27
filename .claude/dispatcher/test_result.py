@@ -546,7 +546,7 @@ class ResultTests(unittest.TestCase):
 
     def test_tail_with_colon_or_count_still_refused(self):
         for text in ("Готово. Хвост: нет метрик у 431 строки", "Не сделано: регистрация в settings.json",
-                     "Готово, осталось 3 шага", "Хвост нет метрик у 431 строки"):
+                     "Готово, осталось 3 шага", "Хвост нет метрик у 431 строки", "Не осталось времени доделать экспорт"):
             with self.subTest(text=text):
                 T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
                 self._v2_done(text)
