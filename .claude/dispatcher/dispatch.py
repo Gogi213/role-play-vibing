@@ -44,6 +44,13 @@ import alarms as AL  # noqa: E402
 import signals as SIG  # noqa: E402
 import routes as ROUTES  # noqa: E402
 import report as REPORT  # noqa: E402
+from role_args import (  # noqa: E402,F401 — запуск роли (усилие, MCP, промпт) вынесен в role_args.py; имена для launch_run и тестов
+    ROLE_EFFORT, FIXED_EFFORT_ROLES, PROMPT_TEMPLATE, _read_mcp_servers, role_mcp_args, plugin_dir_args, effort_for, _py,
+    tickets_cli)
+import role_args as RA  # noqa: E402
+from limits import (  # noqa: E402,F401 — лимит сессии и ошибки API (распознавание) вынесены в limits.py
+    _limit_hit, API_PAUSE, API_AUTH_PAUSE, MAX_API_ERRORS, _api_error, _auth_error, _limit_reset_at, _limit_paused,
+    LIMIT_LABEL_SLACK)
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -134,12 +141,6 @@ STOP_NOTE = ("Прошлый запуск оборван CEO — проверь 
 # xhigh): модель и усилие теперь ВСЕГДА явно в команде запуска, не полагаемся на умолчание CLI.
 # В-153 (02.10): все роли — Sonnet 5.5.
 CLAUDE_MODEL = "claude-sonnet-5-5"
-# Усилие ролей (слово владельца 14.10): Судья — Opus 5.5 high, Инженер — Sonnet 5.5 xhigh, Исследователь — Sonnet 5.5 high.
-# Для Судьи и Инженера усилие ЖЁСТКОЕ: поле `effort:` тикета их не меняет (раньше оно перекрывало усилие всех ролей тикета,
-# и `effort: medium` молча понижал Судью — замер docs/bench/2026-10-14.md). Для Исследователя поле по-прежнему действует
-# (`tickets.py new --effort`), см. effort_for().
-ROLE_EFFORT = {"judge": "high", "engineer": "xhigh", "researcher": "high"}
-FIXED_EFFORT_ROLES = ("judge", "engineer")  # усилие этих ролей не зависит от поля `effort:` тикета
 
 
 # В-153 уточнение (02.10, v1.6.1): на Sonnet 5.5 — только те, кого рационально; Судья (проверяет всех)
@@ -178,27 +179,6 @@ CLAUDE_HAIKU_MODEL = "claude-haiku-5-5"
 # `usage.iterations` (см. _context_tokens_last)
 CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
 
-# v2 (02.10): промпт без призыва @-упоминать роли — будит только явный `--next`; читать шапку, описание и
-# последние записи лога (старое — в archive/<ID>-log.md); никаких фоновых помощников/задач внутри сессии.
-PROMPT_TEMPLATE = (
-    "Ты — {role} команды. Устав: .claude/roles/{role}.md, блокнот: .claude/roles/notes/{role}.md. "
-    "Задача: .claude/tickets/{tid}.md — прочитай шапку, описание и последние записи «## Лог» (старые записи "
-    "лежат в .claude/tickets/archive/{tid}-log.md — grep только при необходимости). Лимит этого запуска — "
-    "{timeout_min} мин. Не запускай в сессии фоновых помощников и фоновых задач; долгая работа — фоновый процесс "
-    "на машине (systemd-run) + status: waiting + wait_for (`{tickets_cli} wait {tid} "
-    "host:<ssh-алиас>:<путь к файлу итога задания> --by ЧЧ:ММ` (срок обязателен, GMT+4); формы: host:<ssh-алиас>:<путь | unit:имя>, file:<путь>, ticket:<ID>), и выйди, "
-    "не жди в сессии. Трать минимум: "
-    "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
-    "результатом. Сделай следующий шаг и сдай итог командой "
-    "`{tickets_cli} result {tid} <{verbs}> --why \"что сделал, что дальше\"` (--why — не длиннее 200 знаков) "
-    "ДО истечения лимита (доказательство: {proofs}; неполная команда — отказ с подсказкой): итог обязателен, "
-    "частичный прогресс не провал. "
-    "Кого будить дальше и status/wait_for ставит таблица маршрутов — --next и шапку руками не правь; "
-    "blocked (задача встала) и ask-owner (развилка, вопрос) уходят Судье; владельцу вопрос о содержании "
-    "исследования (какие гипотезы, гиперпараметры, метрики, что хотим увидеть) переадресует Судья; CEO не будят. "
-    "`{tickets_cli} comment {tid} --author {role} --text \"...\"` — только промежуточная заметка без смены "
-    "хода. @упоминания в тексте никого не будят."
-)
 
 RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, out_fh, err_fh, reason}
 # popen=None у записей, восстановленных из state.json["active_runs"] после перезапуска диспетчера
@@ -480,80 +460,22 @@ def _popen(cmd, **kwargs):
     return subprocess.Popen(cmd, **kwargs)
 
 
-def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
-    """`mcpServers` из json-файла (`~/.claude.json`, `.mcp.json`); с `project_key` — ещё и записи проекта
-    (`projects[<путь>].mcpServers`, они перекрывают пользовательские). Нет файла/битый json — пусто."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    out = dict(data.get("mcpServers") or {}) if isinstance(data, dict) else {}
-    if project_key and isinstance(data, dict):
-        projects = data.get("projects") or {}
-        for k, v in projects.items():
-            if isinstance(v, dict) and os.path.normcase(os.path.normpath(k)) == os.path.normcase(os.path.normpath(project_key)):
-                out.update(v.get("mcpServers") or {})
-    return out
 
 
-def role_mcp_args(run_stem: str) -> list[str]:
-    """TK-171: MCP-серверы роли — `role_mcp` из `.claude/rpv.json`. Нет ключа/`all` — флагов нет, роль видит всё, что видит обычный
-    `claude` (поведение до 1.8.26); `none` — `--strict-mcp-config` без конфига, ни одного сервера (TK-140: свой
-    Playwright на каждый запуск ≈ 600 МБ); список имён — временный json только с этими серверами
-    (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
-    `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
-    mode = P.setting("role_mcp", "all")
-    word = mode.strip().lower() if isinstance(mode, str) else ""
-    if word in ("all", "none"):
-        return [] if word == "all" else ["--strict-mcp-config"]
-    names = [str(n).strip() for n in (mode if isinstance(mode, list) else str(mode).split(",")) if str(n).strip()]
-    servers = _read_mcp_servers(Path.home() / ".claude.json", str(CFG.PROJECT_ROOT))
-    servers.update(_read_mcp_servers(CFG.PROJECT_ROOT / ".mcp.json"))
-    picked = {n: servers[n] for n in names if n in servers}
-    for n in names:
-        if n not in picked:
-            print(f"[dispatch] rpv.json role_mcp: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
-                  file=sys.stderr, flush=True)
-    cfg = CFG.RUNS_DIR / f"{run_stem}.mcp.json"
-    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=2), encoding="utf-8")
-    return ["--strict-mcp-config", "--mcp-config", str(cfg)]
 
 
-def plugin_dir_args() -> list[str]:
-    """CP11: `RPV_PLUGIN_DIR` — роли идут с плагином из этой папки (`claude --plugin-dir`, перекрывает установленный
-    плагин того же имени). Нужна проверке рабочей копии на чистом проекте (`tools/e2e_clean_project.py`); не задана —
-    флага нет, роли видят установленный плагин."""
-    d = (P.env("PLUGIN_DIR", "") or "").strip()
-    return ["--plugin-dir", d] if d else []
 
 
-def effort_for(role: str, tkt=None) -> str:
-    """Усилие запуска. Судья и Инженер — всегда ROLE_EFFORT (поле `effort:` тикета для них не действует: владелец 14.10).
-    Остальные роли — поле `effort:` тикета, иначе умолчание роли (high)."""
-    if role in FIXED_EFFORT_ROLES:
-        return ROLE_EFFORT[role]
-    if tkt is not None and getattr(tkt, "effort", ""):
-        return tkt.effort
-    return ROLE_EFFORT.get(role, "high")
 
 
-def _py() -> str:
-    """Интерпретатор для команд, которые диспетчер выдаёт ролям: на Mac/Linux слова `python` может не быть (TK-110 В-1); есть в PATH — прежнее `python` (кавычки вокруг пути ломают PowerShell)."""
-    return "python " if shutil.which("python") else shlex.quote(Path(sys.executable).as_posix()) + " "
 
 
-def tickets_cli() -> str:
-    """Команда tickets.py из папки плагина: проект роль берёт из RPV_PROJECT (его ставит launch_run) и своего cwd."""
-    return _py() + shlex.quote((CODE_DIR / "tickets.py").as_posix())
+
+
 
 
 def build_prompt(role: str, tid: str, extra_note: str = None) -> str:
-    prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(RUN_TIMEOUT // 60),
-                                    tickets_cli=tickets_cli(), verbs="|".join(ROUTES.verbs_for(role)),
-                                    proofs=ROUTES.proofs_for(role))
-    if extra_note:
-        prompt += " " + extra_note
-    return prompt
+    return RA.build_prompt(role, tid, RUN_TIMEOUT, extra_note)
 
 
 def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: int = 0,
@@ -880,30 +802,14 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
 
 # --- лимит сессии (TK-070 п.2): ответ 429 «You've hit your session limit · resets 5am (Asia/Tbilisi)» — не холостой ход ---
 
-LIMIT_LABEL_SLACK = timedelta(minutes=2)
 
 
-def _limit_hit(result: dict) -> bool:
-    text = str((result or {}).get("result") or "")
-    return (result or {}).get("api_error_status") == 429 or "hit your session limit" in text
 
 
-API_PAUSE = timedelta(minutes=5)  # ошибка API (обрыв сети, 5xx): запуски на паузе, по образцу лимита сессии
-API_AUTH_PAUSE = timedelta(minutes=30)  # вход истёк: повтор бессмыслен, пока CEO не войдёт заново
-MAX_API_ERRORS = 3  # подряд ошибок API у (задача, роль) → blocked с настоящей причиной
 
 
-def _api_error(result: dict) -> bool:
-    """Запуск оборвала ошибка API (обрыв ECONNRESET, 5xx, вход истёк), кроме 429 — это лимит (`_limit_hit`)."""
-    r = result or {}
-    if _limit_hit(r):
-        return False
-    return r.get("terminal_reason") == "api_error" or (bool(r.get("is_error")) and r.get("api_error_status") is not None)
 
 
-def _auth_error(result: dict) -> bool:
-    r = result or {}
-    return r.get("api_error_status") == 401 or "Failed to authenticate" in str(r.get("result") or "")
 
 
 def _handle_api_error(tid: str, info: dict, state: dict, now, result: dict) -> None:
@@ -933,36 +839,8 @@ def _handle_api_error(tid: str, info: dict, state: dict, now, result: dict) -> N
     save_state(state)
 
 
-def _limit_reset_at(result: dict, now, ref=None) -> datetime:
-    """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится).
-    ref — момент ответа (конец запуска; по умолчанию now): метка раньше него — завтра, но метка в пределах
-    LIMIT_LABEL_SLACK до ответа (минутное округление) — уже прошла: вернём момент <= now, паузы не будет."""
-    m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)(?:\s*\(([^)]+)\))?", str((result or {}).get("result") or ""), re.I)
-    if not m:
-        return now + timedelta(hours=1)
-    hour, minute = int(m.group(1)) % 12, int(m.group(2) or 0)
-    if m.group(3).lower() == "pm":
-        hour += 12
-    try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo(m.group(4)) if m.group(4) else now.tzinfo
-    except Exception:
-        tz = now.tzinfo
-    local = (ref or now).astimezone(tz)
-    at = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if at <= local - LIMIT_LABEL_SLACK:
-        at += timedelta(days=1)
-    return at + timedelta(minutes=1)
 
 
-def _limit_paused(state: dict, now) -> bool:
-    until = state.get("limit_pause_until")
-    if not until:
-        return False
-    try:
-        return now < T.parse_dt(until)
-    except ValueError:
-        return False
 
 
 def _last_run_was_limit(tid: str) -> bool:
