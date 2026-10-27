@@ -8,13 +8,8 @@ import routes as routes_mod
 import ticket as T
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="tickets.py")
-    p.add_argument("--project", default=None,
-                   help="корень проекта (иначе RPV_PROJECT, CLAUDE_PROJECT_DIR, ближайший каталог вверх с .claude/roles); "
-                        "перед подкомандой")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
+def _add_ticket_parsers(sub) -> None:
+    """Заведение тикета, запись в лог, приёмка."""
     p_new = sub.add_parser("new")
     p_new.add_argument("--owner", required=True, choices=["researcher", "engineer", "judge"])
     p_new.add_argument("--title", required=True)
@@ -56,6 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_accept.add_argument("--tail", default=None, help="хвосты: - (нет) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_accept.add_argument("--live", default=None, help="договор с [вживую]: файл живой проверки (что увидит владелец)")
 
+
+def _add_result_parser(sub) -> None:
+    """Итог шага роли."""
     p_result = sub.add_parser("result", help="сдать шаг: итог из списка + --why + доказательство; кого будить — таблица маршрутов")
     p_result.add_argument("id")
     p_result.add_argument("result", help="done | pr | accept | return | blocked | ask-owner | wait | continue")
@@ -78,6 +76,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_result.add_argument("--live", default=None,
                           help="accept: договор с [вживую] — файл живой проверки на настоящих данных (что увидит владелец)")
 
+
+def _add_control_parsers(sub) -> None:
+    """Ход тикета (start, wait, due, stop), согласия владельца, настройки, входящие CEO, статус."""
     p_start = sub.add_parser("start")
     p_start.add_argument("id")
 
@@ -123,4 +124,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_inbox.add_argument("--peek", action="store_true", help="только показать, не считать прочитанным")
 
     sub.add_parser("status")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="tickets.py")
+    p.add_argument("--project", default=None,
+                   help="корень проекта (иначе RPV_PROJECT, CLAUDE_PROJECT_DIR, ближайший каталог вверх с .claude/roles); "
+                        "перед подкомандой")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    _add_ticket_parsers(sub)
+    _add_result_parser(sub)
+    _add_control_parsers(sub)
     return p
