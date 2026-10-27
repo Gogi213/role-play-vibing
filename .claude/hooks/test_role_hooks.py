@@ -335,7 +335,15 @@ class Prompts(unittest.TestCase):
         self.assertIsNotNone(rm.context_advice(big, state))
 
     def test_context_tokens_single_line_transcript(self):
-        self.assertEqual(rm.context_tokens(self.transcript(1000)), 1010)
+        self.assertEqual(rm.context_tokens(self.transcript(1000)), 1001)  # вход + кэш; вывод (9) — не контекст, как у диспетчера (TK-010)
+
+    def test_context_tokens_skips_sidechain(self):
+        path = os.path.join(TMP, "tr-side.jsonl")
+        usage = lambda n: {"input_tokens": n, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"message": {"usage": usage(300)}}) + chr(10))
+            fh.write(json.dumps({"isSidechain": True, "message": {"usage": usage(9000)}}) + chr(10))
+        self.assertEqual(rm.context_tokens(path), 300)
 
     def test_no_deck_alert_and_no_reminders(self):
         for name in ("deck_alert", "on_prompt", "consolidate_due", "CONSOLIDATE_TEXT", "on_skill"):

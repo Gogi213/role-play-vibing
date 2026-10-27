@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
+import transcript  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import blind  # noqa: E402
 import downtime  # noqa: E402
@@ -1082,10 +1083,7 @@ def _resume_store(state: dict, tid: str, role: str) -> dict:
     return state.setdefault("ticket_sessions", {}).setdefault(f"{tid}::{role}", {})
 
 
-def _tokens_of(d: dict) -> int:
-    d = d or {}
-    return (int(d.get("input_tokens") or 0) + int(d.get("cache_read_input_tokens") or 0) +
-            int(d.get("cache_creation_input_tokens") or 0))
+_tokens_of = transcript.context_of
 
 
 def _context_tokens_sum(usage: dict) -> int:
@@ -1096,34 +1094,8 @@ def _context_tokens_sum(usage: dict) -> int:
 
 def _transcript_last_turn_tokens(session_id) -> int:
     """Контекст ПОСЛЕДНЕГО хода сессии по её транскрипту (usage последнего ответа модели); 0 — транскрипта нет."""
-    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
-        return 0
-    try:
-        path = next(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
-        if path is None:
-            return 0
-        with open(path, "rb") as fh:
-            fh.seek(0, 2)
-            start = max(0, fh.tell() - 600_000)
-            fh.seek(start)
-            lines = fh.read().decode("utf-8", "replace").splitlines()
-        if start:
-            lines = lines[1:]  # первая строка хвоста может быть оборвана
-        for line in reversed(lines):
-            if '"usage"' not in line:
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if row.get("isSidechain"):
-                continue
-            n = _tokens_of((row.get("message") or {}).get("usage"))
-            if n:
-                return n
-    except Exception:
-        pass
-    return 0
+    path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
+    return transcript.last_turn_tokens(path) if path else 0
 
 
 def _context_tokens_last(result: dict) -> int:
@@ -1771,10 +1743,8 @@ def _transcript_usage_since(session_id, started) -> dict:
     """Токены запуска по транскрипту сессии (TK-055): сумма usage ответов модели с отметкой >= started (ISO или
     datetime), по одному на message.id (потоковые дубли — последний). Для запусков без JSON (таймаут/убит): {} —
     сессии/транскрипта нет."""
-    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
-        return {}
     try:
-        path = next(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"), None)
+        path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
         if path is None:
             return {}
         t0 = started if isinstance(started, datetime) else datetime.fromisoformat(str(started))
@@ -1883,7 +1853,8 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
     store = _resume_store(state, tid, role)
     if result.get("session_id"):
         store["session_id"] = result["session_id"]
-    elif timed_out and info.get("session_id") and not store.get("session_id") and             next(CLAUDE_PROJECTS_DIR.glob(f"*/{info['session_id']}.jsonl"), None) is not None:
+    elif (timed_out and info.get("session_id") and not store.get("session_id")
+          and transcript.find(CLAUDE_PROJECTS_DIR, info["session_id"]) is not None):
         store["session_id"] = info["session_id"]  # убитая новая сессия: транскрипт есть — повтор продолжит её, не с нуля
 
     path = TICKETS_DIR / f"{tid}.md"
