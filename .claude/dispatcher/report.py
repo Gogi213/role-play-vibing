@@ -163,13 +163,6 @@ def _facts(groups: list) -> str:
     return "\n".join(out)
 
 
-def _agent_def(name: str) -> dict:
-    """agents/<name>.md → определение для `claude --agents` (как tools/helper_eval.py): модель и усилие — из фронтматтера."""
-    meta, prompt = HA.agent_meta(AGENTS_DIR / f"{name}.md")
-    return {"description": meta.get("description", name), "prompt": prompt,
-            "model": meta["model"], "effort": meta["effort"]}
-
-
 def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
     """Ответ `claude -p --agent reporter` (весь JSON `--output-format json`: result, total_cost_usd) или None. Запуск из
     временного каталога вне проекта и без RPV_* в окружении (как haiku_aux): ни CLAUDE.md, ни хуков, ни инструментов."""
@@ -177,13 +170,11 @@ def ask_reporter(prompt: str, runner=hide.run, claude: str | None = None):
     if not claude:
         return None
     try:
-        agent = _agent_def("reporter")
+        agent = HA.agent_def(AGENTS_DIR / "reporter.md")
         with tempfile.TemporaryDirectory() as tmp:
             defs = Path(tmp) / "agents.json"
             defs.write_text(json.dumps({"reporter": agent}, ensure_ascii=False), encoding="utf-8")
-            cmd = [claude, "-p", "--agents", str(defs), "--agent", "reporter", "--model", agent["model"], "--effort",
-                   agent["effort"], "--output-format", "json", "--no-session-persistence", "--tools", "",
-                   "--max-budget-usd", str(BUDGET_USD)]
+            cmd = HA.agent_cmd(claude, defs, "reporter", agent["model"], agent["effort"], BUDGET_USD)
             r = HA.run_claude(cmd, prompt, CLAUDE_TIMEOUT_S, cwd=tmp, runner=runner)
         out = json.loads((r.stdout or b"").decode("utf-8", "replace"))
     except (OSError, KeyError, ValueError, subprocess.SubprocessError):

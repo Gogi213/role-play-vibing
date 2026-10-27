@@ -98,13 +98,9 @@ class UsageKeys(unittest.TestCase):
 
     def test_dispatch_reads_through_it(self):
         self.write(_row(100, out=7), _row(5000, out=1, side=True))
-        old, D.CLAUDE_PROJECTS_DIR = D.CLAUDE_PROJECTS_DIR, self.dir
-        try:
-            self.assertEqual(D._transcript_last_turn_tokens("sess-1"), 100)
-            self.assertEqual(D._transcript_last_turn_tokens("../sess-1"), 0)
-            self.assertEqual(D._transcript_last_turn_tokens("nope"), 0)
-        finally:
-            D.CLAUDE_PROJECTS_DIR = old
+        self.assertEqual(RUNLOG.transcript_last_turn_tokens("sess-1", self.dir), 100)
+        self.assertEqual(RUNLOG.transcript_last_turn_tokens("../sess-1", self.dir), 0)
+        self.assertEqual(RUNLOG.transcript_last_turn_tokens("nope", self.dir), 0)
 
     def test_broken_rows_are_skipped(self):
         self.write(_row(100), '{"usage": [', '[1, 2, "usage"]', '{"message": "usage"}')

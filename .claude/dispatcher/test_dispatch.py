@@ -4365,15 +4365,10 @@ class TokenAccountingTest(unittest.TestCase):
             {"timestamp": "2026-10-05T12:01:00Z", "message": {"id": "m2", "usage": {"input_tokens": 2, "output_tokens": 1}}},
         ]
         (d / "sess-1.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
-        orig = D.CLAUDE_PROJECTS_DIR
-        D.CLAUDE_PROJECTS_DIR = d.parent
-        try:
-            u = D._transcript_usage_since("sess-1", datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc))
-            self.assertEqual(u, {"input_tokens": 3, "cache_read_input_tokens": 700,
-                                 "cache_creation_input_tokens": 30, "output_tokens": 10})
-            self.assertEqual(D._transcript_usage_since("nope", "2026-10-05T12:00:00+00:00"), {})
-        finally:
-            D.CLAUDE_PROJECTS_DIR = orig
+        u = RUNLOG.transcript_usage_since("sess-1", datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc), d.parent)
+        self.assertEqual(u, {"input_tokens": 3, "cache_read_input_tokens": 700,
+                             "cache_creation_input_tokens": 30, "output_tokens": 10})
+        self.assertEqual(RUNLOG.transcript_usage_since("nope", "2026-10-05T12:00:00+00:00", d.parent), {})
 
     def test_usage_parse_old_and_new_lines(self):
         import usage as U

@@ -242,16 +242,8 @@ import runlog as RL  # noqa: E402
 from runlog import read_run_result as _read_run_result  # noqa: E402
 
 
-def _transcript_last_turn_tokens(session_id) -> int:
-    return RL.transcript_last_turn_tokens(session_id, CLAUDE_PROJECTS_DIR)
-
-
 def _context_tokens_last(result: dict) -> int:
     return RL.context_tokens_last(result, CLAUDE_PROJECTS_DIR)
-
-
-def _transcript_usage_since(session_id, started) -> dict:
-    return RL.transcript_usage_since(session_id, started, CLAUDE_PROJECTS_DIR)
 
 
 def _log_run_summary(*args, **kwargs) -> None:
@@ -621,8 +613,7 @@ LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее ча�
 STALL_ALARM_MIN = 15.0  # CP5: столько минут подряд стоит готовая работа — тревога
 # --- побочная работа тика — alarms.py; здесь обёртки подставляют _popen и append_ceo_inbox ----------------------
 
-from alarms import STALLED, _stall_title, _guarded  # noqa: E402,F401
-from alarms import owner_questions as _owner_questions  # noqa: E402,F401
+from alarms import STALLED, _stall_title, _guarded, owner_questions as _owner_questions  # noqa: E402,F401
 
 
 def _stall_alarm(state: dict, now, stalled: list) -> None:
