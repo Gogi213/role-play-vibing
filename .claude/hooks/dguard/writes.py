@@ -119,10 +119,8 @@ def over(t, vars_, ctx):
     return ((Over(t), ctx.copy()),)
 
 
-def cp_scan(args, ctx, vars_, move=False, xargs=False):
-    """`cp`/`mv`: цель — существующий файл (или `каталог/имя` существующего каталога); `-n`/`--no-clobber` — не трогает.
-    `mv` (`move=True`) вдобавок УДАЛЯЕТ источники: каждый источник проверяется как цель удаления (`mv защищённое ./trash`
-    с последующим `rm -rf ./trash` — отказ на первом шаге); источники из stdin `xargs` не проверить — отказ."""
+def cp_args(args):
+    """Слова `cp`/`mv`: (позиционные, значение `-t`/`--target-directory` или None, `-n`); None — `--help`/`--version`."""
     pos = []
     dest_opt = None
     noclobber = False
@@ -135,7 +133,7 @@ def cp_scan(args, ctx, vars_, move=False, xargs=False):
             options = False
         elif options and a.startswith("--"):
             if a in ("--help", "--version"):
-                return
+                return None
             if a == "--no-clobber":
                 noclobber = True
             elif a == "--target-directory" and k < len(args):
@@ -151,6 +149,17 @@ def cp_scan(args, ctx, vars_, move=False, xargs=False):
                 k += 1
         else:
             pos.append(a)
+    return pos, dest_opt, noclobber
+
+
+def cp_scan(args, ctx, vars_, move=False, xargs=False):
+    """`cp`/`mv`: цель — существующий файл (или `каталог/имя` существующего каталога); `-n`/`--no-clobber` — не трогает.
+    `mv` (`move=True`) вдобавок УДАЛЯЕТ источники: каждый источник проверяется как цель удаления (`mv защищённое ./trash
+    с последующим `rm -rf ./trash` — отказ на первом шаге); источники из stdin `xargs` не проверить — отказ."""
+    parsed = cp_args(args)
+    if parsed is None:
+        return
+    pos, dest_opt, noclobber = parsed
     if dest_opt is not None:
         dest, srcs = dest_opt, pos
     elif len(pos) >= 2:

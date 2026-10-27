@@ -65,15 +65,8 @@ def const_str(node, env):
     return None
 
 
-def python_scan(code, ctx, depth):
-    """Удаления в коде Python: вызовы shutil.rmtree/os.remove/os.unlink/os.rmdir/Path.unlink/.rmdir() (не слова)."""
-    code = textwrap.dedent(code)
-    try:
-        tree = ast.parse(code)
-    except (SyntaxError, ValueError):
-        if PY_CALL_RE.search(code):
-            yield (UNKNOWN_TARGET, ctx.copy())
-        return
+def python_imports(tree):
+    """Имена модуля `os` и функции, ввезённые `from os/shutil import …` (rmtree, remove, …)."""
     os_names = {"os"}
     funcs = set()
     for node in ast.walk(tree):
@@ -85,16 +78,39 @@ def python_scan(code, ctx, depth):
             for a in node.names:
                 if a.name == "rmtree" or (node.module == "os" and a.name in DEL_OS):
                     funcs.add(a.asname or a.name)
+    return os_names, funcs
+
+
+def call_arg0(call):
+    if call.args:
+        return call.args[0]
+    for kw in call.keywords:
+        if kw.arg in ("path", "name", "dir"):
+            return kw.value
+    return None
+
+
+def attr_call_target(node, on_os):
+    """Цель вызова `x.attr(...)`: узел-цель (или None), если это удаление, иначе False."""
+    attr = node.func.attr
+    if attr == "rmtree" or (attr in DEL_OS and on_os):
+        return call_arg0(node)
+    if attr in ("unlink", "rmdir"):
+        return call_arg0(node) if on_os else node.func.value
+    return False
+
+
+def python_scan(code, ctx, depth):
+    """Удаления в коде Python: вызовы shutil.rmtree/os.remove/os.unlink/os.rmdir/Path.unlink/.rmdir() (не слова)."""
+    code = textwrap.dedent(code)
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        if PY_CALL_RE.search(code):
+            yield (UNKNOWN_TARGET, ctx.copy())
+        return
+    os_names, funcs = python_imports(tree)
     env = python_consts(tree)
-
-    def arg0(call):
-        if call.args:
-            return call.args[0]
-        for kw in call.keywords:
-            if kw.arg in ("path", "name", "dir"):
-                return kw.value
-        return None
-
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -102,30 +118,32 @@ def python_scan(code, ctx, depth):
         target = False   # False — не удаление; иначе узел-цель (или None)
         if isinstance(f, ast.Attribute):
             on_os = isinstance(f.value, ast.Name) and f.value.id in os_names
-            if f.attr == "rmtree":
-                target = arg0(node)
-            elif f.attr in DEL_OS and on_os:
-                target = arg0(node)
-            elif f.attr in ("unlink", "rmdir"):
-                target = arg0(node) if on_os else f.value
-            elif f.attr in ("system", "popen") and on_os and node.args:
-                text = const_str(node.args[0], env)
-                if text is not None:
-                    yield from scan_text(text, ctx, depth=depth + 1)
-            elif f.attr in SUBPROC and isinstance(f.value, ast.Name) and f.value.id == "subprocess" and node.args:
-                a = node.args[0]
-                if isinstance(a, (ast.List, ast.Tuple)):
-                    words = [const_str(e, env) or "$?" for e in a.elts]
-                    yield from scan_one(Cmd(words), ctx, {}, (), depth + 1)
-                else:
-                    s = const_str(a, env)
-                    if s is not None:
-                        yield from scan_text(s, ctx, depth=depth + 1)
+            target = attr_call_target(node, on_os)
+            if target is False:
+                yield from python_run_scan(node, on_os, env, ctx, depth)
         elif isinstance(f, ast.Name) and f.id in funcs:
-            target = arg0(node)
+            target = call_arg0(node)
         if target is not False:
             v = const_str(target, env) if target is not None else None
             yield (v if v is not None else UNKNOWN_TARGET, ctx.copy())
+
+
+def python_run_scan(node, on_os, env, ctx, depth):
+    """`os.system/os.popen(строка)` и `subprocess.*(команда)`: вложенная команда разбирается как оболочечная."""
+    attr = node.func.attr
+    if attr in ("system", "popen") and on_os and node.args:
+        text = const_str(node.args[0], env)
+        if text is not None:
+            yield from scan_text(text, ctx, depth=depth + 1)
+    elif attr in SUBPROC and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess" and node.args:
+        a = node.args[0]
+        if isinstance(a, (ast.List, ast.Tuple)):
+            words = [const_str(e, env) or "$?" for e in a.elts]
+            yield from scan_one(Cmd(words), ctx, {}, (), depth + 1)
+        else:
+            s = const_str(a, env)
+            if s is not None:
+                yield from scan_text(s, ctx, depth=depth + 1)
 
 
 def find_scan(args, ctx, vars_, depth):
@@ -221,33 +239,31 @@ def record_var(vars_, word, depth):
         vars_[k] = expand_vars(v, vars_)
 
 
-def scan_one(cmd, ctx, vars_, stdin, depth):
-    """Удаления одной простой команды: (цель, контекст) по каждой."""
-    words = list(cmd.words)
-    for t in cmd.overwrites:                          # `> файл` усекает файл — как удаление
-        yield from over(t, vars_, ctx)
-    sin = list(cmd.heredocs) + list(stdin) + pipe_src(cmd)
-    if not words:
-        return
-    sin = [expand_vars(x, vars_) for x in sin]
-    if len(words) == 3 and re.fullmatch(r"\$\w+", words[0]) and words[1] in ("=", "+="):
-        vars_[words[0][1:]] = words[2]                # PowerShell: `$script = @'...'@` — строка, которую потом отдадут ssh
-        return
-    if len(words) > 3 and re.fullmatch(r"\$\w+", words[0]) and words[1] in ("=", "+="):
-        words = words[2:]                             # PowerShell: `$r = Invoke-RestMethod …` — разбирается команда справа
+def strip_assignment(words, vars_, depth):
+    """Слова команды без присваиваний (`$x = …`, `NAME=v`); None — команды нет, переменные записаны."""
+    if len(words) >= 3 and re.fullmatch(r"\$\w+", words[0]) and words[1] in ("=", "+="):
+        if len(words) == 3:
+            vars_[words[0][1:]] = words[2]            # PowerShell: `$script = @'...'@` — строка, которую потом отдадут ssh
+            return None
+        return words[2:]                              # PowerShell: `$r = Invoke-RestMethod …` — разбирается команда справа
     if len(words) == 1 and re.match(r"^\$\w+=", words[0]):    # PowerShell: `$out="data\dashboard"` (без пробелов)
         name_, _, value_ = words[0].partition("=")
         vars_[name_[1:]] = expand_vars(value_, vars_)
-        return
+        return None
     if all(ASSIGN.match(w) for w in words):          # `NAME=value` без команды — запомнить переменные
         for w in words:
             record_var(vars_, w, depth)
-        return
+        return None
+    return words
+
+
+def command_start(words, vars_):
+    """Индекс слова-команды после присваиваний, служебных слов и обёрток и признак xargs; None — команды нет."""
     xargs = False
     i = 0
     for _ in range(40):
         if i >= len(words):
-            return
+            return None
         w = words[i]
         if ASSIGN.match(w):
             i += 1
@@ -259,7 +275,7 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
         if name in WRAPPERS:
             j = skip_wrapper(name, words, i)
             if j is None:
-                return
+                return None
             xargs = xargs or name == "xargs"
             i = j
             continue
@@ -270,9 +286,24 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
             continue
         break
     else:
+        return None
+    return (i, xargs) if i < len(words) else None
+
+
+def scan_one(cmd, ctx, vars_, stdin, depth):
+    """Удаления одной простой команды: (цель, контекст) по каждой."""
+    words = list(cmd.words)
+    for t in cmd.overwrites:                          # `> файл` усекает файл — как удаление
+        yield from over(t, vars_, ctx)
+    sin = list(cmd.heredocs) + list(stdin) + pipe_src(cmd)
+    if not words:
         return
-    if i >= len(words):
+    sin = [expand_vars(x, vars_) for x in sin]
+    words = strip_assignment(words, vars_, depth)
+    start = command_start(words, vars_) if words else None
+    if start is None:
         return
+    i, xargs = start
     w = words[i]
     name = cmd_name(w)
     args = expand_args(words[i + 1:], vars_)
@@ -285,14 +316,26 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
                 record_var(vars_, a, depth)
         return
     if name in DEL_VERBS:
-        targets = del_targets(name, args, xargs, cmd.pipe_from is not None)
-        for t in targets or ():
+        for t in del_targets(name, args, xargs, cmd.pipe_from is not None) or ():
             yield (t, ctx.copy())
     elif PS_DOTNET_DELETE.match(w):
         yield (UNKNOWN_TARGET, ctx.copy())
     elif name == "find":
         yield from find_scan(args, ctx, vars_, depth)
-    elif name == "rsync":
+    elif name in WRITERS:
+        yield from writer_scan(name, args, ctx, vars_, xargs)
+    elif name == "git":
+        redirected = any(re.match(r"(?:GIT_DIR|GIT_WORK_TREE)=", x) for x in words[:i])
+        yield from git_scan(args, ctx, vars_, redirected)
+    elif name == "ssh":
+        yield from ssh_scan(args, ctx, vars_, sin, depth)
+    else:
+        yield from other_scan(w, name, args, ctx, vars_, sin, depth)
+
+
+def writer_scan(name, args, ctx, vars_, xargs):
+    """Команды, которые пишут в файл: cp/mv, rsync, tee, dd, truncate и их PowerShell-аналоги."""
+    if name == "rsync":
         yield from rsync_scan(args, ctx)
     elif name in ("cp", "mv"):
         yield from cp_scan(args, ctx, vars_, move=name == "mv", xargs=xargs)
@@ -308,66 +351,33 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
         yield from truncate_scan(args, ctx, vars_)
     elif name == "dd":
         yield from dd_scan(args, ctx, vars_)
-    elif name == "git":
-        redirected = any(re.match(r"(?:GIT_DIR|GIT_WORK_TREE)=", x) for x in words[:i])
-        yield from git_scan(args, ctx, vars_, redirected)
-    elif name == "rclone":
+
+
+WRITERS = frozenset({"rsync", "cp", "mv", "tee", "truncate", "dd", *PS_COPY_NAMES, *PS_RENAME_NAMES, *PS_WRITE_NAMES})
+
+
+def other_scan(w, name, args, ctx, vars_, sin, depth):
+    """Остальные команды: запускалки, интерпретаторы, смена каталога; неизвестная — `generic_scan`."""
+    if name == "rclone":
         if args and args[0] in ("delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup"):
             yield (f"<rclone {args[0]}>", ctx.copy())
-    elif name == "ssh":
-        yield from ssh_scan(args, ctx, vars_, sin, depth)
     elif name in RUNNERS:                            # `uv run python -c …`, `poetry run rm …`
-        for k, a in enumerate(args):
-            nm = cmd_name(a)
-            if (nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or nm in PUBLISH_SUBS
-                    or nm in HTTP_NAMES or PY_NAMES.match(nm)):
-                yield from scan_one(Cmd(args[k:]), ctx, vars_, sin, depth + 1)
-                break
+        yield from runner_scan(args, ctx, vars_, sin, depth)
     elif name in OTHER_INTERP:                       # perl/ruby/node/php: вызовы удаления в коде — цель не видна
         if any(OTHER_DEL_RE.search(t) for t in list(args) + list(sin)):
             yield (UNKNOWN_TARGET, ctx.copy())
     elif name == "robocopy":                         # /MIR и /PURGE удаляют лишнее в приёмнике (второй путь)
-        flags = [a.lower() for a in args if a.startswith("/")]
-        if "/mir" in flags or "/purge" in flags:
-            pos = [a for a in args if not a.startswith("/")]
-            yield (pos[1] if len(pos) > 1 else "<robocopy без цели>", ctx.copy())
+        yield from robocopy_scan(args, ctx)
     elif PY_NAMES.match(name):
-        code = None
-        k = 0
-        while k < len(args):
-            a = args[k]
-            if re.fullmatch(r"-[A-Za-z]*c", a) and k + 1 < len(args):
-                code = [args[k + 1]]
-                break
-            if a == "-":
-                code = sin
-                break
-            if a in ("-W", "-X"):
-                k += 2
-            elif a.startswith("-"):
-                k += 1
-            else:
-                break                                  # скрипт-файл или -m: тело не видно
-        else:
-            code = sin
-        pctx = ctx.copy()
-        pctx.via = "py-ast"
-        for text in code or ():
-            yield from python_scan(text, pctx, depth)
+        yield from python_cmd_scan(args, sin, ctx, depth)
     elif name in SHELLS or name == "eval" or name in ("invoke-expression", "iex"):
-        if name in SHELLS:
-            text, has_script = shell_code(args)
-            texts = [text] if text is not None else ([] if has_script else sin)
-        else:
-            texts = [" ".join(args)]
-        for text in texts:
-            yield from scan_text(text, ctx, (), depth + 1)
+        yield from shell_cmd_scan(name, args, sin, ctx, depth)
     elif name in PS_NAMES:
         text = ps_code(args)
         sctx = ctx.copy()
         sctx.via = "ps"
-        for t in ([text] if text is not None else []):
-            yield from scan_text(t, sctx, (), depth + 1)
+        if text is not None:
+            yield from scan_text(text, sctx, (), depth + 1)
     elif name == "cmd":
         for k, a in enumerate(args):
             if a.lower() in ("/c", "/k", "/r"):
@@ -380,6 +390,58 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
         ctx.cwd = None
     else:
         yield from generic_scan(w, name, args, ctx, vars_, sin, depth)
+
+
+def runner_scan(args, ctx, vars_, sin, depth):
+    for k, a in enumerate(args):
+        nm = cmd_name(a)
+        if (nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or nm in PUBLISH_SUBS
+                or nm in HTTP_NAMES or PY_NAMES.match(nm)):
+            yield from scan_one(Cmd(args[k:]), ctx, vars_, sin, depth + 1)
+            break
+
+
+def robocopy_scan(args, ctx):
+    flags = [a.lower() for a in args if a.startswith("/")]
+    if "/mir" in flags or "/purge" in flags:
+        pos = [a for a in args if not a.startswith("/")]
+        yield (pos[1] if len(pos) > 1 else "<robocopy без цели>", ctx.copy())
+
+
+def python_cmd_scan(args, sin, ctx, depth):
+    """`python -c "…"` / `python -` (код из stdin): код разбирается как Python, скрипт-файл и `-m` — тело не видно."""
+    code = None
+    k = 0
+    while k < len(args):
+        a = args[k]
+        if re.fullmatch(r"-[A-Za-z]*c", a) and k + 1 < len(args):
+            code = [args[k + 1]]
+            break
+        if a == "-":
+            code = sin
+            break
+        if a in ("-W", "-X"):
+            k += 2
+        elif a.startswith("-"):
+            k += 1
+        else:
+            break                                      # скрипт-файл или -m: тело не видно
+    else:
+        code = sin
+    pctx = ctx.copy()
+    pctx.via = "py-ast"
+    for text in code or ():
+        yield from python_scan(text, pctx, depth)
+
+
+def shell_cmd_scan(name, args, sin, ctx, depth):
+    if name in SHELLS:
+        text, has_script = shell_code(args)
+        texts = [text] if text is not None else ([] if has_script else sin)
+    else:
+        texts = [" ".join(args)]
+    for text in texts:
+        yield from scan_text(text, ctx, (), depth + 1)
 
 
 def generic_scan(w, name, args, ctx, vars_, sin, depth):

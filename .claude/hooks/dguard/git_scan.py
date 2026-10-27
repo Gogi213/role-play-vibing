@@ -67,24 +67,31 @@ def git_discard(sub, rest, ctx, repo):
     if sub == "stash":
         pos = [a for a in rest if not a.startswith("-")]
         return f"git stash {pos[0]}" if pos and pos[0] in ("clear", "drop") else None
-    if sub == "branch":
-        if "--force" in long_ or any(c for c in short if any(ch in c for ch in "DMCf")):
-            return "git branch -D/-M/-C/-f (удаление или перезапись ветки)"
-        return None
-    if sub == "restore":
-        staged = "--staged" in long_ or any("S" in c for c in short)
-        worktree = "--worktree" in long_ or any("W" in c for c in short)
-        return None if staged and not worktree else "git restore (затирает файлы рабочего дерева)"
-    if sub == "switch":
-        if "--discard-changes" in long_ or "--force" in long_ or any("f" in c for c in short):
-            return "git switch -f (затирает правки рабочего дерева)"
-        return None
-    # checkout
-    if "--" in rest:
-        return "git checkout -- <путь> (затирает файлы рабочего дерева)"
-    if long_ & {"--force", "--patch", "--ours", "--theirs", "--pathspec-from-file"} or any(
-            "f" in c or "p" in c for c in short):
-        return "git checkout -f/-p/--ours/--theirs (затирает файлы рабочего дерева)"
+    if sub == "checkout":
+        return checkout_discard(rest, short, long_, ctx, repo)
+    return {"branch": branch_discard, "restore": restore_discard, "switch": switch_discard}[sub](short, long_)
+
+
+def branch_discard(short, long_):
+    if "--force" in long_ or any(c for c in short if any(ch in c for ch in "DMCf")):
+        return "git branch -D/-M/-C/-f (удаление или перезапись ветки)"
+    return None
+
+
+def restore_discard(short, long_):
+    staged = "--staged" in long_ or any("S" in c for c in short)
+    worktree = "--worktree" in long_ or any("W" in c for c in short)
+    return None if staged and not worktree else "git restore (затирает файлы рабочего дерева)"
+
+
+def switch_discard(short, long_):
+    if "--discard-changes" in long_ or "--force" in long_ or any("f" in c for c in short):
+        return "git switch -f (затирает правки рабочего дерева)"
+    return None
+
+
+def checkout_pathspecs(rest):
+    """Позиционные слова `git checkout` без значений `-b/-B/--orphan/--conflict`."""
     pos = []
     k = 0
     while k < len(rest):
@@ -94,6 +101,16 @@ def git_discard(sub, rest, ctx, repo):
             k += 1                                       # значение: имя новой ветки
         elif not a.startswith("-"):
             pos.append(a)
+    return pos
+
+
+def checkout_discard(rest, short, long_, ctx, repo):
+    if "--" in rest:
+        return "git checkout -- <путь> (затирает файлы рабочего дерева)"
+    if long_ & {"--force", "--patch", "--ours", "--theirs", "--pathspec-from-file"} or any(
+            "f" in c or "p" in c for c in short):
+        return "git checkout -f/-p/--ours/--theirs (затирает файлы рабочего дерева)"
+    pos = checkout_pathspecs(rest)
     if len(pos) >= 2 or any(a == "." or any(ch in a for ch in "*?[") for a in pos):
         return "git checkout <ревизия> <путь>|. (затирает файлы рабочего дерева)"
     if len(pos) == 1 and not getattr(ctx, "remote", False):
@@ -225,8 +242,12 @@ def push_publication(rest, repo, ctx):
     return None
 
 
-def git_scan(args, ctx, vars_, redirected=False):
-    """`redirected` — GIT_DIR/GIT_WORK_TREE в окружении команды: каталог репозитория не равен рабочему."""
+def scratch_ok(exotic, repo, ctx):
+    return not exotic and scratch_repo_ok(repo, ctx)
+
+
+def git_options(args, vars_, redirected):
+    """Глобальные опции до подкоманды: (индекс подкоманды, последний `-C`, все `-C`, нестандартные каталоги репозитория)."""
     j = 0
     base = None
     bases = []
@@ -246,42 +267,31 @@ def git_scan(args, ctx, vars_, redirected=False):
             j += 1
         else:
             break
-    if j >= len(args):
-        return
-    sub, rest = args[j], args[j + 1:]
-    repo = None if exotic else ctx.cwd                    # каталог репозитория: cwd, сдвинутый цепочкой `-C`
-    for b in bases:                                       # абсолютный `-C` задаёт каталог и при неизвестном cwd
-        repo = None if exotic else join_cwd(repo, b, vars_)
-    if sub == "reset":
-        if "--hard" in rest and not (not exotic and scratch_repo_ok(repo, ctx)):
-            yield (Forbid("git reset --hard"), ctx.copy())
-        return
-    if sub == "push":
-        pos = [a for a in rest if not a.startswith("-")]
-        if any(a == "--force" or a.startswith("--force-with-lease")
-               or (a.startswith("-") and not a.startswith("--") and "f" in a[1:]) for a in rest):
-            yield (Forbid("git push --force"), ctx.copy())
-        elif any(a.startswith("+") for a in pos):
-            yield (Forbid("git push +ветка (принудительное обновление)"), ctx.copy())
-        elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
-              or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
-            label = "git push --delete/--mirror/:ветка (удаление веток на удалённом)"
-            names = None if any(a in ("--mirror", "--prune") for a in rest) else delete_branch_names(rest, pos)
-            yield (BranchDelete(label, names) if names else Forbid(label), ctx.copy())
-        elif label := push_publication(rest, repo, ctx):
-            yield (Publish(label), ctx.copy())
-        return
-    if sub in ("checkout", "switch", "restore", "branch", "stash"):
-        label = git_discard(sub, rest, ctx, repo)
-        if label and not (not exotic and scratch_repo_ok(repo, ctx)):
-            yield (Forbid(label), ctx.copy())
-        return
-    if sub != "clean":
-        return
+    return j, base, bases, exotic
+
+
+def push_scan(rest, repo, ctx):
+    pos = [a for a in rest if not a.startswith("-")]
+    if any(a == "--force" or a.startswith("--force-with-lease")
+           or (a.startswith("-") and not a.startswith("--") and "f" in a[1:]) for a in rest):
+        yield (Forbid("git push --force"), ctx.copy())
+    elif any(a.startswith("+") for a in pos):
+        yield (Forbid("git push +ветка (принудительное обновление)"), ctx.copy())
+    elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
+          or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
+        label = "git push --delete/--mirror/:ветка (удаление веток на удалённом)"
+        names = None if any(a in ("--mirror", "--prune") for a in rest) else delete_branch_names(rest, pos)
+        yield (BranchDelete(label, names) if names else Forbid(label), ctx.copy())
+    elif label := push_publication(rest, repo, ctx):
+        yield (Publish(label), ctx.copy())
+
+
+def clean_scan(rest, base, exotic, repo, ctx):
+    """`git clean`: с `-f` — запрет вне черновых копий; без `-f` — чистит указанные пути (или каталог `-C`)."""
     if any(a == "--dry-run" or (a.startswith("-") and not a.startswith("--") and "n" in a) for a in rest):
         return
     if any(a == "--force" or (a.startswith("-") and not a.startswith("--") and "f" in a[1:]) for a in rest):
-        if not (not exotic and scratch_repo_ok(repo, ctx)):
+        if not scratch_ok(exotic, repo, ctx):
             yield (Forbid("git clean -f"), ctx.copy())
         return
     after = rest[rest.index("--") + 1:] if "--" in rest else []
@@ -289,3 +299,25 @@ def git_scan(args, ctx, vars_, redirected=False):
     b = base or "."
     for sp in (specs or [None]):
         yield ((b if sp is None else posixpath.join(b, sp)), ctx.copy())
+
+
+def git_scan(args, ctx, vars_, redirected=False):
+    """`redirected` — GIT_DIR/GIT_WORK_TREE в окружении команды: каталог репозитория не равен рабочему."""
+    j, base, bases, exotic = git_options(args, vars_, redirected)
+    if j >= len(args):
+        return
+    sub, rest = args[j], args[j + 1:]
+    repo = None if exotic else ctx.cwd                    # каталог репозитория: cwd, сдвинутый цепочкой `-C`
+    for b in bases:                                       # абсолютный `-C` задаёт каталог и при неизвестном cwd
+        repo = None if exotic else join_cwd(repo, b, vars_)
+    if sub == "reset":
+        if "--hard" in rest and not scratch_ok(exotic, repo, ctx):
+            yield (Forbid("git reset --hard"), ctx.copy())
+    elif sub == "push":
+        yield from push_scan(rest, repo, ctx)
+    elif sub in ("checkout", "switch", "restore", "branch", "stash"):
+        label = git_discard(sub, rest, ctx, repo)
+        if label and not scratch_ok(exotic, repo, ctx):
+            yield (Forbid(label), ctx.copy())
+    elif sub == "clean":
+        yield from clean_scan(rest, base, exotic, repo, ctx)

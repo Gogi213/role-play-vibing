@@ -143,11 +143,7 @@ class _Lexer:
             elif c == "\\":
                 self.backslash()
             elif c == "'":
-                j = s.find("'", i + 1)
-                if j < 0:
-                    raise ParseError("'")
-                self.push(s[i + 1:j])
-                self.i = j + 1
+                self.single()
             elif c == '"':
                 self.double()
             elif c == "$" and s.startswith("$(", i):
@@ -156,50 +152,16 @@ class _Lexer:
                 self.push(s[i:j + 1])
                 self.i = j + 1
             elif c == "`":
-                if s.startswith("`\n", i):
-                    self.i += 2
-                    continue
-                j = s.find("`", i + 1)
-                if j < 0:
-                    self.push(c)
-                    self.i += 1
-                else:
-                    self.sub(s[i + 1:j])
-                    self.push(s[i:j + 1])
-                    self.i = j + 1
+                self.backtick()
             elif c == "@" and not self.inword and re.match(r"@(['\"])[ \t]*\n", s[i:i + 40]):
-                q = s[i + 1]
-                start = s.index("\n", i) + 1
-                end = s.find("\n" + q + "@", start - 1)
-                if end < 0:
-                    raise ParseError("here-string")
-                self.push(s[start:end])
-                self.i = end + 3
+                self.here_string()
             elif c == ";":
                 self.end_cmd(";")
                 self.i += 1
             elif c == "|":
-                if s.startswith("||", i):
-                    self.end_cmd("||")
-                    self.i += 2
-                elif s.startswith("|&", i):
-                    self.end_cmd("|")
-                    self.i += 2
-                else:
-                    self.end_cmd("|")
-                    self.i += 1
+                self.pipe()
             elif c == "&":
-                if s.startswith("&&", i):
-                    self.end_cmd("&&")
-                    self.i += 2
-                elif s.startswith("&>", i):
-                    self.end_word()
-                    append = s.startswith("&>>", i)
-                    self.i += 3 if append else 2
-                    self.skip = True if append else "out"
-                else:
-                    self.end_cmd("&")
-                    self.i += 1
+                self.amp()
             elif c in "<>":
                 self.redirect()
             elif c == "(" and self.inword and ARRAY_HEAD.fullmatch("".join(self.buf)):
@@ -214,6 +176,65 @@ class _Lexer:
                 self.i += 1
         self.end_cmd("")
         return self.cmds
+
+    def single(self):
+        s, i = self.s, self.i
+        j = s.find("'", i + 1)
+        if j < 0:
+            raise ParseError("'")
+        self.push(s[i + 1:j])
+        self.i = j + 1
+
+    def backtick(self):
+        s, i = self.s, self.i
+        if s.startswith("`\n", i):
+            self.i += 2
+            return
+        j = s.find("`", i + 1)
+        if j < 0:
+            self.push("`")
+            self.i += 1
+        else:
+            self.sub(s[i + 1:j])
+            self.push(s[i:j + 1])
+            self.i = j + 1
+
+    def here_string(self):
+        """PowerShell `@'…'@` / `@"…"@` — многострочная строка одним словом."""
+        s, i = self.s, self.i
+        q = s[i + 1]
+        start = s.index("\n", i) + 1
+        end = s.find("\n" + q + "@", start - 1)
+        if end < 0:
+            raise ParseError("here-string")
+        self.push(s[start:end])
+        self.i = end + 3
+
+    def pipe(self):
+        s, i = self.s, self.i
+        if s.startswith("||", i):
+            self.end_cmd("||")
+            self.i += 2
+        elif s.startswith("|&", i):
+            self.end_cmd("|")
+            self.i += 2
+        else:
+            self.end_cmd("|")
+            self.i += 1
+
+    def amp(self):
+        s, i = self.s, self.i
+        if s.startswith("&&", i):
+            self.end_cmd("&&")
+            self.i += 2
+        elif s.startswith("&>", i):
+            self.end_word()
+            append = s.startswith("&>>", i)
+            self.i += 3 if append else 2
+            self.skip = True if append else "out"
+        else:
+            self.end_cmd("&")
+            self.i += 1
 
     def backslash(self):
         s, i = self.s, self.i
