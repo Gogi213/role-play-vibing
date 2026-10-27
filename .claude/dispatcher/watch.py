@@ -29,11 +29,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import cfg as cfg_mod  # noqa: E402
+import rpv_config as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
-import dispatch as D  # noqa: E402 — переиспользуем append_ceo_inbox
-import config as CFG  # noqa: E402
+import signals as SIG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import waits as W  # noqa: E402 — ssh-проба и разбор условий ожидания
 import procs  # noqa: E402 — замок экземпляра
 import project as P  # noqa: E402
@@ -91,8 +91,8 @@ def check_blocked_and_needs_owner(now) -> list:
         except Exception as e:
             out.append(Finding("ticket-unreadable", path.stem, f"{path.stem}: не читается — {type(e).__name__}: {e}"))
             continue
-        if tkt.status in ("blocked", "needs_owner") and not D._awaits_judge(tkt, now):  # blocked исполнителя ждёт Судью, не CEO (TK-002)
-            age = D.blocked_age_text(tkt, now)
+        if tkt.status in ("blocked", "needs_owner") and not SIG._awaits_judge(tkt, now):  # blocked исполнителя ждёт Судью, не CEO (TK-002)
+            age = SIG.blocked_age_text(tkt, now)
             out.append(Finding(tkt.status, tkt.id, f"{tkt.id}: status={tkt.status}" + (f" — {tkt.status} {age}" if age else "")))
     return out
 
@@ -295,12 +295,12 @@ def _past_deadline(path, tkt, ws: dict, spec: str, now) -> bool:
     if by is None or now - by <= timedelta(minutes=BY_GRACE_MIN):
         return False
     parsed = T.parse_wait_for(spec)
-    if parsed and parsed[0] == "file" and D.check_wait_for(spec):  # файл лёг — будит диспетчер, срок ни при чём
+    if parsed and parsed[0] == "file" and W.check_wait_for(spec, W.project_where()):  # файл лёг — будит диспетчер, срок ни при чём
         return False
     _wake_owner_job(path, tkt, ws, spec, f"сторож: срок ожидания {by.astimezone():%d.%m %H:%M} прошёл (+{BY_GRACE_MIN} мин), цель `{spec}` не выполнена",
                     now, key="by_wakes")
     if T.wait_needs_by(spec):
-        D.record_job_outcome(tkt.id, spec, "overdue", now=now)  # CP6: задание не кончилось к сроку — в счёт ежедневного отчёта
+        W.record_job_outcome(tkt.id, spec, "overdue", now=now, where=W.project_where())  # CP6: задание не кончилось к сроку — в счёт ежедневного отчёта
     return True
 
 
@@ -399,7 +399,7 @@ def _triage_ci_run(path, tkt, parsed, ws: dict, now, run_probe) -> bool:
 def _triage_empty(path: Path, tkt, ws: dict, now, empty_seen: set) -> None:
     """waiting без условия и без next — ждать нечего, производителя нет: EMPTY_WAIT_STRIKES проверок подряд → владелец."""
     empty = ws.setdefault("empty_wait", {})
-    if (tkt.header.get("next") or "").strip() or tkt.id in D.load_state().get("active_runs", {}):
+    if (tkt.header.get("next") or "").strip() or tkt.id in CFG.load_state().get("active_runs", {}):
         empty.pop(tkt.id, None)  # next поставлен или роль по тикету сейчас работает (обычная приёмка: ci_watch снял условие, диспетчер запустил Судью) — производитель есть
         return
     empty_seen.add(tkt.id)
@@ -751,7 +751,7 @@ def notify_findings(findings: list, ws: dict, now) -> list:
         time_elapsed = last_ts is None or (now - T.parse_dt(last_ts)).total_seconds() >= (
             _repeat_hours(f.kind) * 3600)
         if time_elapsed:
-            D.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
+            SIG.append_ceo_inbox("*", f"watch-{f.kind}", f.message, now)
             notified[marker] = {"ts": T.now_iso(now)}
             posted.append(f)
     # снятые находки — забыть, чтобы будущее повторение не ждало старого окна дедупа

@@ -24,7 +24,7 @@ sys.path.insert(0, str(HERE))
 import registry as R  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 
 HOOKS = HERE.parent / "hooks"
 
@@ -161,7 +161,7 @@ class AllowTests(unittest.TestCase):
         self.decide()
 
         def consent():
-            code = ("import delete_guard as d, json, sys; d.configure(sys.argv[1]); print(json.dumps(d.publish_consent()))")
+            code = ("import json, sys; from dguard import config, policy; config.configure(sys.argv[1]); print(json.dumps(policy.publish_consent()))")
             env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_")}
             env.update(RPV_ROLE="engineer", RPV_TICKET=self.tid)
             r = subprocess.run([sys.executable, "-c", code, str(self.root)], cwd=HOOKS, env=env, capture_output=True, text=True)

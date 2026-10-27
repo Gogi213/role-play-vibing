@@ -20,9 +20,9 @@ os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import cfg  # noqa: E402
+import rpv_config as cfg  # noqa: E402
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import report as R  # noqa: E402
 import tickets as TK  # noqa: E402
 

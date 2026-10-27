@@ -454,8 +454,8 @@ class RoleInstructionsUseResult(unittest.TestCase):
     """Итог шага — только `tickets.py result`: ни одна инструкция роли не велит `comment` для итога (Stop-хук тоже)."""
 
     def test_no_instruction_sends_role_to_comment_for_result(self):
-        import delete_guard as dg
-        for text in (rm.SILENT_TEXT, dg.REASON_IRREVERSIBLE, dg.REASON_CEO_SIGNAL):
+        from dguard import messages as msg
+        for text in (rm.SILENT_TEXT, msg.REASON_IRREVERSIBLE, msg.REASON_CEO_SIGNAL):
             self.assertNotIn("tickets.py comment", text)
             self.assertIn("tickets.py result", text)
 

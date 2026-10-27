@@ -410,24 +410,17 @@ def grade(raw: str, tid: str, entries: list, until: datetime, shown: str = "") -
 
 
 def load_agent(name: str = "overseer") -> dict:
-    """agents/<name>.md → определение для `claude --agents` (как tools/helper_eval.py). Пустой `tools:` — без инструментов."""
+    """agents/<name>.md → определение для `claude --agents` (пустой `tools:` — без инструментов)."""
     try:
-        meta, prompt = HA.agent_meta(ROOT / "agents" / f"{name}.md")
+        return HA.agent_def(ROOT / "agents" / f"{name}.md", with_tools=True)
     except ValueError as e:
         raise SystemExit(str(e))
-    d = {"description": meta.get("description", name), "prompt": prompt,
-         "tools": [t.strip() for t in meta.get("tools", "").split(",") if t.strip()]}
-    for k in ("model", "effort"):
-        if meta.get(k):
-            d[k] = meta[k]
-    return d
 
 
 def call_overseer(prompt: str, agents_file: Path, workdir: Path, model: str, effort: str, per_call: float, timeout: int) -> dict:
     """Один вызов: `claude -p --agent overseer` без инструментов, без MCP, настроек пользователя и навыков — только устав и промпт."""
-    cmd = [claude_bin(), "-p", "--agents", str(agents_file), "--agent", "overseer", "--model", model, "--effort", effort,
-           "--output-format", "json", "--no-session-persistence", "--max-budget-usd", str(per_call),
-           "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "project"]
+    cmd = HA.agent_cmd(claude_bin(), agents_file, "overseer", model, effort, per_call,
+                       ("--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "project"))
     t0 = time.time()
     raw = ""
     try:

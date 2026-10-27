@@ -44,7 +44,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from datetime import datetime, timedelta
@@ -52,14 +51,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
-import cfg as cfg_mod  # noqa: E402
-import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import rpv_config as cfg_mod  # noqa: E402
+import signals as SIG  # noqa: E402
+import cost as COST  # noqa: E402
+import stop as STOP  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
+import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
@@ -119,8 +121,8 @@ def cmd_new(args) -> int:
 
     if args.executor == "haiku":
         # судья TK-002 п.5г: обход проверки Судьи запрещён — отказ до создания файла, не постфактум
-        if args.kind not in D.HAIKU_ALLOWED_KINDS:
-            print(f"--executor haiku требует --kind из {sorted(D.HAIKU_ALLOWED_KINDS)}", file=sys.stderr)
+        if args.kind not in SIG.HAIKU_ALLOWED_KINDS:
+            print(f"--executor haiku требует --kind из {sorted(SIG.HAIKU_ALLOWED_KINDS)}", file=sys.stderr)
             return 1
         if reviewer == "judge":
             print("--executor haiku нельзя вместе с --reviewer judge — числа/вердикты не на Haiku",
@@ -176,7 +178,7 @@ def cmd_comment(args) -> int:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
             T.write_header_updates(path, {"next": nxt}, stamp_updated=False)
             # №15 аудита: blocked + next: роль — запись без запуска; ход роли снимает blocked (иначе тикет висит с будильником)
-            if nxt in D.P.ROLES and T.read_ticket(path).status == "blocked":
+            if nxt in P.ROLES and T.read_ticket(path).status == "blocked":
                 T.write_header_updates(path, {"status": "in_progress"}, stamp_updated=False)
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
@@ -189,8 +191,8 @@ def cmd_comment(args) -> int:
 def _regression(tid: str, cmd: str) -> bool:
     """V2-3: приёмка Судьи — только при зелёных проверках всех исправленных ошибок (`errors.py`). True — отказ (причина уже
     в stderr, в тикет ничего не пишем). Нет реестра ошибок или исправленных в нём — ничего не запускается. Проверка, что «не
-    запустилась», — тоже отказ (не проверено), а повтор сверх потолка зовёт CEO (`D.append_ceo_inbox`)."""
-    err = errors_mod.gate(PROJECT_ROOT, tid, signal=D.append_ceo_inbox)
+    запустилась», — тоже отказ (не проверено), а повтор сверх потолка зовёт CEO (`SIG.append_ceo_inbox`)."""
+    err = errors_mod.gate(PROJECT_ROOT, tid, signal=SIG.append_ceo_inbox)
     if err:
         print(f"{cmd}: {err}", file=sys.stderr)
     return bool(err)
@@ -221,7 +223,7 @@ def _result_proof(args, role: str, tkt) -> str:
         head, _ = routes_mod.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
     if args.result == "done" and role == "ceo":
-        proof += f" ({D.NO_REVIEW_MARK})"
+        proof += f" ({SIG.NO_REVIEW_MARK})"
     return proof
 
 
@@ -267,7 +269,7 @@ def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_c
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
     if tail_ceo:
-        D.append_ceo_inbox(args.id, "хвост", tail_ceo)
+        SIG.append_ceo_inbox(args.id, "хвост", tail_ceo)
     upd = routes_mod.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                            owner_last=routes_mod.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
@@ -310,7 +312,7 @@ def cmd_result(args) -> int:
 def _caller_role() -> str:
     """Роль вызывающей сессии: `RPV_ROLE` запуска роли, а стёрта — по дереву процессов (`project.caller_role`); у CEO и
     владельца её нет."""
-    return D.P.caller_role(CFG.PROJECT_ROOT)
+    return P.caller_role(CFG.PROJECT_ROOT)
 
 
 def _decisions_ack(args) -> tuple[str, str]:
@@ -471,7 +473,7 @@ def cmd_accept(args) -> int:
         return 1
     import merge_rule
     import routes
-    slug = (getattr(args, "repo", None) or D.P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
+    slug = (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
@@ -490,7 +492,7 @@ def cmd_accept(args) -> int:
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:
-        D.append_ceo_inbox(args.id, "хвост", tail_ceo)
+        SIG.append_ceo_inbox(args.id, "хвост", tail_ceo)
     tkt = T.read_ticket(path)
     prs = {int(n) for n in re.findall(r"\d+", str(tkt.header.get("pr") or ""))} | {int(args.pr)}
     if (routes.last_owner_result(tkt) == "done" and prs <= merge_rule.landed_prs(tkt) | {int(args.pr)}
@@ -564,7 +566,7 @@ def cmd_wait(args) -> int:
     # (маркер прошлого прогона). Осознанно ждать готовое — `--allow-met`.
     if parsed and parsed[0] in ("file", "host", "ticket") and not getattr(args, "allow_met", False):
         try:
-            met = D.check_wait_for(spec)
+            met = W.check_wait_for(spec, W.project_where())
         except Exception:  # нет ssh/алиаса в окружении — проверка недоступна, не мешаем
             met = False
         if met:
@@ -605,7 +607,7 @@ def cmd_stop(args) -> int:
     if not text:
         print("stop: --text пуст — нужна новая постановка", file=sys.stderr)
         return 1
-    D.write_stop_request(path.stem, args.next or "", text)
+    STOP.write_stop_request(path.stem, args.next or "", text)
     print(f"{args.id}: заявка на остановку принята — на ближайшем тике диспетчер снимет запущенную роль; дальше: "
           + (f"todo, next: {args.next}" if args.next else "status: stopped (не будить)"))
     return 0
@@ -710,7 +712,7 @@ def _write_consents(path: Path, data: dict) -> None:
 
 
 def cmd_config(args) -> int:
-    """CEO: правка `.claude/rpv.json` — ключ из закрытого списка, значение проверено (`cfg.KEYS`); правка пишется в журнал,
+    """CEO: правка `.claude/rpv.json` — ключ из закрытого списка, значение проверено (`rpv_config.KEYS`); правка пишется в журнал,
     Судье заводится проверка, не принятая за 2 ч правка откатывается сама. Судья: `config accept CFG-N`."""
     role = _caller_role()
     if args.action == "accept":
@@ -744,7 +746,7 @@ def cmd_config(args) -> int:
 
 
 def cmd_status(args) -> int:
-    state = D.load_state()
+    state = CFG.load_state()
     rows = []
     for path in T.list_tickets(TICKETS_DIR):
         try:
@@ -753,7 +755,7 @@ def cmd_status(args) -> int:
             rows.append((path.stem, f"<ошибка разбора: {e}>", "", "", "", "", ""))
             continue
         tid = tkt.id
-        spent_col = f"${D.ticket_cost_spent(state, tid):.2f}"  # учёт, не лимит (В-173)
+        spent_col = f"${COST.ticket_cost_spent(state, tid):.2f}"  # учёт, не лимит (В-173)
         rows.append((tid, tkt.header.get("title", "")[:40], tkt.owner, tkt.status,
                      tkt.reviewer, spent_col, tkt.header.get("updated", "")))
     if not rows:
@@ -776,8 +778,8 @@ def cmd_status(args) -> int:
             print(f"{tkt.id}: {left}")
         if by_left := T.by_left_text(tkt, now):
             print(f"{tkt.id}: {by_left}")
-    print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(D._today(now), 0.0):.2f}, "
-          f"за последний час ${D._rolling_hour_cost(state, now):.2f}")
+    print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(COST._today(now), 0.0):.2f}, "
+          f"за последний час ${COST._rolling_hour_cost(state, now):.2f}")
     return 0
 
 

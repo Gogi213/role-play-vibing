@@ -13,45 +13,33 @@
 from __future__ import annotations
 
 import atexit
-import json
 import os
-import re
-import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import threading
 import time
 import uuid
-from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
-import transcript  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import downtime  # noqa: E402
-import notify  # noqa: E402
 import on_met as ON_MET  # noqa: E402
 import waits as W  # noqa: E402
 import alarms as AL  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
-import routes as ROUTES  # noqa: E402
-import report as REPORT  # noqa: E402
 from role_args import (  # noqa: E402,F401 — запуск роли (усилие, MCP, промпт) вынесен в role_args.py; имена для launch_run и тестов
-    ROLE_EFFORT, FIXED_EFFORT_ROLES, PROMPT_TEMPLATE, _read_mcp_servers, role_mcp_args, plugin_dir_args, effort_for, _py,
-    tickets_cli)
+    ROLE_EFFORT, role_mcp_args, plugin_dir_args, effort_for)
 import role_args as RA  # noqa: E402
 from limits import (  # noqa: E402,F401 — лимит сессии и ошибки API (распознавание) вынесены в limits.py
-    _limit_hit, API_PAUSE, API_AUTH_PAUSE, MAX_API_ERRORS, _api_error, _auth_error, _limit_reset_at, _limit_paused,
-    LIMIT_LABEL_SLACK)
+    _limit_hit, _api_error, _limit_reset_at, _limit_paused)
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -121,12 +109,8 @@ MAX_IDLE_RUNS = 2
 # --- сигналы CEO и уведомления — signals.py; здесь обёртки подставляют идущие запуски --------------------------
 
 from signals import (  # noqa: E402,F401 — сигналы CEO вынесены в signals.py; имена для вызовов из dispatch и tickets
-    _ceo_file_write, MECH_KINDS, _mech_log, append_ceo_inbox, SIGNAL_SUMMARY_KINDS, SUMMARY_EVERY_HOURS,
-    classify_signal, flush_pending_summary, route_ceo_signal, _first_line, handle_next_ceo, _ceo_handoff_during_run,
-    escalate_review_limit, JUDGE_GRACE, blocked_since, blocked_age_text, _awaits_judge, notify_status_for_ceo,
-    notify_parse_error, WAIT_NOTICE_EVERY, WAIT_EMPTY_AFTER, _review_returns, NO_REVIEW_MARK, closed_without_review,
-    _review_pending, _done_marker, baseline_done_notified, notify_done, haiku_refused_reason, MAX_REVIEW_RETURNS,
-    HAIKU_ALLOWED_KINDS)
+    _mech_log, append_ceo_inbox, route_ceo_signal, handle_next_ceo, escalate_review_limit, notify_status_for_ceo,
+    notify_parse_error, baseline_done_notified, notify_done, haiku_refused_reason)
 
 
 def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
@@ -190,30 +174,18 @@ RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, 
 
 # --- состояние ------------------------------------------------------------------------------
 
-from config import load_state, save_state  # noqa: E402,F401 — файл состояния, пути — CFG
+from project_paths import load_state, save_state  # noqa: E402,F401 — файл состояния, пути — CFG
 
 
 # --- wait_for: само ожидание — waits.py; здесь обёртки подставляют пути проекта --------------------------------
 
-def _where() -> W.Where:
-    return W.Where(CFG.PROJECT_ROOT, CFG.DISPATCHER_DIR, CFG.TICKETS_DIR)
-
-
 def check_wait_for(spec: str) -> bool:
     """Условие `wait_for` выполнено? Формы — `ticket.parse_wait_for` (README, «v4»); см. waits.check_wait_for."""
-    return W.check_wait_for(spec, _where())
-
-
-def record_job_outcome(tid: str, spec: str, outcome: str, rc: str = "", now=None) -> bool:
-    return W.record_job_outcome(tid, spec, outcome, rc, now, where=_where())
-
-
-def note_wait_met(path: Path, tkt: T.Ticket, now) -> T.Ticket:
-    return W.note_wait_met(path, tkt, now, _where())
+    return W.check_wait_for(spec, W.project_where())
 
 
 def _blind_tick() -> None:
-    W.blind_tick(_where(), _mech_log)
+    W.blind_tick(W.project_where(), _mech_log)
 
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
@@ -231,7 +203,7 @@ REASON_PRIORITY = {"next": 0, "in_progress-resume": 2}
 
 
 from decide import (  # noqa: E402,F401 — решение «кого будить» вынесено в decide.py; здесь имена и обёртка с подставляемым check_wait_for
-    Decision, ACCEPT_PR, _last_accept, _ceo_order_after_accept, _executor_waits_after_accept, close_after_merge)
+    Decision, close_after_merge)
 import decide as DEC  # noqa: E402
 
 
@@ -255,20 +227,11 @@ def _resume_store(state: dict, tid: str, role: str) -> dict:
 
 
 import runlog as RL  # noqa: E402
-from runlog import (  # noqa: E402,F401 — итог запуска в runs.log вынесен в runlog.py; имена для finish и тестов
-    tokens_of as _tokens_of, context_tokens_sum as _context_tokens_sum, read_run_result as _read_run_result)
-
-
-def _transcript_last_turn_tokens(session_id) -> int:
-    return RL.transcript_last_turn_tokens(session_id, CLAUDE_PROJECTS_DIR)
+from runlog import read_run_result as _read_run_result  # noqa: E402
 
 
 def _context_tokens_last(result: dict) -> int:
     return RL.context_tokens_last(result, CLAUDE_PROJECTS_DIR)
-
-
-def _transcript_usage_since(session_id, started) -> dict:
-    return RL.transcript_usage_since(session_id, started, CLAUDE_PROJECTS_DIR)
 
 
 def _log_run_summary(*args, **kwargs) -> None:
@@ -309,8 +272,7 @@ def _rate_limited(state: dict, tid: str, now, role: str = "") -> bool:
 
 
 from cost import (  # noqa: E402,F401 — учёт стоимости вынесен в cost.py; имена для вызовов из dispatch и tickets
-    _today, _add_cost, ticket_cost_spent, add_ticket_cost, _record_cost_event, _rolling_hour_cost,
-    _model_usage_number, _model_usage_diff, resolve_run_cost)
+    _add_cost, ticket_cost_spent, add_ticket_cost, _record_cost_event, resolve_run_cost)
 
 
 def _model_usage_warning(model_usage_diff: dict, expected: str = None) -> str:
@@ -331,7 +293,7 @@ def _model_usage_warning(model_usage_diff: dict, expected: str = None) -> str:
 
 
 from procs import (  # noqa: E402,F401 — процессы вынесены в procs.py; здесь имена для вызовов из dispatch
-    _proc_start, _pid_alive, PID_CHECK_TRIES, PID_CHECK_TIMEOUT_S, _pid_state, _ps_field, _proc_state, _proc_comm, _pid_alive_posix, _kill, acquire_instance_lock, release_instance_lock, _proc_alive, _kill_proc)
+    _proc_start, _pid_alive, _kill, acquire_instance_lock, release_instance_lock, _proc_alive, _kill_proc)
 
 
 def _stop_run(info: dict) -> bool:
@@ -466,7 +428,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
 import finish as FIN  # noqa: E402
 from finish import (  # noqa: E402,F401 — что делать с тикетом после запуска вынесено в finish.py; имена для _finish_run и тестов
-    role_logged as _role_logged, block_ticket as _block_ticket, handle_api_error as _handle_api_error)
+    handle_api_error as _handle_api_error)
 
 
 def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, result: dict) -> None:
@@ -578,7 +540,7 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
 
 
 from stop import (  # noqa: E402,F401 — остановка и подхват запусков вынесены в stop.py; обёртки подставляют идущие запуски
-    write_stop_request, _stop_requests, _reset_same_status, _reset_loop_state, _apply_stop, _find_pid_by_session)
+    _reset_same_status)
 
 
 def _poll_running(state: dict, now) -> None:
@@ -613,8 +575,7 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
 IDLE_SLO_MIN = 10.0
 import handoff as HO  # noqa: E402
 from handoff import (  # noqa: E402,F401 — ход у открытого тикета вынесен в handoff.py; имена для tick и тестов
-    IDLE_GRACE_S, INVARIANT_GRACE_S, _waits_without_condition, _drop_ceo_handoff, _ceo_handoff_pending, _no_move_reason,
-    enforce_move_invariant, notify_wait_cycle)
+    _waits_without_condition, _drop_ceo_handoff, enforce_move_invariant, notify_wait_cycle)
 
 
 def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
@@ -640,8 +601,7 @@ LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее ча�
 STALL_ALARM_MIN = 15.0  # CP5: столько минут подряд стоит готовая работа — тревога
 # --- побочная работа тика — alarms.py; здесь обёртки подставляют _popen и append_ceo_inbox ----------------------
 
-from alarms import STALLED, _stall_title, _guarded  # noqa: E402,F401
-from alarms import owner_questions as _owner_questions  # noqa: E402,F401
+from alarms import STALLED, _stall_title, _guarded, owner_questions as _owner_questions  # noqa: E402,F401
 
 
 def _stall_alarm(state: dict, now, stalled: list) -> None:
@@ -709,7 +669,7 @@ def _collect_candidates(state: dict, now) -> tuple:
             if tid in RUNNING:
                 continue
             if tkt.status == "waiting" and not tkt.next_role:
-                tkt = note_wait_met(path, tkt, now)  # CP6: задание кончилось — исход в jobs.jsonl, итог (.rc) — в лог тикета
+                tkt = W.note_wait_met(path, tkt, now, W.project_where())  # CP6: задание кончилось — исход в jobs.jsonl, итог (.rc) — в лог тикета
             if (tkt.status == "waiting" and not tkt.next_role and (tkt.header.get("on_met") or "").strip()
                     and check_wait_for(tkt.header.get("wait_for", ""))):
                 try:

@@ -21,7 +21,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from role_context import (ROLE_NAMES, ROLES, ROOT, STATE_DIR, env, env_role, find_title, read_label,  # noqa: E402
+from role_context import (ROLE_NAMES, ROLES, ROOT, STATE_DIR, env_role, find_title, read_label,  # noqa: E402
                           ticket_id, write_label)
 
 LOG_DIR = os.path.join(ROOT, ".claude", "roles", "log")
