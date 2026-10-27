@@ -138,6 +138,9 @@ def launch_notes(extra_note, role: str, reason: str, stopped: bool, rotated: boo
     if reason == "ceo-order-after-accept":
         notes.append("PR влит, но после приёмки Судьи в логе есть заказ CEO: ответь на него записью — выполнен (чем, "
                      "коммит/PR) или нет (что осталось); не закрывай тикет молча.")
+    if reason == "after-merge-step":
+        notes.append("PR влит, но в приёмке Судьи или в заказе указан шаг «после слияния:» (тег, выкладка, выпуск): сделай его и "
+                     "сдай результат (`result … done --path <доказательство>`); тикет диспетчер не закрывал.")
     return " ".join(x for x in notes if x)
 
 
