@@ -538,7 +538,7 @@ class ResultTests(unittest.TestCase):
     def test_tail_negation_is_not_a_tail(self):
         """alpha TK-264 (PR #106): «… Хвостов нет» + `--tail -` отказывало корнем `хвост`; законченное отрицание — не хвост."""
         for text in ("Всё сделано, тесты зелёные. Хвостов нет", "хвоста нет, всё сделано", "Сделано без хвостов.",
-                     "Сделано, ничего не осталось", "Сделано, осталось 0"):
+                     "Сделано, ничего не осталось", "Сделано, осталось 0", "Всё сделано, 1379 passed. Осталось: приёмка."):
             with self.subTest(text=text):
                 T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
                 self._v2_done(text)
@@ -547,7 +547,8 @@ class ResultTests(unittest.TestCase):
 
     def test_tail_with_colon_or_count_still_refused(self):
         for text in ("Готово. Хвост: нет метрик у 431 строки", "Не сделано: регистрация в settings.json",
-                     "Готово, осталось 3 шага", "Хвост нет метрик у 431 строки", "Не осталось времени доделать экспорт"):
+                     "Готово, осталось 3 шага", "Хвост нет метрик у 431 строки", "Не осталось времени доделать экспорт",
+                     "Осталось: приёмка и экспорт"):
             with self.subTest(text=text):
                 T.write_header_updates(self.path, {"status": "in_progress"}, now=NOW)
                 self._v2_done(text)
