@@ -387,7 +387,7 @@ class StartTests(unittest.TestCase):
             raise subprocess.TimeoutExpired("tasklist", 5)
         with mock.patch.object(S.D.os, "name", "nt"), mock.patch.object(S.D.hide, "run", boom):
             self.assertIsNone(S.D._pid_state(4242, "py"))
-            self.assertTrue(S.D._pid_alive_name(4242, "py"))
+            self.assertTrue(S.D._pid_alive(4242, "py"))
 
     def test_pid_state_tasklist_retries_then_answers(self):
         calls = []

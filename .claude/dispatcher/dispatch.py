@@ -1340,18 +1340,12 @@ def _pid_alive(pid, expect_name: str = None, start: str = None) -> bool:
         now_start = _proc_start(pid)
         if now_start is not None:
             return now_start == start and _pid_alive(pid, "")
-        return _pid_alive_name(pid, "")  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
-    return _pid_alive_name(pid, expect_name)
+        return _pid_state(pid, "") is not False  # метку узнать нельзя (сбой ps) — процесс есть, имя образа не судья
+    return _pid_state(pid, expect_name) is not False  # «неизвестно» (таймаут tasklist) = жив: В-209 Д-1
 
 
 PID_CHECK_TRIES = 3          # tasklist на нагруженной машине отвечает позже 5 с — повтор, не «мёртв»
 PID_CHECK_TIMEOUT_S = 10
-
-
-def _pid_alive_name(pid, expect_name: str = None) -> bool:
-    """Жив ли pid. Сбой проверки (таймаут tasklist) — не «мёртв»: см. `_pid_state`; здесь «неизвестно» = жив, чтобы
-    нагруженная машина не объявляла живую службу мёртвой (В-209 Д-1)."""
-    return _pid_state(pid, expect_name) is not False
 
 
 def _pid_state(pid, expect_name: str = None):
@@ -1597,8 +1591,9 @@ def role_mcp_args(run_stem: str) -> list[str]:
     (user `~/.claude.json`, проектные записи оттуда, `<проект>/.mcp.json`; позднее перекрывает раннее) и
     `--strict-mcp-config --mcp-config <json>`. Имени нет ни в одном источнике — предупреждение в stderr, сервер пропущен."""
     mode = P.setting("role_mcp", "all")
-    if isinstance(mode, str) and mode.strip().lower() in ("all", "none"):
-        return [] if mode.strip().lower() == "all" else ["--strict-mcp-config"]
+    word = mode.strip().lower() if isinstance(mode, str) else ""
+    if word in ("all", "none"):
+        return [] if word == "all" else ["--strict-mcp-config"]
     names = [str(n).strip() for n in (mode if isinstance(mode, list) else str(mode).split(",")) if str(n).strip()]
     servers = _read_mcp_servers(Path.home() / ".claude.json", str(PROJECT_ROOT))
     servers.update(_read_mcp_servers(PROJECT_ROOT / ".mcp.json"))
@@ -2598,6 +2593,14 @@ def _stall_title(tkt: T.Ticket) -> str:
     return " ".join((tkt.header.get("title") or tkt.id).split())[:70]
 
 
+def _guarded(label: str, fn, *args) -> None:
+    """Побочная работа тика (тревога, отчёт, Надзиратель, вопрос владельцу) не должна ронять тик."""
+    try:
+        fn(*args)
+    except Exception as e:
+        print(f"[dispatch] {label}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def _stall_alarm(state: dict, now, stalled: list) -> None:
     """CP5 (критерии 8, 9, 10): одна тревога владельцу — в Telegram (`notify.py`) и строкой CEO — когда готовая работа
     стоит STALL_ALARM_MIN минут подряд; одна на эпизод. Пошла снова — короткое «снова идёт»."""
@@ -2816,25 +2819,13 @@ def tick(now=None) -> int:
     idle_now = not RUNNING and not launched and not paused
     if idle_now:  # готовая работа не взята, и никто не работает — стоит
         STALLED.extend(_stall_title(t) for p_, t, _ in candidates if t.id not in RUNNING and p_.stem not in RUNNING)
-    try:
-        _stall_alarm(state, now, STALLED)
-    except Exception as e:  # тревога не должна ронять тик
-        print(f"[dispatch] тревога: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    _guarded("тревога", _stall_alarm, state, now, STALLED)
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
-    try:
-        _daily_report(state, now)
-    except Exception as e:  # отчёт не должен ронять тик
-        print(f"[dispatch] отчёт: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _overseer(state, now)
-    except Exception as e:  # Надзиратель не должен ронять тик
-        print(f"[dispatch] надзиратель: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _owner_questions(state, now)
-    except Exception as e:  # вопрос владельцу не должен ронять тик
-        print(f"[dispatch] вопрос владельцу: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+    _guarded("отчёт", _daily_report, state, now)
+    _guarded("надзиратель", _overseer, state, now)
+    _guarded("вопрос владельцу", _owner_questions, state, now)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
     save_state(state)
     return launched

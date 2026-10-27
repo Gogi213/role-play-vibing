@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -32,16 +31,13 @@ def _claude():
     return c if c and (os.path.isfile(c) or shutil.which(c)) else None
 
 
-def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S,
-        as_json: bool = False):
-    """Ответ модели (str) или None; as_json — весь JSON `--output-format json` (result, usage) как dict. Вход режется до хвоста MAX_IN знаков."""
+def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S):
+    """Ответ модели (str) или None. Вход режется до хвоста MAX_IN знаков."""
     claude = claude if claude is not None else _claude()
     if not claude or not text.strip():
         return None
     cmd = [claude, "-p", "--model", MODEL, "--effort", EFFORT, "--system-prompt", system, "--tools", "",
            "--no-session-persistence"]
-    if as_json:
-        cmd += ["--output-format", "json"]
     env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_") and k != "CLAUDE_PROJECT_DIR"}  # TK-110 Ж-1
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -51,12 +47,7 @@ def ask(system: str, text: str, runner=hide.run, claude: str | None = None, time
     out = (getattr(r, "stdout", b"") or b"").decode("utf-8", "replace").strip()
     if getattr(r, "returncode", 1) != 0 or not out:
         return None
-    if not as_json:
-        return out
-    try:
-        return json.loads(out)
-    except ValueError:
-        return None
+    return out
 
 
 def diagnose(unit: str, tail: str, **kw):
