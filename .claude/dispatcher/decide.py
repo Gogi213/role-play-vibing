@@ -46,6 +46,17 @@ def _executor_waits_after_accept(tkt: T.Ticket, idx: int) -> bool:
     return any(re.match(r"\[итог:\s*wait\]", e.text.strip()) and not T.author_is(e.author, "judge") for e in tkt.log[idx + 1:])
 
 
+AFTER_MERGE_FIELD = re.compile(r"после слияния:\s*(\S[^\n]*)", re.I)
+AFTER_MERGE_ORDER = re.compile(r"^[ \t>*-]*после слияния:\s*(\S[^\n]*)", re.I | re.M)
+
+
+def _step_after_merge(tkt: T.Ticket, idx: int) -> str:
+    """Шаг после слияния (тег, выкладка, выпуск — TK-026, alpha TK-258, TK-077): поле `accept … --after-merge "<шаг>"` в
+    приёмке Судьи (запись idx) или строка «после слияния:» в заказе (описании тикета). Есть — тикет не закрывают, будят автора."""
+    m = AFTER_MERGE_FIELD.search(tkt.log[idx].text) or AFTER_MERGE_ORDER.search(tkt.description)
+    return m.group(1).strip() if m else ""
+
+
 CLOSED_BY_MERGE = re.compile(r"PR #(\d+) влит, приёмка Судьи (?:на голову )?([0-9a-f]{4,40})")
 
 
@@ -59,8 +70,8 @@ def _closed_by_merge_before(tkt: T.Ticket, pr: int, sha: str) -> bool:
 
 
 def close_after_merge(path: Path, tkt: T.Ticket, now, state: dict = None) -> "T.Ticket | None":
-    """alpha #107 П0: `wait_for: merged:` выполнен, приёмка Судьи стоит на голове влитого PR, заказов после неё нет — закрываем
-    сами (done, путь из приёмки), роли не будим: автор писал бы `done` ради блокнота, а Судья принимал бы повторно. Заказ CEO
+    """alpha #107 П0: `wait_for: merged:` выполнен, приёмка Судьи стоит на голове влитого PR, заказов после неё нет и шага после слияния
+    (`_step_after_merge`) нет — закрываем сами (done, путь из приёмки), роли не будим: автор писал бы `done` ради блокнота, а Судья принимал бы повторно. Заказ CEO
     04:37: только если ожидание поставил Судья (не исполнитель ради шага после слияния) и PR влит в ветку по умолчанию (не в
     промежуточную, как alpha TK-263 в tk262). Иначе None — автора будит wait_for-met, как раньше. TK-018: закрывали этим же PR
     на этой же голове — это повтор, второй сигнал done CEO не уходит (метка в `state`)."""
@@ -71,7 +82,7 @@ def close_after_merge(path: Path, tkt: T.Ticket, now, state: dict = None) -> "T.
         return None
     repo, pr = parsed[1], parsed[2]
     idx, sha = _last_accept(tkt, pr)
-    if idx < 0 or _ceo_order_after_accept(tkt, pr) or _executor_waits_after_accept(tkt, idx):
+    if idx < 0 or _ceo_order_after_accept(tkt, pr) or _executor_waits_after_accept(tkt, idx) or _step_after_merge(tkt, idx):
         return None
     import merge_rule
     merged = merge_rule.merged_pr(repo, pr)
@@ -128,6 +139,10 @@ def decide(tkt: T.Ticket, state: dict, now, check_wait_for) -> "Decision | None"
             parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
             if parsed and parsed[0] == "merged" and _ceo_order_after_accept(tkt, parsed[2]):
                 return Decision(role=owner, reason="ceo-order-after-accept")  # alpha TK-283: заказ CEO после приёмки без ответа
+            if parsed and parsed[0] == "merged":
+                idx, _ = _last_accept(tkt, parsed[2])
+                if idx >= 0 and _step_after_merge(tkt, idx):
+                    return Decision(role=owner, reason="after-merge-step")  # TK-027: PR влит, дальше шаг из приёмки/заказа
             return Decision(role=owner, reason="wait_for-met")
         return None
 

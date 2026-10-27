@@ -244,10 +244,11 @@ def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
                                   "decisions": getattr(args, "decisions", None),
                                   "numbers": getattr(args, "numbers", None),
                                   "tail": getattr(args, "tail", None),
-                                  "live": getattr(args, "live", None)})())
+                                  "live": getattr(args, "live", None),
+                                  "after_merge": getattr(args, "after_merge", None)})())
     if rc == 0:
         with T.ticket_lock(path):
-            T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}")
+            T.append_log(path, role, f"[итог: accept] PR #{args.pr}@{args.sha[:7]}{ack} — {why}{_after_merge_note(args)}")
     return rc
 
 
@@ -457,6 +458,13 @@ def cmd_due(args) -> int:
     return 0
 
 
+def _after_merge_note(args) -> str:
+    """Пометка приёмки «после слияния: <шаг>» (TK-027): по ней закрытие по слиянию (`decide.close_after_merge`) не закрывает
+    тикет, а будит автора на этот шаг. Одна строка — разбор ищет шаг до конца строки."""
+    step = " ".join((getattr(args, "after_merge", None) or "").split())
+    return f" после слияния: {step}" if step else ""
+
+
 def cmd_accept(args) -> int:
     """Судья: машиночитаемый вердикт «принято» на конкретной голове PR (TK-079 п.2). Вливает программа (merge_rule), когда
     на этой голове CI зелёный и PR без конфликтов; сменится голова — вердикт не действует, нужен новый."""
@@ -508,7 +516,7 @@ def cmd_accept(args) -> int:
         return 0
     with T.ticket_lock(path):
         T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}.{ack} "
-                     + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."))
+                     + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule.") + _after_merge_note(args))
         acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
         acc[int(args.pr)] = args.sha  # вердикты по другим PR тикета не трогаем
         # ждём влития: после merged диспетчер разбудит владельца (done или следующий шаг); Судью повторно не будим
