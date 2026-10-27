@@ -218,6 +218,11 @@ def ticket_state(project: Path, tid: str) -> tuple[str, str]:
     return (st.group(1) if st else ""), (res[-1] if res else "")
 
 
+def run_jsons(runs_dir: Path) -> list[Path]:
+    """Итоги запусков ролей `runs/<время>-<тикет>-<роль>.json` (без конфигов MCP)."""
+    return sorted(f for f in runs_dir.glob("*.json") if not f.name.endswith(".mcp.json")) if runs_dir.exists() else []
+
+
 def ticket_next(project: Path, tid: str) -> str:
     """Поле `next:` шапки тикета: кого диспетчер разбудит дальше (пусто — никого)."""
     p = project / ".claude" / "tickets" / f"{tid}.md"

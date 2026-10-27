@@ -42,6 +42,17 @@ class StatsTests(unittest.TestCase):
         self.assertLess(r["wall_ms"], 10_000)
 
 
+class RunJsonsTests(unittest.TestCase):
+    def test_skips_mcp_configs_and_missing_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+            self.assertEqual(C.run_jsons(runs), [])
+            runs.mkdir()
+            for n in ("b-TK-001-engineer.json", "a-TK-001-judge.json", "a-TK-001-judge.mcp.json", "x.txt"):
+                (runs / n).write_text("{}", encoding="utf-8")
+            self.assertEqual([f.name for f in C.run_jsons(runs)], ["a-TK-001-judge.json", "b-TK-001-engineer.json"])
+
+
 class TaskCheckTests(unittest.TestCase):
     """Проверка кодом должна пропускать верное решение и ловить неверное — иначе замер качества ничего не стоит."""
 

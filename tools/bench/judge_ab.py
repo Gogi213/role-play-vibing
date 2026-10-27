@@ -267,7 +267,7 @@ def run_case(variant: str, case: Case, rep: int, timeout_min: float = 10) -> dic
             except subprocess.TimeoutExpired:
                 disp.kill()
     settle = time.time() + 240
-    while time.time() < settle and any(f.stat().st_size == 0 for f in E.run_jsons(w.runs_dir)):
+    while time.time() < settle and any(f.stat().st_size == 0 for f in C.run_jsons(w.runs_dir)):
         time.sleep(1)
         w.poll()
     runs = E.collect_runs(proj, w)

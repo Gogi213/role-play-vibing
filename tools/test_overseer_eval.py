@@ -271,7 +271,7 @@ class SetTests(NoClaude):
 
 class AgentTests(NoClaude):
     def test_overseer_definition(self):
-        d = ov.load_agent("overseer")
+        d = ov.HA.load_agent("overseer")
         self.assertEqual((d["model"], d["effort"], d["tools"]), ("claude-haiku-5-5", "xhigh", []))
         for kind in ov.core.KINDS:
             self.assertIn(kind, d["prompt"])

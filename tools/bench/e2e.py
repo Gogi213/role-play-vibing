@@ -27,10 +27,6 @@ def claude_projects_dir() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
 
 
-def run_jsons(runs_dir: Path) -> list[Path]:
-    return sorted(f for f in runs_dir.glob("*.json") if not f.name.endswith(".mcp.json")) if runs_dir.exists() else []
-
-
 class Watcher:
     """Опрос тикетов и каталога запусков: когда каждый запуск впервые замечен и когда в его файл попал итог."""
 
@@ -45,7 +41,7 @@ class Watcher:
 
     def poll(self) -> None:
         now = time.time()
-        for f in run_jsons(self.runs_dir):
+        for f in C.run_jsons(self.runs_dir):
             self.seen.setdefault(f.name, now)
             if f.name not in self.ended and f.stat().st_size > 0:
                 self.ended[f.name] = now
@@ -131,7 +127,7 @@ def parse_transcript(session_id: str) -> dict:
 
 def collect_runs(proj: Path, w: Watcher) -> list[dict]:
     runs = []
-    for f in run_jsons(w.runs_dir):
+    for f in C.run_jsons(w.runs_dir):
         m = re.match(r"(\d{8}-\d{6})-(TK-\d+)-(\w+)\.json", f.name)
         if not m:
             continue
@@ -263,12 +259,12 @@ def _drive(proj: Path, w: Watcher, env: dict, timeout_min: float, kill_after_s: 
         w.poll()
         timed_out = not w.all_terminal()
         settle = time.time() + 180  # запуск, сдавший итог, ещё пишет JSON — без него цена неполная
-        while time.time() < settle and any(f.stat().st_size == 0 for f in run_jsons(w.runs_dir)):
+        while time.time() < settle and any(f.stat().st_size == 0 for f in C.run_jsons(w.runs_dir)):
             time.sleep(1)
             w.poll()
         # диспетчер записывает конец запуска в runs.log на СЛЕДУЮЩЕМ тике: даём ему тик, иначе учёт плагина неполон
         wait_log = time.time() + 45
-        while time.time() < wait_log and len(runs_log_rows(proj)) < len([f for f in run_jsons(w.runs_dir) if f.stat().st_size > 0]):
+        while time.time() < wait_log and len(runs_log_rows(proj)) < len([f for f in C.run_jsons(w.runs_dir) if f.stat().st_size > 0]):
             time.sleep(1)
     finally:
         if disp.poll() is None:

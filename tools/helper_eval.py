@@ -54,18 +54,6 @@ def registry_cmd(work: Path) -> str:
 
 
 # ------------------------------------------------------------------------------------------------------------
-# Определение помощника
-# ------------------------------------------------------------------------------------------------------------
-
-def load_agent(name: str) -> dict:
-    """agents/<name>.md → {description, prompt, tools, model, effort}."""
-    try:
-        return HA.agent_def(ROOT / "agents" / f"{name}.md", with_tools=True)
-    except ValueError as e:
-        raise SystemExit(str(e))
-
-
-# ------------------------------------------------------------------------------------------------------------
 # Проверки
 # ------------------------------------------------------------------------------------------------------------
 
@@ -284,11 +272,11 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
         if not agents.exists():
             defs = {}
             for name in PROMPTS:
-                d = load_agent(name)
+                d = HA.load_agent(name)
                 d["model"], d["effort"] = model, effort
                 defs[name] = d
             agents.write_text(json.dumps(defs, ensure_ascii=False), encoding="utf-8")
-    tools = load_agent(task).get("tools", [])
+    tools = HA.load_agent(task).get("tools", [])
     # копия заготовки во временном каталоге; `.claude/` Claude Code без полного режима не даёт писать молча
     cmd = HA.agent_cmd(CLAUDE, agents, task, model, effort, budget, tools=None,
                        extra=("--permission-mode", "bypassPermissions", "--allowedTools", ",".join(tools)))

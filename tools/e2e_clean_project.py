@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DISP = ROOT / ".claude" / "dispatcher"
 sys.path.insert(0, str(ROOT / "tools" / "bench"))
-from common import find_bash, init_script, ticket_state  # noqa: E402  одна копия — в bench/common.py
+from common import find_bash, init_script, run_jsons, ticket_state  # noqa: E402  одна копия — в bench/common.py
 
 GOAL_QUOTE = "нужен скрипт hello.py, который печатает слово привет"
 CRITERION = "python hello.py печатает «привет»"
@@ -33,11 +33,6 @@ CRITERION = "python hello.py печатает «привет»"
 
 def sh(cmd, cwd, **kw):
     return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
-
-
-def run_jsons(runs_dir: Path) -> list[Path]:
-    """Итоги запусков ролей `runs/<время>-<тикет>-<роль>.json` (без конфигов MCP)."""
-    return sorted(f for f in runs_dir.glob("*.json") if not f.name.endswith(".mcp.json")) if runs_dir.exists() else []
 
 
 def main(argv=None) -> int:
