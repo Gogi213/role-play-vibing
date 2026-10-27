@@ -5,7 +5,7 @@ WATCH_DEDUP_REPEAT_HOURS, пока проблема не снята (п.2г). П
 при находке; сердцебиение (`watch-heartbeat.json`) обновляется каждый цикл независимо от находок —
 его возраст проверяет хук `role_memory.py` (кто сторожит сторожа, п.2а).
 
-v2 (02.10): orphan по закрытым (done/cancelled) тикетам молчат, по открытым повторяются не чаще раза в сутки.
+v2 (02.10): orphan по закрытым (done/stopped) тикетам молчат, по открытым повторяются не чаще раза в сутки.
 v3 (03.10, В-173): проверки трат (суточный/часовой расход, бюджет тикета) удалены — лимитов денег нет.
 v4 (TK-100 №6/№26): блок «вторая машина» (ALERT-*/HOLD/очередь/заморозка по ssh) и check_dispatcher_alive удалены —
 «диспетчер жив» остаётся у supervise и doctor.
@@ -64,7 +64,6 @@ WATCH_DEDUP_REPEAT_HOURS = 2.0
 # диспетчер уже сообщил один раз (`ceo-inbox`), сторож лишь страхует — раз в сутки
 WATCH_LONG_REPEAT_HOURS = 24.0
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner"}
-CLOSED_TICKET_STATUSES = ("done", "cancelled")
 ORPHAN_TICKET_HOURS = 2.0
 
 
@@ -107,7 +106,7 @@ def check_orphan_tickets(now, skip_ids=()) -> list:
             tkt = T.read_ticket(path)
         except Exception:
             continue
-        if tkt.status in CLOSED_TICKET_STATUSES or tkt.status not in ("in_progress", "waiting", "in_review"):
+        if tkt.status in T.CLOSED_STATUSES or tkt.status not in ("in_progress", "waiting", "in_review"):
             continue
         if tkt.id in skip_ids:  # цель wait_for жива (TK-056 п.4): долгое ожидание — не сирота
             continue

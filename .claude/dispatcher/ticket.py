@@ -224,6 +224,8 @@ def file_wait_problem(spec: str) -> str:
     return ""
 
 
+# Закрытый тикет: работа не идёт и не ждётся. Единственное определение (watch, worktree_hygiene, поиск дублей).
+CLOSED_STATUSES = ("done", "stopped")
 DUP_WINDOW_S = 3600
 DUP_RATIO = 0.8
 
@@ -240,7 +242,7 @@ def similar_recent_ticket(tickets_dir, title: str, now: datetime | None = None) 
             upd = datetime.fromisoformat(str(tkt.header.get("updated") or ""))
         except Exception:
             continue
-        if tkt.status in ("done", "stopped") or (now - upd).total_seconds() > DUP_WINDOW_S:
+        if tkt.status in CLOSED_STATUSES or (now - upd).total_seconds() > DUP_WINDOW_S:
             continue
         have = " ".join(str(tkt.header.get("title") or "").lower().split())
         if want and difflib.SequenceMatcher(None, want, have).ratio() >= DUP_RATIO:
