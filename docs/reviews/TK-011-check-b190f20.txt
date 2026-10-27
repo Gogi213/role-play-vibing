@@ -1,0 +1,8 @@
+TK-011 · PR #126@b190f20 · проверка Судьи (git archive головы, чистая копия)
+wc -l dispatch.py: 840 (порог 900); крупнейшие не-тест файлы: watch.py 827, tickets.py 803, overseer.py 719
+radon cc -n E по .claude/dispatcher (не тесты): пусто
+функций длиннее 100 строк (ast, не тесты): нет
+import dispatch: ci_watch.py, merge_rule.py — нет (на main были); dispatch.py не импортирует tickets/watch — циклов нет
+тесты в диффе: assert-строк удалено 95, добавлено 95; def test — 0/0; отличия только в путях (D.→CFG./W., dispatch→procs)
+pytest -n auto .claude tools: 1295 passed, 8 skipped
+CI на b190f20: ubuntu, windows, macos, systemd, ci-ok — SUCCESS; mergeable

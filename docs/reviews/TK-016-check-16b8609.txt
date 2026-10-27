@@ -1,0 +1,7 @@
+Проверка Судьи TK-016 · чистая копия на 16b8609 (git worktree --detach) · 2026-10-27
+wc -l: tickets.py 802
+wc -l: watch.py 824
+radon cc: tickets.cmd_result B 9
+radon cc: watch.triage_waits B 6
+radon cc: новые помощники ≤ B (_triage_ticket B 10, _settle_target B 7, _triage_target B 6)
+pytest -n auto: 1295 passed, 8 skipped in 234.09s
