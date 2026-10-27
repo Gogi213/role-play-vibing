@@ -114,6 +114,12 @@ def charter_file(t, ctx):
     return len(segs) >= 3 and segs[-2] == "roles" and segs[-3] == ".claude" and segs[-1].endswith(".md")
 
 
+def addon_file(t, ctx):
+    """Цель — добавка проекта к уставу `.claude/roles/project/<имя>.md` (TK-038): закрыта и когда файла ещё нет — его создаёт только `charter addon`."""
+    segs = [x for x in _abs_norm(t, ctx).split("/") if x]
+    return len(segs) >= 4 and segs[-2] == "project" and segs[-3] == "roles" and segs[-4] == ".claude" and segs[-1].endswith(".md")
+
+
 def charter_table_edit(tool, ti):
     """Edit строк таблицы (`| … |`) в `.claude/roles/README.md` — таблица зон с путями проекта; остальное в уставе закрыто."""
     path = (file_target(ti) or "").replace("\\", "/").lower() if tool == "Edit" else ""
@@ -313,6 +319,6 @@ def protected(t, ctx, role, deleting):
         return REASON_SETTINGS.format(t=t)
     if role and owner_record(t, ctx):
         return REASON_OWNER_RECORD.format(t=t)
-    if role is None and (charter_file(t, ctx) or (rpv_config(t, ctx) and not config.PROTECTED_ERROR))             and (deleting or may_exist(t, ctx)):         # TK-007: CEO правит настройки командой; сломанный файл — руками
+    if role is None and (addon_file(t, ctx) or ((charter_file(t, ctx) or (rpv_config(t, ctx) and not config.PROTECTED_ERROR))             and (deleting or may_exist(t, ctx)))):         # TK-007: CEO правит настройки командой; сломанный файл — руками
         return REASON_CEO_CONFIG.format(t=t)
     return protected_path(t, ctx, deleting)
