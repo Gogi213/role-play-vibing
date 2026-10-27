@@ -106,17 +106,21 @@ class LookTests(unittest.TestCase):
         self.assertEqual(len(self.look(answer(), now=T0 + timedelta(minutes=15))), 1, "после сбоя тикет смотрим снова")
 
     def test_cost_rule_steps_without_model(self):
-        self.write_open(self.entries, spent=31)  # больше 3× медианы ($10)
+        self.assertEqual(O.COST_STEPS, (6, 12))
+        self.write_open(self.entries, spent=31)  # 3× медианы ($10): ступени нет
         self.look(answer())
+        self.assertEqual(self.routed, [])
+        self.write_open(self.entries, spent=61)  # больше 6× медианы
+        self.look(answer(), now=T0 + timedelta(minutes=15))
         self.assertEqual([t for t, _ in self.routed], ["TK-200"])
         self.assertIn("дорого", self.routed[0][1])
-        self.assertIn("3× медианы", self.routed[0][1])
-        self.look(answer(), now=T0 + timedelta(minutes=15))
-        self.assertEqual(len(self.routed), 1, "та же ступень — один раз")
-        self.write_open(self.entries, spent=61)  # больше 6× медианы
+        self.assertIn("6× медианы", self.routed[0][1])
         self.look(answer(), now=T0 + timedelta(minutes=30))
+        self.assertEqual(len(self.routed), 1, "та же ступень — один раз")
+        self.write_open(self.entries, spent=121)  # больше 12× медианы
+        self.look(answer(), now=T0 + timedelta(minutes=45))
         self.assertEqual(len(self.routed), 2)
-        self.assertIn("6×", self.routed[1][1])
+        self.assertIn("12×", self.routed[1][1])
 
     def test_spike_rule(self):
         """Всплеск: за 6 ч тикет потратил больше 3× обычных трат тикета за 6 ч в проекте."""
@@ -150,7 +154,7 @@ class LookTests(unittest.TestCase):
         self.assertEqual(rows[-1].get("decision_unknown"), "В-99", "номера нет в реестре — не выдаём его за ответ")
 
     def test_report_line(self):
-        self.write_open(self.entries, spent=31)
+        self.write_open(self.entries, spent=61)
         self.look(finding())
         p = R.Period(self.root, T0 - timedelta(hours=1), T0 + timedelta(hours=1), [])
         self.assertEqual(R.m_overseer(p), "находок Судье 2 (дорого 1, не-движемся 1), взглядов 1, $0.00")
