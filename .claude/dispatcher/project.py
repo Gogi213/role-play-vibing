@@ -259,6 +259,23 @@ def resolve_project(argv=None) -> Path:
     return found
 
 
+FRONTMATTER = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
+
+
+def frontmatter(text: str):
+    """Единственный разбор шапки `---` ... `---` (тикет, ошибка, цель, роль): (плоская шапка {ключ: значение}, смещение
+    конца шапки) или None, если шапки нет. Пустые строки в шапке пропускаются, перевод строки — LF или CRLF."""
+    m = FRONTMATTER.match(text)
+    if not m:
+        return None
+    head = {}
+    for line in m.group(1).splitlines():
+        if line.strip():
+            key, _, value = line.partition(":")
+            head[key.strip()] = value.strip()
+    return head, m.end()
+
+
 def atomic_write_text(path, text: str, retries: int = 8) -> None:
     """Запись через временный файл + os.replace. На Windows replace падает с PermissionError, пока
     другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи

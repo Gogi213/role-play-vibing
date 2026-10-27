@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 import hide
+import project as P
 
 MODEL = "claude-haiku-5-5"
 EFFORT = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
@@ -46,11 +46,11 @@ def run_claude(cmd: list, prompt: str, timeout: float, cwd=None, runner=hide.run
 
 def agent_meta(path: Path) -> tuple:
     """`agents/<имя>.md` → (плоский фронтматтер {ключ: значение}, текст промпта). Нет фронтматтера — ValueError."""
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", path.read_text(encoding="utf-8"), re.S)
-    if not m:
+    text = path.read_text(encoding="utf-8")
+    fm = P.frontmatter(text)
+    if not fm:
         raise ValueError(f"{path.parent.name}/{path.name}: нет фронтматтера")
-    meta = {k.strip(): v.strip().strip('"') for k, _, v in (ln.partition(":") for ln in m.group(1).splitlines())}
-    return meta, m.group(2).strip()
+    return {k: v.strip('"') for k, v in fm[0].items()}, text[fm[1]:].strip()
 
 
 def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S):

@@ -46,7 +46,7 @@ try:
 except ImportError:
     fcntl = None
 
-HEADER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
+HEADER_RE = P.FRONTMATTER
 LOG_HEADING_RE = re.compile(r"^##\s*Лог\s*$", re.M)
 ENTRY_RE = re.compile(r"^###\s+(\S+)\s+(.+?)\s*$", re.M)
 ROLE_TOKENS = (*P.ROLES, "ceo")
@@ -331,14 +331,8 @@ def _match_header(text: str):
 
 
 def _parse_header(text: str):
-    m = _match_header(text)
-    header = {}
-    for line in m.group(1).splitlines():
-        if not line.strip():
-            continue
-        key, _, value = line.partition(":")
-        header[key.strip()] = value.strip()
-    return header, m.end()
+    _match_header(text)  # нет шапки — ValueError
+    return P.frontmatter(text)
 
 
 def _parse_log(rest: str):

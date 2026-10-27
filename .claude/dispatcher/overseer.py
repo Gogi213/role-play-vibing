@@ -129,13 +129,8 @@ def parse_log(text: str) -> list:
 
 def split_ticket(text: str) -> tuple:
     """Файл тикета → (шапка, описание, текст лога). Описание — между шапкой и `## Лог`."""
-    m = re.match(r"^---\n(.*?)\n---\n?(.*)$", text, re.S)
-    head, body = {}, text
-    if m:
-        for ln in m.group(1).splitlines():
-            k, _, v = ln.partition(":")
-            head[k.strip()] = v.strip()
-        body = m.group(2)
+    fm = P.frontmatter(text)
+    head, body = (fm[0], text[fm[1]:]) if fm else ({}, text)
     lg = re.search(r"^## Лог[ \t]*$", body, re.M)
     if not lg:
         return head, body.strip(), ""
