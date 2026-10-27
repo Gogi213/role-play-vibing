@@ -731,6 +731,142 @@ class ErrorsTests(unittest.TestCase):
                 self.assertEqual(E.main(["list"]), 2)
         self.assertIn("проект не найден", err.getvalue())
 
+    # --- CP2-а (TK-004): «не запустилась» — третий исход, не возврат
+    def log_rows(self):
+        log = self.root / ".claude" / "dispatcher" / "regressions.log"
+        return [ln.split("\t") for ln in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+
+    def test_run_check_three_outcomes(self):
+        self.fix_commit()
+        self.script("tools/slow.py", "import time\ntime.sleep(30)")
+        t0 = time.time()
+        ok, note = E.run_check(["python", "tools/slow.py"], self.root, 1)
+        self.assertLess(time.time() - t0, 20)
+        self.assertIs(ok, None)
+        self.assertIn("таймаут 1 с", note)
+        ok, note = E.run_check(["python", "tools/bad.py"], self.root, 30)
+        self.assertIs(ok, False)
+        self.assertIn("код 1", note)
+        self.assertEqual(E.run_check(["python", "tools/flag.py"], self.root, 30), (True, ""))
+        with mock.patch.object(E.subprocess, "Popen", side_effect=FileNotFoundError("нет python")):
+            ok, note = E.run_check(["python", "tools/ok.py"], self.root, 30)
+        self.assertIs(ok, None)
+        self.assertIn("не запустилась: FileNotFoundError", note)
+
+    def test_red_check_is_still_a_regression_refusal(self):
+        a = self.fixed_fast("python tools/flag.py", "Цена")
+        (self.root / "flag.txt").write_text("x", encoding="utf-8")
+        infra = []
+        bad = E.run_all(self.root, infra=infra)
+        self.assertEqual(([i for i, _, _ in bad], infra), ([a], []))
+        msg = E.gate(self.root, "TK-5")
+        self.assertIn("регрессия", msg)
+        self.assertIn("result <ID> return", msg)
+        self.assertEqual(self.log_rows()[0][1:], ["TK-5", a], "строка регресса — три поля, как раньше")
+
+    def test_timeout_is_not_verified_and_not_a_return(self):
+        a = self.fixed_fast("python tools/flag.py", "Цена")
+        with mock.patch.object(E, "run_check", return_value=(None, "таймаут 5 с, дерево процессов убито")):
+            msg = E.gate(self.root, "TK-5")
+        self.assertIn(f"{a} «Цена»: таймаут 5 с", msg)
+        self.assertIn("Не проверено, не вина работы", msg)
+        self.assertIn("wait <ID> at:", msg)
+        self.assertIn("не return", msg)
+        self.assertNotIn("регрессия", msg)
+        self.assertNotIn("верни работу автору", msg)
+        self.assertEqual(self.log_rows()[0][1:], ["TK-5", a, "infra"])
+
+    def test_without_infra_list_not_started_counts_as_failed_like_before(self):
+        a = self.fixed_fast("python tools/flag.py", "Цена")
+        with mock.patch.object(E, "run_check", return_value=(None, "не запустилась: OSError: x")):
+            self.assertEqual([i for i, _, _ in E.run_all(self.root)], [a])
+
+    def test_run_cli_marks_not_started_with_exit_2(self):
+        a = self.fixed_fast("python tools/flag.py", "Цена")
+        with mock.patch.object(E, "run_check", return_value=(None, "таймаут 5 с")):
+            code, out, _ = self.run_cli("run")
+        self.assertEqual((code, out), (2, f"{a} НЕ ЗАПУСТИЛАСЬ — Цена: таймаут 5 с"))
+
+    def test_fourth_not_started_in_a_row_signals_ceo(self):
+        self.fixed_fast("python tools/flag.py", "Цена")
+        sig = mock.Mock()
+        with mock.patch.object(E, "run_check", return_value=(None, "таймаут 5 с")):
+            for n in (1, 2, 3):
+                self.assertIn(f"Подряд не запустилась: {n} из 3", E.gate(self.root, "TK-5", signal=sig))
+            sig.assert_not_called()
+            msg = E.gate(self.root, "TK-5", signal=sig)
+        sig.assert_called_once()
+        self.assertEqual(sig.call_args.args[:2], ("TK-5", "проверка-не-запустилась"))
+        self.assertIn("4 раз подряд", sig.call_args.args[2])
+        self.assertIn("CEO позван", msg)
+        self.assertEqual([r[3] for r in self.log_rows()], ["infra"] * 4)
+
+    def test_streak_is_per_ticket_and_broken_by_red_or_pass(self):
+        self.fixed_fast("python tools/flag.py", "Цена")
+        sig = mock.Mock()
+        with mock.patch.object(E, "run_check", return_value=(None, "таймаут")):
+            for _ in range(3):
+                E.gate(self.root, "TK-5", signal=sig)
+            E.gate(self.root, "TK-6", signal=sig)                     # чужой тикет счёт TK-5 не двигает и сам с единицы
+            self.assertIn("1 из 3", E.gate(self.root, "TK-7", signal=sig))
+        with mock.patch.object(E, "run_check", return_value=(True, "")):
+            self.assertEqual(E.gate(self.root, "TK-5", signal=sig), "")   # приёмка прошла — серия оборвана
+        self.assertEqual(self.log_rows()[-1][1:], ["TK-5", "", "ok"])
+        with mock.patch.object(E, "run_check", return_value=(None, "таймаут")):
+            self.assertIn("1 из 3", E.gate(self.root, "TK-5", signal=sig))
+        with mock.patch.object(E, "run_check", return_value=(False, "код 3")):
+            E.gate(self.root, "TK-5", signal=sig)                     # красная — тоже обрыв
+        with mock.patch.object(E, "run_check", return_value=(None, "таймаут")):
+            self.assertIn("1 из 3", E.gate(self.root, "TK-5", signal=sig))
+        sig.assert_not_called()
+        self.assertEqual(self.log_rows()[0][3], "infra")
+        E.gate(self.root, "TK-9")                                     # зелёная приёмка без серии строк не пишет
+        self.assertNotIn("TK-9", [r[1] for r in self.log_rows()])
+
+    def test_ticket_gate_passes_ceo_signal_channel(self):
+        import tickets
+        with mock.patch.object(tickets.errors_mod, "gate", return_value="") as g:
+            self.assertFalse(tickets._regression("TK-5", "accept"))
+        self.assertIs(g.call_args.kwargs["signal"], tickets.D.append_ceo_inbox)
+
+    # --- fixed_sha не предок проверяемой головы: исправление ещё не влито
+    def unmerged_fix(self, title="Цена"):
+        """Ошибка, исправление которой (fixed_sha) лежит в ветке `side`, а HEAD корня — на C0: проверка ok.py там красная."""
+        default = self.git("rev-parse", "--abbrev-ref", "HEAD")
+        eid = self.added(title)
+        self.git("checkout", "-q", "-b", "side")
+        self.fix_commit()
+        E._set_header(E.errors_dir(self.root) / f"{eid}.md", {"status": "fixed", "check": "python tools/ok.py",
+                                                              "fixed": "2026-10-27 05:00",
+                                                              "fixed_sha": self.git("rev-parse", "--short", "HEAD")})
+        self.git("checkout", "-q", default)
+        return eid, default
+
+    def test_unmerged_fix_is_skipped_with_a_note_and_not_run(self):
+        eid, _ = self.unmerged_fix()
+        seen = []
+        with mock.patch.object(E, "run_check", side_effect=AssertionError("гонять нельзя")):
+            self.assertEqual(E.run_all(self.root, report=lambda *a: seen.append(a)), [])
+            self.assertEqual(E.gate(self.root, "TK-5"), "")
+        self.assertEqual(seen, [(eid, "Цена", True, "исправление ещё не влито")])
+        code, out, _ = self.run_cli("run")
+        self.assertEqual((code, out), (0, f"{eid} ok — Цена (исправление ещё не влито)"))
+
+    def test_merged_fix_is_run_again(self):
+        eid, _ = self.unmerged_fix()
+        self.git("merge", "-q", "--no-edit", "side")
+        self.assertEqual(E.run_all(self.root), [], "влито — проверка гоняется и зелёная")
+        self.assertEqual(self.run_cli("run")[1], f"{eid} ok — Цена")
+        self.git("rm", "-q", "-f", "fixed.txt")
+        self.git("commit", "-qm", "регресс")
+        self.assertEqual([i for i, _, _ in E.run_all(self.root)], [eid], "влито и сломано — красная")
+
+    def test_unknown_or_empty_fixed_sha_is_not_skipped(self):
+        for sha in ("", "deadbeef"):
+            self.assertFalse(E._not_merged(self.root, sha), "нет sha или git его не знает — решает обычная сверка")
+        self.assertFalse(E._not_merged(self.root / "нет", self.c0), "не git — тоже")
+        self.assertFalse(E._not_merged(self.root, self.c0), "предок головы — проверка гоняется")
+
 
 if __name__ == "__main__":
     unittest.main()
