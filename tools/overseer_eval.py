@@ -45,13 +45,13 @@ import argparse
 import json
 import random
 import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
+from eval_common import LOCK, append_jsonl, emit, read_jsonl  # noqa: E402
 import overseer as core  # noqa: E402  ядро — общее с живым Надзирателем (`.claude/dispatcher/overseer.py`)
 from overseer import (  # noqa: E402
     build_prompt, call_overseer, closed_scale, grade, is_judge_return, load_agent, load_runs, load_ticket,
@@ -61,13 +61,6 @@ NORMAL_N, NORMAL_SEED, NORMAL_MAX_RUNS = 20, 14, 6
 MECHANICAL = ("watch", "dispatcher", "ci", "merge")  # записи кода, не ролей: для оценки «сколько окон без них»
 SUPPRESS_H = 24  # против шума: одна принятая находка по тикету не чаще раза в сутки (docs/v2/checkpoints.md, CP14)
 
-
-
-def emit(text: str) -> None:
-    """Печать в UTF-8 (консоль Windows по умолчанию не она)."""
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    print(text)
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -112,8 +105,6 @@ def choose(tickets: dict, runs: dict, only=None, group: str = "all") -> list:
 # Вызов claude
 # ------------------------------------------------------------------------------------------------------------
 
-_LOCK = threading.Lock()
-
 # ------------------------------------------------------------------------------------------------------------
 # Прогон
 # ------------------------------------------------------------------------------------------------------------
@@ -148,8 +139,7 @@ def plan_jobs(tickets: dict, runs: dict, chosen: list, a) -> list:
 
 
 def read_rows(out: Path) -> list:
-    p = out / "windows.jsonl"
-    return [json.loads(l) for l in p.open(encoding="utf-8") if l.strip()] if p.exists() else []
+    return read_jsonl(out / "windows.jsonl", missing_ok=True)
 
 
 def cmd_run(a) -> int:
@@ -170,7 +160,7 @@ def cmd_run(a) -> int:
     print(f"окон в наборе: {len(jobs)}, готово раньше: {len(jobs) - len(todo)}, к вызову: {len(todo)}, бюджет ${a.budget:.2f}", flush=True)
 
     def one(j):
-        with _LOCK:
+        with LOCK:
             if state["spent"] >= a.budget:
                 state["skipped"] += 1
                 return
@@ -179,7 +169,7 @@ def cmd_run(a) -> int:
         for _ in range(2):  # сбой связи или пустой ответ — один повтор, цена обоих вызовов в сумме
             r = call_overseer(j["prompt"], agents, out / "work", a.model, a.effort, a.per_call, a.timeout)
             res = r if res is None else {**r, "cost": (r["cost"] or 0) + (res["cost"] or 0), "retried": True}
-            with _LOCK:
+            with LOCK:
                 state["spent"] += r["cost"] or 0
                 state["calls"] += 1
             if not r["error"]:
@@ -190,9 +180,7 @@ def cmd_run(a) -> int:
         row.update(res)
         row.update(g)
         prompt_file(out, row).write_text(j["prompt"], encoding="utf-8")
-        with _LOCK:
-            with (out / "windows.jsonl").open("a", encoding="utf-8") as w:
-                w.write(json.dumps(row, ensure_ascii=False) + "\n")
+        append_jsonl(out / "windows.jsonl", row)
         print(f"{j['ticket']} окно {j['window']:>3} {j['end'][5:16]} ${row['cost'] or 0:.4f} {row['dur']:>5}s {row['outcome']}"
               + (f" ({row['kind']})" if row["outcome"] == "accepted" else f" [{row['reason']}]" if row["reason"] else ""), flush=True)
 
