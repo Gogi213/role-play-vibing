@@ -79,7 +79,9 @@ class CharterGuard(unittest.TestCase):
         self.no('cd $ROOT/.claude/roles && cp /tmp/x judge.md')              # переменная в пути к уставам — известна по хвосту
         self.assertNotIn("charter sync", self.shell('cd - && cp /tmp/x judge.md') or "")   # прежний каталог не определить: не устав
         self.ok('cd /tmp && cp /tmp/x judge.md')
-        self.assertNotIn("charter sync", self.shell('cd .claude/roles && popd && cp /tmp/x judge.md') or "")   # после `popd` — как в dguard: каталог неизвестен
+        for cmd in ('cd .claude/roles && popd && cp /tmp/x judge.md', 'cd .claude/roles; popd; cp /tmp/x judge.md',
+                    'pushd .claude/roles; popd; cp /tmp/x .claude/roles/judge.md'):
+            self.no(cmd)                                                        # `popd` без стека каталог не меняет — запись всё ещё в уставы
 
     def test_copying_a_directory_over_claude_overwrites_the_charters(self):
         b = self.base

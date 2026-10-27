@@ -13,7 +13,7 @@ from dguard.writes import may_exist
 
 ROLES = ".claude/roles"
 WORD = re.compile(r"""\"[^\"]*\"|'[^']*'|\S+""")
-CD_NAMES = frozenset({"cd", "pushd", "chdir", "set-location", "sl", "popd"})   # как в dguard.cmd_scan; после `popd` каталог неизвестен
+CD_NAMES = frozenset({"cd", "pushd", "chdir", "set-location", "sl", "popd"})   # как в dguard.cmd_scan
 TOKEN = re.compile(r"""[^\s"'`=<>|;&()]*\.claude/roles(?:/[^\s"'`<>|;&()]*)?""", re.I)
 COPY_TO = frozenset({"cp", "mv", "install", "ln", "rsync", "copy", "move", "copy-item", "move-item", "rename-item"})  # назначение — последний путь
 ALL_ARGS = frozenset({"tee", "rm", "truncate", "set-content", "add-content", "out-file", "clear-content", "remove-item", "new-item"})
@@ -33,11 +33,14 @@ def _abs(tok, here):
 
 
 def _cd(here, words):
-    """Рабочий каталог после `cd`/`pushd`/`popd` (общий `join_cwd` стража); неизвестный → None. Путь с неизвестной переменной, но
+    """Рабочий каталог после `cd`/`pushd` (общий `join_cwd` стража); неизвестный → None. `popd` каталог не меняет: стек не ведётся,
+    а `cd .claude/roles; popd` при пустом стеке остаётся в уставах — осторожная сторона. Путь с неизвестной переменной, но
     с каталогом уставов в хвосте (`cd $ROOT/.claude/roles`), остаётся буквальным."""
+    if words[0].lower() == "popd":
+        return here
     pos = [w for w in words[1:] if not w.startswith("-") or w == "-"]
     target = pos[0] if pos else None
-    new = None if words[0].lower() == "popd" else join_cwd(here, target, {})
+    new = join_cwd(here, target, {})
     if new is None and target and ROLES in target.replace("\\", "/").lower():
         return _abs(target, here).rstrip("/")
     return new
