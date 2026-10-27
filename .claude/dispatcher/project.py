@@ -276,15 +276,15 @@ def frontmatter(text: str):
     return head, m.end()
 
 
-def atomic_write_text(path, text: str, retries: int = 8) -> None:
-    """Запись через временный файл + os.replace. На Windows replace падает с PermissionError, пока
-    другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи
+def _atomic_write(path, write, retries: int) -> None:
+    """Запись через временный файл (`write(tmp)`) + os.replace. На Windows replace падает с PermissionError, пока
+    другой процесс (диспетчер, роль) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи
     оставляет прежний файл целым и не оставляет `.tmp`. Каталог создаётся."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
-        tmp.write_text(text, encoding="utf-8", newline="\n")
+        write(tmp)
         for i in range(retries):
             try:
                 os.replace(tmp, path)
@@ -301,6 +301,16 @@ def atomic_write_text(path, text: str, retries: int = 8) -> None:
             pass
 
 
+def atomic_write_text(path, text: str, retries: int = 8) -> None:
+    """Текст (UTF-8, LF) целиком или прежний файл — `_atomic_write`."""
+    _atomic_write(path, lambda tmp: tmp.write_text(text, encoding="utf-8", newline="\n"), retries)
+
+
+def atomic_write_bytes(path, data: bytes, retries: int = 8) -> None:
+    """Байты как есть (уставы с CRLF) целиком или прежний файл — `_atomic_write`."""
+    _atomic_write(path, lambda tmp: tmp.write_bytes(data), retries)
+
+
 def write_json(path, data, sort_keys: bool = False) -> None:
     """Единственная запись JSON состояния: `indent=2`, кириллица как есть, перевод строки в конце, атомарно."""
     atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=sort_keys) + "\n")
@@ -312,6 +322,12 @@ def read_json(path, default=None):
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return default
+
+
+def read_log(path) -> list:
+    """Журнал (`config set`, `charter sync`): список записей-объектов; нет файла, битый JSON, не список — `[]`."""
+    data = read_json(path, [])
+    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
 
 
 def read_pid(pid_file) -> int:
