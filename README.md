@@ -48,7 +48,7 @@ Platform details, manual start and project-root lookup: [docs/install.md](docs/i
    ```
 
 2. Run `/rpv-start` in the project: it restarts the dispatcher and the watcher on the new code.
-3. Bring the role charters up to date. `/rpv-init` never overwrites `.claude/roles/`, so new rules from a release reach an existing project only when the CEO copies them from the plugin's `templates/roles/` (the release's entry in [CHANGELOG.md](CHANGELOG.md) names the files).
+3. Bring the role charters up to date. `/rpv-init` never overwrites `.claude/roles/`, so new rules from a release reach an existing project only through `python <plugin>/.claude/dispatcher/tickets.py charter sync [--file <name>.md]` (the CEO's guard rejects copying by hand; the release's entry in [CHANGELOG.md](CHANGELOG.md) names the changed files).
 
 ## How it works
 
