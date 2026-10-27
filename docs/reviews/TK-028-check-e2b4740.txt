@@ -1,0 +1,5 @@
+e2b474008c691389c6e1eb82ec8b8b6985b76c1f	refs/tags/v2.0.8
+{"conclusion":"success","databaseId":40466284383,"headSha":"e2b474008c691389c6e1eb82ec8b8b6985b76c1f"}
+{"conclusion":"cancelled","databaseId":40466090317}
+версии согласованы: {"plugin": "2.0.8", "marketplace": "2.0.8", "changelog": "2.0.8"}
+rc=0

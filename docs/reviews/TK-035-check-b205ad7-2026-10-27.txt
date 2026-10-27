@@ -1,0 +1,8 @@
+TK-035 · проверка Судьи · снимок origin/main ba2ef65 (git archive во временный каталог)
+.py без test_*/conftest в .claude/ и tools/: 82
+rpv_config._atomic: строка 76, тело одна строка P.write_json(path, data), вызовов 6 (136,141,150,175,201,208); других пользователей вне rpv_config нет
+radon cc E/F: 0
+radon cc D: 39
+watch.py строк: 827
+pyflakes charter.py, project.py, rpv_config.py, charter_cmd.py: пусто
+pytest test_tk033.py test_charter_guard.py: 17 passed

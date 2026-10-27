@@ -1,0 +1,8 @@
+PR #153@0af8c9f, база origin/main b72a0e1; вне базы один коммит 0af8c9f (CHANGELOG.md, plugin.json, marketplace.json)
+release.py check: версии согласованы: plugin 2.0.10, marketplace 2.0.10, changelog 2.0.10
+git diff --stat v2.0.9 origin/main -- templates/: templates/roles/ceo.md 1 файл
+проход 1 (review-round2-2026-10-27.md:11): Всего в таблицах 5 строк
+проход 2 (review-round2-pass2-2026-10-27.md:7): Находок: 1, мелкая (ось 2)
+проход 3 (review-round2-pass3-2026-10-27.md:7): Находок: 0
+проход 3 (review-round2-pass3-2026-10-27.md:13): макс. watch.py 827
+CI PR #153 на 0af8c9f: ubuntu pass, macos pass, systemd pass, windows pending на момент проверки

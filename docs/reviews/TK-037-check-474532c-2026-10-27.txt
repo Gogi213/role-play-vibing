@@ -1,0 +1,5 @@
+TK-037 проверка Судьи, PR #149 голова 474532c, копия /tmp/j149
+test_update.py: 17 passed
+полный набор pytest -n auto: 1372 passed, 8 skipped
+claude 2.1.302: plugin update имеет -s, --scope <scope>
+tickets.py charter sync: --ref и --why есть (tickets_cli.py:133-134)

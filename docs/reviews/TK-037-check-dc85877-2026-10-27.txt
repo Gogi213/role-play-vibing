@@ -1,0 +1,2 @@
+PR #149 @ dc85877, копия .claude/worktrees/TK-037, python -m pytest -n auto -q
+1383 passed, 8 skipped in 186.87s
