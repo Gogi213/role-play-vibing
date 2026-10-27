@@ -463,7 +463,7 @@ class RoleInstructionsUseResult(unittest.TestCase):
         sys.path.insert(0, os.path.join(os.path.dirname(HERE), "dispatcher"))
         import dispatch as D
         self.assertIn(" result TK-1 <", D.build_prompt("engineer", "TK-1"))
-        src = open(D.__file__, encoding="utf-8").read()
+        src = open(os.path.join(os.path.dirname(D.__file__), "finish.py"), encoding="utf-8").read()
         self.assertIn("командой tickets.py result", src)
         self.assertNotIn("командой tickets.py comment и обнови", src)
 

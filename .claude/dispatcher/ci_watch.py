@@ -7,42 +7,20 @@
 from __future__ import annotations
 
 import json
-import re
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
+import merge_rule  # noqa: E402
+import procs  # noqa: E402
 import project as P  # noqa: E402
-import hide  # noqa: E402
 import ticket as T  # noqa: E402
+from ci_core import ACTIVE, gh_api, load_state, save_state, ticket_for_pr, wake  # noqa: E402,F401
 
 INTERVAL_S = 60.0
 RED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale")
-_TK_RE = re.compile(r"\bTK-?(\d+)\b", re.I)
-ACTIVE = ("todo", "in_progress", "in_review", "waiting")
-
-
-def state_path() -> Path:
-    return D.STATE_FILE.parent / "ci-state.json"
-
-
-def load_state() -> dict:
-    return P.read_json(state_path(), {})
-
-
-def save_state(st: dict) -> None:
-    P.write_json(state_path(), st)
-
-
-def gh_api(path: str, method: str = "GET", **fields):
-    args = ["gh", "api", "-X", method, path] + [x for k, v in fields.items() for x in ("-f", f"{k}={v}")]
-    r = hide.run(args, capture_output=True, timeout=60)
-    if r.returncode != 0:
-        raise RuntimeError((r.stderr or b"").decode("utf-8", "replace").strip()[:200])
-    return json.loads(r.stdout.decode("utf-8"))
 
 
 def ci_result(runs: list):
@@ -53,21 +31,6 @@ def ci_result(runs: list):
     if red:
         return "failure", red
     return "success", []
-
-
-def ticket_for_pr(pr: dict, tickets: list):
-    """Тикет по шапке `pr:` (список номеров), иначе по TK-<N> в имени ветки/заголовке. Нет — None."""
-    num = str(pr["number"])
-    for t in tickets:
-        if num in re.findall(r"\d+", str(t.header.get("pr") or "")):
-            return t
-    m = _TK_RE.search(f"{pr.get('head', {}).get('ref', '')} {pr.get('title', '')}")
-    if m:
-        want = f"TK-{int(m.group(1)):03d}"
-        for t in tickets:
-            if t.id == want:
-                return t
-    return None
 
 
 def judged_on(tkt, sha: str) -> bool:
@@ -87,18 +50,6 @@ def decide(tkt, sha: str, state: str, red: list, pr_number: int, repo: str):
     return "judge", f"CI зелёный на {s7} (PR #{pr_number}): проверь голову; вердикт — записью с {s7}."
 
 
-def wake(path, tkt, who: str, text: str, repo: str = "", pr_number: int = 0) -> None:
-    upd = {"next": who}
-    if repo and (tkt.header.get("wait_for") or "").strip() == f"ci:{repo}#{pr_number}":
-        upd.update({"wait_for": "", "on_met": ""})
-    elif repo and who != "judge" and (tkt.header.get("wait_for") or "").strip() == f"merged:{repo}#{pr_number}":
-        # красный CI на принятом PR: ждать влития нечего (PR не влить) — владелец будится, ожидание снято (TK-092, CEO 05:25)
-        upd.update({"wait_for": "", "on_met": "", "status": "in_progress"})
-    with T.ticket_lock(path):
-        T.append_log(path, "ci", text)
-        T.write_header_updates(path, upd, stamp_updated=False)
-
-
 ERR_LIMIT = 3          # подряд сбоев опроса CI одного PR, после которых о нём узнаёт владелец тикета
 
 
@@ -116,7 +67,7 @@ def run_once(repo: str, gh=gh_api) -> list:
     """Один проход. Возвращает список (PR, sha7, state, кого разбудили)."""
     st, out = load_state(), []
     tickets = []
-    for p in T.list_tickets(D.TICKETS_DIR):
+    for p in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tickets.append(T.read_ticket(p))
         except Exception:
@@ -177,31 +128,30 @@ def run_done(repo: str, run_id: int, gh=gh_api) -> bool:
 
 
 def write_heartbeat() -> None:
-    f = D.STATE_FILE.parent / "ci-heartbeat.json"
+    f = CFG.STATE_FILE.parent / "ci-heartbeat.json"
     T.atomic_write_text(f, json.dumps({"ts": T.now_iso()}))
 
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if not D.ensure_project(argv, "ci_watch"):
+    if not CFG.ensure_project(argv, "ci_watch"):
         return 2
     repo = next((a.split("=", 1)[1] for a in argv if a.startswith("--repo=")), None) or P.setting("ci_repo", "")
     if not repo:
         print("ci_watch: нужен --repo=<владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 2
     if "--once" not in argv:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра supervise (TK-090 Д-1)
-        lock = D.DISPATCHER_DIR / "ci_watch.pid"
-        ok, why = D.acquire_instance_lock(lock)
+        lock = CFG.DISPATCHER_DIR / "ci_watch.pid"
+        ok, why = procs.acquire_instance_lock(lock)
         if not ok:
             print(f"[ci_watch] {why}", file=sys.stderr)
             return 1
         import atexit
-        atexit.register(D.release_instance_lock, lock)
+        atexit.register(procs.release_instance_lock, lock)
     while True:
         try:
             for n, s7, state, woke in run_once(repo):
                 print(f"[ci_watch] PR #{n} {s7}: {state}" + (f" → {woke}" if woke else ""))
-            import merge_rule
             for n, what in merge_rule.merge_once(repo):
                 print(f"[merge_rule] PR #{n}: {what}")
         except Exception as e:

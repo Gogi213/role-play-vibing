@@ -22,6 +22,7 @@ atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cfg  # noqa: E402
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import report as R  # noqa: E402
 import tickets as TK  # noqa: E402
 
@@ -39,8 +40,8 @@ class ConfigTests(unittest.TestCase):
             f"# Решения владельца\n\n## В-7 · 2026-10-27 04:57\n> {QUOTE}\nСуть: узкие рамки\nЗаменяет: —\n", encoding="utf-8")
         self.rpv = self.root / ".claude" / "rpv.json"
         self.rpv.write_text(json.dumps({"max_parallel": 3}), encoding="utf-8")
-        self._orig = (D.TICKETS_DIR, TK.TICKETS_DIR, TK.PROJECT_ROOT)
-        D.TICKETS_DIR = TK.TICKETS_DIR = self.root / "tickets"
+        self._orig = (CFG.TICKETS_DIR, TK.TICKETS_DIR, TK.PROJECT_ROOT)
+        CFG.TICKETS_DIR = TK.TICKETS_DIR = self.root / "tickets"
         TK.PROJECT_ROOT = self.root
         self.role = ""
         patch = mock.patch.object(TK, "_caller_role", lambda: self.role)
@@ -48,7 +49,7 @@ class ConfigTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def tearDown(self):
-        D.TICKETS_DIR, TK.TICKETS_DIR, TK.PROJECT_ROOT = self._orig
+        CFG.TICKETS_DIR, TK.TICKETS_DIR, TK.PROJECT_ROOT = self._orig
         self.tmp.cleanup()
 
     def cmd(self, *argv):

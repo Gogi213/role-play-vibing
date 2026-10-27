@@ -14,6 +14,8 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dispatch as D  # noqa: E402
+import alarms as AL
+import config as CFG  # noqa: E402
 import registry  # noqa: E402
 import report as R  # noqa: E402
 
@@ -422,9 +424,9 @@ class DispatcherTriggerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve()
-        self.orig = D.PROJECT_ROOT
-        D.configure_project(self.root)
-        D._REPORT_PROC = None
+        self.orig = CFG.PROJECT_ROOT
+        CFG.configure_project(self.root)
+        AL._REPORT_PROC = None
         self.procs = []
 
         class Proc:
@@ -438,8 +440,8 @@ class DispatcherTriggerTests(unittest.TestCase):
 
     def tearDown(self):
         self.patch.stop()
-        D._REPORT_PROC = None
-        D.configure_project(self.orig)
+        AL._REPORT_PROC = None
+        CFG.configure_project(self.orig)
         self.tmp.cleanup()
 
     def test_first_tick_only_sets_the_mark(self):

@@ -149,22 +149,23 @@ class JobrunTests(unittest.TestCase):
         """Вся цепочка без сети: jobrun.sh пишет файл итога, «ssh» (удалённая команда в локальном bash) отдаёт его сверке диспетчера."""
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import dispatch as D
+        import waits as W
         _, rc = self.run_job("sleep 1.5; exit 3")
         remote = rc.as_posix()
         if re.match(r"[A-Za-z]:/", remote):  # Git Bash: C:/x → /c/x, путь на «машине» обязан быть абсолютным (/…)
             remote = "/" + remote[0].lower() + remote[2:]
         key = ("loop", "path", remote)
         spec = f"host:loop:{remote}"
-        D._WAIT_WATCH.add(key)
-        self.addCleanup(lambda: (D._WAIT_WATCH.discard(key), D._WAIT_CACHE.pop(key, None), D._WAIT_RC.pop(key, None)))
-        with mock.patch.object(D, "_ssh_cmd", lambda alias, cmd: [BASH, "-c", cmd]), mock.patch.object(D, "BLIND", D.blind.Tracker()):
-            D._reconcile()
-            self.assertFalse(D._WAIT_CACHE[key][1], "задание идёт — итога нет, сверка условие не закрывает")
+        W._WAIT_WATCH.add(key)
+        self.addCleanup(lambda: (W._WAIT_WATCH.discard(key), W._WAIT_CACHE.pop(key, None), W._WAIT_RC.pop(key, None)))
+        with mock.patch.object(W, "_ssh_cmd", lambda alias, cmd: [BASH, "-c", cmd]), mock.patch.object(W, "BLIND", W.blind.Tracker()):
+            W._reconcile()
+            self.assertFalse(W._WAIT_CACHE[key][1], "задание идёт — итога нет, сверка условие не закрывает")
             self.wait_rc(rc)
-            D._reconcile()
-        self.assertTrue(D._WAIT_CACHE[key][1])
-        self.assertEqual(D.wait_rc(spec), "SERVICE_RESULT=exit-code EXIT_STATUS=3")
-        self.assertTrue(D._rc_failed(D.wait_rc(spec)))
+            W._reconcile()
+        self.assertTrue(W._WAIT_CACHE[key][1])
+        self.assertEqual(W.wait_rc(spec), "SERVICE_RESULT=exit-code EXIT_STATUS=3")
+        self.assertTrue(W._rc_failed(W.wait_rc(spec)))
 
 
 if __name__ == "__main__":

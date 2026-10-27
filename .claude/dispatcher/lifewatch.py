@@ -24,7 +24,7 @@ STATE_NAME = "job-state.json"
 
 
 def probe_job(alias: str, jid: str, ssh_cmd, timeout: float = 25.0):
-    """(состояние, хвост лога). `ssh_cmd(alias, remote)` — как `dispatch._ssh_cmd`; адаптер не задан — `ssh-error`."""
+    """(состояние, хвост лога). `ssh_cmd(alias, remote)` — как `waits._ssh_cmd`; адаптер не задан — `ssh-error`."""
     tpl = P.setting("job_state_cmd")
     if not tpl or "{id}" not in tpl:
         return "ssh-error", ""

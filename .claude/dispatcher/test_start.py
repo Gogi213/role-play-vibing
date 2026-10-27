@@ -354,7 +354,7 @@ class StartTests(unittest.TestCase):
     def test_stop_running_kills_copy_without_pid_file(self):
         killed = []
         pid_file = self.project / ".claude" / "dispatcher" / "dispatch.pid"
-        with mock.patch.object(S, "find_copies", return_value=[555]), mock.patch.object(S.D, "_kill", killed.append):
+        with mock.patch.object(S, "find_copies", return_value=[555]), mock.patch.object(S.PR, "_kill", killed.append):
             self.assertEqual(S.stop_running(pid_file, "dispatch.py", project=self.project), 555)
         self.assertEqual(killed, [555])
 
@@ -366,7 +366,7 @@ class StartTests(unittest.TestCase):
 
         def kill(pid):
             pid_file.write_text("222", encoding="utf-8")
-        with mock.patch.object(S, "is_ours", return_value=True), mock.patch.object(S.D, "_kill", kill),                 mock.patch.object(S.D, "_pid_alive", return_value=False), mock.patch.object(S, "find_copies", return_value=[]):
+        with mock.patch.object(S, "is_ours", return_value=True), mock.patch.object(S.PR, "_kill", kill),                 mock.patch.object(S.PR, "_pid_alive", return_value=False), mock.patch.object(S, "find_copies", return_value=[]):
             S.stop_running(pid_file, "dispatch.py", project=self.project)
         self.assertEqual(pid_file.read_text(encoding="utf-8"), "222")
 
@@ -386,9 +386,9 @@ class StartTests(unittest.TestCase):
         """В-209 Д-1: таймаут tasklist (все повторы) — None, а не «мёртв»; is_ours считает такой процесс нашим."""
         def boom(*a, **k):
             raise subprocess.TimeoutExpired("tasklist", 5)
-        with mock.patch.object(S.D.os, "name", "nt"), mock.patch.object(S.D.hide, "run", boom):
-            self.assertIsNone(S.D._pid_state(4242, "py"))
-            self.assertTrue(S.D._pid_alive(4242, "py"))
+        with mock.patch.object(S.PR.os, "name", "nt"), mock.patch.object(S.PR.hide, "run", boom):
+            self.assertIsNone(S.PR._pid_state(4242, "py"))
+            self.assertTrue(S.PR._pid_alive(4242, "py"))
 
     def test_pid_state_tasklist_retries_then_answers(self):
         calls = []
@@ -398,8 +398,8 @@ class StartTests(unittest.TestCase):
             if len(calls) == 1:
                 raise subprocess.TimeoutExpired("tasklist", 5)
             return subprocess.CompletedProcess(cmd, 0, '"python.exe","4242","Console","1","1 K"' + chr(10), "")
-        with mock.patch.object(S.D.os, "name", "nt"), mock.patch.object(S.D.hide, "run", run):
-            self.assertTrue(S.D._pid_state(4242, "py"))
+        with mock.patch.object(S.PR.os, "name", "nt"), mock.patch.object(S.PR.hide, "run", run):
+            self.assertTrue(S.PR._pid_state(4242, "py"))
         self.assertEqual(len(calls), 2)
 
 

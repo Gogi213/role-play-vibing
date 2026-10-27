@@ -55,19 +55,21 @@ def test_flap_keeps_original_since():
 def test_alert_file_removed_when_target_leaves_active(tmp_path, monkeypatch):
     import time
     import dispatch as D
-    monkeypatch.setattr(D, "DISPATCHER_DIR", tmp_path)
-    monkeypatch.setattr(D, "CEO_INBOX", tmp_path / "ceo-inbox.md")
-    monkeypatch.setattr(D, "CEO_WAKE_LOG", tmp_path / "ceo-wake.log")
-    monkeypatch.setattr(D, "TICKETS_DIR", tmp_path / "tickets")
-    monkeypatch.setattr(D, "_blind_sound", lambda: None)
-    monkeypatch.setattr(D, "BLIND", blind.Tracker(alert_s=300, repeat_s=1800))
-    monkeypatch.setattr(D, "_WAIT_WATCH", {("gpu1", "host", "x"): 1})
-    D.BLIND.record("ssh:gpu1", False, time.time() - 400)
+    import config as CFG  # noqa: E402
+    import waits as W
+    monkeypatch.setattr(CFG, "DISPATCHER_DIR", tmp_path)
+    monkeypatch.setattr(CFG, "CEO_INBOX", tmp_path / "ceo-inbox.md")
+    monkeypatch.setattr(CFG, "CEO_WAKE_LOG", tmp_path / "ceo-wake.log")
+    monkeypatch.setattr(CFG, "TICKETS_DIR", tmp_path / "tickets")
+    monkeypatch.setattr(W, "_blind_sound", lambda: None)
+    monkeypatch.setattr(W, "BLIND", blind.Tracker(alert_s=300, repeat_s=1800))
+    monkeypatch.setattr(W, "_WAIT_WATCH", {("gpu1", "host", "x"): 1})
+    W.BLIND.record("ssh:gpu1", False, time.time() - 400)
     D._blind_tick()
     f = tmp_path / "ALERT-BLIND.txt"
     assert f.exists() and "ssh:gpu1" in f.read_text(encoding="utf-8")
     assert "[blind]" in (tmp_path / "mechanics.log").read_text(encoding="utf-8")  # CP5: механика — в лог, CEO не будит
     assert not (tmp_path / "ceo-wake.log").exists()
-    monkeypatch.setattr(D, "_WAIT_WATCH", {})  # ожидание снято -> acts пуст, файл обязан уйти
+    monkeypatch.setattr(W, "_WAIT_WATCH", {})  # ожидание снято -> acts пуст, файл обязан уйти
     D._blind_tick()
     assert not f.exists()

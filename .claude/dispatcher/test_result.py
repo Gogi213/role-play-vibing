@@ -19,6 +19,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import routes as R  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402
@@ -32,10 +33,10 @@ class ResultTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
         (base / "tickets").mkdir()
-        self._orig = (D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT)
-        D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT = base / "tickets", base / "state.json", base / "tickets", base
+        self._orig = (CFG.TICKETS_DIR, CFG.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT)
+        CFG.TICKETS_DIR, CFG.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT = base / "tickets", base / "state.json", base / "tickets", base
         self.base = base
-        self.path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="Т", status="todo", now=NOW)
+        self.path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="Т", status="todo", now=NOW)
         T.write_header_updates(self.path, {"status": "in_progress", "reviewer": "judge"}, now=NOW)
         self.tid = self.path.stem
         self._role = os.environ.get("RPV_ROLE")
@@ -50,7 +51,7 @@ class ResultTests(unittest.TestCase):
     def tearDown(self):
         import merge_rule
         merge_rule.check_pr = self._chk
-        D.TICKETS_DIR, D.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT = self._orig
+        CFG.TICKETS_DIR, CFG.STATE_FILE, TK.TICKETS_DIR, TK.PROJECT_ROOT = self._orig
         if self._role is None:
             os.environ.pop("RPV_ROLE", None)
         else:
@@ -104,7 +105,7 @@ class ResultTests(unittest.TestCase):
     def test_ticket_from_new_goes_through_judge_on_done(self):  # сквозной: new → done исполнителя → Судья, без флагов
         (self.base / "out.md").write_text("x", encoding="utf-8")
         self.assertEqual(TK.main(["new", "--ref", "В-229", "--owner", "researcher", "--title", "Сквозной тикет", "--force"]), 0)
-        self.path = max(D.TICKETS_DIR.glob("TK-*.md"))
+        self.path = max(CFG.TICKETS_DIR.glob("TK-*.md"))
         self.tid = self.path.stem
         self.assertEqual(self.tkt().reviewer, "judge")
         self.assertEqual(self.res("researcher", "done", path="out.md"), 0)
@@ -204,7 +205,7 @@ class ResultTests(unittest.TestCase):
         self.refused("judge", "accept", pr=7, sha=SHA, repo="x/y")  # PR нет в репо — ничего не пишем
 
     def test_wait_ticket_cycle_writes_nothing(self):
-        other = T.create_ticket(D.TICKETS_DIR, owner="researcher", title="Д", status="todo", now=NOW)
+        other = T.create_ticket(CFG.TICKETS_DIR, owner="researcher", title="Д", status="todo", now=NOW)
         T.write_header_updates(other, {"status": "waiting", "wait_for": f"ticket:{self.tid}"}, now=NOW)
         self.refused("engineer", "wait", form=f"ticket:{other.stem}")
 
@@ -368,9 +369,9 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(self.tkt().status, "waiting")
 
     def test_new_refuses_similar_recent_title(self):
-        self.assertTrue(T.similar_recent_ticket(D.TICKETS_DIR, "т", now=NOW))
-        self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "совсем другое про счёт", now=NOW), "")
-        self.assertEqual(T.similar_recent_ticket(D.TICKETS_DIR, "т", now=NOW + timedelta(hours=2)), "")
+        self.assertTrue(T.similar_recent_ticket(CFG.TICKETS_DIR, "т", now=NOW))
+        self.assertEqual(T.similar_recent_ticket(CFG.TICKETS_DIR, "совсем другое про счёт", now=NOW), "")
+        self.assertEqual(T.similar_recent_ticket(CFG.TICKETS_DIR, "т", now=NOW + timedelta(hours=2)), "")
 
     # --- TK-233
     def test_judge_ask_owner_needs_owner_reason(self):
@@ -411,14 +412,14 @@ class ResultTests(unittest.TestCase):
                      backlog=False, executor=None, kind=None)
             a.update(kw)
             return TK.cmd_new(type("A", (), a)())
-        before = len(list(D.TICKETS_DIR.glob("TK-*.md")))
+        before = len(list(CFG.TICKETS_DIR.glob("TK-*.md")))
         self.assertEqual(new(), 1)
         self.assertEqual(new(ref="да"), 1)
-        self.assertEqual(len(list(D.TICKETS_DIR.glob("TK-*.md"))), before, "отказ не создаёт файл")
+        self.assertEqual(len(list(CFG.TICKETS_DIR.glob("TK-*.md"))), before, "отказ не создаёт файл")
         self.assertEqual(new(ref="В-12"), 0)
         self.assertEqual(new(ref="В-"), 1)
         self.assertEqual(new(ref="В-229"), 0)
-        made = max(D.TICKETS_DIR.glob("TK-*.md"))
+        made = max(CFG.TICKETS_DIR.glob("TK-*.md"))
         self.assertIn("Ссылка на задачу владельца: В-229", made.read_text(encoding="utf-8"))
 
     def test_new_ref_checked_against_owner_registry(self):
@@ -615,7 +616,7 @@ class ResultTests(unittest.TestCase):
         (self.base / "review.md").write_text("x", encoding="utf-8")
         self.res("engineer", "done", path="out.md")
         self.assertEqual(self.res("judge", "accept", path="review.md", live=None), 0, "без [вживую] ворот нет")
-        p = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="Ф", status="in_progress",
+        p = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="Ф", status="in_progress",
                             description="Примут, если: [вживую] владелец открывает форму и видит прогоны за 2 с", now=NOW)
         T.write_header_updates(p, {"reviewer": "judge"}, now=NOW)
         self.tid = p.stem
@@ -760,12 +761,12 @@ class ResultTests(unittest.TestCase):
                  backlog=False, executor=None, kind=None, ref="В-229", due="2099-01-02T18:00+04:00", said=None)
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(TK.cmd_new(type("A", (), a)()), 0)
-        made = T.read_ticket(max(D.TICKETS_DIR.glob("TK-*.md")))
+        made = T.read_ticket(max(CFG.TICKETS_DIR.glob("TK-*.md")))
         self.assertEqual(made.header.get("due_first"), "2099-01-02T18:00+04:00")
-        before = len(list(D.TICKETS_DIR.glob("TK-*.md")))
+        before = len(list(CFG.TICKETS_DIR.glob("TK-*.md")))
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(TK.cmd_new(type("A", (), dict(a, title="Другое", due="не срок"))()), 1)
-        self.assertEqual(len(list(D.TICKETS_DIR.glob("TK-*.md"))), before, "непонятый срок — файл не создан")
+        self.assertEqual(len(list(CFG.TICKETS_DIR.glob("TK-*.md"))), before, "непонятый срок — файл не создан")
 
 
     # --- V2-3: приёмка Судьи гоняет проверки всех исправленных ошибок

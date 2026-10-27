@@ -119,7 +119,7 @@ class EpisodeTests(unittest.TestCase):
 
     def test_both_alarms_use_it(self):
         """Обе тревоги идут через `notify.episode`: ни у одной нет своей копии «флаг + отправка»."""
-        for name in ("dispatch.py", "supervise.py"):
+        for name in ("alarms.py", "supervise.py"):
             self.assertIn("notify.episode(", (HERE / name).read_text(encoding="utf-8"), name)
 
 

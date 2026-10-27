@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import ci_watch as C  # noqa: E402
-import dispatch as D  # noqa: E402
+import ci_core as C  # noqa: E402
+import config as CFG  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -21,7 +21,7 @@ _TRANSIENT = re.compile(r"HTTP 5\d\d|timed out|timeout|connection", re.I)
 
 
 def merge_state_path() -> Path:
-    return D.STATE_FILE.parent / "merge-state.json"
+    return CFG.STATE_FILE.parent / "merge-state.json"
 
 
 def _load() -> dict:
@@ -72,7 +72,7 @@ def _note_not_found(repo: str, number: int) -> None:
     только в журнале диспетчера. Повторный опрос того же ожидания вторую запись не пишет."""
     text = f"PR #{number} не найден в {repo} — ожидание merged: снято; проверь номер PR и репозиторий (ci_repo в .claude/rpv.json)."
     want = f"merged:{repo}#{number}"
-    for p in T.list_tickets(D.TICKETS_DIR):
+    for p in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(p)
         except Exception:
@@ -164,21 +164,26 @@ def _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out) -> None:
         out.append((n, "не подтверждено → владельцу"))
 
 
-def merge_once(repo: str, gh=C.gh_api) -> list:
-    """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
-    st, out = _load(), []
+def _read_tickets() -> list:
     tickets = []
-    for p in T.list_tickets(D.TICKETS_DIR):
+    for p in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tickets.append(T.read_ticket(p))
         except Exception:
             continue
-    default = gh(f"repos/{repo}")["default_branch"]
-    prs = gh(f"repos/{repo}/pulls?state=open&per_page=100")
-    open_heads = {p["head"]["ref"] for p in prs}
-    ci = C.load_state()
+    return tickets
+
+
+def _report_gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception, n: int, out: list) -> None:
+    r = _gh_error(st, key, sha, tkt, what, e)
+    if r:
+        out.append((n, r))
+
+
+def _sweep_pending(gh, repo: str, default: str, tickets: list, st: dict, out: list) -> set:
+    """TK-109 п.1/14: PUT без ответа — смотрим PR вне списка open. Возвращает номера влитых."""
     swept = set()
-    for key, ent in list(st.items()):                          # TK-109 п.1/14: PUT без ответа — смотрим PR вне списка open
+    for key, ent in list(st.items()):
         if not (isinstance(ent, dict) and ent.get("put_pending") and key.startswith(f"{repo}#")):
             continue
         n, psha = int(key.rsplit("#", 1)[1]), ent["put_pending"]
@@ -193,65 +198,85 @@ def merge_once(repo: str, gh=C.gh_api) -> list:
             st.pop(key)
             swept.add(n)
             _after_merge(gh, repo, n, psha, default, ptkt, {"merged": True, "sha": d2.get("merge_commit_sha")}, st, out)
+    return swept
+
+
+def _put_merge(gh, repo: str, n: int, sha: str, tkt, key: str, st: dict, out: list):
+    """PUT слияния. Ответ слияния или None (на этом проходе PR больше не трогаем)."""
+    try:
+        return gh(f"repos/{repo}/pulls/{n}/merge", method="PUT", merge_method="merge", sha=sha)
+    except Exception as e:
+        # TK-109 п.1/14: таймаут/5xx самого PUT мог прийти ПОСЛЕ слияния — переспрашиваем, влитый PR из open уйдёт
+        try:
+            d2 = gh(f"repos/{repo}/pulls/{n}")
+        except Exception:
+            st[key] = {"put_pending": sha, "tid": tkt.id}   # не знаем — досмотр вне списка open на следующих проходах
+            return None
+        if not d2.get("merged"):
+            _report_gh_error(st, key, sha, tkt, "слияние", e, n, out)
+            return None
+        return {"merged": True, "sha": d2.get("merge_commit_sha")}
+
+
+def _switch_base(gh, repo: str, pr: dict, default: str, tkt, key: str, st: dict, out: list) -> None:
+    n, sha, base = pr["number"], pr["head"]["sha"], pr["base"]["ref"]
+    try:
+        gh(f"repos/{repo}/pulls/{n}", method="PATCH", base=default)
+    except Exception as e:                            # TK-109 п.2: сбой одного PR не обрывает проход
+        _report_gh_error(st, key, sha, tkt, "смена базы", e, n, out)
+        return
+    out.append((n, f"база {base} → {default}"))
+
+
+def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, open_heads: set, st: dict, out: list) -> None:
+    n, sha = pr["number"], pr["head"]["sha"]
+    tkt = C.ticket_for_pr(pr, tickets)
+    if tkt is None or tkt.status not in C.ACTIVE + ("done",):
+        return
+    acc = accepted_head(tkt, n)
+    if not acc or not sha.startswith(acc):
+        return
+    key = f"{repo}#{n}"
+    ci_ok = (ci.get(key) or {}).get("sha") == sha and (ci.get(key) or {}).get("state") == "success"
+    base = pr["base"]["ref"]
+    if base != default:
+        if ci_ok and base not in open_heads:
+            _switch_base(gh, repo, pr, default, tkt, key, st, out)
+        return
+    try:
+        detail = gh(f"repos/{repo}/pulls/{n}")
+    except Exception as e:
+        _report_gh_error(st, key, sha, tkt, "запрос состояния PR", e, n, out)
+        return
+    if "errs" in (st.get(key) or {}):
+        st.pop(key)
+    if detail.get("mergeable") is False:                  # конфликт сообщаем сразу: CI на конфликтной голове не нужен
+        if (st.get(key) or {}).get("conflict") != sha:
+            _note(tkt, f"PR #{n} принят на {sha[:7]}, но конфликтует с {default}: слей {default} в ветку и запушь "
+                       f"(CI и вердикт на новой голове — заново).", wake_owner=True)
+            st[key] = {"conflict": sha}
+            out.append((n, "конфликт → владельцу"))
+        return
+    if not ci_ok or detail.get("mergeable") is None:
+        return
+    merged_resp = _put_merge(gh, repo, n, sha, tkt, key, st, out)
+    if merged_resp is None:
+        return
+    st.pop(key, None)
+    _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out)
+
+
+def merge_once(repo: str, gh=C.gh_api) -> list:
+    """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
+    st, out = _load(), []
+    tickets = _read_tickets()
+    default = gh(f"repos/{repo}")["default_branch"]
+    prs = gh(f"repos/{repo}/pulls?state=open&per_page=100")
+    open_heads = {p["head"]["ref"] for p in prs}
+    ci = C.load_state()
+    swept = _sweep_pending(gh, repo, default, tickets, st, out)
     for pr in prs:
-        n, sha = pr["number"], pr["head"]["sha"]
-        if n in swept:
-            continue
-        tkt = C.ticket_for_pr(pr, tickets)
-        if tkt is None or tkt.status not in C.ACTIVE + ("done",):
-            continue
-        acc = accepted_head(tkt, n)
-        if not acc or not sha.startswith(acc):
-            continue
-        key = f"{repo}#{n}"
-        ci_ok = (ci.get(key) or {}).get("sha") == sha and (ci.get(key) or {}).get("state") == "success"
-        base = pr["base"]["ref"]
-        if base != default:
-            if not ci_ok or base in open_heads:
-                continue
-            try:
-                gh(f"repos/{repo}/pulls/{n}", method="PATCH", base=default)
-            except Exception as e:                            # TK-109 п.2: сбой одного PR не обрывает проход
-                r = _gh_error(st, key, sha, tkt, "смена базы", e)
-                if r:
-                    out.append((n, r))
-                continue
-            out.append((n, f"база {base} → {default}"))
-            continue
-        try:
-            detail = gh(f"repos/{repo}/pulls/{n}")
-        except Exception as e:
-            r = _gh_error(st, key, sha, tkt, "запрос состояния PR", e)
-            if r:
-                out.append((n, r))
-            continue
-        if "errs" in (st.get(key) or {}):
-            st.pop(key)
-        if detail.get("mergeable") is False:                  # конфликт сообщаем сразу: CI на конфликтной голове не нужен
-            if (st.get(key) or {}).get("conflict") != sha:
-                _note(tkt, f"PR #{n} принят на {sha[:7]}, но конфликтует с {default}: слей {default} в ветку и запушь "
-                           f"(CI и вердикт на новой голове — заново).", wake_owner=True)
-                st[key] = {"conflict": sha}
-                out.append((n, "конфликт → владельцу"))
-            continue
-        if not ci_ok or detail.get("mergeable") is None:
-            continue
-        try:
-            merged_resp = gh(f"repos/{repo}/pulls/{n}/merge", method="PUT", merge_method="merge", sha=sha)
-        except Exception as e:
-            # TK-109 п.1/14: таймаут/5xx самого PUT мог прийти ПОСЛЕ слияния — переспрашиваем, влитый PR из open уйдёт
-            try:
-                d2 = gh(f"repos/{repo}/pulls/{n}")
-            except Exception:
-                st[key] = {"put_pending": sha, "tid": tkt.id}   # не знаем — досмотр вне списка open на следующих проходах
-                continue
-            if not d2.get("merged"):
-                r = _gh_error(st, key, sha, tkt, "слияние", e)
-                if r:
-                    out.append((n, r))
-                continue
-            merged_resp = {"merged": True, "sha": d2.get("merge_commit_sha")}
-        st.pop(key, None)
-        _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out)
+        if pr["number"] not in swept:
+            _handle_pr(gh, repo, pr, default, tickets, ci, open_heads, st, out)
     _save(st)
     return out

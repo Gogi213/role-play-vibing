@@ -18,6 +18,7 @@ atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
 import ticket as T  # noqa: E402
 
 REPO = "o/r"
@@ -29,16 +30,16 @@ class CiWatchTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
         (base / "tickets").mkdir()
-        self._orig = (D.TICKETS_DIR, D.STATE_FILE)
-        D.TICKETS_DIR, D.STATE_FILE = base / "tickets", base / "state.json"
-        self.path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="Тикет", status="todo", now=NOW)
+        self._orig = (CFG.TICKETS_DIR, CFG.STATE_FILE)
+        CFG.TICKETS_DIR, CFG.STATE_FILE = base / "tickets", base / "state.json"
+        self.path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="Тикет", status="todo", now=NOW)
         T.write_header_updates(self.path, {"status": "in_review"}, now=NOW)
         T.append_log(self.path, "engineer", "PR отправлен", now=NOW)
         self.tid = self.path.stem
         self.sha, self.runs = "a" * 40, []
 
     def tearDown(self):
-        D.TICKETS_DIR, D.STATE_FILE = self._orig
+        CFG.TICKETS_DIR, CFG.STATE_FILE = self._orig
         self.tmp.cleanup()
 
     def gh(self, path):
@@ -174,7 +175,7 @@ class CiWatchTests(unittest.TestCase):
 
     def test_heartbeat_written(self):  # TK-090 Д-1: сердцебиение для supervise
         C.write_heartbeat()
-        beat = D.STATE_FILE.parent / "ci-heartbeat.json"
+        beat = CFG.STATE_FILE.parent / "ci-heartbeat.json"
         self.assertTrue(beat.exists())
         import json
         self.assertIn("ts", json.loads(beat.read_text(encoding="utf-8")))

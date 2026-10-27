@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import dispatch as D  # noqa: E402 — _pid_alive/_kill; импорт ничего не создаёт
+import procs as PR  # noqa: E402 — _pid_alive/_kill; импорт ничего не создаёт
 import project as P  # noqa: E402
 import hide  # noqa: E402
 
@@ -49,7 +49,7 @@ OPTIONAL = (("ci_watch", lambda root: bool(P.setting("ci_repo", root=root))),)  
 def services(project=None) -> tuple:
     """Службы проекта: обязательные и включённые его `.claude/rpv.json` (`project` не задан — проект `P.set_root`)."""
     return SERVICES + tuple(n for n, on in OPTIONAL if on(project))
-LOCK_IMAGE = "py"                  # подстрока имени образа процесса, как в dispatch.acquire_instance_lock
+LOCK_IMAGE = "py"                  # подстрока имени образа процесса, как в procs.acquire_instance_lock
 STOP_TIMEOUT_S = 10.0
 SETTLE_S = 1.5                     # столько ждём после запуска: упал сразу (замок, ошибка) — скажем об этом
 
@@ -95,7 +95,7 @@ def _cmdline(pid: int) -> str | None:
             return fh.read().replace(b"\0", b" ").decode("utf-8", "replace").strip() or None
     except OSError:
         pass
-    return D._ps_field(pid, "args") or None   # macOS/BSD: /proc нет
+    return PR._ps_field(pid, "args") or None   # macOS/BSD: /proc нет
 
 
 def _list_procs() -> list:
@@ -127,7 +127,7 @@ def is_ours_state(pid: int, script_name: str):
     Командную строку узнать не удалось — считаем нашим (как и сам pid-замок диспетчера)."""
     if not pid:
         return False
-    alive = D._pid_state(pid, LOCK_IMAGE)
+    alive = PR._pid_state(pid, LOCK_IMAGE)
     if not alive:
         return alive
     line = _cmdline(pid)
@@ -303,7 +303,7 @@ class Started:
         """None — работает; иначе код завершения ("?" — после запуска через WMI/systemd он неизвестен)."""
         if self.popen is not None:
             return self.popen.poll()
-        return None if self.pid and D._pid_alive(self.pid, "cmd" if self.how == "wmi" else LOCK_IMAGE) else "?"
+        return None if self.pid and PR._pid_alive(self.pid, "cmd" if self.how == "wmi" else LOCK_IMAGE) else "?"
 
 
 def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT_S, unit: str | None = None,
@@ -313,17 +313,17 @@ def stop_running(pid_file: Path, script_name: str, timeout: float = STOP_TIMEOUT
     stopped = stop_unit(unit) if unit else 0
     pid = read_pid(pid_file)
     if is_ours(pid, script_name):
-        D._kill(pid)
+        PR._kill(pid)
         deadline = time.time() + timeout
-        while D._pid_alive(pid, LOCK_IMAGE) and time.time() < deadline:
+        while PR._pid_alive(pid, LOCK_IMAGE) and time.time() < deadline:
             time.sleep(0.1)
-        if D._pid_alive(pid, LOCK_IMAGE) and os.name != "nt":
-            D._kill(pid, force=True)
+        if PR._pid_alive(pid, LOCK_IMAGE) and os.name != "nt":
+            PR._kill(pid, force=True)
             time.sleep(0.3)
         stopped = pid
     for extra in (find_copies(script_name, project) if project else []):   # копия без pid-файла (упавший старт) — тоже гасим
         if extra != pid:
-            D._kill(extra)
+            PR._kill(extra)
             stopped = stopped or extra
     if read_pid(pid_file) == pid:   # перезапись другим процессом (свежий диспетчер) не стираем (В-209 Д-2)
         try:

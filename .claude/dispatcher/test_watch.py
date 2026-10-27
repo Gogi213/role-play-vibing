@@ -21,7 +21,11 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
+import waits as WAITS  # noqa: E402
+import procs  # noqa: E402
 import ticket as T  # noqa: E402
+import signals as SIG  # noqa: E402
 import watch as W  # noqa: E402
 
 TZ = timezone(timedelta(hours=4))
@@ -40,27 +44,27 @@ class WatchSandbox(unittest.TestCase):
         self.tickets_dir = base / "tickets"
         self.tickets_dir.mkdir(parents=True)
         self._orig = {
-            "TICKETS_DIR": D.TICKETS_DIR, "STATE_FILE": D.STATE_FILE, "CEO_INBOX": D.CEO_INBOX,
-            "CEO_WAKE_LOG": D.CEO_WAKE_LOG, "DISPATCHER_DIR": D.DISPATCHER_DIR,
+            "TICKETS_DIR": CFG.TICKETS_DIR, "STATE_FILE": CFG.STATE_FILE, "CEO_INBOX": CFG.CEO_INBOX,
+            "CEO_WAKE_LOG": CFG.CEO_WAKE_LOG, "DISPATCHER_DIR": CFG.DISPATCHER_DIR,
         }
-        D.TICKETS_DIR = self.tickets_dir
-        D.STATE_FILE = base / "state.json"
-        D.CEO_INBOX = base / "ceo-inbox.md"
-        D.CEO_WAKE_LOG = base / "ceo-wake.log"
-        D.DISPATCHER_DIR = base  # job-state.json / job-owners.json сторожа — в песочницу
+        CFG.TICKETS_DIR = self.tickets_dir
+        CFG.STATE_FILE = base / "state.json"
+        CFG.CEO_INBOX = base / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = base / "ceo-wake.log"
+        CFG.DISPATCHER_DIR = base  # job-state.json / job-owners.json сторожа — в песочницу
         W.WATCH_STATE_FILE = base / "watch-state.json"
         W.WATCH_HEARTBEAT_FILE = base / "watch-heartbeat.json"
         self.now = dt("2026-09-27T12:00:00+04:00")
         env_patch = mock.patch.dict(os.environ)  # адаптеры проекта (боевой ssh) тестам не нужны; после теста среда как была
         env_patch.start()
         self.addCleanup(env_patch.stop)
-        aliases_patch = mock.patch.object(D, "WATCHED_ALIASES", {"gpu1"})   # умолчания нет: машины со сторожем задаёт окружение
+        aliases_patch = mock.patch.object(WAITS, "WATCHED_ALIASES", {"gpu1"})   # умолчания нет: машины со сторожем задаёт окружение
         aliases_patch.start()
         self.addCleanup(aliases_patch.stop)
 
     def tearDown(self):
         for k, v in self._orig.items():
-            setattr(D, k, v)
+            setattr(CFG, k, v)
         self.tmp.cleanup()
 
 
@@ -166,7 +170,7 @@ class DedupTests(WatchSandbox):
         ws = {}
         posted = W.notify_findings([W.Finding("blocked", "TK-1", "TK-1: status=blocked")], ws, self.now)
         self.assertEqual(len(posted), 1)
-        self.assertIn("TK-1", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("TK-1", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_repeat_within_window_is_suppressed(self):
         ws = {}
@@ -300,9 +304,9 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_probe_progress_json_in_flight_is_producer_not_met(self):
         import subprocess as sp
-        orig, orig_ssh = sp.run, W.D._ssh_cmd
+        orig, orig_ssh = sp.run, WAITS._ssh_cmd
         try:
-            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
+            WAITS._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 1, "total": 5}', stderr=b"")
             self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.json"), "producer")
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n{"done": 5, "total": 5}', stderr=b"")
@@ -310,15 +314,15 @@ class TriageWaitsTests(WatchSandbox):
             sp.run = lambda *a, **k: sp.CompletedProcess(a, 0, stdout=b'exists\n', stderr=b"")
             self.assertEqual(W.probe_wait_target("gpu1", "path", "/data/sched/job-a.mark"), "met")
         finally:
-            sp.run, W.D._ssh_cmd = orig, orig_ssh
+            sp.run, WAITS._ssh_cmd = orig, orig_ssh
 
     def test_probe_reads_rc_like_dispatcher(self):
         """ssh-проба (TK-010): сторож читает `.rc` так же, как диспетчер, и вердикт у обоих один (`_path_met`)."""
         import subprocess as sp
-        orig, orig_ssh = sp.run, W.D._ssh_cmd
+        orig, orig_ssh = sp.run, WAITS._ssh_cmd
         sent = []
         try:
-            W.D._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
+            WAITS._ssh_cmd = lambda alias, remote: ["ssh", alias, remote]
             def fake(cmd, *a, **k):
                 sent.append(cmd[-1])
                 return sp.CompletedProcess(cmd, 0, stdout=b"exists\nrc=0 done", stderr=b"")
@@ -326,11 +330,11 @@ class TriageWaitsTests(WatchSandbox):
             arg = "/data/sched/job-a.rc"
             self.assertEqual(W.probe_wait_target("gpu1", "path", arg), "met")
             self.assertIn("cat /data/sched/job-a.rc", sent[0])
-            self.assertEqual(W.D._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
-            self.assertTrue(W.D._path_met(("gpu1", "path", arg), "rc=0 done"))
+            self.assertEqual(WAITS._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
+            self.assertTrue(WAITS._path_met(("gpu1", "path", arg), "rc=0 done"))
         finally:
-            sp.run, W.D._ssh_cmd = orig, orig_ssh
-            W.D._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
+            sp.run, WAITS._ssh_cmd = orig, orig_ssh
+            WAITS._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
 
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch
@@ -502,9 +506,9 @@ class TriageWaitsTests(WatchSandbox):
         p = self._waiting(self.SPEC)
         ws = {}
         self.assertEqual(len(W.triage_waits(ws, self.now, job_probe=self._job("running"))), 1)
-        self.assertFalse(lifewatch.job_done(D.DISPATCHER_DIR, "gpu1", "0108041500123"))
+        self.assertFalse(lifewatch.job_done(CFG.DISPATCHER_DIR, "gpu1", "0108041500123"))
         W.triage_waits(ws, self.now, job_probe=self._job("done"))
-        self.assertTrue(lifewatch.job_done(D.DISPATCHER_DIR, "gpu1", "0108041500123"))
+        self.assertTrue(lifewatch.job_done(CFG.DISPATCHER_DIR, "gpu1", "0108041500123"))
         self.assertTrue(D.check_wait_for(self.SPEC))
         self.assertEqual(T.read_ticket(p).status, "waiting")
 
@@ -542,7 +546,7 @@ class TriageWaitsTests(WatchSandbox):
         T.write_header_updates(p, {"status": "waiting", "wait_for": "host:gpu1:/data/x/other-name.done"})
         W.triage_waits(ws, self.now, probe=lambda *a: "unknown", owners_probe=self._owned(tid, "failed"))
         self.assertEqual(T.read_ticket(p).status, "waiting")  # то же упавшее задание второй раз не будит
-        data = json.loads((D.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
+        data = json.loads((CFG.DISPATCHER_DIR / "job-owners.json").read_text(encoding="utf-8"))
         self.assertEqual(data["gpu1"][0]["ticket"], tid)
 
     def test_old_failed_job_after_job_form_wake_does_not_block_for_ceo(self):
@@ -685,7 +689,7 @@ class TriageWaitsTests(WatchSandbox):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", ""), t.header.get("wait_by", "")), ("in_progress", "", ""))
         self.assertIn("срок ожидания", t.log[-1].text)
-        rows = [json.loads(ln) for ln in (D.DISPATCHER_DIR / "jobs.jsonl").read_text(encoding="utf-8").splitlines()]  # CP6: счёт для отчёта
+        rows = [json.loads(ln) for ln in (CFG.DISPATCHER_DIR / "jobs.jsonl").read_text(encoding="utf-8").splitlines()]  # CP6: счёт для отчёта
         self.assertEqual(rows, [{"ts": T.now_iso(by + timedelta(minutes=W.BY_GRACE_MIN + 1)), "ticket": t.id,
                                  "wait_for": "host:gpu1:/data/x/tier1.done", "outcome": "overdue", "rc": None}])
 
@@ -694,7 +698,7 @@ class TriageWaitsTests(WatchSandbox):
         T.write_header_updates(p, {"wait_by": (self.now - timedelta(hours=3)).isoformat(timespec="seconds")})
         W.triage_waits({}, self.now, probe=lambda *a: "met", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")  # цель выполнена — будит диспетчер, не срок
-        self.assertFalse((D.DISPATCHER_DIR / "jobs.jsonl").exists())
+        self.assertFalse((CFG.DISPATCHER_DIR / "jobs.jsonl").exists())
 
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
@@ -864,13 +868,13 @@ class WatchInstanceLockTests(WatchSandbox):
         W.WATCH_PID_FILE = Path(self.tmp.name) / "watch.pid"
         W.run_once = lambda *a, **kw: cycles.append(1) or []
         W.WATCH_PID_FILE.write_text(str(holder.pid), encoding="utf-8")
-        orig_alive = D._pid_alive
-        D._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
+        orig_alive = procs._pid_alive
+        procs._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
         try:
             self.assertEqual(W.main([]), 1)
             self.assertEqual(cycles, [])
         finally:
-            D._pid_alive = orig_alive
+            procs._pid_alive = orig_alive
             W.WATCH_PID_FILE, W.run_once = orig
             holder.kill()
             holder.wait(timeout=10)
@@ -886,7 +890,7 @@ class WatchLogTests(WatchSandbox):
         state = {"ceo_handoffs": {tid: T.now_iso(self.now - timedelta(minutes=1))}}
         self.assertTrue(D._ceo_handoff_pending(T.read_ticket(p), state, self.now + timedelta(hours=1)))
         self.assertIn(tid, state["ceo_handoffs"])
-        self.assertIn("[ждёт-ceo]", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("[ждёт-ceo]", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_watch_entries_do_not_reset_orphan_timer(self):
         # запись сторожа (напоминание, ssh-тревога) не сбрасывает таймер сироты (ревью #27)
@@ -919,7 +923,7 @@ class WatchLogTests(WatchSandbox):
         with mock.patch.object(T, "_IS_WINDOWS", False):  # запись допустима: старый тикет мог уже ждать так
             T.write_header_updates(p, {"wait_for": "file:/tmp/done.json"}, now=self.now)
         state = {}
-        with mock.patch.object(T, "_IS_WINDOWS", True), mock.patch.object(D, "append_ceo_inbox") as inbox:
+        with mock.patch.object(T, "_IS_WINDOWS", True), mock.patch.object(SIG, "append_ceo_inbox") as inbox:
             D.notify_wait_for_problem(T.read_ticket(p), state, self.now)
         self.assertEqual(inbox.call_count, 1)
         self.assertIn("posix-путь на Windows", inbox.call_args[0][2])

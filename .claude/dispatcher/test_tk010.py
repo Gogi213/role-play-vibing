@@ -386,12 +386,12 @@ class KillOnce(unittest.TestCase):
 
     def test_no_private_killers(self):
         here = Path(__file__).resolve().parent
-        for name in ("dispatch", "start", "errors"):
+        for name in ("dispatch", "procs", "start", "errors"):
             src = (here / f"{name}.py").read_text(encoding="utf-8")
             for old in ("_pid_kill", "_kill_tree"):
                 self.assertNotIn(old, src, (name, old))
-            self.assertEqual(src.count('["taskkill"'), 1 if name == "dispatch" else 0, name)
-            if name != "dispatch":
+            self.assertEqual(src.count('["taskkill"'), 1 if name == "procs" else 0, name)
+            if name != "procs":
                 self.assertNotIn("os.kill(", src, name)
 
     def test_tree_kill_takes_real_grandchild_and_plain_kill_takes_only_parent(self):

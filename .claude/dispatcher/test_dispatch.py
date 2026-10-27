@@ -32,6 +32,10 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import config as CFG  # noqa: E402
+import waits as W  # noqa: E402
+import on_met as OM  # noqa: E402
+import procs  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402  (CLI — new/comment/start/status)
@@ -704,21 +708,23 @@ class DispatchRunTests(unittest.TestCase):
         self.dispatcher_dir.mkdir(parents=True)
 
         self._orig = {k: getattr(D, k) for k in
-                      ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
-                       "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
-                       "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
-        D.DISPATCHER_DIR = self.dispatcher_dir  # CP5: mechanics.log и notify.log — не в каталог живого проекта
+                      ("CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT", "STOP_VERIFY_S", "ROLE_PARALLEL")}
+        self._orig_cfg = {k: getattr(CFG, k) for k in
+                          ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
+                           "CEO_INBOX", "CEO_WAKE_LOG", "STOP_DIR")}
+        self._orig_pid_name = procs.PID_EXPECT_NAME
+        CFG.DISPATCHER_DIR = self.dispatcher_dir  # CP5: mechanics.log и notify.log — не в каталог живого проекта
         D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль)
-        D.TICKETS_DIR = self.tickets_dir
-        D.PROJECT_ROOT = self.base
-        D.STATE_FILE = self.dispatcher_dir / "state.json"
-        D.RUNS_DIR = self.dispatcher_dir / "runs"
-        D.RUNS_LOG = self.dispatcher_dir / "runs.log"
-        D.CEO_INBOX = self.dispatcher_dir / "ceo-inbox.md"
-        D.CEO_WAKE_LOG = self.dispatcher_dir / "ceo-wake.log"
-        D.STOP_DIR = self.dispatcher_dir / "stop"
+        CFG.TICKETS_DIR = self.tickets_dir
+        CFG.PROJECT_ROOT = self.base
+        CFG.STATE_FILE = self.dispatcher_dir / "state.json"
+        CFG.RUNS_DIR = self.dispatcher_dir / "runs"
+        CFG.RUNS_LOG = self.dispatcher_dir / "runs.log"
+        CFG.CEO_INBOX = self.dispatcher_dir / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = self.dispatcher_dir / "ceo-wake.log"
+        CFG.STOP_DIR = self.dispatcher_dir / "stop"
         # фейковый "claude" в тестах — это sys.executable (python.exe/python3), не claude.exe
-        D.PID_EXPECT_NAME = python_image_name()
+        procs.PID_EXPECT_NAME = python_image_name()
         D.RUNNING.clear()
         self._orig_popen = D._popen
         # по умолчанию подпроцесс — безвредный `python -c pass`: тесты, доходящие до launch_run (повтор в
@@ -743,6 +749,9 @@ class DispatchRunTests(unittest.TestCase):
         del os.environ["FAKE_TICKETS_DIR"]
         for k, v in self._orig.items():
             setattr(D, k, v)
+        for k, v in self._orig_cfg.items():
+            setattr(CFG, k, v)
+        procs.PID_EXPECT_NAME = self._orig_pid_name
         for attempt in range(20):   # Windows под xdist: потомок ещё держит err.log (WinError 32), TK-095
             try:
                 self.tmp.cleanup()
@@ -787,7 +796,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertNotIn("[idle-slo]", inbox, "CP5: суточный SLO CEO не будит — одна тревога «работа стоит»")
         self.assertEqual(inbox.count("[работа-стоит]"), 1, "15 мин стоит — одна тревога на эпизод")
         self.assertIn("не отправлено (нет RPV_TG_TOKEN/RPV_TG_CHAT): Работа стоит",
-                      (D.DISPATCHER_DIR / "notify.log").read_text(encoding="utf-8"))
+                      (CFG.DISPATCHER_DIR / "notify.log").read_text(encoding="utf-8"))
 
     def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
@@ -821,7 +830,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(late.status, "in_progress")
         self.assertEqual(D.decide(late, state, t0 + timedelta(minutes=11)).role, "engineer")
         self.assertTrue(any(e.author == "dispatcher" and "инвариант" in e.text for e in late.log))
-        self.assertIn("нет-хода", (D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8"))
+        self.assertIn("нет-хода", (CFG.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8"))
 
     def test_waiting_with_good_wait_for_is_a_move(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
@@ -842,7 +851,7 @@ class DispatchRunTests(unittest.TestCase):
         state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
         for m in (11, 12, 30):
             self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=m)).status, "waiting")
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         self.assertEqual(inbox.count("[ждёт-ceo]"), 1)
         self.assertNotIn("[нет-хода]", inbox)
         T.append_log(p, "ceo", "принято, думаю", now=t0 + timedelta(minutes=31))
@@ -881,7 +890,7 @@ class DispatchRunTests(unittest.TestCase):
         state = self._handoff_state(p, t0)
         state["ceo_handoff_reminded"] = {T.read_ticket(p).id: "x"}
         fake = mock.MagicMock(pid=1)
-        with mock.patch.object(D, "_popen", return_value=fake), mock.patch.object(D, "RUNS_DIR", self.tickets_dir.parent / "runs"):
+        with mock.patch.object(D, "_popen", return_value=fake), mock.patch.object(CFG, "RUNS_DIR", self.tickets_dir.parent / "runs"):
             try:
                 D.launch_run(p, "judge", state, t0 + timedelta(minutes=2), reason="next")
             finally:
@@ -918,7 +927,7 @@ class DispatchRunTests(unittest.TestCase):
         p = self.mk("engineer", "waiting", now=t0)
         state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
         self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=5), state))
-        self.assertFalse(D.CEO_INBOX.exists() and "ждёт-ceo" in D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertFalse(CFG.CEO_INBOX.exists() and "ждёт-ceo" in CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_done_and_blocked_are_not_violations(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
@@ -951,7 +960,7 @@ class DispatchRunTests(unittest.TestCase):
         state, now = {}, dt("2026-10-06T12:30:00+04:00")
         for p in (b, a, a):
             D.notify_wait_cycle(T.read_ticket(p), state, now)
-        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
+        self.assertEqual((CFG.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("цикл-ожиданий"), 1)
 
     def test_limit_pause_capped_to_one_hour(self):
         self.assertEqual(D.LIMIT_PAUSE_MAX, timedelta(hours=1))
@@ -972,8 +981,8 @@ class DispatchRunTests(unittest.TestCase):
         state = D.load_state()
         self.assertEqual(state["ticket_sessions"][f"{path.stem}::researcher"]["session_id"],
                           f"sess-{path.stem}-researcher")
-        self.assertTrue(D.RUNS_LOG.exists())
-        self.assertIn(path.stem, D.RUNS_LOG.read_text(encoding="utf-8"))
+        self.assertTrue(CFG.RUNS_LOG.exists())
+        self.assertIn(path.stem, CFG.RUNS_LOG.read_text(encoding="utf-8"))
 
     def test_waiting_without_condition_returns_to_in_progress(self):
         """TK-070 п.3: владелец ушёл в waiting без wait_for и без next — диспетчер возвращает in_progress и пишет причину."""
@@ -1030,10 +1039,10 @@ class DispatchRunTests(unittest.TestCase):
         for p in (victim, other):
             T.write_header_updates(p, {"status": "blocked"}, now=now)
             T.append_log(p, "dispatcher", "холостой ход ×2: роль не оставила запись", now=now)
-        D.RUNS_DIR.mkdir(parents=True, exist_ok=True)
-        (D.RUNS_DIR / f"20261006-080000-{victim.stem}-engineer.json").write_text(
+        CFG.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        (CFG.RUNS_DIR / f"20261006-080000-{victim.stem}-engineer.json").write_text(
             json.dumps({"api_error_status": 429, "result": "You've hit your session limit · resets 5am"}), encoding="utf-8")
-        (D.RUNS_DIR / f"20261006-080000-{other.stem}-engineer.json").write_text(
+        (CFG.RUNS_DIR / f"20261006-080000-{other.stem}-engineer.json").write_text(
             json.dumps({"result": "ok"}), encoding="utf-8")
         D.unblock_limit_victims(now)
         self.assertEqual(T.read_ticket(victim).status, "in_progress")
@@ -1164,7 +1173,7 @@ class DispatchRunTests(unittest.TestCase):
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "blocked")
         self.assertIn("researcher", tkt.log[-1].text)
-        self.assertIn("researcher", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("researcher", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_finish_run_flags_haiku_ticket_actually_run_on_other_model(self):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Подмена модели")
@@ -1179,7 +1188,7 @@ class DispatchRunTests(unittest.TestCase):
                 "attempt": 0, "run_file": run_file, "err_file": run_file, "out_fh": None, "err_fh": None,
                 "reason": "todo", "status_at_launch": "todo", "executor": "haiku"}
         D._finish_run(tid, info, state, dt("2026-09-27T12:01:00+04:00"), timed_out=False)
-        self.assertIn("opus", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("opus", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_no_log_entry_retries_once_then_blocks(self):
         self.set_fake_bin(FAKE_BIN_SILENT)
@@ -1191,8 +1200,8 @@ class DispatchRunTests(unittest.TestCase):
         # раз дошли сюда, все попытки для этого тикета исчерпаны и RUNNING пуст.
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "blocked")
-        self.assertTrue(D.CEO_INBOX.exists())
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8")
+        self.assertTrue(CFG.CEO_INBOX.exists())
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertIn(path.stem, inbox)
         self.assertIn("blocked", inbox)
 
@@ -1283,7 +1292,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(tkt.status, "in_progress")
         # 2 записи роли (исходная + повтор) + 1 запись dispatcher про блокировку
         self.assertEqual(len(tkt.log), 1)
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         self.assertNotIn("todo дважды подряд", inbox)
 
     def test_min_gap_prevents_immediate_relaunch_via_tick(self):
@@ -1299,7 +1308,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def _assert_no_money_signals(self):
         """В-173: ни одна строка про деньги не попадает ни в ceo-inbox, ни в ceo-wake.log."""
-        for f in (D.CEO_INBOX, D.CEO_WAKE_LOG):
+        for f in (CFG.CEO_INBOX, CFG.CEO_WAKE_LOG):
             text = f.read_text(encoding="utf-8") if f.exists() else ""
             for needle in ("budget", "бюджет", "суточный", "скорость трат", "потолок стоимости"):
                 self.assertNotIn(needle, text, f"{f.name}: {needle}")
@@ -1402,7 +1411,7 @@ class DispatchRunTests(unittest.TestCase):
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "blocked")
         self.assertIn("холостой ход", tkt.log[-1].text)
-        self.assertIn("холостой ход", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("холостой ход", CFG.CEO_INBOX.read_text(encoding="utf-8"))
         self.assertEqual(D.RUNNING, {}, "без повтора")
 
     def test_default_idle_limit_is_two_retry_once_then_block(self):
@@ -1461,7 +1470,7 @@ class DispatchRunTests(unittest.TestCase):
                 "attempt": 0, "run_file": run_file, "err_file": run_file, "out_fh": None, "err_fh": None,
                 "reason": "todo", "status_at_launch": "todo"}
         D._finish_run(tid, info, state, dt("2026-09-27T12:01:00+04:00"), timed_out=False)
-        self.assertIn("fable-5-1", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("fable-5-1", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_finish_run_expects_model_family_of_the_runs_role(self):
         """v1.6.1: Судья на opus — тишина в ceo-inbox; тот же opus у инженера (ждём sonnet) — тревога."""
@@ -1483,7 +1492,7 @@ class DispatchRunTests(unittest.TestCase):
                         "attempt": 0, "run_file": run_file, "err_file": run_file, "out_fh": None, "err_fh": None,
                         "reason": "todo", "status_at_launch": "todo"}
                 D._finish_run(tid, info, state, dt("2026-09-27T12:01:00+04:00"), timed_out=False)
-                inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+                inbox = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
                 self.assertEqual("modelUsage" in inbox, warns, f"{role}: {inbox!r}")
         finally:
             D.ROLE_MODEL = orig_role_model
@@ -1528,14 +1537,14 @@ class DispatchRunTests(unittest.TestCase):
             "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
             "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": str(self.tickets_dir.parent / "r.err"),
             "reason": "todo", "status_at_launch": "in_progress", "session_id": sid}}}
-        orig = D.PID_EXPECT_NAME
-        D.PID_EXPECT_NAME = ""
+        orig = procs.PID_EXPECT_NAME
+        procs.PID_EXPECT_NAME = ""
         try:
             D.recover_active_runs(state, datetime.now().astimezone())
             self.assertEqual(D.RUNNING[path.stem]["pid"], proc.pid)
             self.assertEqual(state["active_runs"][path.stem]["pid"], proc.pid)
         finally:
-            D.PID_EXPECT_NAME = orig
+            procs.PID_EXPECT_NAME = orig
             D.RUNNING.clear()
 
     def test_recover_drops_intent_mirror_when_role_never_started(self):
@@ -1633,8 +1642,8 @@ class DispatchRunTests(unittest.TestCase):
     def test_recover_adopts_role_under_foreign_image_name_by_pid_and_start(self):
         """#16: роль под другим именем образа (npm-установка — node, не claude) после рестарта диспетчера жива: подхват по
         pid + времени старта, повторного запуска и конца прогона нет."""
-        orig = D.PID_EXPECT_NAME
-        D.PID_EXPECT_NAME = "claude-image-that-this-process-does-not-have"
+        orig = procs.PID_EXPECT_NAME
+        procs.PID_EXPECT_NAME = "claude-image-that-this-process-does-not-have"
         try:
             path, run, state = self._slow_role_mirror("Чужое имя образа")
             saved = state["active_runs"][path.stem]
@@ -1642,12 +1651,12 @@ class DispatchRunTests(unittest.TestCase):
             D.recover_active_runs(state, datetime.now().astimezone())
             self.assertIn(path.stem, D.RUNNING, "живая роль не должна считаться мёртвой из-за имени образа")
             D.save_state(state)
-            D.PID_EXPECT_NAME = python_image_name()
+            procs.PID_EXPECT_NAME = python_image_name()
             self.wait_running()
             run["popen"].wait(timeout=5)
             self.assertEqual(len(T.read_ticket(path).log), 1, "второго запуска поверх живой роли нет")
         finally:
-            D.PID_EXPECT_NAME = orig
+            procs.PID_EXPECT_NAME = orig
 
     def test_recover_treats_pid_with_other_start_time_as_finished(self):
         """#16: pid переиспользован другим процессом (метка старта другая) — роль мертва, как бы ни звался образ."""
@@ -1716,12 +1725,12 @@ class DispatchRunTests(unittest.TestCase):
     def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
         """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-        orig = D._proc_start
+        orig = procs._proc_start
         try:
-            D._proc_start = lambda pid: None
+            procs._proc_start = lambda pid: None
             self.assertTrue(D._pid_alive(child.pid, "no-such-image", start="123"))
         finally:
-            D._proc_start = orig
+            procs._proc_start = orig
             child.kill()
             child.wait(timeout=10)
         self.assertFalse(D._pid_alive(child.pid, "", start="123"))
@@ -1734,11 +1743,11 @@ class DispatchRunTests(unittest.TestCase):
         T.append_log(path, "researcher", "Нужно решение владельца. @ceo подскажи.",
                      now=dt("2026-09-27T12:01:00+04:00"))
         D.tick(now=dt("2026-09-27T12:02:00+04:00"))
-        self.assertFalse(D.CEO_INBOX.exists() and D.CEO_INBOX.read_text(encoding="utf-8").strip())
+        self.assertFalse(CFG.CEO_INBOX.exists() and CFG.CEO_INBOX.read_text(encoding="utf-8").strip())
         self.assertEqual(D.RUNNING, {})
         T.write_header_updates(path, {"status": "needs_owner"}, now=dt("2026-09-27T12:03:00+04:00"))
         D.tick(now=dt("2026-09-27T12:04:00+04:00"))
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8")
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertIn("needs_owner", inbox)
         self.assertEqual(D.RUNNING, {})  # ceo не запускается диспетчером как роль
 
@@ -1749,12 +1758,12 @@ class DispatchRunTests(unittest.TestCase):
         T.append_log(path, "researcher", "Нужно решение владельца.", now=dt("2026-09-27T12:01:00+04:00"))
         T.write_header_updates(path, {"status": "needs_owner"}, now=dt("2026-09-27T12:01:00+04:00"))
         D.tick(now=dt("2026-09-27T12:02:00+04:00"))
-        self.assertTrue(D.CEO_WAKE_LOG.exists())
-        wake = D.CEO_WAKE_LOG.read_text(encoding="utf-8")
+        self.assertTrue(CFG.CEO_WAKE_LOG.exists())
+        wake = CFG.CEO_WAKE_LOG.read_text(encoding="utf-8")
         self.assertIn(path.stem, wake)
         self.assertIn("needs_owner", wake)
         # столько же строк, сколько записей ушло в ceo-inbox.md за этот тик
-        inbox_lines = [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        inbox_lines = [ln for ln in CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines() if ln.strip()]
         wake_lines = [ln for ln in wake.splitlines() if ln.strip()]
         self.assertEqual(len(wake_lines), len(inbox_lines))
 
@@ -1763,7 +1772,7 @@ class DispatchRunTests(unittest.TestCase):
         (self.tickets_dir / "X5.md").write_text("нет шапки тут\n", encoding="utf-8")
         for i in range(3):
             D.tick(now=dt("2026-09-27T12:00:00+04:00") + timedelta(seconds=15 * i))
-        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 1, "3 тика с одной и той же ошибкой — одна строка")
+        self.assertEqual((CFG.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 1, "3 тика с одной и той же ошибкой — одна строка")
 
     def test_tick_reports_waiting_with_unknown_wait_for_once_and_launches_nobody(self):
         """v4: свободный текст в wait_for — одна строка CEO за несколько тиков, роль не запускается."""
@@ -1775,7 +1784,7 @@ class DispatchRunTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         for i in range(3):
             self.assertEqual(D.tick(now=dt("2026-09-27T12:00:30+04:00") + timedelta(seconds=15 * i)), 0)
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8")
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertEqual(inbox.count("wait_for не понят"), 1)
         self.assertEqual(D.RUNNING, {})
 
@@ -1786,7 +1795,7 @@ class DispatchRunTests(unittest.TestCase):
         D.notify_parse_error("X5", "ValueError: тикет без шапки", state, dt("2026-09-27T12:00:15+04:00"))
         D.notify_parse_error("X5", "UnicodeDecodeError: 'utf-8' codec can't decode byte", state,
                               dt("2026-09-27T12:00:30+04:00"))
-        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 2)
+        self.assertEqual((CFG.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("parse-error"), 2)
 
     def test_done_without_reviewer_signals_ceo_one_line(self):
         """v2: done без reviewer (V2-1: Haiku-задача, тикет Судьи, закрыл CEO) — ровно одна строка CEO «done»; дедуп по `updated`."""
@@ -1797,13 +1806,13 @@ class DispatchRunTests(unittest.TestCase):
         T.append_log(path, "researcher", "готово, числа: KPI 0,097", now=dt("2026-09-27T12:01:00+04:00"))
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-09-27T12:01:00+04:00"))
         D.tick(now=dt("2026-09-27T12:02:00+04:00"))
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8")
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertEqual(inbox.count("[done]"), 1)
         self.assertIn("Без ревью", inbox)
         self.assertIn("KPI 0,097", inbox)
         self.assertEqual(D.RUNNING, {})  # без reviewer некого запускать
         D.tick(now=dt("2026-09-27T12:02:30+04:00"))  # дедуп: тот же updated — второй строки нет
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[done]"), 1)
+        self.assertEqual(CFG.CEO_INBOX.read_text(encoding="utf-8").count("[done]"), 1)
 
     # --- `tickets.py stop`: остановка роли посреди запуска (CEO, 03.10) ------------------------------------------------
 
@@ -1843,7 +1852,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertFalse(self._alive(child), "потомок роли снят вместе с ней")
         self.assertEqual(D.RUNNING, {})
         self.assertNotIn(path.stem, D.load_state().get("active_runs", {}))
-        self.assertFalse((D.STOP_DIR / f"{path.stem}.json").exists(), "заявка разобрана")
+        self.assertFalse((CFG.STOP_DIR / f"{path.stem}.json").exists(), "заявка разобрана")
 
     def test_stop_without_next_parks_ticket_as_stopped_and_is_not_a_failure(self):
         path, _ = self.start_tree_run()
@@ -1856,11 +1865,11 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(trace.author, "dispatcher")
         self.assertRegex(trace.text, r"^остановлен CEO в \d\d:\d\d")
         self.assertEqual((entry.author, entry.text), ("ceo", "Новая постановка: сделай X"))
-        self.assertIn("status=stopped", D.RUNS_LOG.read_text(encoding="utf-8"))
+        self.assertIn("status=stopped", CFG.RUNS_LOG.read_text(encoding="utf-8"))
         for _ in range(3):
             self.assertEqual(D.tick(), 0, "stopped никого не будит")
         self.assertEqual(D.RUNNING, {}, "ни повтора, ни запуска")
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         self.assertNotIn("blocked", inbox)
         self.assertFalse(any("не оставил" in e.text or "заблокирована" in e.text for e in tkt.log))
 
@@ -1919,9 +1928,9 @@ class DispatchRunTests(unittest.TestCase):
         D.tick()
         D.tick()
         self.assertIn(tid, D.RUNNING)
-        self.assertTrue((D.STOP_DIR / f"{tid}.json").exists(), "заявка ждёт следующего тика")
+        self.assertTrue((CFG.STOP_DIR / f"{tid}.json").exists(), "заявка ждёт следующего тика")
         self.assertEqual(T.read_ticket(path).status, "in_progress")
-        self.assertEqual((D.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("[stop-failed]"), 1)
+        self.assertEqual((CFG.DISPATCHER_DIR / "mechanics.log").read_text(encoding="utf-8").count("[stop-failed]"), 1)
         D._kill = real_kill
         D.tick()
         self.assertNotIn(tid, D.RUNNING)
@@ -1944,7 +1953,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_stop_request_for_unknown_ticket_is_left_untouched(self):
         D.write_stop_request("TK-404", "", "x")
         D.tick()
-        self.assertTrue((D.STOP_DIR / "TK-404.json").exists())
+        self.assertTrue((CFG.STOP_DIR / "TK-404.json").exists())
 
     def test_role_is_launched_in_its_own_process_group(self):
         self.set_fake_bin(FAKE_BIN_SILENT)
@@ -2116,7 +2125,7 @@ class DispatchRunTests(unittest.TestCase):
         D.save_state(state)
         self.assertEqual(D.RUNNING, {})
         self.assertEqual(T.read_ticket(path).status, "blocked")
-        self.assertIn("blocked", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("blocked", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_non_owner_run_with_entry_is_fine(self):
         path = T.create_ticket(self.tickets_dir, owner="researcher", title="Чужой с записью",
@@ -2141,7 +2150,7 @@ class DispatchRunTests(unittest.TestCase):
         self.wait_running()
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "blocked")
-        self.assertIn("judge", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("judge", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_retry_runs_regardless_of_ticket_spend(self):
         """В-173: расход по задаче повтор не отменяет (раньше при остатке бюджета < $1 — одна строка CEO вместо
@@ -2273,14 +2282,14 @@ class DispatchRunTests(unittest.TestCase):
         T.write_header_updates(path, {"status": "waiting", "next": "ceo"}, now=dt("2026-09-27T12:00:30+04:00"))
         T.append_log(path, "researcher", "Нужно решение владельца по бюджету.", now=dt("2026-09-27T12:01:00+04:00"))
         D.tick(now=dt("2026-09-27T12:02:00+04:00"))
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8")
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertEqual(inbox.count("[next-ceo]"), 1)
         self.assertIn("решение владельца по бюджету", inbox)
         self.assertEqual(T.read_ticket(path).next_role, "")
         self.assertEqual(T.read_ticket(path).header["updated"], "2026-09-27T12:00:30+04:00",
                          "очистка next поле updated не двигает")
         D.tick(now=dt("2026-09-27T12:02:20+04:00"))
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[next-ceo]"), 1)
+        self.assertEqual(CFG.CEO_INBOX.read_text(encoding="utf-8").count("[next-ceo]"), 1)
         self.assertEqual(D.RUNNING, {})
 
     def test_done_history_is_not_resignalled_on_first_tick(self):
@@ -2290,7 +2299,7 @@ class DispatchRunTests(unittest.TestCase):
                                  now=dt("2026-09-27T12:00:00+04:00"))
             T.write_header_updates(p, {"status": "done"}, now=dt("2026-09-27T12:01:00+04:00"))
         D.tick(now=dt("2026-09-27T12:02:00+04:00"))
-        self.assertFalse(D.CEO_INBOX.exists() and "[done]" in D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertFalse(CFG.CEO_INBOX.exists() and "[done]" in CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_done_with_pending_review_is_signalled_only_after_verdict(self):
         self.set_fake_bin(FAKE_BIN_SILENT)
@@ -2303,7 +2312,7 @@ class DispatchRunTests(unittest.TestCase):
         D.tick(now=dt("2026-10-02T10:02:00+04:00"))  # правило (г): ревьюер запущен, статус in_review
         self.assertEqual(T.read_ticket(path).status, "in_review")
         self.assertEqual(D.RUNNING[path.stem]["role"], "judge")
-        self.assertFalse(D.CEO_INBOX.exists() and "[done]" in D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertFalse(CFG.CEO_INBOX.exists() and "[done]" in CFG.CEO_INBOX.read_text(encoding="utf-8"))
         T.append_log(path, "judge", "принято", now=dt("2026-10-02T10:10:00+04:00"))
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-02T10:10:00+04:00"))
         D.RUNNING[path.stem]["popen"].kill()
@@ -2312,7 +2321,7 @@ class DispatchRunTests(unittest.TestCase):
             fh.close()
         D.RUNNING.clear()
         D.tick(now=dt("2026-10-02T10:11:00+04:00"))
-        self.assertEqual(D.CEO_INBOX.read_text(encoding="utf-8").count("[done]"), 1)
+        self.assertEqual(CFG.CEO_INBOX.read_text(encoding="utf-8").count("[done]"), 1)
 
     def test_done_line_has_no_budget_note_whatever_the_spend(self):
         """В-173: строка `done` без «потрачено N % бюджета» — бюджетов нет; строка одна, `budget-check` нет."""
@@ -2325,7 +2334,7 @@ class DispatchRunTests(unittest.TestCase):
         D.save_state(state)
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-02T10:01:00+04:00"))
         D.tick(now=dt("2026-10-02T10:02:00+04:00"))
-        inbox = D.CEO_INBOX.read_text(encoding="utf-8")
+        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertEqual(inbox.count("[done]"), 1)
         self.assertNotIn("бюджет", inbox)
         self.assertNotIn("соразмерность", inbox)
@@ -2438,9 +2447,9 @@ class DispatchRunTests(unittest.TestCase):
         tid = path.stem
 
         def lines():
-            if not D.CEO_INBOX.exists():
+            if not CFG.CEO_INBOX.exists():
                 return []
-            return [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines() if tid in ln]
+            return [ln for ln in CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines() if tid in ln]
         for n in range(1, 6):
             self.same_status_step(path, n, "in_progress")
         self.assertEqual(lines(), [], "до порога тихо — предупреждения нет")
@@ -2479,7 +2488,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(tkt.log[-1].author, "dispatcher")
         D.tick()                                  # следующий тик: тот же blocked второй строкой не повторяется
         D.tick()
-        lines = [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines() if path.stem in ln]
+        lines = [ln for ln in CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines() if path.stem in ln]
         self.assertEqual(len(lines), 1, lines)
         self.assertIn("[blocked]", lines[0])
         self.assertEqual(D.RUNNING, {})
@@ -2546,9 +2555,9 @@ class DispatchRunTests(unittest.TestCase):
                                now=dt("2026-10-03T12:00:00+04:00") + timedelta(minutes=n))
 
     def ceo_lines(self, tid, kind=None):
-        if not D.CEO_INBOX.exists():
+        if not CFG.CEO_INBOX.exists():
             return []
-        return [ln for ln in D.CEO_INBOX.read_text(encoding="utf-8").splitlines()
+        return [ln for ln in CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines()
                 if tid in ln and (kind is None or f"[{kind}]" in ln)]
 
     def recording_popen(self):
@@ -2774,18 +2783,18 @@ class DispatchRunTests(unittest.TestCase):
             calls.append(cmd[-1])
             return R()
         D.subprocess.run = run
-        D._WAIT_CACHE.clear()
-        D._WAIT_RC.clear()
+        W._WAIT_CACHE.clear()
+        W._WAIT_RC.clear()
 
         def restore():
             D.subprocess.run = orig_run
-            D._WAIT_CACHE.clear()
-            D._WAIT_RC.clear()
+            W._WAIT_CACHE.clear()
+            W._WAIT_RC.clear()
         self.addCleanup(restore)
         return calls
 
     def jobs(self) -> list:
-        f = D.DISPATCHER_DIR / D.JOBS_LOG_NAME
+        f = CFG.DISPATCHER_DIR / W.JOBS_LOG_NAME
         return [json.loads(ln) for ln in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
 
     def tick_launches(self, now) -> list:
@@ -2851,27 +2860,27 @@ class DispatchRunTests(unittest.TestCase):
         self.assertTrue(D.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now))
         self.assertEqual(self.jobs()[0], {"ts": T.now_iso(now), "ticket": "TK-1", "wait_for": "host:gpu1:/a.rc", "outcome": "overdue", "rc": None})
         self.assertEqual(len(self.jobs()), 4)
-        with open(D.DISPATCHER_DIR / D.JOBS_LOG_NAME, "a", encoding="utf-8") as fh:
+        with open(CFG.DISPATCHER_DIR / W.JOBS_LOG_NAME, "a", encoding="utf-8") as fh:
             fh.write("битая строка\n")
         self.assertFalse(D.record_job_outcome("TK-2", "host:gpu1:/a.rc", "met", now=now), "битые строки счёт не ломают")
 
 
 class TicketsCliStartTests(unittest.TestCase):
     """v1.1: `tickets.py start` — backlog → todo, и только backlog.
-    `cmd_status` читает state.json (траты) — песочница и на TK.TICKETS_DIR, и на D.STATE_FILE, иначе тест
+    `cmd_status` читает state.json (траты) — песочница и на TK.TICKETS_DIR, и на CFG.STATE_FILE, иначе тест
     читает/пишет боевой state.json (поймано на живом файле 27.09 — TK-001/TK-002 утекли в state)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.tickets_dir = Path(self.tmp.name) / "tickets"
         self._orig_tickets_dir = TK.TICKETS_DIR
-        self._orig_state_file = D.STATE_FILE
+        self._orig_state_file = CFG.STATE_FILE
         TK.TICKETS_DIR = self.tickets_dir
-        D.STATE_FILE = Path(self.tmp.name) / "state.json"
+        CFG.STATE_FILE = Path(self.tmp.name) / "state.json"
 
     def tearDown(self):
         TK.TICKETS_DIR = self._orig_tickets_dir
-        D.STATE_FILE = self._orig_state_file
+        CFG.STATE_FILE = self._orig_state_file
         self.tmp.cleanup()
 
     def test_start_moves_backlog_to_todo(self):
@@ -2965,7 +2974,7 @@ class TicketsCliStartTests(unittest.TestCase):
         import io
         TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "Без бюджета"])
         path = T.list_tickets(self.tickets_dir)[0]
-        self.assertFalse(D.STATE_FILE.exists(), "new больше не трогает state.json")
+        self.assertFalse(CFG.STATE_FILE.exists(), "new больше не трогает state.json")
         self.assertNotIn("budget", T.read_ticket(path).header)
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
@@ -3036,12 +3045,12 @@ class TicketsCliStopTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
         self.tickets_dir = self.base / "tickets"
-        self._orig = (TK.TICKETS_DIR, D.STOP_DIR)
-        TK.TICKETS_DIR, D.STOP_DIR = self.tickets_dir, self.base / "stop"
+        self._orig = (TK.TICKETS_DIR, CFG.STOP_DIR)
+        TK.TICKETS_DIR, CFG.STOP_DIR = self.tickets_dir, self.base / "stop"
         self._env = {k: os.environ.pop(k, None) for k in ("RPV_ROLE",)}
 
     def tearDown(self):
-        TK.TICKETS_DIR, D.STOP_DIR = self._orig
+        TK.TICKETS_DIR, CFG.STOP_DIR = self._orig
         for k, v in self._env.items():
             os.environ.pop(k, None)
             if v is not None:
@@ -3049,7 +3058,7 @@ class TicketsCliStopTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def request(self, tid):
-        return json.loads((D.STOP_DIR / f"{tid}.json").read_text(encoding="utf-8"))
+        return json.loads((CFG.STOP_DIR / f"{tid}.json").read_text(encoding="utf-8"))
 
     def test_stop_writes_request_and_leaves_ticket_untouched(self):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
@@ -3071,13 +3080,13 @@ class TicketsCliStopTests(unittest.TestCase):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
         self.assertEqual(TK.main(["stop", "TK-404", "--text", "x"]), 1)
         self.assertEqual(TK.main(["stop", path.stem, "--text", "   "]), 1)
-        self.assertFalse(D.STOP_DIR.exists(), "заявки нет")
+        self.assertFalse(CFG.STOP_DIR.exists(), "заявки нет")
 
     def test_stop_is_for_ceo_only(self):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
         os.environ["RPV_ROLE"] = "engineer"  # диспетчер ставит роль в окружение запуска роли
         self.assertEqual(TK.main(["stop", path.stem, "--text", "x"]), 1)
-        self.assertFalse(D.STOP_DIR.exists())
+        self.assertFalse(CFG.STOP_DIR.exists())
         os.environ["RPV_ROLE"] = "ceo"
         self.assertEqual(TK.main(["stop", path.stem, "--text", "x"]), 0)
 
@@ -3089,7 +3098,7 @@ class TicketsCliStopTests(unittest.TestCase):
             for bad in ("ceo", "everyone"):
                 with self.assertRaises(SystemExit):
                     TK.main(["stop", path.stem, "--text", "x", "--next", bad])
-        self.assertFalse(D.STOP_DIR.exists())
+        self.assertFalse(CFG.STOP_DIR.exists())
 
     def test_second_stop_replaces_the_first(self):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Идёт")
@@ -3097,7 +3106,7 @@ class TicketsCliStopTests(unittest.TestCase):
         TK.main(["stop", path.stem, "--text", "Вторая", "--next", "judge"])
         req = self.request(path.stem)
         self.assertEqual((req["text"], req["next"]), ("Вторая", "judge"))
-        self.assertEqual(len(list(D.STOP_DIR.glob("*.json"))), 1)
+        self.assertEqual(len(list(CFG.STOP_DIR.glob("*.json"))), 1)
 
     def test_start_returns_stopped_ticket_to_todo_and_only_backlog_or_stopped(self):
         stopped = T.create_ticket(self.tickets_dir, owner="engineer", title="Остановлена", status="stopped")
@@ -3175,8 +3184,8 @@ class JudgeSimulationDecideTests(unittest.TestCase):
         """«Можно потом»: `wait_for: ticket:<ID>` — зависимость от другого тикета (раньше жила прозой)."""
         with tempfile.TemporaryDirectory() as d:
             tdir = Path(d)
-            orig_dir = D.TICKETS_DIR
-            D.TICKETS_DIR = tdir
+            orig_dir = CFG.TICKETS_DIR
+            CFG.TICKETS_DIR = tdir
             try:
                 T.create_ticket(tdir, owner="engineer", title="Блокер", status="in_progress")
                 blocker = T.list_tickets(tdir)[0]
@@ -3187,7 +3196,7 @@ class JudgeSimulationDecideTests(unittest.TestCase):
                 T.write_header_updates(blocker, {"status": "done"})
                 self.assertEqual(D.decide(tkt, {}, self.t0).reason, "wait_for-met")
             finally:
-                D.TICKETS_DIR = orig_dir
+                CFG.TICKETS_DIR = orig_dir
 
 
 def iso(d):
@@ -3210,8 +3219,8 @@ class RoleMcpTests(unittest.TestCase):
         self.runs = self.tmp / "runs"
         self.runs.mkdir()
         env = {"HOME": str(home), "USERPROFILE": str(home)}
-        for patcher in (mock.patch.dict(os.environ, env), mock.patch.object(D, "PROJECT_ROOT", proj),
-                        mock.patch.object(D, "RUNS_DIR", self.runs)):
+        for patcher in (mock.patch.dict(os.environ, env), mock.patch.object(CFG, "PROJECT_ROOT", proj),
+                        mock.patch.object(CFG, "RUNS_DIR", self.runs)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -3316,12 +3325,12 @@ class MoneyControlsTests(unittest.TestCase):
         self.state = {}
         self.now = dt("2026-09-27T12:00:00+04:00")
         self.tmp = tempfile.TemporaryDirectory()
-        self._orig_inbox, self._orig_wake = D.CEO_INBOX, D.CEO_WAKE_LOG
-        D.CEO_INBOX = Path(self.tmp.name) / "ceo-inbox.md"
-        D.CEO_WAKE_LOG = Path(self.tmp.name) / "ceo-wake.log"
+        self._orig_inbox, self._orig_wake = CFG.CEO_INBOX, CFG.CEO_WAKE_LOG
+        CFG.CEO_INBOX = Path(self.tmp.name) / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = Path(self.tmp.name) / "ceo-wake.log"
 
     def tearDown(self):
-        D.CEO_INBOX, D.CEO_WAKE_LOG = self._orig_inbox, self._orig_wake
+        CFG.CEO_INBOX, CFG.CEO_WAKE_LOG = self._orig_inbox, self._orig_wake
         self.tmp.cleanup()
 
     # --- v1.4, судья TK-002 п.3 (взамен привратника TypeSafe): таблица правил кодом ---
@@ -3336,25 +3345,25 @@ class MoneyControlsTests(unittest.TestCase):
 
     def test_route_ceo_signal_wake_kind_appears_immediately(self):
         D.route_ceo_signal("TK-1", "blocked", "тест", self.state, self.now)
-        self.assertIn("тест", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertIn("тест", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_route_ceo_signal_summary_kind_not_lost_flushes_eventually(self):
         """Ничего не выкидывается в «только журнал» — просто уходит не сразу, а пачкой."""
         D.route_ceo_signal("TK-1", "model", "не-opus модель X", self.state, self.now)
         # первый флаш случается сразу (нет last_summary_flush) — но проверим, что текст ГДЕ-ТО есть
-        self.assertTrue(D.CEO_INBOX.exists())
-        self.assertIn("не-opus модель X", D.CEO_INBOX.read_text(encoding="utf-8"))
+        self.assertTrue(CFG.CEO_INBOX.exists())
+        self.assertIn("не-opus модель X", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_route_ceo_signal_summary_batches_within_window(self):
         D.flush_pending_summary(self.state, self.now)  # задаём точку отсчёта окна (пусто — просто маркер)
         D.route_ceo_signal("TK-1", "model", "первая", self.state, self.now + timedelta(minutes=1))
-        before = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        before = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         D.route_ceo_signal("TK-2", "model", "вторая", self.state, self.now + timedelta(minutes=2))
-        after_immediate = D.CEO_INBOX.read_text(encoding="utf-8") if D.CEO_INBOX.exists() else ""
+        after_immediate = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         self.assertEqual(before, after_immediate, "вторая копится, не уходит немедленно внутри окна")
         D.route_ceo_signal("TK-3", "model", "третья", self.state,
                             self.now + timedelta(hours=D.SUMMARY_EVERY_HOURS, minutes=5))
-        final = D.CEO_INBOX.read_text(encoding="utf-8")
+        final = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertIn("вторая", final)
         self.assertIn("третья", final)
 
@@ -3534,10 +3543,10 @@ class MoneyControlsTests(unittest.TestCase):
             D.add_ticket_cost(state, "TK-1", spent)
             tkt = T.parse_text("---\nid: TK-1\ntitle: Закрытая\nowner: researcher\nstatus: done\n"
                                "updated: 2026-09-27T11:00:00+04:00\n---\n\n## Лог\n", Path("TK-1.md"))
-            if D.CEO_INBOX.exists():
-                D.CEO_INBOX.unlink()
+            if CFG.CEO_INBOX.exists():
+                CFG.CEO_INBOX.unlink()
             D.notify_done(tkt, state, self.now)
-            text = D.CEO_INBOX.read_text(encoding="utf-8")
+            text = CFG.CEO_INBOX.read_text(encoding="utf-8")
             self.assertNotIn("бюджет", text, spent)
             self.assertEqual(text.count("[done]"), 1)
 
@@ -3548,7 +3557,7 @@ class MoneyControlsTests(unittest.TestCase):
         self.assertAlmostEqual(D._rolling_hour_cost(self.state, self.now + timedelta(minutes=2)), 12.0)
         later = self.now + timedelta(hours=1, minutes=2)
         self.assertAlmostEqual(D._rolling_hour_cost(self.state, later), 0.0, msg="час прошёл — окно очистилось")
-        self.assertFalse(D.CEO_INBOX.exists(), "учёт ничего не пишет CEO")
+        self.assertFalse(CFG.CEO_INBOX.exists(), "учёт ничего не пишет CEO")
 
 
 class ContextTokensTests(unittest.TestCase):
@@ -3631,10 +3640,10 @@ class HostSshTests(unittest.TestCase):
     """v1.1: кэш ssh-проверок, тильда в пути. CP6: ssh идёт к алиасу из ~/.ssh/config — своих настроек машин у плагина нет."""
 
     def setUp(self):
-        D._WAIT_CACHE.clear()
+        W._WAIT_CACHE.clear()
 
     def tearDown(self):
-        D._WAIT_CACHE.clear()
+        W._WAIT_CACHE.clear()
 
     def test_repeated_checks_within_cache_window_hit_ssh_once(self):
         """«Можно потом»: без кэша ssh дёргается на каждый ждущий тикет каждые 15 с."""
@@ -3652,12 +3661,12 @@ class HostSshTests(unittest.TestCase):
         D.subprocess.run = fake_run
         D.time.time = lambda: fake_clock[0]
         try:
-            self.assertTrue(D._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
-            fake_clock[0] += D.WAIT_CHECK_CACHE_S / 2  # ещё внутри окна кэша
-            self.assertTrue(D._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
+            self.assertTrue(W._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
+            fake_clock[0] += W.WAIT_CHECK_CACHE_S / 2  # ещё внутри окна кэша
+            self.assertTrue(W._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
             self.assertEqual(len(calls), 1, "второй вызов внутри окна кэша не должен дёргать ssh")
-            fake_clock[0] += D.WAIT_CHECK_CACHE_S + 1  # окно истекло
-            self.assertTrue(D._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
+            fake_clock[0] += W.WAIT_CHECK_CACHE_S + 1  # окно истекло
+            self.assertTrue(W._host_wait_met("deck", "path", "~/rpv/queue/STATUS"))
             self.assertEqual(len(calls), 2, "после истечения окна кэша — новый вызов")
         finally:
             D.subprocess.run = orig_run
@@ -3665,13 +3674,13 @@ class HostSshTests(unittest.TestCase):
 
     def test_tilde_path_not_quoted_away(self):
         """Живой прогон 27.09 поймал: shlex.quote('~/x') = "'~/x'" — remote-шелл её не раскрывает."""
-        self.assertEqual(D._remote_test_arg("~/rpv/queue/STATUS"), "~/rpv/queue/STATUS")
-        self.assertEqual(D._remote_test_arg("~"), "~")
+        self.assertEqual(W._remote_test_arg("~/rpv/queue/STATUS"), "~/rpv/queue/STATUS")
+        self.assertEqual(W._remote_test_arg("~"), "~")
 
     def test_tilde_nested_job_marker_path(self):
         """CEO 27.09: wait_for: deck: с маркером ~/rpv/queue/done/<id>.job — вложенный путь, фикс
         v1.1 общий для любой глубины после ~/, не только однокомпонентных путей."""
-        arg = D._remote_test_arg("~/rpv/queue/done/T-38.job")
+        arg = W._remote_test_arg("~/rpv/queue/done/T-38.job")
         self.assertEqual(arg, "~/rpv/queue/done/T-38.job")  # безопасные символы — без кавычек
 
     def test_wait_for_deck_job_marker_used_via_check_wait_for(self):
@@ -3681,23 +3690,23 @@ class HostSshTests(unittest.TestCase):
             calls.append((alias, what, arg))
             return True
 
-        orig = D._host_wait_met
-        D._host_wait_met = fake_host_wait_met
+        orig = W._host_wait_met
+        W._host_wait_met = fake_host_wait_met
         try:
             self.assertTrue(D.check_wait_for("host:deck:~/rpv/queue/done/T-38.job"))
         finally:
-            D._host_wait_met = orig
+            W._host_wait_met = orig
         self.assertEqual(calls, [("deck", "path", "~/rpv/queue/done/T-38.job")])
 
     def test_tilde_path_rest_still_escaped(self):
         import shlex
         raw = "~/rpv/queue/a b;rm -rf /"
-        arg = D._remote_test_arg(raw)
+        arg = W._remote_test_arg(raw)
         self.assertEqual(arg, "~" + shlex.quote(raw[1:]))
         self.assertTrue(arg.startswith("~'") or arg.startswith("~/"))  # тильда сама не в кавычках
 
     def test_absolute_path_quoted_as_before(self):
-        self.assertIn("'", D._remote_test_arg("/tmp/a b"))
+        self.assertIn("'", W._remote_test_arg("/tmp/a b"))
 
     def test_command_is_plain_ssh_to_the_alias(self):
         """Любой алиас из ~/.ssh/config: ни хоста, ни ключа, ни known_hosts плагин сам не подставляет."""
@@ -3713,7 +3722,7 @@ class HostSshTests(unittest.TestCase):
         orig_run = D.subprocess.run
         D.subprocess.run = fake_run
         try:
-            ok = D._host_wait_met("gpu-box.lan", "path", "~/rpv/queue/STATUS")
+            ok = W._host_wait_met("gpu-box.lan", "path", "~/rpv/queue/STATUS")
         finally:
             D.subprocess.run = orig_run
         self.assertTrue(ok)
@@ -3723,18 +3732,18 @@ class HostSshTests(unittest.TestCase):
     def test_old_machine_variables_are_ignored(self):
         env = {"RPV_DECK_HOST": "deck@old-host", "RPV_CALC_HOST": "root@old", "RPV_DECK_KEY": "/k/id", "RPV_DECK_KNOWN_HOSTS": "/k/known"}
         with mock.patch.dict(os.environ, env):
-            cmd = D._ssh_cmd("deck", "true")
+            cmd = W._ssh_cmd("deck", "true")
         self.assertEqual(cmd, ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "deck", "true"])
 
     def test_alias_that_ssh_would_take_for_an_option_is_refused_and_ssh_not_called(self):
         for bad in ("-oProxyCommand=x", "a b", "a;b", ""):
             with self.assertRaises(RuntimeError, msg=bad):
-                D._ssh_cmd(bad, "true")
+                W._ssh_cmd(bad, "true")
         calls = []
         orig_run, D.subprocess.run = D.subprocess.run, lambda *a, **kw: calls.append(a)
         try:
-            with mock.patch.object(D, "BLIND", D.blind.Tracker()), contextlib.redirect_stderr(io.StringIO()):
-                self.assertFalse(D._host_wait_met("-oProxyCommand=x", "path", "/x"))
+            with mock.patch.object(W, "BLIND", W.blind.Tracker()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertFalse(W._host_wait_met("-oProxyCommand=x", "path", "/x"))
         finally:
             D.subprocess.run = orig_run
         self.assertEqual(calls, [])
@@ -3745,8 +3754,8 @@ class WaitForHostTests(unittest.TestCase):
     CP6: алиас — любое ssh-имя. ssh подменён, сети нет."""
 
     def setUp(self):
-        D._WAIT_CACHE.clear()
-        D._WAIT_ERR_LAST.clear()
+        W._WAIT_CACHE.clear()
+        W._WAIT_ERR_LAST.clear()
         self.cmds = []
         self.reply = (0, b"", b"")
         self._orig_run = D.subprocess.run
@@ -3754,8 +3763,8 @@ class WaitForHostTests(unittest.TestCase):
 
     def tearDown(self):
         D.subprocess.run = self._orig_run
-        D._WAIT_CACHE.clear()
-        D._WAIT_ERR_LAST.clear()
+        W._WAIT_CACHE.clear()
+        W._WAIT_ERR_LAST.clear()
 
     def _fake_run(self, cmd, **kwargs):
         self.cmds.append(cmd)
@@ -3768,7 +3777,7 @@ class WaitForHostTests(unittest.TestCase):
         return R()
 
     def met(self, spec):
-        D._WAIT_CACHE.clear()
+        W._WAIT_CACHE.clear()
         return D.check_wait_for(spec)
 
     # --- разбор формы ---
@@ -3904,19 +3913,19 @@ class WaitForNoticeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
-        self._orig = {k: getattr(D, k) for k in ("TICKETS_DIR", "CEO_INBOX", "CEO_WAKE_LOG")}
-        D.TICKETS_DIR = self.base / "tickets"
-        D.CEO_INBOX = self.base / "ceo-inbox.md"
-        D.CEO_WAKE_LOG = self.base / "ceo-wake.log"
+        self._orig = {k: getattr(CFG, k) for k in ("TICKETS_DIR", "CEO_INBOX", "CEO_WAKE_LOG")}
+        CFG.TICKETS_DIR = self.base / "tickets"
+        CFG.CEO_INBOX = self.base / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = self.base / "ceo-wake.log"
         self._orig_tk_dir = TK.TICKETS_DIR
-        TK.TICKETS_DIR = D.TICKETS_DIR
+        TK.TICKETS_DIR = CFG.TICKETS_DIR
         D.RUNNING.clear()
         self.now = dt("2026-10-04T12:00:00+04:00")
         self.state = {}
 
     def tearDown(self):
         for k, v in self._orig.items():
-            setattr(D, k, v)
+            setattr(CFG, k, v)
         TK.TICKETS_DIR = self._orig_tk_dir
         D.RUNNING.clear()
         self.tmp.cleanup()
@@ -3927,7 +3936,7 @@ class WaitForNoticeTests(unittest.TestCase):
         return T.parse_text(text, Path("TK-9.md"))
 
     def inbox(self):
-        return D.CEO_INBOX.read_text(encoding="utf-8").splitlines() if D.CEO_INBOX.exists() else []
+        return CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines() if CFG.CEO_INBOX.exists() else []
 
     def test_unknown_format_reported_once_a_day(self):
         tkt = self.tkt("прогон окон на сервере счёта — готов, когда done=total")
@@ -3973,7 +3982,7 @@ class WaitForNoticeTests(unittest.TestCase):
 
     # --- запись формы ---
     def test_write_header_updates_refuses_unknown_wait_for(self):
-        path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t")
+        path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="t")
         with self.assertRaises(ValueError) as cm:
             T.write_header_updates(path, {"status": "waiting", "wait_for": "готов, когда done=total"})
         self.assertIn("host:<ssh-алиас>", str(cm.exception))
@@ -3987,12 +3996,12 @@ class WaitForNoticeTests(unittest.TestCase):
             rc = TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "t", "--wait-for", "потом посмотрю"])
         self.assertEqual(rc, 1)
         self.assertIn("wait_for не понят", err.getvalue())
-        self.assertEqual(list(D.TICKETS_DIR.glob("TK-*.md")) if D.TICKETS_DIR.exists() else [], [])
+        self.assertEqual(list(CFG.TICKETS_DIR.glob("TK-*.md")) if CFG.TICKETS_DIR.exists() else [], [])
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(TK.main(["new", "--ref", "В-229", "--owner", "engineer", "--title", "t", "--wait-for", "host:gpu1:unit:u"]), 0)
 
     def test_cli_wait_sets_status_and_checks_form(self):
-        path = T.create_ticket(D.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
+        path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="t", status="in_progress")
         with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(D, "check_wait_for", return_value=False):  # без настоящего ssh
             self.assertEqual(TK.main(["wait", path.stem, "host:gpu1:/var/rpv/progress/tk044.json", "--by", "2099-01-01T00:00+04:00"]), 0)
         tkt = T.read_ticket(path)
@@ -4050,28 +4059,28 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
     """Аудит-2 п.7: на Linux зомби — мёртв (`/proc/<pid>/status`: State Z); п.5: второй диспетчер/сторож не стартует."""
 
     def test_zombie_state_counts_as_dead_and_normal_state_as_alive(self):
-        orig_kill, orig_state = D.os.kill, D._proc_state
+        orig_kill, orig_state = D.os.kill, procs._proc_state
         D.os.kill = lambda pid, sig: None                      # kill -0 «успешен» — как для зомби
         try:
-            D._proc_state = lambda pid: "Z"
+            procs._proc_state = lambda pid: "Z"
             self.assertFalse(D._pid_alive_posix(4242, ""))
-            D._proc_state = lambda pid: "X"
+            procs._proc_state = lambda pid: "X"
             self.assertFalse(D._pid_alive_posix(4242, ""))
-            D._proc_state = lambda pid: "S"
+            procs._proc_state = lambda pid: "S"
             self.assertTrue(D._pid_alive_posix(4242, ""))
-            D._proc_state = lambda pid: None                    # /proc недоступен — по kill -0
+            procs._proc_state = lambda pid: None                    # /proc недоступен — по kill -0
             self.assertTrue(D._pid_alive_posix(4242, ""))
         finally:
-            D.os.kill, D._proc_state = orig_kill, orig_state
+            D.os.kill, procs._proc_state = orig_kill, orig_state
 
     def test_without_proc_name_and_state_come_from_ps(self):
         """macOS: нет /proc — имя образа и состояние берутся из ps; чужой процесс с живым pid — не наш."""
-        o_kill, o_ps, o_open = D.os.kill, D._ps_field, D.open if hasattr(D, "open") else None
+        o_kill, o_ps, o_open = D.os.kill, procs._ps_field, procs.open if hasattr(procs, "open") else None
         D.os.kill = lambda pid, sig: None
-        D.open = lambda *a, **k: (_ for _ in ()).throw(OSError("нет /proc"))
+        procs.open = lambda *a, **k: (_ for _ in ()).throw(OSError("нет /proc"))
         try:
             vals = {"stat": "S", "comm": "/usr/bin/vim"}
-            D._ps_field = lambda pid, field: vals.get(field)
+            procs._ps_field = lambda pid, field: vals.get(field)
             self.assertFalse(D._pid_alive_posix(4242, "claude"))
             vals["comm"] = "/opt/homebrew/bin/claude"
             self.assertTrue(D._pid_alive_posix(4242, "claude"))
@@ -4080,8 +4089,8 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
             vals.clear()                                          # ps ничего не знает — как раньше, по kill -0
             self.assertTrue(D._pid_alive_posix(4242, "claude"))
         finally:
-            D.os.kill, D._ps_field = o_kill, o_ps
-            del D.open
+            D.os.kill, procs._ps_field = o_kill, o_ps
+            del procs.open
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "зомби и /proc — только Linux")
     def test_real_zombie_child_is_not_alive(self):
@@ -4156,20 +4165,20 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
 
     def test_main_refuses_second_dispatcher_and_does_not_tick(self):
         with tempfile.TemporaryDirectory() as d:
-            orig = (D.PID_FILE, D.TICKETS_DIR, D.tick)
+            orig = (CFG.PID_FILE, CFG.TICKETS_DIR, D.tick)
             holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
             ticks = []
-            D.PID_FILE, D.TICKETS_DIR = Path(d) / "dispatch.pid", Path(d) / "tickets"
+            CFG.PID_FILE, CFG.TICKETS_DIR = Path(d) / "dispatch.pid", Path(d) / "tickets"
             D.tick = lambda *a, **kw: ticks.append(1) or 0
-            D.PID_FILE.write_text(str(holder.pid), encoding="utf-8")
-            orig_alive = D._pid_alive
-            D._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
+            CFG.PID_FILE.write_text(str(holder.pid), encoding="utf-8")
+            orig_alive = procs._pid_alive
+            procs._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
             try:
                 self.assertEqual(D.main(["--once"]), 1)
                 self.assertEqual(ticks, [], "второй экземпляр не должен тикать")
             finally:
-                D._pid_alive = orig_alive
-                D.PID_FILE, D.TICKETS_DIR, D.tick = orig
+                procs._pid_alive = orig_alive
+                CFG.PID_FILE, CFG.TICKETS_DIR, D.tick = orig
                 holder.kill()
                 holder.wait(timeout=10)
 
@@ -4303,19 +4312,19 @@ class ProjectRootTests(unittest.TestCase):
 
     def test_configure_project_moves_all_state_paths_into_project(self):
         import watch as W
-        orig = D.PROJECT_ROOT
+        orig = CFG.PROJECT_ROOT
         self.addCleanup(lambda: W.configure_project(orig))
         W.configure_project(self.proj)
         state = self.proj / ".claude" / "dispatcher"
-        self.assertEqual(D.TICKETS_DIR, self.proj / ".claude" / "tickets")
-        for path in (D.STATE_FILE, D.PID_FILE, D.RUNS_DIR, D.RUNS_LOG, D.CEO_INBOX, D.CEO_WAKE_LOG,
+        self.assertEqual(CFG.TICKETS_DIR, self.proj / ".claude" / "tickets")
+        for path in (CFG.STATE_FILE, CFG.PID_FILE, CFG.RUNS_DIR, CFG.RUNS_LOG, CFG.CEO_INBOX, CFG.CEO_WAKE_LOG,
                      W.WATCH_HEARTBEAT_FILE, W.WATCH_PID_FILE, W.WATCH_STATE_FILE):
             self.assertEqual(path.parent, state, path)
         self.assertNotEqual(D.CODE_DIR, state)  # код диспетчера и состояние проекта — разные каталоги
 
     def test_tickets_cli_project_flag_writes_into_that_project(self):
-        orig = (TK.TICKETS_DIR, TK.PROJECT_ROOT, D.PROJECT_ROOT)
-        self.addCleanup(lambda: (D.configure_project(orig[2]), setattr(TK, "TICKETS_DIR", orig[0]),
+        orig = (TK.TICKETS_DIR, TK.PROJECT_ROOT, CFG.PROJECT_ROOT)
+        self.addCleanup(lambda: (CFG.configure_project(orig[2]), setattr(TK, "TICKETS_DIR", orig[0]),
                                  setattr(TK, "PROJECT_ROOT", orig[1])))
         self.assertEqual(TK.main(["--project", str(self.proj), "new", "--ref", "В-229", "--owner", "engineer", "--title", "Проект"]), 0)
         self.assertEqual([p.name for p in (self.proj / ".claude" / "tickets").glob("TK-*.md")], ["TK-001.md"])
@@ -4374,9 +4383,9 @@ class OnMetTests(unittest.TestCase):
         (self.root / "tools").mkdir()
         self.tickets = self.root / "tickets"
         self.tickets.mkdir()
-        self.orig = (D.PROJECT_ROOT, D.RUNS_LOG, D._git_tracked, D.ON_MET_TIMEOUT_S)
-        D.PROJECT_ROOT, D.RUNS_LOG = self.root, self.root / "runs.log"
-        D._git_tracked = lambda rel: (self.root / rel).exists()
+        self.orig = (CFG.PROJECT_ROOT, CFG.RUNS_LOG, OM._git_tracked, OM.ON_MET_TIMEOUT_S)
+        CFG.PROJECT_ROOT, CFG.RUNS_LOG = self.root, self.root / "runs.log"
+        OM._git_tracked = lambda root, rel: (root / rel).exists()
         disp = str(Path(D.__file__).resolve().parent).replace("\\", "/")
         (self.root / "tools" / "hdr.py").write_text(
             f"import sys, json; sys.path.insert(0, {disp!r}); import ticket as T\n"
@@ -4387,7 +4396,7 @@ class OnMetTests(unittest.TestCase):
         self.now = dt("2026-10-05T12:00:00+04:00")
 
     def tearDown(self):
-        D.PROJECT_ROOT, D.RUNS_LOG, D._git_tracked, D.ON_MET_TIMEOUT_S = self.orig
+        CFG.PROJECT_ROOT, CFG.RUNS_LOG, OM._git_tracked, OM.ON_MET_TIMEOUT_S = self.orig
         self.tmp.cleanup()
 
     def ticket(self, on_met, wait_for="file:/x/y"):
@@ -4408,7 +4417,7 @@ class OnMetTests(unittest.TestCase):
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header["wait_for"], t.header["on_met"]), ("waiting", "file:/x/next", ""))
         self.assertIn("hdr done", t.log[-1].text)
-        self.assertIn(" on_met reason=on_met", D.RUNS_LOG.read_text(encoding="utf-8"))
+        self.assertIn(" on_met reason=on_met", CFG.RUNS_LOG.read_text(encoding="utf-8"))
 
     def test_ok_without_new_wait_for_wakes_owner(self):
         p = self.ticket("")
@@ -4426,13 +4435,13 @@ class OnMetTests(unittest.TestCase):
         self.assertIn("код 3", t.log[-1].text)
 
     def test_timeout_kills_tree(self):
-        D.ON_MET_TIMEOUT_S = 1.0
+        OM.ON_MET_TIMEOUT_S = 1.0
         p = self.ticket("python tools/sleep.py")
         t0 = time.time()
         self.assertFalse(self.run_met(p))
         self.assertLess(time.time() - t0, 20)
         self.assertIn("таймаут", T.read_ticket(p).log[-1].text)
-        self.assertIn("status=timeout", D.RUNS_LOG.read_text(encoding="utf-8"))
+        self.assertIn("status=timeout", CFG.RUNS_LOG.read_text(encoding="utf-8"))
 
     def test_command_cannot_close_ticket(self):
         for upd in ({"status": "in_review"}, {"status": "done"}, {"next": "judge"}):
@@ -4529,18 +4538,18 @@ class WaitReconcileTest(unittest.TestCase):
     """Сверка wait_for: один ssh на машину; в боевом цикле основной поток ssh не зовёт; файл итога задания (.rc) читается целиком."""
 
     def setUp(self):
-        D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._WAIT_RC.clear()
-        self._run, self._async, self._sshcmd = D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd
-        D._ssh_cmd = lambda alias, cmd: ["ssh", alias, cmd]
-        D.WAIT_ASYNC = True
+        W._WAIT_CACHE.clear(); W._WAIT_WATCH.clear(); W._WAIT_RC.clear()
+        self._run, self._async, self._sshcmd = D.subprocess.run, W.WAIT_ASYNC, W._ssh_cmd
+        W._ssh_cmd = lambda alias, cmd: ["ssh", alias, cmd]
+        W.WAIT_ASYNC = True
 
         def boom(*a, **k):
             raise AssertionError("ssh вне теста")
         D.subprocess.run = boom
 
     def tearDown(self):
-        D.subprocess.run, D.WAIT_ASYNC, D._ssh_cmd = self._run, self._async, self._sshcmd
-        D._WAIT_CACHE.clear(); D._WAIT_WATCH.clear(); D._WAIT_RC.clear()
+        D.subprocess.run, W.WAIT_ASYNC, W._ssh_cmd = self._run, self._async, self._sshcmd
+        W._WAIT_CACHE.clear(); W._WAIT_WATCH.clear(); W._WAIT_RC.clear()
 
     def _ssh(self, out: bytes, rc: int = 0):
         calls = []
@@ -4552,26 +4561,26 @@ class WaitReconcileTest(unittest.TestCase):
 
     def test_main_thread_never_calls_ssh_and_hands_the_condition_to_the_poller(self):
         self.assertFalse(D.check_wait_for("host:gpu1:/runs/u1.rc"))  # boom в setUp упал бы
-        self.assertIn(("gpu1", "path", "/runs/u1.rc"), D._WAIT_WATCH)
+        self.assertIn(("gpu1", "path", "/runs/u1.rc"), W._WAIT_WATCH)
 
     def test_reconcile_one_ssh_per_machine_closes_all_waiting(self):
         """Первая проверка сорвана таймаутом — сверка одним ssh закрывает все ждущие условия машины."""
         def timeout(*a, **k):
             raise D.subprocess.TimeoutExpired("ssh", 15)
         D.subprocess.run = timeout
-        D._host_probe("gpu1", "path", "/data/w/chain.done")
+        W._host_probe("gpu1", "path", "/data/w/chain.done")
         for k in (("gpu1", "path", "/data/w/chain.done"), ("gpu1", "unit", "u1"), ("gpu1", "path", "/data/p/x.json")):
-            D._WAIT_WATCH.add(k)
+            W._WAIT_WATCH.add(k)
         calls = self._ssh(b"@@0\n{\"done\": 1, \"total\": 5}\n@@rc 0\n@@1\n@@rc 0\n@@2\ninactive\n@@rc 0\n")
-        D._reconcile()
+        W._reconcile()
         self.assertEqual(len(calls), 1)
-        self.assertTrue(D._WAIT_CACHE[("gpu1", "path", "/data/w/chain.done")][1])
-        self.assertTrue(D._WAIT_CACHE[("gpu1", "unit", "u1")][1])
-        self.assertFalse(D._WAIT_CACHE[("gpu1", "path", "/data/p/x.json")][1])
+        self.assertTrue(W._WAIT_CACHE[("gpu1", "path", "/data/w/chain.done")][1])
+        self.assertTrue(W._WAIT_CACHE[("gpu1", "unit", "u1")][1])
+        self.assertFalse(W._WAIT_CACHE[("gpu1", "path", "/data/p/x.json")][1])
         self.assertTrue(D.check_wait_for("host:gpu1:/data/w/chain.done"))
 
     def test_recon_script_keeps_tilde_unquoted_and_reads_json_and_rc(self):
-        script = D._recon_script([("gpu1", "path", "~/x.done"), ("gpu1", "path", "~/rpv/progress/a.json"), ("gpu1", "path", "~/runs/u.rc")])
+        script = W._recon_script([("gpu1", "path", "~/x.done"), ("gpu1", "path", "~/rpv/progress/a.json"), ("gpu1", "path", "~/runs/u.rc")])
         self.assertIn("test -e ~/x.done", script)
         self.assertIn("cat ~/rpv/progress/a.json", script)
         self.assertIn("cat ~/runs/u.rc", script)
@@ -4579,88 +4588,88 @@ class WaitReconcileTest(unittest.TestCase):
 
     def test_rc_file_is_read_and_kept_for_the_wake_note(self):
         calls = self._ssh(b"SERVICE_RESULT=exit-code EXIT_STATUS=2\n")
-        self.assertTrue(D._host_probe("gpu1", "path", "/var/lib/rpv/runs/tk1-0101-ab12.rc"))
+        self.assertTrue(W._host_probe("gpu1", "path", "/var/lib/rpv/runs/tk1-0101-ab12.rc"))
         self.assertEqual(calls, ["cat /var/lib/rpv/runs/tk1-0101-ab12.rc"])
-        self.assertEqual(D.wait_rc("host:gpu1:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "SERVICE_RESULT=exit-code EXIT_STATUS=2")
-        self.assertEqual(D.wait_rc("host:vps:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "", "это файл другой машины")
-        self.assertEqual(D.wait_rc("file:/x.rc"), "")
-        self.assertEqual(D.wait_rc("host:gpu1:unit:tk1"), "")
+        self.assertEqual(W.wait_rc("host:gpu1:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "SERVICE_RESULT=exit-code EXIT_STATUS=2")
+        self.assertEqual(W.wait_rc("host:vps:/var/lib/rpv/runs/tk1-0101-ab12.rc"), "", "это файл другой машины")
+        self.assertEqual(W.wait_rc("file:/x.rc"), "")
+        self.assertEqual(W.wait_rc("host:gpu1:unit:tk1"), "")
 
     def test_reconcile_reads_rc_file_too(self):
         key = ("gpu1", "path", "/runs/u1.rc")
-        D._WAIT_WATCH.add(key)
+        W._WAIT_WATCH.add(key)
         self._ssh(b"@@0\nSERVICE_RESULT=success EXIT_STATUS=0\n@@rc 0\n")
-        D._reconcile()
-        self.assertTrue(D._WAIT_CACHE[key][1])
-        self.assertEqual(D.wait_rc("host:gpu1:/runs/u1.rc"), "SERVICE_RESULT=success EXIT_STATUS=0")
+        W._reconcile()
+        self.assertTrue(W._WAIT_CACHE[key][1])
+        self.assertEqual(W.wait_rc("host:gpu1:/runs/u1.rc"), "SERVICE_RESULT=success EXIT_STATUS=0")
 
     def test_rc_file_not_there_yet_means_job_is_running(self):
         self._ssh(b"", rc=1)
-        self.assertFalse(D._host_probe("gpu1", "path", "/runs/u1.rc"))
-        self.assertEqual(D.wait_rc("host:gpu1:/runs/u1.rc"), "")
+        self.assertFalse(W._host_probe("gpu1", "path", "/runs/u1.rc"))
+        self.assertEqual(W.wait_rc("host:gpu1:/runs/u1.rc"), "")
 
     def test_rc_failed(self):
         for rc, bad in (("SERVICE_RESULT=success EXIT_STATUS=0", False), ("SERVICE_RESULT=exit-code EXIT_STATUS=2", True),
                         ("SERVICE_RESULT=signal EXIT_STATUS=TERM", True), ("SERVICE_RESULT=success EXIT_STATUS=TERM", True),
                         ("SERVICE_RESULT=oom-kill EXIT_STATUS=", True), ("SERVICE_RESULT=success EXIT_STATUS=", False),
                         ("чужой формат файла", False)):
-            self.assertEqual(D._rc_failed(rc), bad, rc)
+            self.assertEqual(W._rc_failed(rc), bad, rc)
 
     def test_reconcile_missing_file_stays_unmet(self):
-        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
+        W._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         self._ssh(b"@@0\n@@rc 1\n")
-        D._reconcile()
-        self.assertFalse(D._WAIT_CACHE[("gpu1", "path", "/data/a.done")][1])
+        W._reconcile()
+        self.assertFalse(W._WAIT_CACHE[("gpu1", "path", "/data/a.done")][1])
 
     def test_reconcile_ssh_failure_changes_nothing(self):
-        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
+        W._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         self._ssh(b"", rc=255)
-        D._reconcile()
-        self.assertNotIn(("gpu1", "path", "/data/a.done"), D._WAIT_CACHE)
+        W._reconcile()
+        self.assertNotIn(("gpu1", "path", "/data/a.done"), W._WAIT_CACHE)
 
     def test_blind_tick_alert_per_machine_and_recovery(self):
         """TK-217: ssh 255 к gpu1 дольше порога → ALERT-BLIND.txt с именем машины и строка в mechanics.log; возврат — «зрение
         вернулось», файл снят, сверка запрошена сразу. vps без ожиданий не тревожит."""
         import tempfile as _tf
-        old = (D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR)
+        old = (CFG.DISPATCHER_DIR, CFG.CEO_WAKE_LOG, W.BLIND, W._RECON_LAST, CFG.TICKETS_DIR)
         tmp = Path(_tf.mkdtemp())
-        D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.TICKETS_DIR = tmp, tmp / "ceo-wake.log", tmp / "tickets"
-        D.TICKETS_DIR.mkdir()
-        D.BLIND = D.blind.Tracker(alert_s=300, repeat_s=1800)
-        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
+        CFG.DISPATCHER_DIR, CFG.CEO_WAKE_LOG, CFG.TICKETS_DIR = tmp, tmp / "ceo-wake.log", tmp / "tickets"
+        CFG.TICKETS_DIR.mkdir()
+        W.BLIND = W.blind.Tracker(alert_s=300, repeat_s=1800)
+        W._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         try:
-            D.BLIND.record("ssh:gpu1", False, time.time() - 400)
-            D.BLIND.record("ssh:vps", False, time.time() - 400)
+            W.BLIND.record("ssh:gpu1", False, time.time() - 400)
+            W.BLIND.record("ssh:vps", False, time.time() - 400)
             D.hide.run  # noqa: B018 — звук в тесте не нужен
-            orig, D._blind_sound = D._blind_sound, lambda: None
+            orig, W._blind_sound = W._blind_sound, lambda: None
             D._blind_tick()
-            D._blind_sound = orig
+            W._blind_sound = orig
             alert = (tmp / "ALERT-BLIND.txt").read_text(encoding="utf-8")
             self.assertIn("ssh:gpu1", alert)
             self.assertNotIn("ssh:vps", alert)
             self.assertIn("диспетчер слеп: ssh:gpu1", (tmp / "mechanics.log").read_text(encoding="utf-8"))
-            self.assertFalse(D.CEO_WAKE_LOG.exists(), "CP5: механика CEO не будит")
-            D._RECON_LAST = time.time()
-            D.BLIND.record("ssh:gpu1", True, time.time())
+            self.assertFalse(CFG.CEO_WAKE_LOG.exists(), "CP5: механика CEO не будит")
+            W._RECON_LAST = time.time()
+            W.BLIND.record("ssh:gpu1", True, time.time())
             D._blind_tick()
             self.assertFalse((tmp / "ALERT-BLIND.txt").exists())
             self.assertIn("зрение вернулось: ssh:gpu1", (tmp / "mechanics.log").read_text(encoding="utf-8"))
-            self.assertEqual(D._RECON_LAST, 0.0)
+            self.assertEqual(W._RECON_LAST, 0.0)
         finally:
-            D._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
-            D.DISPATCHER_DIR, D.CEO_WAKE_LOG, D.BLIND, D._RECON_LAST, D.TICKETS_DIR = old
+            W._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
+            CFG.DISPATCHER_DIR, CFG.CEO_WAKE_LOG, W.BLIND, W._RECON_LAST, CFG.TICKETS_DIR = old
 
     def test_reconcile_ssh_255_feeds_blind_tracker(self):
-        old = D.BLIND
-        D.BLIND = D.blind.Tracker()
-        D._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
+        old = W.BLIND
+        W.BLIND = W.blind.Tracker()
+        W._WAIT_WATCH.add(("gpu1", "path", "/data/a.done"))
         try:
             self._ssh(b"", rc=255)
-            D._reconcile()
-            self.assertTrue(D.BLIND.any_down())
+            W._reconcile()
+            self.assertTrue(W.BLIND.any_down())
             self._ssh(b"@@0\n@@rc 1\n")
-            D._reconcile()
-            self.assertFalse(D.BLIND.any_down())
+            W._reconcile()
+            self.assertFalse(W.BLIND.any_down())
         finally:
-            D._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
-            D.BLIND = old
+            W._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
+            W.BLIND = old
