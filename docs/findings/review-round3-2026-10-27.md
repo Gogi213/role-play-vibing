@@ -19,7 +19,7 @@
 |---|---|---|
 | 1 мёртвый код | 2 | #1 (diff), #2 (весь `tools`); `vulture` ≥ 60 без тестов — прочее прежнее: `ctypes` `hide.py:24-25`, `project.py:134`, `conftest.py` (хуки pytest) |
 | 2 избыточность | 0 | `start.find_copies` (однострочная обёртка над `find_scripts`) — два живых вызова (`doctor.py:175`, `start.py:330`), оставлена; `supervise.launchd_env/launchd_label/plist_path` — по два и более потребителей (`doctor.py`, `supervise.py`) |
-| 3 сложность и длина | 1 | #3. Файлов > 900 — 0 (макс. `watch.py` 827); функций > 100 — 0 (макс. `role_context.full_context` 88, было меньше; `dispatch.launch_run` 83); radon E/F — 1 (было 0); radon D = 41 (было 39: +`full_context`, +`plugin_version.installed`, +`dguard.charter_cmd._sub_hit` в списке, −`check_tool` перенесён) |
+| 3 сложность и длина | 1 | #3. Файлов > 900 — 0 (макс. `watch.py` 827); функций > 100 — 0 (макс. `role_context.full_context` 88, было меньше; `dispatch.launch_run` 83); radon E/F — 1 (было 0); radon D = 41 (было 39: новые в D — `role_context.full_context` 23, `plugin_version.installed` 22; `push_publication` перешла из D в E) |
 | 4 дизайн | 1 | #4. Цепочка импортов `dguard` (`… policy → push_scope → ceo_signal → checks`) без циклов; `Publish.main`/`PushRefs` — один носитель данных пуша, второго нет |
 | 5 дублирование | 2 | #5, #6. Остальное из диффа (`_ref_error` в `charter`, `push_words`) — одна реализация на правило |
 
