@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
+import runs as RL  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
 import project as P  # noqa: E402
 import hide  # noqa: E402
@@ -593,7 +594,6 @@ def _stale(ts: str, now) -> bool:
 
 # --- счётчик застоя по runs.log (TK-056 п.4) -----------------------------------------------------
 STALL_RUNS = 2  # подряд таймаутов / холостых запусков до блока
-_RUN_KV = re.compile(r"(\w+)=(\S+)")
 
 
 def _recent_runs(runs_path, tid: str, limit: int) -> list:
@@ -604,13 +604,13 @@ def _recent_runs(runs_path, tid: str, limit: int) -> list:
         return []
     rows = []
     for ln in reversed(lines[-4000:]):
-        parts = ln.split()
-        if len(parts) < 4 or parts[1] != tid or parts[2] == "on_met":
+        row = RL.split(ln)
+        if row is None or row[1] != tid or row[2] == RL.ON_MET:
             continue
-        st = dict(_RUN_KV.findall(ln)).get("status", "?")
+        st = row[3].get("status", "?")
         if st == "stopped":
             continue
-        rows.append((T.parse_dt(parts[0]), parts[2], st))
+        rows.append((T.parse_dt(row[0]), row[2], st))
         if len(rows) >= limit:
             break
     return rows[::-1]

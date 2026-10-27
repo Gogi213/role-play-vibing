@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import registry  # noqa: E402
+import runs as RL  # noqa: E402
 import ticket as T  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]  # корень плагина: agents/overseer.md
@@ -46,7 +47,6 @@ RECENT_H = 6
 DAYS_SHOWN = 7
 
 HDR = re.compile(r"^### (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?) (\S+)[ \t]*$", re.M)
-RUN_KV = re.compile(r"\b(\w+)=(\S*)")
 RETURN = re.compile(r"^\[итог:\s*return\]")
 
 # --- живая работа ----------------------------------------------------------------------------------------------
@@ -165,28 +165,20 @@ def ticket_ids(project: Path) -> list:
     return sorted(p.stem for p in (project / ".claude" / "tickets").glob("TK-*.md"))
 
 
-def _num(s):
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return None
-
-
 def parse_runs(text: str) -> dict:
     """runs.log → {тикет: [Run по времени]}. `on_met` — команда проекта, не запуск модели. Цена — resolved_cost, иначе cost_usd."""
     out = {}
     for ln in text.splitlines():
-        p = ln.split()
-        if len(p) < 3 or p[2] == "on_met":
+        row = RL.split(ln)
+        if row is None or row[2] == RL.ON_MET:
             continue
+        stamp, tid, role, kv = row
         try:
-            ts = parse_ts(p[0])
+            ts = parse_ts(stamp)
         except ValueError:
             continue
-        kv = dict(RUN_KV.findall(ln))
-        raw = _num(kv.get("cost_usd")) or 0.0
-        cost = _num(kv.get("resolved_cost"))
-        out.setdefault(p[1], []).append(Run(ts, p[2], raw if cost is None else cost, kv.get("status", ""), raw))
+        cost, raw = RL.costs(kv)
+        out.setdefault(tid, []).append(Run(ts, role, cost, kv.get("status", ""), raw))
     for lst in out.values():
         lst.sort(key=lambda r: r.ts)
     return out

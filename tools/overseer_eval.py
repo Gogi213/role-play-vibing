@@ -55,7 +55,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
 import overseer as core  # noqa: E402  ядро — общее с живым Надзирателем (`.claude/dispatcher/overseer.py`)
 from overseer import (  # noqa: E402,F401
-    DAYS_SHOWN, DEFAULT_TZ, HDR, KINDS, MIN_QUOTE, RECENT_H, RETURN, RUN_KV, Entry, Run, Stats, Ticket, Window, _num, _numbers,
+    DAYS_SHOWN, DEFAULT_TZ, HDR, KINDS, MIN_QUOTE, RECENT_H, RETURN, Entry, Run, Stats, Ticket, Window, _numbers,
     _pct, build_prompt, call_overseer, claude_bin, closed_scale, cut, entry_block, gist, grade, invented_numbers, is_judge_return,
     load_agent, load_runs, load_ticket, make_windows, merge_entries, norm_ws, parse_answer, parse_log, parse_runs, parse_ts,
     pick_new, quote_found, scale_text, split_ticket, stats_at, stats_text, ticket_ids, ticket_start)

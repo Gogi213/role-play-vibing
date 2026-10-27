@@ -42,6 +42,7 @@ import notify  # noqa: E402
 import project as P  # noqa: E402
 import registry  # noqa: E402
 import routes  # noqa: E402
+import runs as RL  # noqa: E402
 import ticket as T  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -60,7 +61,6 @@ RESULT = re.compile(r"\[итог: ([\w-]+)\]")
 RETURN_BLOCKED = re.compile(r"\[итог: (?:return|blocked)\]")
 CONFLICT = re.compile(r"конфликт|rebase|merge conflict", re.I)
 NUM = re.compile(r"\d+(?:[.,]\d+)?")
-RUN_KV = re.compile(r"(\w+)=(\S+)")
 REF_IN_TEXT = re.compile(r"\b(?:TK|G|E)-\d+|В-\d+")
 
 
@@ -337,17 +337,13 @@ def read_runs(root: Path):
         return None
     rows = []
     for ln in lines:
-        parts = ln.split()
-        ts = _ts(parts[0]) if len(parts) >= 4 else None
-        if not ts or parts[2] == "on_met":    # on_met — команда проекта, не запуск модели
+        row = RL.split(ln)
+        ts = _ts(row[0]) if row else None
+        if not ts or row[2] == RL.ON_MET:    # on_met — команда проекта, не запуск модели
             continue
-        kv = dict(RUN_KV.findall(ln))
-        try:
-            cost = float(kv.get("resolved_cost") or kv.get("cost_usd") or 0)
-        except ValueError:
-            cost = 0.0
-        rows.append({"ts": ts, "tid": parts[1], "role": parts[2], "reason": kv.get("reason", ""),
-                     "status": kv.get("status", "?"), "cost": cost})
+        _, tid, role, kv = row
+        rows.append({"ts": ts, "tid": tid, "role": role, "reason": kv.get("reason", ""),
+                     "status": kv.get("status", "?"), "cost": RL.costs(kv)[0]})
     return sorted(rows, key=lambda r: r["ts"])
 
 

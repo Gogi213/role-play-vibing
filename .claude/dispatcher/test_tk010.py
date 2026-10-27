@@ -13,9 +13,13 @@ import ceo_inbox as CI  # noqa: E402
 import dispatch as D  # noqa: E402
 import doctor as DOC  # noqa: E402
 import heartbeat as HB  # noqa: E402
+import overseer as OV  # noqa: E402
+import report as RP  # noqa: E402
+import runs as RL  # noqa: E402
 import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
 import transcript as TR  # noqa: E402
+import usage as US  # noqa: E402
 import watch as W  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 
@@ -128,6 +132,45 @@ class HeartbeatStale(unittest.TestCase):
         self.assertEqual(SV.decide(HB.STALE_S - 1, True), "ok")
         self.assertEqual(SV.decide(HB.STALE_S + 1, True), "restart")
         self.assertIs(DOC.SV, SV)
+
+
+class RunsLogLine(unittest.TestCase):
+    """Четыре читателя runs.log (overseer, report, usage, watch) разбирают строку одним `runs.split`/`runs.costs`."""
+    TS = "2026-10-27T05:00:00+04:00"
+
+    def test_one_threshold_and_cost_rule(self):
+        short = f"{self.TS} TK-1 engineer"
+        self.assertIsNone(RL.split(short))
+        self.assertEqual(OV.parse_runs(short), {})
+        self.assertEqual(RP.read_runs(self._root(short)), [])
+        self.assertIsNone(US.parse(short))
+        # resolved_cost=0 — законный ноль запуска (при --resume), а не «нет цены»: итог сессии cost_usd не подставляется
+        line = f"{self.TS} TK-1 engineer reason=new status=ok cost_usd=5.0 resolved_cost=0.0"
+        self.assertEqual(RL.costs(RL.split(line)[3]), (0.0, 5.0))
+        self.assertEqual(OV.parse_runs(line)["TK-1"][0].cost, 0.0)
+        self.assertEqual(RP.read_runs(self._root(line))[0]["cost"], 0.0)
+        broken = f"{self.TS} TK-1 engineer reason=new status=ok cost_usd=2.5 resolved_cost=abc"
+        self.assertEqual(OV.parse_runs(broken)["TK-1"][0].cost, 2.5)
+        self.assertEqual(RP.read_runs(self._root(broken))[0]["cost"], 2.5)
+
+    def test_on_met_is_not_a_run(self):
+        line = f"{self.TS} TK-1 on_met reason=x status=ok"
+        self.assertEqual(OV.parse_runs(line), {})
+        self.assertEqual(RP.read_runs(self._root(line)), [])
+
+    def test_no_private_copies(self):
+        for name in ("overseer", "report", "usage", "watch"):
+            src = (Path(__file__).resolve().parent / f"{name}.py").read_bytes().decode("utf-8")
+            self.assertNotIn("RUN_KV", src, name)
+            self.assertNotIn("_KV = re", src, name)
+
+    @staticmethod
+    def _root(line: str) -> Path:
+        root = Path(tempfile.mkdtemp())
+        d = root / ".claude" / "dispatcher"
+        d.mkdir(parents=True)
+        (d / "runs.log").write_text(line + "\n", encoding="utf-8")
+        return root
 
 
 if __name__ == "__main__":
