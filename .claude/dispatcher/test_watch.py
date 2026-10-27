@@ -25,6 +25,7 @@ import config as CFG  # noqa: E402
 import waits as WAITS  # noqa: E402
 import procs  # noqa: E402
 import ticket as T  # noqa: E402
+import signals as SIG  # noqa: E402
 import watch as W  # noqa: E402
 
 TZ = timezone(timedelta(hours=4))
@@ -922,7 +923,7 @@ class WatchLogTests(WatchSandbox):
         with mock.patch.object(T, "_IS_WINDOWS", False):  # запись допустима: старый тикет мог уже ждать так
             T.write_header_updates(p, {"wait_for": "file:/tmp/done.json"}, now=self.now)
         state = {}
-        with mock.patch.object(T, "_IS_WINDOWS", True), mock.patch.object(D, "append_ceo_inbox") as inbox:
+        with mock.patch.object(T, "_IS_WINDOWS", True), mock.patch.object(SIG, "append_ceo_inbox") as inbox:
             D.notify_wait_for_problem(T.read_ticket(p), state, self.now)
         self.assertEqual(inbox.call_count, 1)
         self.assertIn("posix-путь на Windows", inbox.call_args[0][2])

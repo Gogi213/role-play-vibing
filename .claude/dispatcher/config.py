@@ -53,3 +53,11 @@ def ensure_project(argv, prog: str) -> bool:
         print(f"[{prog}] ошибка: {P.NOT_FOUND_HINT}", file=sys.stderr)
         return False
     return True
+
+
+def load_state() -> dict:
+    return P.read_json(STATE_FILE, {})
+
+
+def save_state(state: dict) -> None:
+    P.write_json(STATE_FILE, state, sort_keys=True)   # с повторами: на Windows читатель держит файл
