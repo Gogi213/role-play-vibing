@@ -16,10 +16,11 @@ from pathlib import Path
 os.environ["CLAUDE_PROJECT_DIR"] = r"C:\visual projects\proj"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import delete_guard as dg  # noqa: E402
+from dguard import checks, config as cfg  # noqa: E402
 
 PROJ_RPV = {"guard_remote_roots": ["~/proj/", "$home/proj/", "${home}/proj/", "/home/srv/proj/", "/opt/proj-compute/"],
             "guard_stage": "/dev/shm/proj-stage", "guard_forbidden_hosts": ["203.0.113.1"]}
-dg.REMOTE_ROOTS, dg.STAGE, dg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)
+cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)
 
 CWD = r"C:\visual projects\proj"
 SCRATCH = "C:/Users/3D6B~1/AppData/Local/Temp/claude/C--visual-projects-proj/abc/scratchpad"
@@ -34,8 +35,8 @@ def protect(*patterns, error=None):
     from unittest import mock
     from contextlib import ExitStack
     stack = ExitStack()
-    stack.enter_context(mock.patch.object(dg, "PROTECTED", tuple(dg.norm(x).rstrip("/") for x in patterns)))
-    stack.enter_context(mock.patch.object(dg, "PROTECTED_ERROR", error))
+    stack.enter_context(mock.patch.object(cfg, "PROTECTED", tuple(dg.norm(x).rstrip("/") for x in patterns)))
+    stack.enter_context(mock.patch.object(cfg, "PROTECTED_ERROR", error))
     return stack
 
 
@@ -805,7 +806,7 @@ class CeoResources0310(unittest.TestCase):
             (root / "nested" / ".git").mkdir(parents=True)                                       # вложенный репозиторий
             (root / ".claude" / "worktrees" / "rpv" / ".git").mkdir(parents=True)                    # TK-070 п.5: клон плагина
             base = dg.norm(root.as_posix())
-            with mock.patch.object(dg, "LOCAL_ROOTS", (base + "/",)):
+            with mock.patch.object(cfg, "LOCAL_ROOTS", (base + "/",)):
                 self.ok(f'cd "{base}/wt" && git reset --hard X')
                 self.ok(f'cd "{base}/wt/sub" && git clean -fd')
                 self.ok(f'git -C "{base}/wt" reset --hard X')
@@ -1118,14 +1119,14 @@ class SecondAudit(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="dg-proj-") as d:
             base = dg.norm(Path(d).as_posix())
             (Path(d) / "tracked.txt").write_text("x", encoding="utf-8")
-            with mock.patch.object(dg, "LOCAL_ROOTS", (base + "/",)):
+            with mock.patch.object(cfg, "LOCAL_ROOTS", (base + "/",)):
                 self.no("git checkout tracked.txt", cwd=base)                 # такой файл есть: это восстановление пути
                 self.ok("git checkout feature-x", cwd=base)                   # файла нет: переключение ветки
 
     # ------------------------------------------------------------------------------------------ (г) fail-closed
     def test_crash_in_scan_is_refusal_not_pass(self):
         from unittest import mock
-        with mock.patch.object(dg, "scan_text", side_effect=RuntimeError("boom")):
+        with mock.patch.object(checks, "scan_text", side_effect=RuntimeError("boom")):
             reason = dg.check("ls", CWD)
         self.assertIsNotNone(reason)
         self.assertIn("Страж удаления упал", reason)
@@ -1133,12 +1134,12 @@ class SecondAudit(unittest.TestCase):
 
     def test_crash_in_target_check_is_refusal_not_pass(self):
         from unittest import mock
-        with mock.patch.object(dg, "allowed", side_effect=ValueError("bad")):
+        with mock.patch.object(checks, "allowed", side_effect=ValueError("bad")):
             self.assertIn("Страж удаления упал", dg.check("rm -rf data/x", CWD))
 
     def test_crash_in_legacy_fallback_is_refusal(self):
         from unittest import mock
-        with mock.patch.object(dg, "legacy_found", side_effect=RuntimeError("boom")):
+        with mock.patch.object(checks, "legacy_found", side_effect=RuntimeError("boom")):
             self.assertIn("Страж удаления упал", dg.check("echo 'unterminated", CWD))
 
     def test_crash_in_check_tool_is_refusal(self):
@@ -1147,7 +1148,7 @@ class SecondAudit(unittest.TestCase):
         with mock.patch.object(dg, "check", side_effect=RuntimeError("boom")):
             self.assertIn("Страж удаления упал", dg.check_tool(ev))
         ev = {"tool_name": "Write", "tool_input": {"file_path": self.f}, "cwd": CWD}
-        with mock.patch.object(dg, "may_exist", side_effect=RuntimeError("boom")):
+        with mock.patch.object(checks, "may_exist", side_effect=RuntimeError("boom")):
             self.assertIn("Страж удаления упал", dg.check_tool(ev))
         self.assertIn("Страж удаления упал", dg.check_tool("не объект"))
         self.assertIn("Страж удаления упал", dg.check_tool(None))
@@ -1414,12 +1415,12 @@ class ProtectedPaths(unittest.TestCase):
         self.d = tempfile.mkdtemp(prefix="dg-pp-", dir=str(Path.home()))    # под домашним: не временный каталог
         self.addCleanup(shutil.rmtree, self.d, True)
         self.base = Path(self.d).as_posix()
-        saved = (dg.LOCAL_ROOTS, dg.WRITE_HOME_ROOTS, dg.PROJECT_DIR, dg.PROTECTED, dg.PROTECTED_ERROR, dg.REMOTE_ROOTS,
-                 dg.STAGE, dg.CLOSED_RE)
+        saved = (cfg.LOCAL_ROOTS, cfg.WRITE_HOME_ROOTS, cfg.PROJECT_DIR, cfg.PROTECTED, cfg.PROTECTED_ERROR, cfg.REMOTE_ROOTS,
+                 cfg.STAGE, cfg.CLOSED_RE)
 
         def restore():
-            (dg.LOCAL_ROOTS, dg.WRITE_HOME_ROOTS, dg.PROJECT_DIR, dg.PROTECTED, dg.PROTECTED_ERROR, dg.REMOTE_ROOTS,
-             dg.STAGE, dg.CLOSED_RE) = saved
+            (cfg.LOCAL_ROOTS, cfg.WRITE_HOME_ROOTS, cfg.PROJECT_DIR, cfg.PROTECTED, cfg.PROTECTED_ERROR, cfg.REMOTE_ROOTS,
+             cfg.STAGE, cfg.CLOSED_RE) = saved
         self.addCleanup(restore)
         for rel in self.FILES:
             f = Path(self.d, rel)
@@ -1430,7 +1431,7 @@ class ProtectedPaths(unittest.TestCase):
         self.addCleanup(p.stop)
         self.as_role(None)
         dg.configure(self.d)
-        dg.REMOTE_ROOTS, dg.STAGE, dg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)  # машины проекта proj — как у остальных тестов
+        cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)  # машины проекта proj — как у остальных тестов
 
     def as_role(self, role):
         os.environ.pop("RPV_ROLE", None)
@@ -1463,18 +1464,18 @@ class ProtectedPaths(unittest.TestCase):
 
     # ------------------------------------------------------------------------------------------ нет настройки
     def test_not_configured_means_no_protection(self):
-        self.assertEqual((dg.PROTECTED, dg.PROTECTED_ERROR), ((), None))
+        self.assertEqual((cfg.PROTECTED, cfg.PROTECTED_ERROR), ((), None))
         for content in ('{}', '{"other": 1}', '{"protected_paths": []}', '{"protected_paths": null}'):
             self.rpv(content)
-            self.assertEqual((dg.PROTECTED, dg.PROTECTED_ERROR), ((), None), content)
+            self.assertEqual((cfg.PROTECTED, cfg.PROTECTED_ERROR), ((), None), content)
             self.ok("rm -rf data/raw backups")
             self.ok("echo x > data/raw/a.bin")
             self.assertIsNone(self.tool("Write", "data/raw/a.bin"))
 
     def test_bom_unknown_keys_and_normalization(self):
         self.rpv('﻿{"protected_paths": ["Data\\\\Raw\\\\", "/Backups/", "*.PEM"], "later_setting": {"a": 1}}')
-        self.assertEqual(dg.PROTECTED, ("data/raw", "/backups", "*.pem"))
-        self.assertIsNone(dg.PROTECTED_ERROR)
+        self.assertEqual(cfg.PROTECTED, ("data/raw", "/backups", "*.pem"))
+        self.assertIsNone(cfg.PROTECTED_ERROR)
 
     # ------------------------------------------------------------------------------------------ удаление и перезапись
     def test_delete_refused_for_ceo_and_every_role(self):
@@ -1605,8 +1606,8 @@ class ProtectedPaths(unittest.TestCase):
     def test_malformed_config_is_fail_closed_with_clear_reason(self):
         for content in self.BROKEN:
             self.rpv(content)
-            self.assertTrue(dg.PROTECTED_ERROR, content)
-            self.assertEqual(dg.PROTECTED, (), content)
+            self.assertTrue(cfg.PROTECTED_ERROR, content)
+            self.assertEqual(cfg.PROTECTED, (), content)
             for role in (None, "engineer"):
                 self.as_role(role)
                 for cmd in ("rm -rf data/other", "rm notes.txt", f'echo x > "{self.base}/notes.txt"',
@@ -1625,7 +1626,7 @@ class ProtectedPaths(unittest.TestCase):
     def test_unreadable_config_is_fail_closed(self):
         Path(self.d, ".claude", "rpv.json").mkdir(parents=True)                      # вместо файла — каталог
         dg.configure(self.d)
-        self.assertIn("не прочитан", dg.PROTECTED_ERROR)
+        self.assertIn("не прочитан", cfg.PROTECTED_ERROR)
         self.no("rm -rf data/other", expect="fail-closed")
 
     def test_broken_config_can_be_fixed_by_ceo_only(self):
@@ -1868,7 +1869,7 @@ class Publication(unittest.TestCase):
         self.ticket.parent.mkdir(parents=True)
         self.write_ticket()
         for p in (mock.patch.dict(os.environ, {"RPV_ROLE": "engineer", "RPV_TICKET": self.TID}),
-                  mock.patch.object(dg, "PROJECT_DIR", str(self.root))):
+                  mock.patch.object(cfg, "PROJECT_DIR", str(self.root))):
             p.start()
             self.addCleanup(p.stop)
 
@@ -2314,8 +2315,8 @@ class SettingsSource(unittest.TestCase):
                 json.dump(rpv, f)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("RPV_", "ALPHA_"))}
         env.update(env_extra, CLAUDE_PROJECT_DIR=proj, PYTHONIOENCODING="utf-8")
-        code = ("import delete_guard as d; print(d.STAGE, d.REMOTE_ROOTS, d.dispatcher_role(), "
-                "d.closed_host('host-9.example'), d.PROTECTED_ERROR)")
+        code = ("import delete_guard as d; from dguard import config as c; print(c.STAGE, c.REMOTE_ROOTS, d.dispatcher_role(), "
+                "d.closed_host('host-9.example'), c.PROTECTED_ERROR)")
         r = subprocess.run([sys.executable, "-c", code], cwd=self.HERE, env=env, capture_output=True, text=True,
                            encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -2416,7 +2417,7 @@ class BranchDeleteConsentTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.file = self.root / ".claude" / "dispatcher" / "branch-delete.json"
         self.file.parent.mkdir(parents=True)
-        for p in (mock.patch.dict(os.environ), mock.patch.object(dg, "PROJECT_DIR", str(self.root))):
+        for p in (mock.patch.dict(os.environ), mock.patch.object(cfg, "PROJECT_DIR", str(self.root))):
             p.start()
             self.addCleanup(p.stop)
         os.environ.pop("RPV_ROLE", None)
