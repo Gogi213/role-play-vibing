@@ -160,19 +160,45 @@ def cmd_new(args) -> int:
     return 0
 
 
+def _ceo_next_pending(tkt):
+    """Запись `ceo` — последняя в логе, а `next` в шапке не пуст (диспетчер гасит его при пробуждении): заказ CEO ещё не
+    исполнен (alpha TK-282: заметка Судьи сбросила `next: engineer` CEO на researcher). → запись CEO или None."""
+    nxt = (tkt.header.get("next") or "").strip()
+    if nxt and tkt.log and T.author_is(tkt.log[-1].author, "ceo"):
+        return tkt.log[-1]
+    return None
+
+
+def _closed_ticket_refusal(tkt, role: str, result: str) -> str:
+    """`done` исполнителя и `accept` Судьи по тикету в статусе done без нового заказа — отказ (alpha TK-266, TK-267, TK-282:
+    повторные запуски после «CEO закрыл / PR влит»). Заказ — запись ceo/владельца после последней приёмки, кроме самого
+    закрытия `[итог: done]`. → текст отказа или ""."""
+    if tkt.status != "done" or not ((role in ("researcher", "engineer") and result == "done")
+                                    or (role == "judge" and result == "accept")):
+        return ""
+    last = max((i for i, e in enumerate(tkt.log) if T.author_is(e.author, "judge") and re.match(r"ПРИНЯТО|\[итог:\s*accept\]", e.text.strip())),
+               default=-1)
+    for e in tkt.log[last + 1:]:
+        if any(T.author_is(e.author, a) for a in ("ceo", "owner", "владелец")) and not re.match(r"\[итог:\s*done\]", e.text.strip()):
+            return ""
+    return "тикет закрыт; нового заказа нет"
+
+
 def cmd_comment(args) -> int:
     path = TICKETS_DIR / f"{args.id}.md"
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
-    nxt, auto_next = args.next, False
+    nxt, auto_next, kept = args.next, False, None
     with T.ticket_lock(path):  # запись, `next` и сжатие лога — одним куском (диспетчер правит шапку тем же замком)
+        before = T.read_ticket(path)
         T.append_log(path, args.author, args.text)
         if not nxt and T.author_is(args.author, "judge"):
             # Судья вернул тикет без `--next`: пока тикет в todo/in_progress/in_review/waiting, ход возвращается
-            # владельцу; done, stopped, needs_owner, blocked — не будим
+            # владельцу; done, stopped, needs_owner, blocked — не будим. Невыполненный заказ CEO (`next` от его записи) не затираем
+            kept = _ceo_next_pending(before)
             tkt = T.read_ticket(path)
-            if tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
+            if kept is None and tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
                 nxt, auto_next = tkt.owner, True
         if nxt:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
@@ -183,6 +209,7 @@ def cmd_comment(args) -> int:
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
           + (f"; next проставлен автоматически (запись Судьи без --next → владелец тикета: {nxt})" if auto_next else "")
+          + (f"; next оставлен: ceo поставил {before.header.get('next').strip()} в {kept.ts.strftime('%H:%M')}" if kept else "")
           + (f"; в архив перенесено записей: {moved}" if moved else ""))
     return 0
 
@@ -209,6 +236,10 @@ def cmd_result(args) -> int:
     err = routes.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
                        form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "",
                        why_owner=getattr(args, "why_owner", None) or "")
+    if err:
+        print(f"result: {err}", file=sys.stderr)
+        return 1
+    err = _closed_ticket_refusal(tkt, role, args.result)
     if err:
         print(f"result: {err}", file=sys.stderr)
         return 1
@@ -303,6 +334,10 @@ def _decisions_ack(args) -> tuple[str, str]:
 # Судья принял). Приёмка в V2-проекте — с явным ответом про хвосты; «хвостов нет» сверяется с последней сдачей исполнителя.
 TAIL_WORDS = re.compile(r"не\s+сделан|не\s+достигнут|не\s+доделан|не\s+выполнен|не\s+реализован|не\s+закончен|не\s+действует|"
                         r"не\s+работает|\bхвост|\bосталось\b|отдельн\w*\s+тикет", re.I)
+# Отрицание хвоста — не хвост (alpha TK-264: «… Хвостов нет» + `--tail -` отклонялось корнем `хвост`). Гасим только законченный
+# оборот: «хвост: нет метрик у 431 строки» или «хвост нет метрик» — по-прежнему хвост.
+TAIL_NEGATION = re.compile(r"хвост\w*\s+нет\b(?!\s+[\w])|\bнет\s+хвост\w*|\bбез\s+хвост\w*|\bне\s+осталось\b|"
+                           r"\bосталось\s+(?:0|ноль)\b(?![.,]\d)", re.I)
 TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
              "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
 
@@ -361,6 +396,7 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
     if raw in ("-", "—"):
         path = TICKETS_DIR / f"{tid}.md"
         sub = _owner_submission(T.read_ticket(path)) if path.exists() else ""
+        sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), sub)  # длина та же: цитата в отказе берётся из этого же текста
         hit = TAIL_WORDS.search(sub)
         if hit:
             return (f"--tail -: в сдаче исполнителя «{sub[max(0, hit.start() - 40):hit.end() + 60].strip()}» — это хвост. "
@@ -555,6 +591,10 @@ def cmd_accept(args) -> int:
         return 1
     if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
+        return 1
+    err = _closed_ticket_refusal(T.read_ticket(path), role or "judge", "accept")
+    if err:
+        print(f"accept: {err}", file=sys.stderr)
         return 1
     import merge_rule
     import routes
