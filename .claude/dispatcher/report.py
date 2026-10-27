@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cfg as cfg_mod  # noqa: E402
 import downtime  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import haiku_aux as HA  # noqa: E402
@@ -501,6 +502,13 @@ def _measure(what: str, fn, norm: str, p: Period) -> str:
 
 # --- сборка и доставка -------------------------------------------------------------------------
 
+def _config_changes(p: Period) -> list:
+    try:
+        return cfg_mod.report_lines(p.root, p.since, p.until)[:5]
+    except Exception:  # noqa: BLE001 — битый журнал не лишает владельца отчёта
+        return []
+
+
 def build(p: Period, ask=None):
     """(текст для владельца, подробности для файла отчёта). Текст — не больше MAX_LINES строк."""
     try:
@@ -509,13 +517,15 @@ def build(p: Period, ask=None):
         groups, empty = [], _nodata(f"принятое не прочитано: {type(e).__name__}")
     sums, cost = summarize(groups, p, ask)
     measures = [_measure(what, fn, norm, p) for what, fn, norm in MEASURES]
-    room = MAX_LINES - (5 + len(measures))      # шапка, две пустые строки, два заголовка частей
+    changes = _config_changes(p)                # TK-007: правки настроек CEO с цитатой; нет правок — нет раздела
+    room = MAX_LINES - (5 + len(measures) + (len(changes) + 2 if changes else 0))   # шапка, пустые строки, заголовки частей
     items = [f"• «{_cut(goal, 50)}» — {sums[i][0]}" if goal else f"• Без цели — {sums[i][0]}"
              for i, (_, goal, _) in enumerate(groups, 1)] or [empty]
     if len(items) > room:
         items = items[:room - 1] + [f"…и ещё {len(items) - room + 1}"]
     text = "\n".join([f"Отчёт за {p.since:%d.%m %H:%M} — {p.until:%d.%m %H:%M}", "", "Принято проверяющим:", *items, "",
-                      "Измерения (что · сколько · норма):", *measures])
+                      "Измерения (что · сколько · норма):", *measures,
+                      *(["", "CEO изменил работу команды:", *changes] if changes else [])])
     details = [f"Период: {p.since:%Y-%m-%d %H:%M} — {p.until:%Y-%m-%d %H:%M}", "",
                "Источники принятого (по запросу владельца; в сообщение не входят):"]
     details += [f"- {gid or 'без цели'}: {', '.join(it['id'] for it in its)} — строка: {sums[i][1]}"

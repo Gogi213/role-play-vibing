@@ -52,6 +52,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cfg as cfg_mod  # noqa: E402
 import dispatch as D  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import registry as registry_mod  # noqa: E402
@@ -801,6 +802,40 @@ def _write_consents(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def cmd_config(args) -> int:
+    """CEO: правка `.claude/rpv.json` — ключ из закрытого списка, значение проверено (`cfg.KEYS`); правка пишется в журнал,
+    Судье заводится проверка, не принятая за 2 ч правка откатывается сама. Судья: `config accept CFG-N`."""
+    role = _caller_role()
+    if args.action == "accept":
+        if role != "judge":
+            print(f"config accept — только Судья; эта сессия — {role or 'CEO'}", file=sys.stderr)
+            return 1
+        entry, err = cfg_mod.accept(PROJECT_ROOT, args.key)
+        if err:
+            print(f"config accept: {err}", file=sys.stderr)
+            return 1
+        print(f"{entry['id']}: принято, откат отменён")
+        return 0
+    if role and role != "ceo":
+        print(f"config set — только CEO; эта сессия — роль {role}", file=sys.stderr)
+        return 1
+    if args.value is None:
+        print("config set: нужно значение — `config set <ключ> <значение> --why \"...\"`", file=sys.stderr)
+        return 1
+    entry, err = cfg_mod.set_value(PROJECT_ROOT, args.key, args.value, args.why or "", (args.ref or "").strip())
+    if err:
+        print(f"config set: {err}", file=sys.stderr)
+        return 1
+    try:
+        path = T.create_ticket(TICKETS_DIR, owner="judge", title=f"Проверка правки настроек {entry['id']}: {entry['key']}",
+                               reviewer="", description=cfg_mod.judge_ticket_text(entry), status="todo")
+        cfg_mod.attach_ticket(PROJECT_ROOT, entry["id"], path.stem)
+    except ValueError as e:                      # правка записана и откатится сама; Судью не разбудили — говорим
+        print(f"config set: тикет Судье не заведён ({e}); откат сам к {entry['deadline']}", file=sys.stderr)
+    print(f"{entry['id']}: {entry['key']} записан; без приёмки Судьи вернётся к {entry['deadline']}")
+    return 0
+
+
 def cmd_status(args) -> int:
     state = D.load_state()
     rows = []
@@ -952,6 +987,15 @@ def main(argv=None) -> int:
     p_alld.add_argument("--ref", default="", help="решение владельца В-N из реестра (`registry.py decide`)")
     p_alld.add_argument("--revoke", action="store_true", help="снять согласие")
     p_alld.set_defaults(func=cmd_allow_delete)
+
+    p_cfg = sub.add_parser("config", help="CEO: set — правка .claude/rpv.json по закрытому списку ключей (Судья проверяет, "
+                                          "через 2 ч без приёмки откат); Судья: accept CFG-N")
+    p_cfg.add_argument("action", choices=["set", "accept"])
+    p_cfg.add_argument("key", help="set: ключ rpv.json; accept: номер правки CFG-N")
+    p_cfg.add_argument("value", nargs="?", default=None, help="set: значение (JSON или строка)")
+    p_cfg.add_argument("--why", default="", help="зачем правка (Судья сверяет со словом владельца)")
+    p_cfg.add_argument("--ref", default="", help="решение владельца В-N из реестра: цитата попадёт в журнал и отчёт")
+    p_cfg.set_defaults(func=cmd_config)
 
     p_inbox = sub.add_parser("inbox", help="CEO: новые строки ceo-inbox.md с прошлого чтения")
     p_inbox.add_argument("--peek", action="store_true", help="только показать, не считать прочитанным")

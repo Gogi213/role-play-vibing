@@ -1648,8 +1648,38 @@ class ProtectedPaths(unittest.TestCase):
         for name in ("Write", "Edit", "MultiEdit"):
             self.assertIn("Настройки Claude Code и плагина", self.tool(name, ".claude/rpv.json"), name)
         self.no("cp notes.txt .claude/rpv.json", expect="Настройки Claude Code и плагина")
-        self.as_role(None)                                                          # CEO — владелец настройки
-        self.assertIsNone(self.tool("Edit", ".claude/rpv.json"))
+        self.as_role(None)                                                          # CEO — только командой `config set` (TK-007)
+        self.assertIn("config set", self.tool("Edit", ".claude/rpv.json"))
+
+    def test_ceo_edits_neither_config_nor_charters_directly(self):
+        """TK-007 (В-7): сессия CEO не пишет rpv.json и уставы .claude/roles/*.md; блокнот и таблица зон README — можно."""
+        self.rpv({"protected_paths": ["data/raw"]})
+        Path(self.d, ".claude", "roles", "notes").mkdir(parents=True, exist_ok=True)
+        for name in ("README.md", "engineer.md", "notes/ceo.md"):
+            Path(self.d, ".claude", "roles", name).write_text("x", encoding="utf-8")
+        for tool in ("Write", "Edit", "MultiEdit"):
+            for f in (".claude/rpv.json", ".claude/roles/README.md", ".claude/roles/engineer.md"):
+                self.assertIn("config set", self.tool(tool, f), (tool, f))
+        self.no("echo '{}' > .claude/rpv.json", expect="config set")
+        self.no("echo x > .claude/roles/README.md", expect="config set")
+        self.no("rm .claude/roles/engineer.md", expect="config set")
+        for tool in ("Write", "Edit"):
+            self.assertIsNone(self.tool(tool, ".claude/roles/notes/ceo.md"), tool)    # блокнот CEO пишется свободно
+        self.ok("echo x > .claude/roles/notes/ceo.md")
+        self.ok("cat .claude/rpv.json")
+        # таблица зон README: Edit строк `| … |` — можно, текст устава — нет
+        ev = lambda old, new: {"tool_name": "Edit", "cwd": self.d, "tool_input": {
+            "file_path": str(Path(self.d, ".claude", "roles", "README.md")), "old_string": old, "new_string": new}}
+        self.assertIsNone(dg.check_tool(ev("| engineer | src/ |", "| engineer | src/, tools/ |")))
+        self.assertIsNotNone(dg.check_tool(ev("правило", "другое правило")))
+        self.assertIsNotNone(dg.check_tool(ev("| a |\nправило", "| a |\nдругое")))
+
+    def test_config_log_is_written_by_command_only(self):
+        for tool in ("Write", "Edit"):
+            self.assertIn("config-log.json", self.tool(tool, ".claude/dispatcher/config-log.json"), tool)
+        reason = dg.check_tool({"tool_name": "Bash", "cwd": self.d,
+                                "tool_input": {"command": "echo '[]' > .claude/dispatcher/config-log.json"}})
+        self.assertIn("config-log.json", reason or "")
 
     def test_load_protected_directly(self):
         self.assertEqual(dg.load_protected(self.d), ((), None))                    # файла нет
