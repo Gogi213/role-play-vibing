@@ -433,6 +433,48 @@ METRICS = {
 }
 
 
+def _metric_cell(met: str, mr: list[dict]) -> str:
+    """Одна ячейка сводки: метрика `met` по прогонам `mr` одной модели."""
+    ok = [r for r in mr if not r["error"]]
+    if met == "случаев":
+        return str(len(mr))
+    if met == "ошибок запуска":
+        return str(len(mr) - len(ok))
+    if met.startswith("цена, $ всего"):
+        return f"{sum(r['cost'] or 0 for r in mr):.3f}"
+    if met.startswith("цена, $ на"):
+        return f"{sum(r['cost'] or 0 for r in mr) / max(len(mr), 1):.4f}"
+    if met.startswith("время"):
+        return f"{sum(r['dur'] for r in mr) / max(len(mr), 1):.0f}"
+    vals = [r["grade"].get(met) for r in ok if r["grade"].get(met) is not None]
+    if not vals:
+        return "—"
+    if isinstance(vals[0], float):
+        return f"{sum(vals) / len(vals):.2f}"
+    return f"{sum(vals)} всего" if not isinstance(vals[0], bool) else f"{sum(vals)}/{len(vals)}"  # не bool — счётчик (stale_cited)
+
+
+def _task_table(task: str, mets: list[str], rows: list[dict], models: list[str]) -> list[str]:
+    tr = [r for r in rows if r["task"] == task]
+    if not tr:
+        return []
+    md = [f"## {task}", "", "| метрика | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
+    for met in ["случаев", "ошибок запуска"] + mets + ["цена, $ всего", "цена, $ на случай", "время, с на случай"]:
+        md.append(f"| {met} | " + " | ".join(_metric_cell(met, [r for r in tr if r["model"] == m]) for m in models) + " |")
+    md.append("")
+    return md
+
+
+def _misses(rows: list[dict]) -> list[str]:
+    md = ["## Промахи", ""]
+    for r in sorted(rows, key=lambda r: (r["task"], r["id"], r["model"])):
+        bad = {k: v for k, v in r["grade"].items() if v is False or (isinstance(v, list) and v and k not in ("types",))}
+        if r["error"] or bad:
+            md.append(f"- `{r['id']}` {r['model'].replace('claude-', '')}: "
+                      + ("ошибка запуска; " if r["error"] else "") + json.dumps(bad, ensure_ascii=False))
+    return md
+
+
 def cmd_report(a) -> int:
     out = Path(a.out)
     rows = {}
@@ -443,40 +485,8 @@ def cmd_report(a) -> int:
     models = sorted({r["model"] for r in rows})
     md = ["# Замер помощников CEO", ""]
     for task, mets in METRICS.items():
-        tr = [r for r in rows if r["task"] == task]
-        if not tr:
-            continue
-        md += [f"## {task}", "", "| метрика | " + " | ".join(models) + " |", "|---|" + "---|" * len(models)]
-        for met in ["случаев", "ошибок запуска"] + mets + ["цена, $ всего", "цена, $ на случай", "время, с на случай"]:
-            cells = []
-            for m in models:
-                mr = [r for r in tr if r["model"] == m]
-                ok = [r for r in mr if not r["error"]]
-                if met == "случаев":
-                    v = str(len(mr))
-                elif met == "ошибок запуска":
-                    v = str(len(mr) - len(ok))
-                elif met.startswith("цена, $ всего"):
-                    v = f"{sum(r['cost'] or 0 for r in mr):.3f}"
-                elif met.startswith("цена, $ на"):
-                    v = f"{sum(r['cost'] or 0 for r in mr) / max(len(mr), 1):.4f}"
-                elif met.startswith("время"):
-                    v = f"{sum(r['dur'] for r in mr) / max(len(mr), 1):.0f}"
-                else:
-                    vals = [r["grade"].get(met) for r in ok if r["grade"].get(met) is not None]
-                    v = ("—" if not vals else f"{sum(vals) / len(vals):.2f}" if isinstance(vals[0], float)
-                         else f"{sum(vals)} всего" if not isinstance(vals[0], bool)  # счётчик (stale_cited)
-                         else f"{sum(vals)}/{len(vals)}")
-                cells.append(v)
-            md.append(f"| {met} | " + " | ".join(cells) + " |")
-        md.append("")
-    md += ["## Промахи", ""]
-    for r in sorted(rows, key=lambda r: (r["task"], r["id"], r["model"])):
-        g = r["grade"]
-        bad = {k: v for k, v in g.items() if v is False or (isinstance(v, list) and v and k not in ("types",))}
-        if r["error"] or bad:
-            md.append(f"- `{r['id']}` {r['model'].replace('claude-', '')}: "
-                      + ("ошибка запуска; " if r["error"] else "") + json.dumps(bad, ensure_ascii=False))
+        md += _task_table(task, mets, rows, models)
+    md += _misses(rows)
     (out / "summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     print("\n".join(md))
