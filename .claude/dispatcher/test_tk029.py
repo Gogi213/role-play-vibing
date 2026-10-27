@@ -31,6 +31,9 @@ TEMPLATE_README = ("# Команда\n\n| роль | зона |\n|---|---|\n| `�
 PROJECT_README = ("# Команда\n\n| роль | зона |\n|---|---|\n| `Инженер` | src/, tools/ |\n| `Судья` | вердикты |\n\nПравило А.\n")
 
 
+DECISIONS_12 = "# Решения владельца\n\n## В-12 · 2026-10-27 05:10\n> без самодеятельности\nСуть: узко\nЗаменяет: —\n"
+
+
 class CharterSync(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -148,6 +151,7 @@ class CharterCommand(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / ".claude" / "roles").mkdir(parents=True)
         (self.root / ".claude" / "dispatcher").mkdir(parents=True)
+        (self.root / ".claude" / "decisions.md").write_text(DECISIONS_12, encoding="utf-8")
         self.role = ""
         for target in (mock.patch.object(TK, "_caller_role", lambda: self.role), mock.patch.object(TK, "PROJECT_ROOT", self.root)):
             target.start()
@@ -164,20 +168,20 @@ class CharterCommand(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_ceo_syncs_judge_and_a_role_session_is_refused(self):
-        rc, out, _ = self.run_cmd("sync", "--file", "judge.md")
+        rc, out, _ = self.run_cmd("sync", "--file", "judge.md", "--ref", "В-12")
         self.assertEqual(rc, 0)
         self.assertIn("judge.md (created)", out)
         self.assertTrue((self.root / ".claude" / "roles" / "judge.md").exists())
         for role in ("engineer", "judge", "researcher"):
             self.role = role
-            rc, _, err = self.run_cmd("sync")
+            rc, _, err = self.run_cmd("sync", "--ref", "В-12")
             self.assertEqual(rc, 1, role)
             self.assertIn("только CEO", err)
         self.role = "ceo"
-        self.assertEqual(self.run_cmd("sync", "--file", "judge.md")[0], 0)
+        self.assertEqual(self.run_cmd("sync", "--file", "judge.md", "--ref", "В-12")[0], 0)
 
     def test_foreign_file_name_is_an_error_not_a_crash(self):
-        rc, _, err = self.run_cmd("sync", "--file", "../../rpv.json")
+        rc, _, err = self.run_cmd("sync", "--file", "../../rpv.json", "--ref", "В-12")
         self.assertEqual(rc, 1)
         self.assertIn("charter sync:", err)
         self.assertIn("charter", json.dumps(build_parser().format_help()))

@@ -314,6 +314,29 @@ class Fit(unittest.TestCase):
         self.assertIn("УСТАВ-МАРКЕР", text)
         self.assertIn("мало", text)
 
+    def test_project_addon_follows_the_charter_and_only_for_its_role(self):
+        """TK-038: `.claude/roles/project/<роль>.md` — в контексте роли сразу после устава; чужой роли и README — только путь."""
+        self.write("judge.md", "# Судья\nУСТАВ-МАРКЕР\n")
+        self.write("notes/judge.md", "# Блокнот\nмало\n")
+        os.makedirs(os.path.join(self.roles, "project"), exist_ok=True)
+        self.write("project/judge.md", "ДОБАВКА-МАРКЕР presubmit при сдаче\n")
+        self.write("project/engineer.md", "ЧУЖАЯ-ДОБАВКА\n")
+        text = rc.full_context("judge", "Роль: Судья", "startup", {})
+        self.assertLess(text.index("УСТАВ-МАРКЕР"), text.index("ДОБАВКА-МАРКЕР"))
+        self.assertLess(text.index("ДОБАВКА-МАРКЕР"), text.index("--- блокнот"))
+        self.assertNotIn("ЧУЖАЯ-ДОБАВКА", text)
+        self.assertNotIn("project/README.md", text)
+        self.write("project/README.md", "зоны проекта\n")
+        self.assertIn("добавка проекта к нему — .claude/roles/project/README.md", rc.full_context("judge", "Роль: Судья", "startup", {}))
+
+    def test_huge_project_addon_is_replaced_by_path_and_total_within_limit(self):
+        self.write("judge.md", "# Судья\nкоротко\n")
+        os.makedirs(os.path.join(self.roles, "project"), exist_ok=True)
+        self.write("project/judge.md", "правило проекта " * 2000)
+        text = rc.full_context("judge", "Роль: Судья", "startup", {})
+        self.assertLessEqual(len(text), rc.LIMIT)
+        self.assertIn("прочитай .claude/roles/project/judge.md", text)
+
     def test_fit_truncates_anything(self):
         self.assertEqual(rc.fit("x" * 100), "x" * 100)
         out = rc.fit("я" * 20000)

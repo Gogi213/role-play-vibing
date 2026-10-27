@@ -12,6 +12,7 @@ from dguard.words import join_cwd
 from dguard.writes import may_exist
 
 ROLES = ".claude/roles"
+ADDON = "project"                                                            # добавки проекта `roles/project/<роль>.md` (TK-038)
 WORD = re.compile(r"""\"[^\"]*\"|'[^']*'|\S+""")
 CD_NAMES = frozenset({"cd", "pushd", "chdir", "set-location", "sl", "popd"})   # как в dguard.cmd_scan
 TOKEN = re.compile(r"""[^\s"'`=<>|;&()]*\.claude/roles(?:/[^\s"'`<>|;&()]*)?""", re.I)
@@ -55,7 +56,12 @@ def _charter_path(p, ctx):
     tail = p[i + len(ROLES):].strip("/")
     if not tail:
         return True
-    if "/" in tail or "$" in tail or "%" in tail:
+    if "$" in tail or "%" in tail:
+        return False
+    if tail.lower().startswith(ADDON + "/"):                                 # добавка проекта: и новый файл — только командой
+        tail = tail[len(ADDON) + 1:]
+        return "/" not in tail and (tail.lower().endswith(".md") or any(c in tail for c in "*?["))
+    if "/" in tail:
         return False
     if any(c in tail for c in "*?["):
         return True

@@ -126,8 +126,12 @@ def _add_control_parsers(sub) -> None:
     p_cfg.add_argument("--ref", default="", help="решение владельца В-N из реестра: цитата попадёт в журнал и отчёт")
 
     p_char = sub.add_parser("charter", help="CEO: sync — перенос уставов из templates/roles/ плагина в .claude/roles/ как есть "
-                                            "(строки таблицы зон README остаются проектными)")
-    p_char.add_argument("action", choices=["sync"])
+                                            "(строки таблицы зон README остаются проектными); addon <роль|README> — добавка проекта "
+                                            ".claude/roles/project/<роль>.md (синк её не трогает); обе — только с --ref В-N")
+    p_char.add_argument("action", choices=["sync", "addon"])
+    p_char.add_argument("name", nargs="?", default="", help="addon: роль (ceo, engineer, judge, researcher) или README")
+    p_char.add_argument("--text", default="", help="addon: текст добавки (дописывается в конец файла)")
+    p_char.add_argument("--replace", action="store_true", help="addon: заменить файл добавки целиком")
     p_char.add_argument("--file", action="append", default=None, metavar="ИМЯ.md",
                         help="только этот файл шаблонов (можно несколько раз); без флага — все")
     p_char.add_argument("--why", default="", help="зачем перенос (по умолчанию — версия плагина)")
