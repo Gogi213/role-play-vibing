@@ -242,13 +242,24 @@ def _review_returns(state: dict, tid: str) -> int:
 NO_REVIEW_MARK = "закрыто без ревью"  # в записи «[итог: done]…» (tickets.py result: CEO или все PR уже приняты и влиты)
 
 
+CLOSED_BY_MERGE_MARK = "тикет закрыт без запуска ролей"  # в записи «[итог: done]…» диспетчера: PR влит, приёмка Судьи на голове есть (TK-018)
+AUTO_AUTHORS = ("merge",)  # записи программы о слиянии: не ход роли и не заказ — «последняя запись» их пропускает (TK-018)
+
+
+def last_move(tkt: T.Ticket):
+    """Последняя запись лога не от программы слияния (`merge`): «PR влит» после закрытия — не новый ход, ревьюера не будит."""
+    return next((e for e in reversed(tkt.log) if e.author.lower() not in AUTO_AUTHORS), None)
+
+
 def closed_without_review(tkt: T.Ticket) -> bool:
     """done закрыт без нового круга ревью (TK-090 а/б): последняя запись — CEO (закрыл сам или оставил комментарий к
-    закрытому) либо итог done с пометкой «закрыто без ревью». Иначе (г) будило бы Судью за каждую такую запись."""
-    if tkt.status != "done" or not tkt.log:
+    закрытому) либо итог done с пометкой «закрыто без ревью» (CEO) / «закрыт без запуска ролей» (диспетчер после слияния).
+    Иначе (г) будило бы Судью за каждую такую запись."""
+    last = last_move(tkt)
+    if tkt.status != "done" or last is None:
         return False
-    last = tkt.log[-1]
-    return T.author_is(last.author, "ceo") or (last.text.lstrip().startswith("[итог: done]") and NO_REVIEW_MARK in last.text)
+    return T.author_is(last.author, "ceo") or (last.text.lstrip().startswith("[итог: done]")
+                                                and (NO_REVIEW_MARK in last.text or CLOSED_BY_MERGE_MARK in last.text))
 
 
 def _review_pending(tkt: T.Ticket, state: dict = None) -> bool:
@@ -259,8 +270,8 @@ def _review_pending(tkt: T.Ticket, state: dict = None) -> bool:
         return False
     if state is not None and _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
         return False
-    last_author = tkt.log[-1].author.lower() if tkt.log else None
-    return last_author not in (tkt.reviewer.lower(), "dispatcher")
+    last = last_move(tkt)
+    return (last.author.lower() if last else None) not in (tkt.reviewer.lower(), "dispatcher")
 
 
 def _done_marker(tkt: T.Ticket) -> str:
@@ -295,12 +306,11 @@ def notify_done(tkt: T.Ticket, state: dict, now) -> None:
     marker = _done_marker(tkt)
     if notified.get(tkt.id) == marker:
         return
-    last = tkt.log[-1] if tkt.log else None
+    last = last_move(tkt)
     if tkt.id in notified and last and T.author_is(last.author, "ceo") and last.text.lstrip().startswith("[итог: done]"):
         notified[tkt.id] = marker  # CEO повторно закрыл уже сообщённый done (гонка с закрытием по слиянию) — второй строки нет
         return
     title = (tkt.header.get("title") or "")[:80]
-    last = tkt.log[-1] if tkt.log else None
     tail = f" — {last.author}: {_first_line(last.text, 120)}" if last else ""
     append_ceo_inbox(tkt.id, "done", f"{title}{tail}", now)
     notified[tkt.id] = marker
