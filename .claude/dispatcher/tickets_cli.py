@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import argparse
 
-import dispatch as D
+import project as P
+import signals as SIG
 import routes as routes_mod
 import ticket as T
 
@@ -11,9 +12,9 @@ import ticket as T
 def _add_ticket_parsers(sub) -> None:
     """Заведение тикета, запись в лог, приёмка."""
     p_new = sub.add_parser("new")
-    p_new.add_argument("--owner", required=True, choices=D.P.ROLES)
+    p_new.add_argument("--owner", required=True, choices=P.ROLES)
     p_new.add_argument("--title", required=True)
-    p_new.add_argument("--reviewer", choices=D.P.ROLES,
+    p_new.add_argument("--reviewer", choices=P.ROLES,
                         help="ревьюер; по умолчанию Судья (у Haiku-задач и тикетов Судьи — никого)")
     p_new.add_argument("--no-reviewer", action="store_true",
                         help="только с --executor haiku (там и так без Судьи); иначе отказ — Судью снимает владелец")
@@ -30,14 +31,14 @@ def _add_ticket_parsers(sub) -> None:
                         help="создать сразу в backlog (перенос из TASKS.md) — диспетчер её не трогает до `start`")
     p_new.add_argument("--executor", choices=["haiku"], default=None,
                         help="claude-haiku-5-5 для чисто механических задач — требует --kind")
-    p_new.add_argument("--kind", choices=sorted(D.HAIKU_ALLOWED_KINDS), default=None,
+    p_new.add_argument("--kind", choices=sorted(SIG.HAIKU_ALLOWED_KINDS), default=None,
                         help="вид задачи для --executor haiku")
 
     p_comment = sub.add_parser("comment")
     p_comment.add_argument("id")
     p_comment.add_argument("--author", required=True)
     p_comment.add_argument("--text", required=True)
-    p_comment.add_argument("--next", choices=[*D.P.ROLES, "ceo"], default=None,
+    p_comment.add_argument("--next", choices=[*P.ROLES, "ceo"], default=None,
                             help="разбудить эту роль один раз (ceo — только blocked/нужно решение владельца)")
 
     p_accept = sub.add_parser("accept", help="Судья: принято, PR N на голове SHA (вливает merge_rule по правилу)")
@@ -99,7 +100,7 @@ def _add_control_parsers(sub) -> None:
     p_stop = sub.add_parser("stop", help="только CEO: остановить запущенную роль тикета и дать новую постановку")
     p_stop.add_argument("id")
     p_stop.add_argument("--text", required=True, help="новая постановка — запись CEO в лог тикета")
-    p_stop.add_argument("--next", choices=D.P.ROLES, default=None,
+    p_stop.add_argument("--next", choices=P.ROLES, default=None,
                         help="роль, которая стартует сразу (тикет станет todo); без --next — status: stopped, не будить")
 
     p_allow = sub.add_parser("allow", help="только CEO: согласие владельца на публикацию по тикету (или --revoke)")

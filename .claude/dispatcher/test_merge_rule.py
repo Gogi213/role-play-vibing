@@ -19,7 +19,7 @@ atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402

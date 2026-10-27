@@ -16,11 +16,11 @@ from pathlib import Path
 os.environ["CLAUDE_PROJECT_DIR"] = r"C:\visual projects\proj"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import delete_guard as dg  # noqa: E402
-from dguard import checks, config as cfg  # noqa: E402
+from dguard import checks, config as cfg, lexer, messages as msg, paths, policy  # noqa: E402
 
 PROJ_RPV = {"guard_remote_roots": ["~/proj/", "$home/proj/", "${home}/proj/", "/home/srv/proj/", "/opt/proj-compute/"],
             "guard_stage": "/dev/shm/proj-stage", "guard_forbidden_hosts": ["203.0.113.1"]}
-cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)
+cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = cfg.machine_rules(PROJ_RPV)
 
 CWD = r"C:\visual projects\proj"
 SCRATCH = "C:/Users/3D6B~1/AppData/Local/Temp/claude/C--visual-projects-proj/abc/scratchpad"
@@ -35,7 +35,7 @@ def protect(*patterns, error=None):
     from unittest import mock
     from contextlib import ExitStack
     stack = ExitStack()
-    stack.enter_context(mock.patch.object(cfg, "PROTECTED", tuple(dg.norm(x).rstrip("/") for x in patterns)))
+    stack.enter_context(mock.patch.object(cfg, "PROTECTED", tuple(cfg.norm(x).rstrip("/") for x in patterns)))
     stack.enter_context(mock.patch.object(cfg, "PROTECTED_ERROR", error))
     return stack
 
@@ -43,7 +43,7 @@ def protect(*patterns, error=None):
 def outside_dir(prefix="dg-outside-"):
     """Свежий каталог ВНЕ корней стража и вне временного каталога (временные файлы стражу разрешены): под домашним."""
     d = tempfile.mkdtemp(prefix=prefix, dir=str(Path.home()))
-    assert dg.temp_rest(dg.norm(Path(d).as_posix())) is None, d
+    assert paths.temp_rest(cfg.norm(Path(d).as_posix())) is None, d
     return d
 
 
@@ -805,7 +805,7 @@ class CeoResources0310(unittest.TestCase):
             (root / "wt" / ".git").write_text("gitdir: ../.git/worktrees/wt", encoding="utf-8")   # связанный worktree
             (root / "nested" / ".git").mkdir(parents=True)                                       # вложенный репозиторий
             (root / ".claude" / "worktrees" / "rpv" / ".git").mkdir(parents=True)                    # TK-070 п.5: клон плагина
-            base = dg.norm(root.as_posix())
+            base = cfg.norm(root.as_posix())
             with mock.patch.object(cfg, "LOCAL_ROOTS", (base + "/",)):
                 self.ok(f'cd "{base}/wt" && git reset --hard X')
                 self.ok(f'cd "{base}/wt/sub" && git clean -fd')
@@ -851,8 +851,8 @@ class CeoResources0310(unittest.TestCase):
             # существующие файлы: чужая автопамять и та же, но не под домашним каталогом — отказ
             self.no(f"echo x > {(base / 'c--other-project' / 'memory' / 'x.md').as_posix()}")
             self.no(f"echo x > {(base / 'c--visual-projects-proj' / 'memory' / 'x.md').as_posix()}")
-        self.assertFalse(dg.write_only_ok("~/.claude/projects/C--visual-projects-proj/memory/../../../settings.json"))
-        self.assertFalse(dg.write_only_ok("~/.claude/projects/C--visual-projects-proj/memory"))   # сам каталог — нет
+        self.assertFalse(paths.write_only_ok("~/.claude/projects/C--visual-projects-proj/memory/../../../settings.json"))
+        self.assertFalse(paths.write_only_ok("~/.claude/projects/C--visual-projects-proj/memory"))   # сам каталог — нет
         self.no("ssh root@203.0.113.2 'echo x > ~/.claude/settings.json'")
 
 
@@ -1117,7 +1117,7 @@ class SecondAudit(unittest.TestCase):
     def test_git_checkout_existing_path_without_double_dash(self):
         from unittest import mock
         with tempfile.TemporaryDirectory(prefix="dg-proj-") as d:
-            base = dg.norm(Path(d).as_posix())
+            base = cfg.norm(Path(d).as_posix())
             (Path(d) / "tracked.txt").write_text("x", encoding="utf-8")
             with mock.patch.object(cfg, "LOCAL_ROOTS", (base + "/",)):
                 self.no("git checkout tracked.txt", cwd=base)                 # такой файл есть: это восстановление пути
@@ -1431,7 +1431,7 @@ class ProtectedPaths(unittest.TestCase):
         self.addCleanup(p.stop)
         self.as_role(None)
         dg.configure(self.d)
-        cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = dg.machine_rules(PROJ_RPV)  # машины проекта proj — как у остальных тестов
+        cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = cfg.machine_rules(PROJ_RPV)  # машины проекта proj — как у остальных тестов
 
     def as_role(self, role):
         os.environ.pop("RPV_ROLE", None)
@@ -1582,9 +1582,9 @@ class ProtectedPaths(unittest.TestCase):
         from unittest import mock
         self.rpv({"protected_paths": ["root"]})
         with mock.patch.object(dg.os.path, "expanduser", return_value="/root"):
-            ctx = dg.Ctx(None)
-            self.assertIsNone(dg.protected_match("/root/.claude/settings.json", ctx, False))
-            self.assertEqual(dg.protected_match("/root/data/root/x.bin", ctx, False), "root")
+            ctx = paths.Ctx(None)
+            self.assertIsNone(policy.protected_match("/root/.claude/settings.json", ctx, False))
+            self.assertEqual(policy.protected_match("/root/data/root/x.bin", ctx, False), "root")
 
     def test_temp_and_scratch_do_not_override_protection(self):
         self.rpv({"protected_paths": ["secret"]})
@@ -1699,10 +1699,10 @@ class ProtectedPaths(unittest.TestCase):
         self.assertIn("config-log.json", reason or "")
 
     def test_load_protected_directly(self):
-        self.assertEqual(dg.load_protected(self.d), ((), None))                    # файла нет
+        self.assertEqual(cfg.load_protected(self.d), ((), None))                    # файла нет
         self.rpv({"protected_paths": ["a", "b/c"]})
-        self.assertEqual(dg.load_protected(self.d), (("a", "b/c"), None))
-        out, err = dg.load_protected(Path(self.d, "nope"))
+        self.assertEqual(cfg.load_protected(self.d), (("a", "b/c"), None))
+        out, err = cfg.load_protected(Path(self.d, "nope"))
         self.assertEqual((out, err), ((), None))
 
 
@@ -1964,7 +1964,7 @@ class Publication(unittest.TestCase):
         tr = []
         self.assertIsNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5"}, "cwd": CWD}, tr))
         self.assertEqual(tr, [("publish", "allow")])
-        self.assertEqual(dg.publish_consent(), (True, self.TID))
+        self.assertEqual(policy.publish_consent(), (True, self.TID))
 
     def test_consent_is_per_ticket(self):
         self.write_ticket(self.ALLOW)
@@ -2271,7 +2271,7 @@ class HookEntryPoint(unittest.TestCase):
 
 class Lexer(unittest.TestCase):
     def words(self, text):
-        return [c.words for c in dg.tokenize(text)]
+        return [c.words for c in lexer.tokenize(text)]
 
     def test_quotes_and_separators(self):
         self.assertEqual(self.words("echo 'a;b' \"c && d\"; ls"), [["echo", "a;b", "c && d"], ["ls"]])
@@ -2283,20 +2283,20 @@ class Lexer(unittest.TestCase):
         self.assertEqual(self.words("find . -exec rm {} \\;"), [["find", ".", "-exec", "rm", "{}", ";"]])
 
     def test_heredoc_body_attached(self):
-        cmds = dg.tokenize("cat <<EOF\nrm -rf /x\nEOF\nls")
+        cmds = lexer.tokenize("cat <<EOF\nrm -rf /x\nEOF\nls")
         self.assertEqual([c.words for c in cmds], [["cat"], ["ls"]])
         self.assertEqual(cmds[0].heredocs, ["rm -rf /x"])
 
     def test_pipe_from(self):
-        cmds = dg.tokenize("echo hi | python -")
+        cmds = lexer.tokenize("echo hi | python -")
         self.assertIs(cmds[1].pipe_from, cmds[0])
 
     def test_comment_skipped(self):
         self.assertEqual(self.words("ls # rm -rf /"), [["ls"]])
 
     def test_unterminated_raises(self):
-        with self.assertRaises(dg.ParseError):
-            dg.tokenize("echo 'abc")
+        with self.assertRaises(lexer.ParseError):
+            lexer.tokenize("echo 'abc")
 
 
 class SettingsSource(unittest.TestCase):
@@ -2315,8 +2315,8 @@ class SettingsSource(unittest.TestCase):
                 json.dump(rpv, f)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("RPV_", "ALPHA_"))}
         env.update(env_extra, CLAUDE_PROJECT_DIR=proj, PYTHONIOENCODING="utf-8")
-        code = ("import delete_guard as d; from dguard import config as c; print(c.STAGE, c.REMOTE_ROOTS, d.dispatcher_role(), "
-                "d.closed_host('host-9.example'), c.PROTECTED_ERROR)")
+        code = ("from dguard import config as c, paths, policy; print(c.STAGE, c.REMOTE_ROOTS, policy.dispatcher_role(), "
+                "paths.closed_host('host-9.example'), c.PROTECTED_ERROR)")
         r = subprocess.run([sys.executable, "-c", code], cwd=self.HERE, env=env, capture_output=True, text=True,
                            encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -2335,10 +2335,10 @@ class SettingsSource(unittest.TestCase):
         self.assertIn("guard_stage — не строка", self.read({}, {"guard_stage": ["/x"]}))
 
     def test_texts_name_settings_keys(self):
-        for text in (dg.REASON, dg.REASON_OVERWRITE, dg.REASON_IRREVERSIBLE):
+        for text in (msg.REASON, msg.REASON_OVERWRITE, msg.REASON_IRREVERSIBLE):
             self.assertNotIn("ALPHA_", text)
             self.assertNotIn("RPV_GUARD", text)
-        self.assertIn("guard_remote_roots", dg.REASON)
+        self.assertIn("guard_remote_roots", msg.REASON)
 
 
 class GuardGroups(unittest.TestCase):

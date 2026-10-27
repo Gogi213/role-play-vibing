@@ -13,7 +13,7 @@ import test_merge_rule as TM  # noqa: E402  (песочница проекта �
 
 Base = TM.MergeRuleBase  # песочница без тестов: тесты test_merge_rule.py здесь не повторяются
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import routes as R  # noqa: E402
 import ticket as T  # noqa: E402

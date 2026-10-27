@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from test_dispatch import CFG, D, T, dt  # песочница проекта поднимает test_dispatch при импорте
+import limits as LIM  # noqa: E402
 
 NOW = dt("2026-10-27T12:00:00+04:00")
 ECONNRESET = {"session_id": "s1", "is_error": True, "terminal_reason": "api_error", "api_error_status": None,
@@ -83,7 +84,7 @@ class ApiErrorTests(unittest.TestCase):
     def test_three_api_errors_in_a_row_block_with_real_reason(self):
         path = self.ticket()
         state = D.load_state()
-        for n in range(D.MAX_API_ERRORS):
+        for n in range(LIM.MAX_API_ERRORS):
             self.assertNotEqual(T.read_ticket(path).status, "blocked")
             self.finish(path, ECONNRESET, n, state)
         tkt = T.read_ticket(path)

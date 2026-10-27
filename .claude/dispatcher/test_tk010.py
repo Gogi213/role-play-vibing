@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
 import dispatch as D  # noqa: E402
+import runlog as RUNLOG  # noqa: E402
 import doctor as DOC  # noqa: E402
 import heartbeat as HB  # noqa: E402
 import overseer as OV  # noqa: E402
@@ -87,7 +88,7 @@ class UsageKeys(unittest.TestCase):
 
     def test_one_definition_of_context(self):
         self.assertEqual(TR.CONTEXT_KEYS, ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
-        self.assertIs(D._tokens_of, TR.context_of)
+        self.assertIs(RUNLOG.tokens_of, TR.context_of)
         self.assertEqual(TR.context_of({"input_tokens": 1, "cache_read_input_tokens": 2, "cache_creation_input_tokens": 4,
                                         "output_tokens": 800}), 7)
 
@@ -97,13 +98,9 @@ class UsageKeys(unittest.TestCase):
 
     def test_dispatch_reads_through_it(self):
         self.write(_row(100, out=7), _row(5000, out=1, side=True))
-        old, D.CLAUDE_PROJECTS_DIR = D.CLAUDE_PROJECTS_DIR, self.dir
-        try:
-            self.assertEqual(D._transcript_last_turn_tokens("sess-1"), 100)
-            self.assertEqual(D._transcript_last_turn_tokens("../sess-1"), 0)
-            self.assertEqual(D._transcript_last_turn_tokens("nope"), 0)
-        finally:
-            D.CLAUDE_PROJECTS_DIR = old
+        self.assertEqual(RUNLOG.transcript_last_turn_tokens("sess-1", self.dir), 100)
+        self.assertEqual(RUNLOG.transcript_last_turn_tokens("../sess-1", self.dir), 0)
+        self.assertEqual(RUNLOG.transcript_last_turn_tokens("nope", self.dir), 0)
 
     def test_broken_rows_are_skipped(self):
         self.write(_row(100), '{"usage": [', '[1, 2, "usage"]', '{"message": "usage"}')
@@ -313,7 +310,7 @@ class AtomicJsonOnce(unittest.TestCase):
 
     def test_no_private_writers(self):
         here = Path(__file__).resolve().parent
-        for name in ("cfg", "overseer", "tickets", "dispatch", "ci_watch", "merge_rule", "lifewatch"):
+        for name in ("rpv_config", "overseer", "tickets", "dispatch", "ci_watch", "merge_rule", "lifewatch"):
             src = (here / f"{name}.py").read_bytes().decode("utf-8")
             self.assertNotIn("os.replace(tmp", src, name)
             self.assertNotIn("indent=1", src, name)

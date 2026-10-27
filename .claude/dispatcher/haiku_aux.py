@@ -53,6 +53,25 @@ def agent_meta(path: Path) -> tuple:
     return {k: v.strip('"') for k, v in fm[0].items()}, text[fm[1]:].strip()
 
 
+def agent_def(path: Path, with_tools: bool = False) -> dict:
+    """`agents/<имя>.md` → определение для `claude --agents`: description, prompt, model/effort (если заданы) и, с with_tools,
+    tools списком (пустой `tools:` — без инструментов). Нет фронтматтера — ValueError."""
+    meta, prompt = agent_meta(path)
+    d = {"description": meta.get("description", path.stem), "prompt": prompt}
+    if with_tools:
+        d["tools"] = [t.strip() for t in meta.get("tools", "").split(",") if t.strip()]
+    for k in ("model", "effort"):
+        if meta.get(k):
+            d[k] = meta[k]
+    return d
+
+
+def agent_cmd(claude: str, agents_file, agent: str, model: str, effort: str, budget, extra: tuple = ()) -> list:
+    """Командная строка `claude -p --agent <agent>` без инструментов и без сессии (Надзиратель, отчёт); extra — флаги вызывающего."""
+    return [claude, "-p", "--agents", str(agents_file), "--agent", agent, "--model", model, "--effort", effort,
+            "--output-format", "json", "--no-session-persistence", "--max-budget-usd", str(budget), "--tools", "", *extra]
+
+
 def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S):
     """Ответ модели (str) или None. Вход режется до хвоста MAX_IN знаков."""
     claude = claude if claude is not None else _claude()

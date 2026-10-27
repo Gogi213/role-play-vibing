@@ -11,7 +11,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import decide as DEC  # noqa: E402
+import signals as SIG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import ticket as T  # noqa: E402
 import watch as W  # noqa: E402
@@ -69,7 +71,7 @@ class CloseAfterMergeTests(Sandbox):
         last = tkt.log[-1]
         self.assertEqual(last.author, "dispatcher")
         self.assertIn("результат: docs/reviews/TK-1.md", last.text)
-        self.assertTrue(D.closed_without_review(tkt))
+        self.assertTrue(SIG.closed_without_review(tkt))
         self.assertEqual(len(self.wake_lines()), 1)
         # CEO закрыл гонкой следом, диспетчер тикает дальше — ни запусков, ни второго сигнала
         T.append_log(p, "ceo", "[итог: done] результат: x (закрыто без ревью) — закрыл", now=T0 + timedelta(minutes=21))
@@ -137,7 +139,7 @@ class CloseAfterMergeTests(Sandbox):
     def test_ceo_done_entry_is_not_an_order(self):
         p = self.accepted()
         T.append_log(p, "ceo", "[итог: done] — x", now=T0 + timedelta(minutes=5))
-        self.assertFalse(D._ceo_order_after_accept(T.read_ticket(p), 44))
+        self.assertFalse(DEC._ceo_order_after_accept(T.read_ticket(p), 44))
 
 
 class ExecutorBlockedTests(Sandbox):

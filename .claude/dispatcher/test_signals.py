@@ -11,7 +11,8 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import signals as SIG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import tickets as TK  # noqa: E402
 
 
@@ -82,7 +83,7 @@ class SignalsTest(unittest.TestCase):
         self.assertIn("новая", self.inbox()[1])
 
     def test_summary_flush_goes_to_inbox(self):
-        D.flush_pending_summary({"pending_summary": ["a", "b"]}, D.T.parse_dt("2026-10-06T16:00:00+04:00"))
+        SIG.flush_pending_summary({"pending_summary": ["a", "b"]}, D.T.parse_dt("2026-10-06T16:00:00+04:00"))
         self.assertIn("[summary] 2 сигнал(ов): a | b", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_comment_writes_no_signal(self):

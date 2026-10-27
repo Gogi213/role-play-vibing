@@ -19,7 +19,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import routes as R  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402
@@ -523,7 +523,7 @@ class ResultTests(unittest.TestCase):
         """Хвост, который ролям не сделать (TK-240: регистрация хука в settings.json), — строкой CEO."""
         self._v2_done("Хук готов. Не сделано (закрыто ролям): регистрация в settings.json")
         self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail="ceo:")
-        with mock.patch.object(TK.D, "append_ceo_inbox") as sig:
+        with mock.patch.object(TK.SIG, "append_ceo_inbox") as sig:
             self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-",
                                       tail='ceo:"вписать хук в settings.json"'), 0)
         sig.assert_called_once_with(self.tid, "хвост", "вписать хук в settings.json")

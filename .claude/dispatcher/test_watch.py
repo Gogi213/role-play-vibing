@@ -21,7 +21,9 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
-import config as CFG  # noqa: E402
+import cost as COST  # noqa: E402
+import handoff as HO  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import waits as WAITS  # noqa: E402
 import procs  # noqa: E402
 import ticket as T  # noqa: E402
@@ -78,7 +80,7 @@ class NoMoneyWatchTests(WatchSandbox):
     def test_huge_spend_gives_no_finding(self):
         p = T.create_ticket(self.tickets_dir, owner="engineer", title="Дорогая", status="todo")
         state = {"last_tick": T.now_iso(self.now - timedelta(seconds=10)),
-                 "daily_cost": {D._today(self.now): 1e6}, "cost_history": [[T.now_iso(self.now), 1e6]],
+                 "daily_cost": {COST._today(self.now): 1e6}, "cost_history": [[T.now_iso(self.now), 1e6]],
                  "ticket_cost": {p.stem: 1e6}, "ticket_budget": {p.stem: 5.0}}  # ticket_budget — наследие state.json
         self.assertEqual(W.collect_findings(self.now), [])
 
@@ -888,7 +890,7 @@ class WatchLogTests(WatchSandbox):
         T.append_log(p, "watch", "напоминание")
         self.assertTrue(T.author_is(T.read_ticket(p).log[-1].author, "watch"))
         state = {"ceo_handoffs": {tid: T.now_iso(self.now - timedelta(minutes=1))}}
-        self.assertTrue(D._ceo_handoff_pending(T.read_ticket(p), state, self.now + timedelta(hours=1)))
+        self.assertTrue(HO._ceo_handoff_pending(T.read_ticket(p), state, self.now + timedelta(hours=1)))
         self.assertIn(tid, state["ceo_handoffs"])
         self.assertIn("[ждёт-ceo]", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 

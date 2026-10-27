@@ -50,30 +50,22 @@ create|upload|edit`, `gh pr merge` (вливает программа `merge_rul
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
 
-Устройство: этот файл — вход хука (`main`, `check_tool`) и реэкспорт имён; разбор и правила лежат в пакете `dguard/`
+Устройство: этот файл — вход хука (`main`, `check_tool`); разбор и правила лежат в пакете `dguard/`
 (config → messages → tools → paths → lexer → words → cmd_scan/publish/writes/git_scan → legacy → policy → ceo_signal → checks).
 Изменяемые настройки (`LOCAL_ROOTS`, `PROTECTED`, `REMOTE_ROOTS`, `STAGE`, `CLOSED_RE`, …) живут в `dguard.config`.
 """
 import json
 import os
 
-from dguard import config
-from dguard.config import *  # noqa: F401,F403
-from dguard.messages import *  # noqa: F401,F403
-from dguard.tools import *  # noqa: F401,F403
-from dguard.paths import *  # noqa: F401,F403
-from dguard.lexer import *  # noqa: F401,F403
-from dguard.words import *  # noqa: F401,F403
-from dguard.cmd_scan import *  # noqa: F401,F403
-from dguard.publish import *  # noqa: F401,F403
-from dguard.writes import *  # noqa: F401,F403
-from dguard.git_scan import *  # noqa: F401,F403
-from dguard.legacy import *  # noqa: F401,F403
-from dguard.policy import *  # noqa: F401,F403
-from dguard.ceo_signal import *  # noqa: F401,F403
-from dguard.checks import *  # noqa: F401,F403
-from dguard.checks import _deny
-from dguard.config import _env  # noqa: F401
+from dguard.ceo_signal import ceo_signal_write
+from dguard.checks import _deny, check, check_file
+from dguard.config import configure
+from dguard.git_scan import BRANCH_CONSENT_NAMES, CONFIG_LOG_NAMES
+from dguard.messages import (REASON_BRANCH_CONSENT_FILE, REASON_CEO_SIGNAL, REASON_CONFIG_LOG, REASON_CONSENT, REASON_CRASH,
+                             REASON_DECIDE, REASON_IDENTITY, REASON_OWNER_RECORD)
+from dguard.policy import (charter_table_edit, consent_forge, decide_outside_secretary, dispatcher_role, identity_change,
+                           owner_record_write)
+from dguard.tools import GUARDED_TOOLS, SHELL_TOOLS, file_target
 
 
 def check_tool(data, trace=None):
