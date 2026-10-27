@@ -1550,25 +1550,24 @@ class DispatchRunTests(unittest.TestCase):
         fin.assert_not_called()
         self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
 
-    def _find_by_session(self, os_name, stdout, sid="sid-tree-1"):
+    def _find_by_session(self, rows, sid="sid-tree-1"):
         from unittest import mock
-        res = mock.Mock(stdout=stdout)
-        with mock.patch.object(D.os, "name", os_name), mock.patch.object(D.os, "getpid", return_value=1),                 mock.patch.object(D.subprocess, "run", return_value=res):
+        with mock.patch.object(D.os, "getpid", return_value=1), mock.patch.object(D.P, "scan_processes", return_value=rows):
             return D._find_pid_by_session(sid)
 
-    def test_find_pid_by_session_picks_tree_root_posix(self):
-        out = ("  100 1 supervisor\n"
-               "  200 999 sh -c claude --session-id sid-tree-1\n"
-               "  300 200 node claude --session-id sid-tree-1\n"
-               "  400 300 node worker --session-id sid-tree-1\n")
-        self.assertEqual(self._find_by_session("posix", out), 200)
-
-    def test_find_pid_by_session_picks_tree_root_windows(self):
-        self.assertEqual(self._find_by_session("nt", "5000 4000\n4000 1\n"), 4000)
+    def test_find_pid_by_session_picks_tree_root(self):
+        rows = [(100, 1, "supervisor"), (200, 999, "sh -c claude --session-id sid-tree-1"),
+                (300, 200, "node claude --session-id sid-tree-1"), (400, 300, "node worker --session-id sid-tree-1")]
+        self.assertEqual(self._find_by_session(rows), 200)
 
     def test_find_pid_by_session_two_independent_roots_takes_min(self):
-        out = "  700 1 claude --session-id sid-tree-1\n  300 1 claude --resume sid-tree-1\n"
-        self.assertEqual(self._find_by_session("posix", out), 300)
+        rows = [(700, 1, "claude --session-id sid-tree-1"), (300, 1, "claude --resume sid-tree-1")]
+        self.assertEqual(self._find_by_session(rows), 300)
+
+    def test_find_pid_by_session_skips_scanner_and_self(self):
+        rows = [(1, 0, "dispatcher sid-tree-1"), (9, 1, "powershell Get-CimInstance sid-tree-1"), (5, 1, "claude sid-tree-1")]
+        self.assertEqual(self._find_by_session(rows), 5)
+        self.assertIsNone(self._find_by_session([(9, 1, "powershell Get-CimInstance sid-tree-1")]))
 
     def test_recover_no_process_but_output_is_finished_as_completed(self):
         from unittest import mock

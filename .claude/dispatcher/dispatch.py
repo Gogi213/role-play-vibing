@@ -2115,31 +2115,12 @@ def _find_pid_by_session(session_id) -> "int | None":
     `--session-id`/`--resume <id>` в командной строке (id известен до запуска)."""
     if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]+", str(session_id)):
         return None
-    try:
-        pairs = []  # (pid, ppid) совпавших процессов
-        if os.name == "nt":
-            ps = (f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{session_id}*' -and "
-                  f"$_.CommandLine -notlike '*Get-CimInstance*' -and $_.ProcessId -ne {os.getpid()} }} | "
-                  "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
-            out = hide.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
-                                 encoding="utf-8", errors="replace", timeout=30).stdout
-            for ln in out.splitlines():
-                f = ln.split()
-                if len(f) == 2 and all(x.isdigit() for x in f):
-                    pairs.append((int(f[0]), int(f[1])))
-        else:
-            out = hide.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
-                                 encoding="utf-8", errors="replace", timeout=10).stdout
-            for ln in out.splitlines():
-                f = ln.split(None, 2)
-                if len(f) == 3 and f[0].isdigit() and f[1].isdigit() and str(session_id) in f[2]:
-                    pairs.append((int(f[0]), int(f[1])))
-        pairs = [(p, pp) for p, pp in pairs if p != os.getpid()]
-        found = {p for p, _ in pairs}
-        roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
-        return min(roots or found) if found else None
-    except Exception:
-        return None
+    sid = str(session_id).lower()
+    pairs = [(p, pp) for p, pp, cmd in P.scan_processes()
+             if p != os.getpid() and sid in cmd.lower() and "get-ciminstance" not in cmd.lower()]  # сам сканер — не роль
+    found = {p for p, _ in pairs}
+    roots = [p for p, pp in pairs if pp not in found]  # обёртка (cmd/node/sh) выше дочернего — берём корень дерева
+    return min(roots or found) if found else None
 
 
 def recover_active_runs(state: dict, now) -> None:

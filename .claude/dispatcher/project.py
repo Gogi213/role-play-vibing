@@ -110,56 +110,83 @@ def parse_time(text, naive_tz=None, *, strict: bool = False):
     return dt.astimezone() if naive_tz is None else dt.replace(tzinfo=naive_tz)
 
 
-def _parent_map() -> dict:
-    """{pid: ppid} всех процессов, только stdlib: Windows — снимок Toolhelp32, Linux — /proc, иначе `ps`. Сбой — {}."""
-    if os.name == "nt":
-        try:
-            import ctypes
-            from ctypes import wintypes as w
+PROC_SCAN_TIMEOUT_S = 30.0   # один предел на все платформы; прежние 10/20/30/60 с у трёх сканеров разошлись без причины
+_CIM_ROWS = ("Get-CimInstance Win32_Process | ForEach-Object "
+             "{ \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }")
 
-            class PE(ctypes.Structure):
-                _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("th32ProcessID", w.DWORD),
-                            ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", w.DWORD), ("cntThreads", w.DWORD),
-                            ("th32ParentProcessID", w.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", w.DWORD),
-                            ("szExeFile", ctypes.c_wchar * 260)]
-            k = ctypes.windll.kernel32
-            k.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
-            snap = k.CreateToolhelp32Snapshot(0x2, 0)
-            if not snap or snap == ctypes.c_void_p(-1).value:
-                return {}
-            out, pe = {}, PE()
-            pe.dwSize = ctypes.sizeof(PE)
-            try:
-                ok = k.Process32FirstW(ctypes.c_void_p(snap), ctypes.byref(pe))
-                while ok:
-                    out[int(pe.th32ProcessID)] = int(pe.th32ParentProcessID)
-                    ok = k.Process32NextW(ctypes.c_void_p(snap), ctypes.byref(pe))
-            finally:
-                k.CloseHandle(ctypes.c_void_p(snap))
-            return out
-        except Exception:
-            return {}
-    out = {}
-    if os.path.isdir("/proc"):
-        for d in os.listdir("/proc"):
-            if d.isdigit():
-                try:
-                    with open(f"/proc/{d}/stat", encoding="utf-8", errors="replace") as f:
-                        out[int(d)] = int(f.read().rsplit(")", 1)[1].split()[1])
-                except (OSError, IndexError, ValueError):
-                    continue
-        if out:
-            return out
+
+def _toolhelp_rows() -> list:
+    """Windows без командных строк: снимок Toolhelp32 (замер: 0,03 с против 0,84 с у CIM)."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    class PE(ctypes.Structure):
+        _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("th32ProcessID", w.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", w.DWORD), ("cntThreads", w.DWORD),
+                    ("th32ParentProcessID", w.DWORD), ("pcPriClassBase", ctypes.c_long), ("dwFlags", w.DWORD),
+                    ("szExeFile", ctypes.c_wchar * 260)]
+    k = ctypes.windll.kernel32
+    k.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    snap = k.CreateToolhelp32Snapshot(0x2, 0)
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return []
+    out, pe = [], PE()
+    pe.dwSize = ctypes.sizeof(PE)
     try:
-        import subprocess
-        r = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10)
-        for ln in r.stdout.splitlines():
-            f = ln.split()
-            if len(f) == 2 and f[0].isdigit() and f[1].isdigit():
-                out[int(f[0])] = int(f[1])
-    except (OSError, ValueError):
-        pass
+        ok = k.Process32FirstW(ctypes.c_void_p(snap), ctypes.byref(pe))
+        while ok:
+            out.append((int(pe.th32ProcessID), int(pe.th32ParentProcessID), ""))
+            ok = k.Process32NextW(ctypes.c_void_p(snap), ctypes.byref(pe))
+    finally:
+        k.CloseHandle(ctypes.c_void_p(snap))
     return out
+
+
+def _proc_fs_rows(cmdline: bool) -> list:
+    out = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/stat", encoding="utf-8", errors="replace") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+            cmd = ""
+            if cmdline:
+                with open(f"/proc/{d}/cmdline", "rb") as f:
+                    cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        except (OSError, IndexError, ValueError):
+            continue
+        out.append((int(d), ppid, cmd))
+    return out
+
+
+def scan_processes(cmdline: bool = True, timeout: float = PROC_SCAN_TIMEOUT_S) -> list:
+    """[(pid, ppid, командная строка)] всех процессов — единственный сканер таблицы процессов, только stdlib. Windows:
+    CIM (с командной строкой) или Toolhelp32 (cmdline=False, строки пустые); Linux — /proc; иначе `ps`. Сбой — []."""
+    import hide
+    import subprocess
+    try:
+        if os.name == "nt":
+            if not cmdline:
+                return _toolhelp_rows()
+            text = hide.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", _CIM_ROWS], capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", timeout=timeout).stdout
+            rows = [(ln.split("\t", 2) + [""])[:3] for ln in text.splitlines() if "\t" in ln]
+        else:
+            rows = _proc_fs_rows(cmdline) if os.path.isdir("/proc") else []
+            if rows:
+                return rows
+            text = hide.run(["ps", "-ww", "-eo", "pid=,ppid=,args="], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=timeout).stdout
+            rows = [(ln.split(None, 2) + [""])[:3] for ln in text.splitlines() if ln.strip()]
+        return [(int(p), int(pp), c) for p, pp, c in rows if p.isdigit() and pp.isdigit()]
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+
+
+def _parent_map() -> dict:
+    """{pid: ppid} всех процессов (без командных строк)."""
+    return {pid: ppid for pid, ppid, _ in scan_processes(cmdline=False)}
 
 
 def ancestor_pids(pid: int | None = None, parents: dict | None = None) -> list:

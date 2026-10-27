@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -328,6 +329,31 @@ class GitOnce(unittest.TestCase):
             subprocess.run(["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"], check=True)
             sha, why = RT.tracked_at_head(Path(d), "f.txt")
             self.assertTrue(sha and not why, (sha, why))
+
+
+class ProcessScanOnce(unittest.TestCase):
+    """Таблица процессов читается одним сканером `project.scan_processes` с одним пределом времени (30 с)."""
+
+    def test_sees_own_process_with_parent_and_cmdline(self):
+        rows = {pid: (ppid, cmd) for pid, ppid, cmd in P.scan_processes()}
+        self.assertIn(os.getpid(), rows)
+        self.assertEqual(rows[os.getpid()][0], os.getppid())
+        self.assertIn("python", rows[os.getpid()][1].lower())
+        self.assertEqual(P._parent_map()[os.getpid()], os.getppid())
+
+    def test_cmdline_false_gives_pairs(self):
+        self.assertIn(os.getpid(), {pid for pid, _, _ in P.scan_processes(cmdline=False)})
+
+    def test_one_default_timeout_and_no_private_scanners(self):
+        import start as S
+        self.assertEqual(P.PROC_SCAN_TIMEOUT_S, 30.0)
+        here = Path(__file__).resolve().parent
+        for name in ("dispatch", "start", "doctor", "supervise"):
+            src = (here / f"{name}.py").read_text(encoding="utf-8")
+            self.assertNotIn("Get-CimInstance Win32_Process |", src, name)
+            self.assertNotIn('"-eo"', src, name)
+            self.assertNotIn('"-axo"', src, name)
+        self.assertIn(os.getpid(), {p for p, _ in S._list_procs()})
 
 
 if __name__ == "__main__":

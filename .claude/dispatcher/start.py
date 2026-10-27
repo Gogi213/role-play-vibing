@@ -104,28 +104,8 @@ def _cmdline(pid: int) -> str | None:
 
 
 def _list_procs() -> list:
-    """[(pid, командная строка)] всех процессов; не получилось — пусто. Linux — /proc, macOS — ps, Windows — CIM."""
-    try:
-        if os.name == "nt":
-            out = hide.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                                  "Get-CimInstance Win32_Process | Where-Object CommandLine | ForEach-Object "
-                                  "{ \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
-                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60).stdout
-            rows = [l.split("	", 1) for l in out.splitlines() if "	" in l]
-        elif Path("/proc/self").exists():
-            rows = []
-            for d in Path("/proc").iterdir():
-                if d.name.isdigit():
-                    try:
-                        rows.append((d.name, (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")))
-                    except OSError:
-                        pass
-        else:
-            out = hide.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True, timeout=20).stdout
-            rows = [l.strip().split(None, 1) for l in out.splitlines() if l.strip()]
-        return [(int(p), c) for p, c in rows if len(p) and str(p).isdigit()]
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return []
+    """[(pid, командная строка)] процессов, у которых она известна; не получилось — пусто."""
+    return [(pid, cmd) for pid, _, cmd in P.scan_processes() if cmd]
 
 
 def _norm(p: str) -> str:
