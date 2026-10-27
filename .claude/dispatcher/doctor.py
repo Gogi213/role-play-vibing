@@ -189,7 +189,7 @@ def main(argv=None) -> int:
         print(P.NOT_FOUND_HINT, file=sys.stderr)
         return 2
     rows = run_checks(Path(project))
-    print(json.dumps([dict(zip(("check", "status", "detail"), r)) for r in rows], ensure_ascii=False, indent=1)
+    print(json.dumps([dict(zip(("check", "status", "detail"), r)) for r in rows], ensure_ascii=False, indent=2)
           if a.json else render(rows))
     return 1 if any(r[1] == FAIL for r in rows) else 0
 

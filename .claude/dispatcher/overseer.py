@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import haiku_aux as HA  # noqa: E402
+import project as P  # noqa: E402
 import registry  # noqa: E402
 import runs as RL  # noqa: E402
 import ticket as T  # noqa: E402
@@ -467,19 +468,12 @@ def _dispatcher_dir(root: Path) -> Path:
 
 
 def load_state(root: Path) -> dict:
-    try:
-        data = json.loads((_dispatcher_dir(root) / STATE_NAME).read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    data = P.read_json(_dispatcher_dir(root) / STATE_NAME, {})
+    return data if isinstance(data, dict) else {}
 
 
 def save_state(root: Path, st: dict) -> None:
-    d = _dispatcher_dir(root)
-    d.mkdir(parents=True, exist_ok=True)
-    tmp = d / (STATE_NAME + ".tmp")
-    tmp.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, d / STATE_NAME)
+    P.write_json(_dispatcher_dir(root) / STATE_NAME, st)
 
 
 def log_row(root: Path, row: dict) -> None:
@@ -709,7 +703,7 @@ def main(argv=None) -> int:
     root = Path(a.project).expanduser().resolve()
     if a.dry_run:
         rows = look(root, route=lambda tid, text: print(text) or True, dry=True)
-        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
     look(root)
     return 0

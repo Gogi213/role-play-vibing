@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_watch as C  # noqa: E402
 import dispatch as D  # noqa: E402
+import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 
 
@@ -24,16 +25,11 @@ def merge_state_path() -> Path:
 
 
 def _load() -> dict:
-    import json
-    try:
-        return json.loads(merge_state_path().read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return P.read_json(merge_state_path(), {})
 
 
 def _save(st: dict) -> None:
-    import json
-    T.atomic_write_text(merge_state_path(), json.dumps(st, ensure_ascii=False, indent=1))
+    P.write_json(merge_state_path(), st)
 
 
 def parse_accepted(value) -> dict:

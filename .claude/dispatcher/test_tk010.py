@@ -250,5 +250,49 @@ class ConstantsOnce(unittest.TestCase):
         self.assertFalse(hasattr(REL, "SEMVER") or hasattr(RP, "SEMVER"))
 
 
+class AtomicJsonOnce(unittest.TestCase):
+    """Запись состояния — `project.write_json` (indent=2, повтор при PermissionError), чтение — `project.read_json`."""
+
+    def test_write_read_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a" / "s.json"
+            P.write_json(p, {"б": 1, "а": [1]}, sort_keys=True)
+            self.assertEqual(p.read_bytes().decode("utf-8"), '{\n  "а": [\n    1\n  ],\n  "б": 1\n}\n')
+            self.assertEqual(P.read_json(p), {"а": [1], "б": 1})
+            self.assertEqual(list(p.parent.glob("*.tmp")), [])
+
+    def test_read_missing_or_broken(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "s.json"
+            self.assertEqual(P.read_json(p, {}), {})
+            p.write_text("{нет", encoding="utf-8")
+            self.assertIsNone(P.read_json(p))
+
+    def test_replace_retries_permission_error(self):
+        import os
+        from unittest import mock
+        real = os.replace
+        calls = []
+
+        def flaky(a, b):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError("занят")
+            return real(a, b)
+        with tempfile.TemporaryDirectory() as d, mock.patch("os.replace", flaky), mock.patch("time.sleep"):
+            p = Path(d) / "s.json"
+            P.write_json(p, {"x": 1})
+            self.assertEqual(P.read_json(p), {"x": 1})
+        self.assertEqual(len(calls), 3)
+
+    def test_no_private_writers(self):
+        here = Path(__file__).resolve().parent
+        for name in ("cfg", "overseer", "tickets", "dispatch", "ci_watch", "merge_rule", "lifewatch"):
+            src = (here / f"{name}.py").read_bytes().decode("utf-8")
+            self.assertNotIn("os.replace(tmp", src.replace("os.replace(tmp, pid_file)", ""), name)
+            self.assertNotIn("indent=1", src, name)
+        self.assertIs(T.atomic_write_text, P.atomic_write_text)
+
+
 if __name__ == "__main__":
     unittest.main()

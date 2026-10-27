@@ -30,14 +30,11 @@ def state_path() -> Path:
 
 
 def load_state() -> dict:
-    try:
-        return json.loads(state_path().read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return P.read_json(state_path(), {})
 
 
 def save_state(st: dict) -> None:
-    T.atomic_write_text(state_path(), json.dumps(st, ensure_ascii=False, indent=1))
+    P.write_json(state_path(), st)
 
 
 def gh_api(path: str, method: str = "GET", **fields):

@@ -56,6 +56,7 @@ import ceo_inbox as CI  # noqa: E402
 import cfg as cfg_mod  # noqa: E402
 import dispatch as D  # noqa: E402
 import errors as errors_mod  # noqa: E402
+import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
 import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
@@ -795,10 +796,7 @@ def _consent_alive(until: str, now) -> bool:
 
 
 def _write_consents(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    P.write_json(path, data)
 
 
 def cmd_config(args) -> int:

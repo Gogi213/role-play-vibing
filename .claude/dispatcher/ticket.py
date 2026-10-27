@@ -374,28 +374,7 @@ def role_entry_keys(tkt: "Ticket", role: str) -> list:
     return [f"{e.ts_raw} {e.author}" for e in tkt.log if author_is(e.author, role)]
 
 
-def atomic_write_text(path, text: str, retries: int = 8) -> None:
-    """Запись через временный файл + os.replace. На Windows replace падает с PermissionError, пока
-    другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи
-    оставляет прежний файл целым и не оставляет `.tmp`."""
-    path = Path(path)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8", newline="\n")
-        for i in range(retries):
-            try:
-                os.replace(tmp, path)
-                return
-            except PermissionError:
-                if i == retries - 1:
-                    raise
-                time.sleep(0.05 * (i + 1))
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+atomic_write_text = P.atomic_write_text   # одна запись с повтором — в project.py
 
 
 # --- блокировка на тикет (аудит 03.10): диспетчер, tickets.py и роли пишут один файл из разных процессов ------------

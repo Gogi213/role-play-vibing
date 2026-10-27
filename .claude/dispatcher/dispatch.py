@@ -247,17 +247,11 @@ class Decision:
 # --- состояние ------------------------------------------------------------------------------
 
 def load_state() -> dict:
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
+    return P.read_json(STATE_FILE, {})
 
 
 def save_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    T.atomic_write_text(STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True))  # с повторами: на Windows читатель держит файл
+    P.write_json(STATE_FILE, state, sort_keys=True)   # с повторами: на Windows читатель держит файл
 
 
 # --- wait_for ---------------------------------------------------------------------------------
@@ -1574,7 +1568,7 @@ def role_mcp_args(run_stem: str) -> list[str]:
             print(f"[dispatch] rpv.json role_mcp: сервер {n!r} не найден ни в ~/.claude.json, ни в .mcp.json — пропущен",
                   file=sys.stderr, flush=True)
     cfg = RUNS_DIR / f"{run_stem}.mcp.json"
-    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=1), encoding="utf-8")
+    cfg.write_text(json.dumps({"mcpServers": picked}, ensure_ascii=False, indent=2), encoding="utf-8")
     return ["--strict-mcp-config", "--mcp-config", str(cfg)]
 
 
@@ -2209,8 +2203,7 @@ def write_stop_request(tid: str, next_role: str, text: str, now=None) -> Path:
     разбирает её на ближайшем тике (process_stop_requests); новая заявка по тому же тикету заменяет прежнюю."""
     STOP_DIR.mkdir(parents=True, exist_ok=True)
     path = STOP_DIR / f"{tid}.json"
-    T.atomic_write_text(path, json.dumps({"at": T.now_iso(now), "next": next_role or "", "text": text},
-                                         ensure_ascii=False, indent=2))
+    P.write_json(path, {"at": T.now_iso(now), "next": next_role or "", "text": text})
     return path
 
 

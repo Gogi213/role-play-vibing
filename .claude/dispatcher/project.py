@@ -16,6 +16,8 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -230,3 +232,39 @@ def resolve_project(argv=None) -> Path:
     return found
 
 
+def atomic_write_text(path, text: str, retries: int = 8) -> None:
+    """Запись через временный файл + os.replace. На Windows replace падает с PermissionError, пока
+    другой процесс (диспетчер) держит файл открытым на чтение, — несколько коротких повторов. Сбой записи
+    оставляет прежний файл целым и не оставляет `.tmp`. Каталог создаётся."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        for i in range(retries):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if i == retries - 1:
+                    raise
+                time.sleep(0.05 * (i + 1))
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+def write_json(path, data, sort_keys: bool = False) -> None:
+    """Единственная запись JSON состояния: `indent=2`, кириллица как есть, перевод строки в конце, атомарно."""
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=sort_keys) + "\n")
+
+
+def read_json(path, default=None):
+    """Единственное чтение JSON: нет файла / битый JSON — `default`. Вид значения (объект, список) проверяет вызывающий."""
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
