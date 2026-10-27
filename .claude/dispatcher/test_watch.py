@@ -21,6 +21,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import procs  # noqa: E402
 import ticket as T  # noqa: E402
 import watch as W  # noqa: E402
 
@@ -864,13 +865,13 @@ class WatchInstanceLockTests(WatchSandbox):
         W.WATCH_PID_FILE = Path(self.tmp.name) / "watch.pid"
         W.run_once = lambda *a, **kw: cycles.append(1) or []
         W.WATCH_PID_FILE.write_text(str(holder.pid), encoding="utf-8")
-        orig_alive = D._pid_alive
-        D._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
+        orig_alive = procs._pid_alive
+        procs._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
         try:
             self.assertEqual(W.main([]), 1)
             self.assertEqual(cycles, [])
         finally:
-            D._pid_alive = orig_alive
+            procs._pid_alive = orig_alive
             W.WATCH_PID_FILE, W.run_once = orig
             holder.kill()
             holder.wait(timeout=10)

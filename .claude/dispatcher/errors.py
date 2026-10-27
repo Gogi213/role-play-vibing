@@ -193,8 +193,8 @@ def run_check(argv, cwd: Path, timeout: float) -> tuple[bool | None, str]:
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            import dispatch
-            dispatch._kill(proc.pid, tree=True)
+            import procs
+            procs._kill(proc.pid, tree=True)
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:

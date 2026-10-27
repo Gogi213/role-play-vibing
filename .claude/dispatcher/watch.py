@@ -32,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
-import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox/_pid_alive
+import dispatch as D  # noqa: E402 — переиспользуем пути/константы/append_ceo_inbox
+import procs  # noqa: E402 — замок экземпляра
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
@@ -46,7 +47,7 @@ def _set_paths() -> None:
     global DISPATCHER_DIR, WATCH_HEARTBEAT_FILE, WATCH_PID_FILE, WATCH_STATE_FILE
     DISPATCHER_DIR = D.DISPATCHER_DIR
     WATCH_HEARTBEAT_FILE = DISPATCHER_DIR / "watch-heartbeat.json"
-    WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (D.acquire_instance_lock)
+    WATCH_PID_FILE = DISPATCHER_DIR / "watch.pid"  # замок единственного экземпляра сторожа (procs.acquire_instance_lock)
     WATCH_STATE_FILE = DISPATCHER_DIR / "watch-state.json"
 
 
@@ -752,11 +753,11 @@ def main(argv=None) -> int:
         posted = run_once()
         print(f"[watch] once: findings={len(posted)}")
         return 0
-    ok, why = D.acquire_instance_lock(WATCH_PID_FILE)
+    ok, why = procs.acquire_instance_lock(WATCH_PID_FILE)
     if not ok:                                   # второй сторож — дублировал бы строки CEO
         print(f"[watch] {why}", file=sys.stderr)
         return 1
-    atexit.register(D.release_instance_lock, WATCH_PID_FILE)
+    atexit.register(procs.release_instance_lock, WATCH_PID_FILE)
     print(f"[watch] loop every {WATCH_INTERVAL_S:.0f}s")
     while True:
         try:

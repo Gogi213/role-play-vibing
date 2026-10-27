@@ -32,6 +32,7 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import procs  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402  (CLI — new/comment/start/status)
@@ -706,7 +707,8 @@ class DispatchRunTests(unittest.TestCase):
         self._orig = {k: getattr(D, k) for k in
                       ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "RUNS_DIR", "RUNS_LOG",
                        "CEO_INBOX", "CEO_WAKE_LOG", "CLAUDE_BIN", "MAX_PARALLEL", "RUN_TIMEOUT",
-                       "PID_EXPECT_NAME", "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
+                       "STOP_DIR", "STOP_VERIFY_S", "ROLE_PARALLEL")}
+        self._orig_pid_name = procs.PID_EXPECT_NAME
         D.DISPATCHER_DIR = self.dispatcher_dir  # CP5: mechanics.log и notify.log — не в каталог живого проекта
         D.ROLE_PARALLEL = {}  # предел по умолчанию (1 на роль)
         D.TICKETS_DIR = self.tickets_dir
@@ -718,7 +720,7 @@ class DispatchRunTests(unittest.TestCase):
         D.CEO_WAKE_LOG = self.dispatcher_dir / "ceo-wake.log"
         D.STOP_DIR = self.dispatcher_dir / "stop"
         # фейковый "claude" в тестах — это sys.executable (python.exe/python3), не claude.exe
-        D.PID_EXPECT_NAME = python_image_name()
+        procs.PID_EXPECT_NAME = python_image_name()
         D.RUNNING.clear()
         self._orig_popen = D._popen
         # по умолчанию подпроцесс — безвредный `python -c pass`: тесты, доходящие до launch_run (повтор в
@@ -743,6 +745,7 @@ class DispatchRunTests(unittest.TestCase):
         del os.environ["FAKE_TICKETS_DIR"]
         for k, v in self._orig.items():
             setattr(D, k, v)
+        procs.PID_EXPECT_NAME = self._orig_pid_name
         for attempt in range(20):   # Windows под xdist: потомок ещё держит err.log (WinError 32), TK-095
             try:
                 self.tmp.cleanup()
@@ -1528,14 +1531,14 @@ class DispatchRunTests(unittest.TestCase):
             "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
             "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": str(self.tickets_dir.parent / "r.err"),
             "reason": "todo", "status_at_launch": "in_progress", "session_id": sid}}}
-        orig = D.PID_EXPECT_NAME
-        D.PID_EXPECT_NAME = ""
+        orig = procs.PID_EXPECT_NAME
+        procs.PID_EXPECT_NAME = ""
         try:
             D.recover_active_runs(state, datetime.now().astimezone())
             self.assertEqual(D.RUNNING[path.stem]["pid"], proc.pid)
             self.assertEqual(state["active_runs"][path.stem]["pid"], proc.pid)
         finally:
-            D.PID_EXPECT_NAME = orig
+            procs.PID_EXPECT_NAME = orig
             D.RUNNING.clear()
 
     def test_recover_drops_intent_mirror_when_role_never_started(self):
@@ -1633,8 +1636,8 @@ class DispatchRunTests(unittest.TestCase):
     def test_recover_adopts_role_under_foreign_image_name_by_pid_and_start(self):
         """#16: роль под другим именем образа (npm-установка — node, не claude) после рестарта диспетчера жива: подхват по
         pid + времени старта, повторного запуска и конца прогона нет."""
-        orig = D.PID_EXPECT_NAME
-        D.PID_EXPECT_NAME = "claude-image-that-this-process-does-not-have"
+        orig = procs.PID_EXPECT_NAME
+        procs.PID_EXPECT_NAME = "claude-image-that-this-process-does-not-have"
         try:
             path, run, state = self._slow_role_mirror("Чужое имя образа")
             saved = state["active_runs"][path.stem]
@@ -1642,12 +1645,12 @@ class DispatchRunTests(unittest.TestCase):
             D.recover_active_runs(state, datetime.now().astimezone())
             self.assertIn(path.stem, D.RUNNING, "живая роль не должна считаться мёртвой из-за имени образа")
             D.save_state(state)
-            D.PID_EXPECT_NAME = python_image_name()
+            procs.PID_EXPECT_NAME = python_image_name()
             self.wait_running()
             run["popen"].wait(timeout=5)
             self.assertEqual(len(T.read_ticket(path).log), 1, "второго запуска поверх живой роли нет")
         finally:
-            D.PID_EXPECT_NAME = orig
+            procs.PID_EXPECT_NAME = orig
 
     def test_recover_treats_pid_with_other_start_time_as_finished(self):
         """#16: pid переиспользован другим процессом (метка старта другая) — роль мертва, как бы ни звался образ."""
@@ -1716,12 +1719,12 @@ class DispatchRunTests(unittest.TestCase):
     def test_pid_alive_unreadable_start_mark_with_live_process_is_alive(self):
         """#16: метка записана, но сейчас её не прочитать (сбой ps) — процесс есть, имя образа не судья."""
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-        orig = D._proc_start
+        orig = procs._proc_start
         try:
-            D._proc_start = lambda pid: None
+            procs._proc_start = lambda pid: None
             self.assertTrue(D._pid_alive(child.pid, "no-such-image", start="123"))
         finally:
-            D._proc_start = orig
+            procs._proc_start = orig
             child.kill()
             child.wait(timeout=10)
         self.assertFalse(D._pid_alive(child.pid, "", start="123"))
@@ -4050,28 +4053,28 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
     """Аудит-2 п.7: на Linux зомби — мёртв (`/proc/<pid>/status`: State Z); п.5: второй диспетчер/сторож не стартует."""
 
     def test_zombie_state_counts_as_dead_and_normal_state_as_alive(self):
-        orig_kill, orig_state = D.os.kill, D._proc_state
+        orig_kill, orig_state = D.os.kill, procs._proc_state
         D.os.kill = lambda pid, sig: None                      # kill -0 «успешен» — как для зомби
         try:
-            D._proc_state = lambda pid: "Z"
+            procs._proc_state = lambda pid: "Z"
             self.assertFalse(D._pid_alive_posix(4242, ""))
-            D._proc_state = lambda pid: "X"
+            procs._proc_state = lambda pid: "X"
             self.assertFalse(D._pid_alive_posix(4242, ""))
-            D._proc_state = lambda pid: "S"
+            procs._proc_state = lambda pid: "S"
             self.assertTrue(D._pid_alive_posix(4242, ""))
-            D._proc_state = lambda pid: None                    # /proc недоступен — по kill -0
+            procs._proc_state = lambda pid: None                    # /proc недоступен — по kill -0
             self.assertTrue(D._pid_alive_posix(4242, ""))
         finally:
-            D.os.kill, D._proc_state = orig_kill, orig_state
+            D.os.kill, procs._proc_state = orig_kill, orig_state
 
     def test_without_proc_name_and_state_come_from_ps(self):
         """macOS: нет /proc — имя образа и состояние берутся из ps; чужой процесс с живым pid — не наш."""
-        o_kill, o_ps, o_open = D.os.kill, D._ps_field, D.open if hasattr(D, "open") else None
+        o_kill, o_ps, o_open = D.os.kill, procs._ps_field, procs.open if hasattr(procs, "open") else None
         D.os.kill = lambda pid, sig: None
-        D.open = lambda *a, **k: (_ for _ in ()).throw(OSError("нет /proc"))
+        procs.open = lambda *a, **k: (_ for _ in ()).throw(OSError("нет /proc"))
         try:
             vals = {"stat": "S", "comm": "/usr/bin/vim"}
-            D._ps_field = lambda pid, field: vals.get(field)
+            procs._ps_field = lambda pid, field: vals.get(field)
             self.assertFalse(D._pid_alive_posix(4242, "claude"))
             vals["comm"] = "/opt/homebrew/bin/claude"
             self.assertTrue(D._pid_alive_posix(4242, "claude"))
@@ -4080,8 +4083,8 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
             vals.clear()                                          # ps ничего не знает — как раньше, по kill -0
             self.assertTrue(D._pid_alive_posix(4242, "claude"))
         finally:
-            D.os.kill, D._ps_field = o_kill, o_ps
-            del D.open
+            D.os.kill, procs._ps_field = o_kill, o_ps
+            del procs.open
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "зомби и /proc — только Linux")
     def test_real_zombie_child_is_not_alive(self):
@@ -4162,13 +4165,13 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
             D.PID_FILE, D.TICKETS_DIR = Path(d) / "dispatch.pid", Path(d) / "tickets"
             D.tick = lambda *a, **kw: ticks.append(1) or 0
             D.PID_FILE.write_text(str(holder.pid), encoding="utf-8")
-            orig_alive = D._pid_alive
-            D._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
+            orig_alive = procs._pid_alive
+            procs._pid_alive = lambda pid, expect_name=None: orig_alive(pid, "")
             try:
                 self.assertEqual(D.main(["--once"]), 1)
                 self.assertEqual(ticks, [], "второй экземпляр не должен тикать")
             finally:
-                D._pid_alive = orig_alive
+                procs._pid_alive = orig_alive
                 D.PID_FILE, D.TICKETS_DIR, D.tick = orig
                 holder.kill()
                 holder.wait(timeout=10)

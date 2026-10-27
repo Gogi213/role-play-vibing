@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import procs  # noqa: E402
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
@@ -191,12 +192,12 @@ def main(argv=None) -> int:
         return 2
     if "--once" not in argv:  # цикл — единственный экземпляр (замок) с сердцебиением для присмотра supervise (TK-090 Д-1)
         lock = D.DISPATCHER_DIR / "ci_watch.pid"
-        ok, why = D.acquire_instance_lock(lock)
+        ok, why = procs.acquire_instance_lock(lock)
         if not ok:
             print(f"[ci_watch] {why}", file=sys.stderr)
             return 1
         import atexit
-        atexit.register(D.release_instance_lock, lock)
+        atexit.register(procs.release_instance_lock, lock)
     while True:
         try:
             for n, s7, state, woke in run_once(repo):

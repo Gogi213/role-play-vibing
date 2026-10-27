@@ -17,7 +17,7 @@ import dispatch as D  # noqa: E402
 if os.environ.get("BENCH_POLL_S"):
     D.POLL_INTERVAL = float(os.environ["BENCH_POLL_S"])
 if os.environ.get("BENCH_PID_NAME"):
-    D.PID_EXPECT_NAME = os.environ["BENCH_PID_NAME"]
+    procs.PID_EXPECT_NAME = os.environ["BENCH_PID_NAME"]
 if os.environ.get("BENCH_JUDGE_MODEL"):
     D.ROLE_MODEL["judge"] = os.environ["BENCH_JUDGE_MODEL"]  # словарь меняется на месте: launch_run читает его при каждом запуске
 if os.environ.get("BENCH_JUDGE_EFFORT"):
