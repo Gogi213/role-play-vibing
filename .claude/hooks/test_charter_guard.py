@@ -59,12 +59,35 @@ class CharterGuard(unittest.TestCase):
         j = f"{self.base}/.claude/roles/judge.md"
         for cmd in (f'cp "{SRC}" .claude/roles/judge.md', f'cp "{SRC}" "{j}"', f'cp -f "{SRC}" {j}', f'cp -t "{self.base}/.claude/roles" "{SRC}"',
                     f'cp -r "{PLUGIN}/templates/roles/." "{self.base}/.claude/roles/"', f'cp "{PLUGIN}/templates/roles/"*.md .claude/roles/',
-                    f'cp x .claude/roles/*.md', f'mv /tmp/x {j}', f'echo x > {j}', f'echo x >> {j}', f'cat "{SRC}" | tee {j}',
+                    'cp x .claude/roles/*.md', f'mv /tmp/x {j}', f'echo x > {j}', f'echo x >> {j}', f'cat "{SRC}" | tee {j}',
                     f'python -c "open(r\'{j}\', \'w\').write(\'x\')"', f'python -c "import shutil; shutil.copy(r\'{SRC}\', r\'{j}\')"',
                     f'sed -i s/a/b/ {j}', f'perl -pi -e s/a/b/ {j}', f'install -m 644 "{SRC}" "{j}"', f'rsync -a "{SRC}" "{j}"',
                     f'ln -sf "{SRC}" "{j}"', f'dd if="{SRC}" of="{j}"', f'cd "{self.base}" && cp "{SRC}" .claude/roles/judge.md',
                     f'P="{PLUGIN}"; cp "$P/templates/roles/judge.md" {j}'):
             self.no(cmd)
+
+    def test_a_path_named_from_the_directory_we_moved_into_is_still_the_charter(self):
+        b = self.base
+        for cmd in (f'cd "{b}/.claude/roles" && cp "{SRC}" judge.md', 'cd .claude/roles && cp /tmp/x judge.md', 'cd .claude && cp x roles/judge.md',
+                    'cd .claude/roles; mv /tmp/x judge.md', 'cd .claude/roles && echo x > judge.md', 'cd .claude/roles && cat /tmp/x | tee judge.md',
+                    'cd .claude/roles && sed -i s/a/b/ judge.md', "cd .claude/roles && python -c \"open('judge.md', 'w').write('x')\"",
+                    'cd .claude && cd roles && cp /tmp/x *.md'):
+            self.no(cmd)
+
+    def test_copying_a_directory_over_claude_overwrites_the_charters(self):
+        b = self.base
+        for cmd in ('cp -r /tmp/roles .claude/', 'cp -r /tmp/roles .claude', f'cp -R /tmp/backup/roles "{b}/.claude/"', 'rsync -a /tmp/roles/ .claude/',
+                    'rsync -a /tmp/x/ .claude', 'cp -r /tmp/x/. .claude/', 'cp -r /tmp/x/* .claude/', 'cp -a /tmp/old/.claude .', 'mv /tmp/roles .claude/',
+                    'cd .claude && cp -r /tmp/roles .', f'cp -r "{PLUGIN}/templates/roles" .claude/', 'mv .claude/roles/judge.md /tmp/x'):
+            self.no(cmd)
+
+    def test_charters_as_the_source_of_a_copy_are_reading(self):
+        for cmd in ('cp .claude/roles/judge.md /tmp/x', 'cp -r .claude/roles /tmp/backup', f'cp {self.base}/.claude/roles/*.md /tmp/', 'rsync -a .claude/roles/ /tmp/b/',
+                    'cd .claude/roles && cp judge.md /tmp/x', 'cd .claude/roles && cat judge.md > /tmp/y', 'cd .claude/roles && grep -n x judge.md',
+                    'cd .claude/roles && ls', 'cd .claude/roles && echo x > notes/ceo.md', 'cd .claude/roles/notes && echo x > ceo.md',
+                    'cp -r /tmp/other .claude/', 'cp /tmp/x.json .claude/', 'cd /tmp && cp -r roles .', 'cd .claude/roles && cd .. && cp x.txt .',
+                    'cp -r .claude /tmp/backup/'):
+            self.ok(cmd)
 
     def test_powershell_and_windows_paths(self):
         j = f"{self.d}\\.claude\\roles\\judge.md"
@@ -85,7 +108,7 @@ class CharterGuard(unittest.TestCase):
                     f'python -c "print(open(r\'{j}\', encoding=\'utf-8\').read())"', 'wc -l .claude/roles/judge.md > /dev/null',
                     'echo x > .claude/roles/notes/ceo.md', 'cp x .claude/roles/notes/y.md', f'cp "{SRC}" .claude/roles/new-role.md',
                     f'python "{PLUGIN}/.claude/dispatcher/tickets.py" --project "{self.base}" charter sync --file judge.md',
-                    f'python tickets.py comment TK-1 --author ceo --text "cp x .claude/roles/judge.md"', 'git status --short .claude/roles'):
+                    'python tickets.py comment TK-1 --author ceo --text "cp x .claude/roles/judge.md"', 'git status --short .claude/roles'):
             self.ok(cmd)
 
     def test_first_rpv_init_still_creates_charters(self):
@@ -93,7 +116,7 @@ class CharterGuard(unittest.TestCase):
         text = (ROOT / "commands" / "rpv-init.md").read_text(encoding="utf-8")
         script = re.search(r"```\n(.*?)\n```", text, re.S).group(1)
         self.assertIn(".claude/roles/$b", script)
-        from dguard.policy import charter_shell_write
+        from dguard.charter_cmd import charter_shell_write
         self.assertIsNone(charter_shell_write("Bash", {"command": script}, self.d))      # прочие правила стража к блоку — не TK-029
 
     def test_write_and_edit_tools_are_refused_for_ceo_with_the_same_hint(self):

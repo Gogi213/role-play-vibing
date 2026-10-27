@@ -63,7 +63,8 @@ from dguard.config import configure
 from dguard.git_scan import BRANCH_CONSENT_NAMES, CONFIG_LOG_NAMES
 from dguard.messages import (REASON_BRANCH_CONSENT_FILE, REASON_CEO_CHARTER, REASON_CEO_SIGNAL, REASON_CONFIG_LOG, REASON_CONSENT, REASON_CRASH,
                              REASON_DECIDE, REASON_IDENTITY, REASON_OWNER_RECORD)
-from dguard.policy import (charter_shell_write, charter_table_edit, consent_forge, decide_outside_secretary, dispatcher_role, identity_change,
+from dguard.charter_cmd import charter_shell_write
+from dguard.policy import (charter_table_edit, consent_forge, decide_outside_secretary, dispatcher_role, identity_change,
                            owner_record_write)
 from dguard.tools import GUARDED_TOOLS, SHELL_TOOLS, file_target
 

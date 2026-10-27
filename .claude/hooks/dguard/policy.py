@@ -7,7 +7,7 @@ from dguard import config
 from dguard.ceo_signal import command_text, parts_write, shell_writes
 from dguard.config import _env, norm
 from dguard.messages import REASON_CEO_CONFIG, REASON_GIT_DIR, REASON_GIT_WRITE, REASON_OWNER_RECORD, REASON_PROTECTED, REASON_PROTECTED_CONFIG, REASON_SETTINGS
-from dguard.paths import Ctx, literal_part, placeholder, temp_rest, under_cwd
+from dguard.paths import literal_part, placeholder, temp_rest, under_cwd
 from dguard.tools import file_target, SHELL_TOOLS
 from dguard.writes import may_exist
 
@@ -121,42 +121,6 @@ def charter_table_edit(tool, ti):
         return False
     rows = [ln for k in ("old_string", "new_string") for ln in str(ti.get(k) or "").splitlines() if ln.strip()]
     return bool(rows) and all(ln.lstrip().startswith("|") for ln in rows)
-
-
-CHARTER_TOKEN = re.compile(r"""[^\s"'`=<>|;&()]*\.claude/roles(?:/[^\s"'`<>|;&()]*)?""", re.I)
-CHARTER_EXTRA_WRITE = re.compile(r"\b(?:rsync|ln|New-Item|Rename-Item|Set-Item)\b|\bperl\b[^|;&]*\s-\w*i", re.I)
-
-
-def _charter_token(token, ctx):
-    """Путь из команды, названный с `.claude/roles`, — устав: существующий `*.md`, каталог уставов, маска (`roles/*.md`). Блокнот,
-    журнал, `.state`, новый файл (его создаёт первый `/rpv-init`: `roles/$b`) и переменная в имени файла — нет."""
-    tail = token.replace("\\", "/").split(".claude/roles", 1)[-1].strip("/")
-    if not tail:
-        return True
-    if "/" in tail or "$" in tail or "%" in tail:
-        return False
-    if any(c in tail for c in "*?["):
-        return True
-    return tail.lower().endswith(".md") and may_exist(token, ctx)
-
-
-def charter_shell_write(tool, ti, cwd):
-    """Сессия CEO пишет в устав `.claude/roles/*.md` через оболочку (`cp`, `mv`, `tee`, `>`, `python`, `sed -i`, `install`, `rsync`…) →
-    название пути или None. Часть команды, что пишет и называет устав, — отказ: по тексту, а не по разбору цели, поэтому путь из
-    строки Python и из переменной тоже виден; чтение и `--text`/`--why` у tickets.py не в счёт. Перенос из шаблонов — `tickets.py
-    charter sync`."""
-    if tool not in SHELL_TOOLS:
-        return None
-    ctx = Ctx(norm(cwd).rstrip("/") if cwd else None, False)
-    for part in re.split(r"\n|&&|\|\||;", command_text(ti, benign=True)):
-        if ".claude/roles" not in part.lower().replace("\\", "/"):
-            continue
-        if not (shell_writes(part, (".claude/roles",)) or CHARTER_EXTRA_WRITE.search(part)):
-            continue
-        for token in CHARTER_TOKEN.findall(part.replace("\\", "/")):
-            if _charter_token(token, ctx):
-                return token
-    return None
 
 
 REGISTRY_DECIDE = re.compile(r"""registry\.py["']?(?:\s+--project(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+))?\s+decide\b""")

@@ -74,6 +74,18 @@ class CharterSync(unittest.TestCase):
         self.assertIn("Правило Б.", text)                                            # новая строка устава пришла
         self.assertIn("| `Судья` | вердикты |", text)
 
+    def test_readme_keeps_project_zones_that_the_template_lacks(self):
+        (self.roles / "README.md").write_text(PROJECT_README.replace("\n\nПравило А.", "\n| `Аналитик` | notebooks/ |\n\nПравило А."), encoding="utf-8")
+        self.sync("README.md")
+        text = (self.roles / "README.md").read_text(encoding="utf-8")
+        self.assertIn("| `Судья` | вердикты |\n| `Аналитик` | notebooks/ |\n\nПравило А.", text)       # после последней строки таблицы шаблона
+        self.assertEqual(text.count("Аналитик"), 1)
+        self.assertEqual(charter.merge_table_rows("# T\n", "| a | b |\n"), "# T\n| a | b |\n")              # в шаблоне нет таблицы — в конец
+        self.assertEqual(charter.merge_table_rows("| a | 1 |", "| a | 2 |\n| z | 3 |"), "| a | 2 |\n| z | 3 |\n")
+        self.sync("README.md")
+        self.assertEqual(self.sync("README.md")[2], None)
+        self.assertEqual(text, (self.roles / "README.md").read_text(encoding="utf-8"))                     # второй перенос ничего не меняет
+
     def test_readme_without_project_copy_is_the_template(self):
         (self.roles / "README.md").unlink()
         entry, _, err = self.sync("README.md")

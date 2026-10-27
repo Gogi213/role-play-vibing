@@ -43,13 +43,24 @@ def _cell(line: str) -> str:
 
 
 def merge_table_rows(template: str, current: str) -> str:
-    """Шаблон как есть, но строки таблицы, которые уже есть в проекте (по первой ячейке), — проекта."""
+    """Шаблон как есть, но строки таблицы, которые уже есть в проекте (по первой ячейке), — проекта; строки проекта, которых нет
+    в шаблоне (его зоны), остаются — после последней строки таблицы шаблона."""
     mine = {_cell(ln): ln.strip() for ln in current.splitlines() if ln.lstrip().startswith("|")}
-    out = []
+    out, last, seen = [], None, set()
     for ln in template.splitlines(keepends=True):
-        if ln.lstrip().startswith("|") and _cell(ln) in mine:
-            ln = mine[_cell(ln)] + ln[len(ln.rstrip("\r\n")):]
+        if ln.lstrip().startswith("|"):
+            last = len(out)
+            seen.add(_cell(ln))
+            if _cell(ln) in mine:
+                ln = mine[_cell(ln)] + ln[len(ln.rstrip("\r\n")):]
         out.append(ln)
+    extra = [row for cell, row in mine.items() if cell not in seen]
+    if extra:
+        at = len(out) if last is None else last + 1
+        eol = "\r\n" if template.endswith("\r\n") else "\n"
+        if at and not out[at - 1].endswith(("\n", "\r")):
+            out[at - 1] += eol
+        out[at:at] = [row + eol for row in extra]
     return "".join(out)
 
 
