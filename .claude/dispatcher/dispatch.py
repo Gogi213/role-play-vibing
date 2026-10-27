@@ -30,17 +30,16 @@ import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import downtime  # noqa: E402
-import notify  # noqa: E402
 import on_met as ON_MET  # noqa: E402
 import waits as W  # noqa: E402
 import alarms as AL  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
 from role_args import (  # noqa: E402,F401 — запуск роли (усилие, MCP, промпт) вынесен в role_args.py; имена для launch_run и тестов
-    ROLE_EFFORT, PROMPT_TEMPLATE, role_mcp_args, plugin_dir_args, effort_for, tickets_cli)
+    ROLE_EFFORT, role_mcp_args, plugin_dir_args, effort_for)
 import role_args as RA  # noqa: E402
 from limits import (  # noqa: E402,F401 — лимит сессии и ошибки API (распознавание) вынесены в limits.py
-    _limit_hit, MAX_API_ERRORS, _api_error, _limit_reset_at, _limit_paused)
+    _limit_hit, _api_error, _limit_reset_at, _limit_paused)
 
 # --- конфигурация (константы — тесты подменяют их прямо на модуле) ------------------------
 
@@ -110,10 +109,8 @@ MAX_IDLE_RUNS = 2
 # --- сигналы CEO и уведомления — signals.py; здесь обёртки подставляют идущие запуски --------------------------
 
 from signals import (  # noqa: E402,F401 — сигналы CEO вынесены в signals.py; имена для вызовов из dispatch и tickets
-    _mech_log, append_ceo_inbox, SUMMARY_EVERY_HOURS, classify_signal, flush_pending_summary, route_ceo_signal,
-    handle_next_ceo, escalate_review_limit, blocked_age_text, _awaits_judge, notify_status_for_ceo, notify_parse_error,
-    NO_REVIEW_MARK, closed_without_review, baseline_done_notified, notify_done, haiku_refused_reason, MAX_REVIEW_RETURNS,
-    HAIKU_ALLOWED_KINDS)
+    _mech_log, append_ceo_inbox, route_ceo_signal, handle_next_ceo, escalate_review_limit, notify_status_for_ceo,
+    notify_parse_error, baseline_done_notified, notify_done, haiku_refused_reason)
 
 
 def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
@@ -218,7 +215,7 @@ REASON_PRIORITY = {"next": 0, "in_progress-resume": 2}
 
 
 from decide import (  # noqa: E402,F401 — решение «кого будить» вынесено в decide.py; здесь имена и обёртка с подставляемым check_wait_for
-    Decision, _ceo_order_after_accept, close_after_merge)
+    Decision, close_after_merge)
 import decide as DEC  # noqa: E402
 
 
@@ -242,8 +239,7 @@ def _resume_store(state: dict, tid: str, role: str) -> dict:
 
 
 import runlog as RL  # noqa: E402
-from runlog import (  # noqa: E402,F401 — итог запуска в runs.log вынесен в runlog.py; имена для finish и тестов
-    tokens_of as _tokens_of, context_tokens_sum as _context_tokens_sum, read_run_result as _read_run_result)
+from runlog import read_run_result as _read_run_result  # noqa: E402
 
 
 def _transcript_last_turn_tokens(session_id) -> int:
@@ -296,8 +292,7 @@ def _rate_limited(state: dict, tid: str, now, role: str = "") -> bool:
 
 
 from cost import (  # noqa: E402,F401 — учёт стоимости вынесен в cost.py; имена для вызовов из dispatch и tickets
-    _today, _add_cost, ticket_cost_spent, add_ticket_cost, _record_cost_event, _rolling_hour_cost,
-    _model_usage_diff, resolve_run_cost)
+    _add_cost, ticket_cost_spent, add_ticket_cost, _record_cost_event, resolve_run_cost)
 
 
 def _model_usage_warning(model_usage_diff: dict, expected: str = None) -> str:
@@ -318,8 +313,7 @@ def _model_usage_warning(model_usage_diff: dict, expected: str = None) -> str:
 
 
 from procs import (  # noqa: E402,F401 — процессы вынесены в procs.py; здесь имена для вызовов из dispatch
-    _proc_start, _pid_alive, _ps_field, _proc_state, _proc_comm, _pid_alive_posix, _kill, acquire_instance_lock,
-    release_instance_lock, _proc_alive, _kill_proc)
+    _proc_start, _pid_alive, _kill, acquire_instance_lock, release_instance_lock, _proc_alive, _kill_proc)
 
 
 def _stop_run(info: dict) -> bool:
@@ -454,7 +448,7 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
 import finish as FIN  # noqa: E402
 from finish import (  # noqa: E402,F401 — что делать с тикетом после запуска вынесено в finish.py; имена для _finish_run и тестов
-    role_logged as _role_logged, handle_api_error as _handle_api_error)
+    handle_api_error as _handle_api_error)
 
 
 def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, result: dict) -> None:
@@ -566,7 +560,7 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
 
 
 from stop import (  # noqa: E402,F401 — остановка и подхват запусков вынесены в stop.py; обёртки подставляют идущие запуски
-    write_stop_request, _reset_same_status, _find_pid_by_session)
+    _reset_same_status)
 
 
 def _poll_running(state: dict, now) -> None:
@@ -601,8 +595,7 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
 IDLE_SLO_MIN = 10.0
 import handoff as HO  # noqa: E402
 from handoff import (  # noqa: E402,F401 — ход у открытого тикета вынесен в handoff.py; имена для tick и тестов
-    _waits_without_condition, _drop_ceo_handoff, _ceo_handoff_pending, _no_move_reason, enforce_move_invariant,
-    notify_wait_cycle)
+    _waits_without_condition, _drop_ceo_handoff, enforce_move_invariant, notify_wait_cycle)
 
 
 def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:

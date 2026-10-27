@@ -33,6 +33,7 @@ import cfg as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
 import dispatch as D  # noqa: E402 — переиспользуем append_ceo_inbox
+import signals as SIG  # noqa: E402
 import config as CFG  # noqa: E402
 import waits as W  # noqa: E402 — ssh-проба и разбор условий ожидания
 import procs  # noqa: E402 — замок экземпляра
@@ -91,8 +92,8 @@ def check_blocked_and_needs_owner(now) -> list:
         except Exception as e:
             out.append(Finding("ticket-unreadable", path.stem, f"{path.stem}: не читается — {type(e).__name__}: {e}"))
             continue
-        if tkt.status in ("blocked", "needs_owner") and not D._awaits_judge(tkt, now):  # blocked исполнителя ждёт Судью, не CEO (TK-002)
-            age = D.blocked_age_text(tkt, now)
+        if tkt.status in ("blocked", "needs_owner") and not SIG._awaits_judge(tkt, now):  # blocked исполнителя ждёт Судью, не CEO (TK-002)
+            age = SIG.blocked_age_text(tkt, now)
             out.append(Finding(tkt.status, tkt.id, f"{tkt.id}: status={tkt.status}" + (f" — {tkt.status} {age}" if age else "")))
     return out
 

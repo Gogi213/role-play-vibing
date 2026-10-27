@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import notify as NOTIFY  # noqa: E402
 import alarms as AL
 import config as CFG  # noqa: E402
 import overseer as O  # noqa: E402
@@ -271,7 +272,7 @@ class OwnerQuestionTests(unittest.TestCase):
         self.addCleanup(lambda: (setattr(CFG, "TICKETS_DIR", saved[0]), setattr(CFG, "DISPATCHER_DIR", saved[1])))
         CFG.TICKETS_DIR, CFG.DISPATCHER_DIR = self.root / ".claude" / "tickets", self.root / ".claude" / "dispatcher"
         self.sent = []
-        p = mock.patch.object(D.notify, "send", lambda text, **kw: self.sent.append(text))
+        p = mock.patch.object(NOTIFY, "send", lambda text, **kw: self.sent.append(text))
         p.start()
         self.addCleanup(p.stop)
 

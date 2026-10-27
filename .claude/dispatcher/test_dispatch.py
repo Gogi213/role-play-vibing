@@ -33,6 +33,14 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import cost as COST  # noqa: E402
+import finish as FIN  # noqa: E402
+import handoff as HO  # noqa: E402
+import procs as PROCS  # noqa: E402
+import role_args as RA  # noqa: E402
+import runlog as RUNLOG  # noqa: E402
+import signals as SIG  # noqa: E402
+import stop as STOP  # noqa: E402
 import config as CFG  # noqa: E402
 import waits as W  # noqa: E402
 import on_met as OM  # noqa: E402
@@ -47,7 +55,7 @@ TZ = timezone(timedelta(hours=4))  # GMT+4 (память проекта)
 def python_image_name() -> str:
     """Подстрока имени образа, под которым ОС видит наш python (фейковая «claude» в тестах — это он). Не stem от
     sys.executable: у framework-python на macOS образ — .../Python.app/Contents/MacOS/Python («Python»), не «python3.14»."""
-    return (D._proc_comm(os.getpid()) if os.name != "nt" else None) or Path(sys.executable).stem
+    return (PROCS._proc_comm(os.getpid()) if os.name != "nt" else None) or Path(sys.executable).stem
 
 
 def dt(s: str) -> datetime:
@@ -247,27 +255,27 @@ class LogCompactionTests(unittest.TestCase):
         keys_at_launch = T.role_entry_keys(T.read_ticket(self.path), "engineer")
         info = {"role": "engineer", "started": dt("2026-10-02T10:00:00+04:00"), "log_keys_at_launch": keys_at_launch}
         T.compact_log(self.path)  # лог укоротился на 12 записей
-        self.assertFalse(D._role_logged(T.read_ticket(self.path), "engineer", info))
+        self.assertFalse(FIN.role_logged(T.read_ticket(self.path), "engineer", info))
         self.add_entries(1, start=40)  # роль дописала новую запись (ей же компакция уже не нужна)
-        self.assertTrue(D._role_logged(T.read_ticket(self.path), "engineer", info))
+        self.assertTrue(FIN.role_logged(T.read_ticket(self.path), "engineer", info))
         # запись ДРУГОГО автора ролью не засчитывается
         other = dict(info, log_keys_at_launch=T.role_entry_keys(T.read_ticket(self.path), "engineer"))
         T.append_log(self.path, "ceo", "комментарий", now=dt("2026-10-02T12:00:00+04:00"))
         T.append_log(self.path, "dispatcher", "служебная", now=dt("2026-10-02T12:01:00+04:00"))
-        self.assertFalse(D._role_logged(T.read_ticket(self.path), "engineer", other))
+        self.assertFalse(FIN.role_logged(T.read_ticket(self.path), "engineer", other))
 
     def test_legacy_active_run_without_keys_falls_back_to_start_time(self):
         self.add_entries(2, size=50)  # записи 10:00 и 10:01
         info = {"role": "engineer", "started": dt("2026-10-02T10:00:30+04:00")}  # зеркало до v2: ключей нет
-        self.assertTrue(D._role_logged(T.read_ticket(self.path), "engineer", info))  # 10:01 ≥ старта
+        self.assertTrue(FIN.role_logged(T.read_ticket(self.path), "engineer", info))  # 10:01 ≥ старта
         info["started"] = dt("2026-10-02T10:30:00+04:00")
-        self.assertFalse(D._role_logged(T.read_ticket(self.path), "engineer", info))
+        self.assertFalse(FIN.role_logged(T.read_ticket(self.path), "engineer", info))
 
     def test_identical_entries_in_same_second_both_count(self):
         T.append_log(self.path, "engineer", "раз", now=dt("2026-10-02T10:00:00+04:00"))
         keys = T.role_entry_keys(T.read_ticket(self.path), "engineer")
         T.append_log(self.path, "engineer", "раз", now=dt("2026-10-02T10:00:00+04:00"))
-        self.assertTrue(D._role_logged(T.read_ticket(self.path), "engineer", {"log_keys_at_launch": keys}))
+        self.assertTrue(FIN.role_logged(T.read_ticket(self.path), "engineer", {"log_keys_at_launch": keys}))
 
 
 class TicketLockTests(unittest.TestCase):
@@ -867,7 +875,7 @@ class DispatchRunTests(unittest.TestCase):
         p = self.mk("engineer", "waiting", now=t0)
         state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
         T.append_log(p, "ceo", "принято", now=t0 + timedelta(minutes=30))  # как tickets.py comment: updated не двигается
-        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=30, seconds=5), state))
+        self.assertIsNone(HO._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=30, seconds=5), state))
         out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=45))
         self.assertEqual(out.status, "in_progress")
 
@@ -927,14 +935,14 @@ class DispatchRunTests(unittest.TestCase):
         t0 = dt("2026-10-06T12:00:00+04:00")
         p = self.mk("engineer", "waiting", now=t0)
         state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
-        self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=5), state))
+        self.assertIsNone(HO._no_move_reason(T.read_ticket(p), t0 + timedelta(minutes=5), state))
         self.assertFalse(CFG.CEO_INBOX.exists() and "ждёт-ceo" in CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_done_and_blocked_are_not_violations(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         for st in ("done", "blocked", "needs_owner", "stopped"):
             p = self.mk("engineer", st, now=t0)
-            self.assertIsNone(D._no_move_reason(T.read_ticket(p), t0 + timedelta(days=1)), st)
+            self.assertIsNone(HO._no_move_reason(T.read_ticket(p), t0 + timedelta(days=1)), st)
 
     def test_wait_cycle_two_and_three_tickets_refused_by_cli(self):
         a, b, c = (self.mk("engineer", "todo") for _ in range(3))
@@ -1555,7 +1563,7 @@ class DispatchRunTests(unittest.TestCase):
             "run_file": str(self.tickets_dir.parent / "r.json"), "err_file": "", "reason": "todo",
             "status_at_launch": "todo", "session_id": "never-started-sid-1"}}}
         from unittest import mock
-        with mock.patch.object(D, "_find_pid_by_session", return_value=None), mock.patch.object(D, "_finish_run") as fin:
+        with mock.patch.object(STOP, "_find_pid_by_session", return_value=None), mock.patch.object(D, "_finish_run") as fin:
             D.recover_active_runs(state, datetime.now().astimezone())
         fin.assert_not_called()
         self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
@@ -1563,7 +1571,7 @@ class DispatchRunTests(unittest.TestCase):
     def _find_by_session(self, rows, sid="sid-tree-1"):
         from unittest import mock
         with mock.patch.object(D.os, "getpid", return_value=1), mock.patch.object(D.P, "scan_processes", return_value=rows):
-            return D._find_pid_by_session(sid)
+            return STOP._find_pid_by_session(sid)
 
     def test_find_pid_by_session_picks_tree_root(self):
         rows = [(100, 1, "supervisor"), (200, 999, "sh -c claude --session-id sid-tree-1"),
@@ -1588,7 +1596,7 @@ class DispatchRunTests(unittest.TestCase):
             "role": "researcher", "pid": None, "started": T.now_iso(datetime.now().astimezone()), "attempt": 0,
             "run_file": str(run_file), "err_file": "", "reason": "todo",
             "status_at_launch": "todo", "session_id": "finished-sid-1"}}}
-        with mock.patch.object(D, "_find_pid_by_session", return_value=None),                 mock.patch.object(D, "_finish_run") as fin:
+        with mock.patch.object(STOP, "_find_pid_by_session", return_value=None),                 mock.patch.object(D, "_finish_run") as fin:
             D.recover_active_runs(state, datetime.now().astimezone())
         self.assertEqual(fin.call_count, 1)
         self.assertEqual((state["active_runs"], dict(D.RUNNING)), ({}, {}))
@@ -1692,10 +1700,10 @@ class DispatchRunTests(unittest.TestCase):
         try:
             os.environ.update(LANG="ru_RU.UTF-8", LC_TIME="ru_RU.UTF-8", TZ="Asia/Dubai")
             os.environ.pop("LC_ALL", None)
-            first = D._ps_field(child.pid, "lstart")
+            first = PROCS._ps_field(child.pid, "lstart")
             for k in saved:
                 os.environ.pop(k, None)
-            second = D._ps_field(child.pid, "lstart")
+            second = PROCS._ps_field(child.pid, "lstart")
             self.assertTrue(first)
             self.assertEqual(first, second)
         finally:
@@ -1839,7 +1847,7 @@ class DispatchRunTests(unittest.TestCase):
         """Заявка `--next researcher` + тик: команда запуска, который диспетчер сделал в этом же тике."""
         calls = []
         D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
-        D.write_stop_request(tid, "researcher", "Новая постановка")
+        STOP.write_stop_request(tid, "researcher", "Новая постановка")
         D.tick()
         self.assertEqual(len(calls), 1, "роль стартует в том же тике")
         return calls[0]
@@ -1847,7 +1855,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_stop_kills_role_and_its_child_and_removes_request(self):
         path, child = self.start_tree_run()
         popen = D.RUNNING[path.stem]["popen"]
-        D.write_stop_request(path.stem, "", "Новая постановка")
+        STOP.write_stop_request(path.stem, "", "Новая постановка")
         D.tick()
         self.assertIsNotNone(popen.poll(), "роль снята")
         self.assertFalse(self._alive(child), "потомок роли снят вместе с ней")
@@ -1857,7 +1865,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_stop_without_next_parks_ticket_as_stopped_and_is_not_a_failure(self):
         path, _ = self.start_tree_run()
-        D.write_stop_request(path.stem, "", "Новая постановка: сделай X")
+        STOP.write_stop_request(path.stem, "", "Новая постановка: сделай X")
         D.tick()
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "stopped")
@@ -1898,7 +1906,7 @@ class DispatchRunTests(unittest.TestCase):
         state["ticket_sessions"] = {key: {"session_id": "old"}}
         D.save_state(state)
         self.assertIn(tid, state["launch_history"])
-        D.write_stop_request(tid, "", "x")
+        STOP.write_stop_request(tid, "", "x")
         D.tick()
         state = D.load_state()
         self.assertNotIn(key, state["idle_runs"])
@@ -1910,7 +1918,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_stop_without_running_role_still_applies_status_and_entry(self):
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Не запущена")
         T.write_header_updates(path, {"status": "waiting"})
-        D.write_stop_request(path.stem, "", "Новая постановка")
+        STOP.write_stop_request(path.stem, "", "Новая постановка")
         D.tick()
         tkt = T.read_ticket(path)
         self.assertEqual(tkt.status, "stopped")
@@ -1925,7 +1933,7 @@ class DispatchRunTests(unittest.TestCase):
         D._kill = lambda pid, **kw: None
         D.STOP_VERIFY_S = 0.3
         self.addCleanup(setattr, D, "_kill", real_kill)
-        D.write_stop_request(tid, "", "x")
+        STOP.write_stop_request(tid, "", "x")
         D.tick()
         D.tick()
         self.assertIn(tid, D.RUNNING)
@@ -1944,7 +1952,7 @@ class DispatchRunTests(unittest.TestCase):
         info["out_fh"].close()
         info["err_fh"].close()
         D.RUNNING.clear()  # «перезапуск диспетчера»: в памяти пусто, зеркало — в state.json
-        D.write_stop_request(path.stem, "", "x")
+        STOP.write_stop_request(path.stem, "", "x")
         D.tick()  # recover_active_runs подхватывает по pid, затем заявка снимает его
         self.assertFalse(self._alive(child))
         real_popen.wait(timeout=5)
@@ -1952,7 +1960,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.RUNNING, {})
 
     def test_stop_request_for_unknown_ticket_is_left_untouched(self):
-        D.write_stop_request("TK-404", "", "x")
+        STOP.write_stop_request("TK-404", "", "x")
         D.tick()
         self.assertTrue((CFG.STOP_DIR / "TK-404.json").exists())
 
@@ -2407,7 +2415,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_prompt_tells_role_to_use_tickets_comment(self):
         prompt = D.build_prompt("engineer", "TK-005")
         self.assertIn("comment TK-005 --author engineer", prompt)
-        self.assertNotIn("alpha", D.PROMPT_TEMPLATE.lower())  # плагин общий: слова проекта в шаблоне нет
+        self.assertNotIn("alpha", RA.PROMPT_TEMPLATE.lower())  # плагин общий: слова проекта в шаблоне нет
         self.assertIn((D.CODE_DIR / "tickets.py").as_posix(), prompt)  # запуск прямо из папки плагина
 
     # --- A5: тормоз цикла «запись есть, статус не меняется»
@@ -2567,7 +2575,7 @@ class DispatchRunTests(unittest.TestCase):
         return calls
 
     def test_default_review_returns_limit_is_two(self):
-        self.assertEqual(D.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2; CP8 — константа
+        self.assertEqual(SIG.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2; CP8 — константа
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
         path = self.review_setup()
@@ -3311,9 +3319,9 @@ class RateLimitTests(unittest.TestCase):
         """Суточный учёт — по календарной дате; никакого «превышено» нет (В-149)."""
         D._add_cost(self.state, self.now, 12.5)
         D._add_cost(self.state, self.now, 1.5)
-        self.assertAlmostEqual(self.state["daily_cost"][D._today(self.now)], 14.0)
+        self.assertAlmostEqual(self.state["daily_cost"][COST._today(self.now)], 14.0)
         tomorrow = self.now + timedelta(days=1)
-        self.assertNotIn(D._today(tomorrow), self.state["daily_cost"])
+        self.assertNotIn(COST._today(tomorrow), self.state["daily_cost"])
 
 
 class MoneyControlsTests(unittest.TestCase):
@@ -3339,10 +3347,10 @@ class MoneyControlsTests(unittest.TestCase):
     def test_classify_signal_defaults_to_wake(self):
         for kind in ("blocked", "needs_owner", "no-reviewer",
                      "mention", "parse-error", "какой-то-новый-вид-никто-не-обновил-таблицу"):
-            self.assertEqual(D.classify_signal(kind), "wake", kind)
+            self.assertEqual(SIG.classify_signal(kind), "wake", kind)
 
     def test_classify_signal_model_is_summary(self):
-        self.assertEqual(D.classify_signal("model"), "summary")
+        self.assertEqual(SIG.classify_signal("model"), "summary")
 
     def test_route_ceo_signal_wake_kind_appears_immediately(self):
         D.route_ceo_signal("TK-1", "blocked", "тест", self.state, self.now)
@@ -3356,14 +3364,14 @@ class MoneyControlsTests(unittest.TestCase):
         self.assertIn("не-opus модель X", CFG.CEO_INBOX.read_text(encoding="utf-8"))
 
     def test_route_ceo_signal_summary_batches_within_window(self):
-        D.flush_pending_summary(self.state, self.now)  # задаём точку отсчёта окна (пусто — просто маркер)
+        SIG.flush_pending_summary(self.state, self.now)  # задаём точку отсчёта окна (пусто — просто маркер)
         D.route_ceo_signal("TK-1", "model", "первая", self.state, self.now + timedelta(minutes=1))
         before = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         D.route_ceo_signal("TK-2", "model", "вторая", self.state, self.now + timedelta(minutes=2))
         after_immediate = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
         self.assertEqual(before, after_immediate, "вторая копится, не уходит немедленно внутри окна")
         D.route_ceo_signal("TK-3", "model", "третья", self.state,
-                            self.now + timedelta(hours=D.SUMMARY_EVERY_HOURS, minutes=5))
+                            self.now + timedelta(hours=SIG.SUMMARY_EVERY_HOURS, minutes=5))
         final = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertIn("вторая", final)
         self.assertIn("третья", final)
@@ -3516,14 +3524,14 @@ class MoneyControlsTests(unittest.TestCase):
         историческая примесь (например Fable из первого домодельного вызова сессии), не тревога."""
         current = {"claude-fable-5-1": {"costUSD": 6.25}, "claude-sonnet-5-5": {"costUSD": 2.49}}
         previous = {"claude-fable-5-1": {"costUSD": 6.25}, "claude-sonnet-5-5": {"costUSD": 2.04}}
-        diff = D._model_usage_diff(current, previous)
+        diff = COST._model_usage_diff(current, previous)
         self.assertNotIn("claude-fable-5-1", diff)
         self.assertIn("claude-sonnet-5-5", diff)
         self.assertIsNone(D._model_usage_warning(diff))  # sonnet вырос — тревоги нет, это ожидаемая модель
 
     def test_model_usage_diff_flags_new_other_family_model(self):
         current = {"claude-fable-5-1": {"costUSD": 1.0}}
-        diff = D._model_usage_diff(current, {})
+        diff = COST._model_usage_diff(current, {})
         self.assertIn("claude-fable-5-1", diff)
         self.assertIsNotNone(D._model_usage_warning(diff))
 
@@ -3555,9 +3563,9 @@ class MoneyControlsTests(unittest.TestCase):
         """Скользящий час по всем ролям — показатель для `tickets.py status`; никого не блокирует."""
         D._record_cost_event(self.state, self.now, 5.0)
         D._record_cost_event(self.state, self.now + timedelta(minutes=1), 7.0)
-        self.assertAlmostEqual(D._rolling_hour_cost(self.state, self.now + timedelta(minutes=2)), 12.0)
+        self.assertAlmostEqual(COST._rolling_hour_cost(self.state, self.now + timedelta(minutes=2)), 12.0)
         later = self.now + timedelta(hours=1, minutes=2)
-        self.assertAlmostEqual(D._rolling_hour_cost(self.state, later), 0.0, msg="час прошёл — окно очистилось")
+        self.assertAlmostEqual(COST._rolling_hour_cost(self.state, later), 0.0, msg="час прошёл — окно очистилось")
         self.assertFalse(CFG.CEO_INBOX.exists(), "учёт ничего не пишет CEO")
 
 
@@ -3569,8 +3577,8 @@ class ContextTokensTests(unittest.TestCase):
 
     def test_sum_is_plain_total_of_usage_dict(self):
         usage = {"input_tokens": 100, "cache_read_input_tokens": 200, "cache_creation_input_tokens": 50}
-        self.assertEqual(D._context_tokens_sum(usage), 350)
-        self.assertEqual(D._context_tokens_sum(None), 0)
+        self.assertEqual(RUNLOG.context_tokens_sum(usage), 350)
+        self.assertEqual(RUNLOG.context_tokens_sum(None), 0)
 
     def test_last_uses_final_iteration_when_present(self):
         result = {
@@ -3586,14 +3594,14 @@ class ContextTokensTests(unittest.TestCase):
         }
         # контекст последнего хода — только третья итерация, не сумма usage целиком (333 886)
         self.assertEqual(D._context_tokens_last(result), 162 + 50_000 + 2_000)
-        self.assertEqual(D._context_tokens_sum(result["usage"]), 300 + 300_000 + 33_586)
+        self.assertEqual(RUNLOG.context_tokens_sum(result["usage"]), 300 + 300_000 + 33_586)
 
     def test_last_without_iterations_and_transcript_is_only_a_lower_estimate(self):
         # живой смоук 27.09 (без iterations в реальном выводе на тот момент): ctx_sum=333886, ходов не 1; запасной
         # путь, когда нет ни iterations, ни транскрипта сессии (см. тесты транскрипта ниже)
         result = {"num_turns": 5, "usage": {"input_tokens": 162, "cache_read_input_tokens": 300_000,
                                              "cache_creation_input_tokens": 33_724}}
-        total = D._context_tokens_sum(result["usage"])
+        total = RUNLOG.context_tokens_sum(result["usage"])
         self.assertEqual(D._context_tokens_last(result), total // 5)
         self.assertLess(D._context_tokens_last(result), total)  # не завышен суммой всех ходов
 
@@ -3634,7 +3642,7 @@ class ContextTokensTests(unittest.TestCase):
     def test_single_turn_run_sum_equals_last(self):
         """Однократный запуск (как в большинстве фейковых тестов) — сумма и последний ход совпадают."""
         result = {"usage": {"input_tokens": 250_001}}
-        self.assertEqual(D._context_tokens_last(result), D._context_tokens_sum(result["usage"]))
+        self.assertEqual(D._context_tokens_last(result), RUNLOG.context_tokens_sum(result["usage"]))
 
 
 class HostSshTests(unittest.TestCase):
@@ -4064,13 +4072,13 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
         D.os.kill = lambda pid, sig: None                      # kill -0 «успешен» — как для зомби
         try:
             procs._proc_state = lambda pid: "Z"
-            self.assertFalse(D._pid_alive_posix(4242, ""))
+            self.assertFalse(PROCS._pid_alive_posix(4242, ""))
             procs._proc_state = lambda pid: "X"
-            self.assertFalse(D._pid_alive_posix(4242, ""))
+            self.assertFalse(PROCS._pid_alive_posix(4242, ""))
             procs._proc_state = lambda pid: "S"
-            self.assertTrue(D._pid_alive_posix(4242, ""))
+            self.assertTrue(PROCS._pid_alive_posix(4242, ""))
             procs._proc_state = lambda pid: None                    # /proc недоступен — по kill -0
-            self.assertTrue(D._pid_alive_posix(4242, ""))
+            self.assertTrue(PROCS._pid_alive_posix(4242, ""))
         finally:
             D.os.kill, procs._proc_state = orig_kill, orig_state
 
@@ -4082,13 +4090,13 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
         try:
             vals = {"stat": "S", "comm": "/usr/bin/vim"}
             procs._ps_field = lambda pid, field: vals.get(field)
-            self.assertFalse(D._pid_alive_posix(4242, "claude"))
+            self.assertFalse(PROCS._pid_alive_posix(4242, "claude"))
             vals["comm"] = "/opt/homebrew/bin/claude"
-            self.assertTrue(D._pid_alive_posix(4242, "claude"))
+            self.assertTrue(PROCS._pid_alive_posix(4242, "claude"))
             vals["stat"] = "Z"
-            self.assertFalse(D._pid_alive_posix(4242, "claude"))
+            self.assertFalse(PROCS._pid_alive_posix(4242, "claude"))
             vals.clear()                                          # ps ничего не знает — как раньше, по kill -0
-            self.assertTrue(D._pid_alive_posix(4242, "claude"))
+            self.assertTrue(PROCS._pid_alive_posix(4242, "claude"))
         finally:
             D.os.kill, procs._ps_field = o_kill, o_ps
             del procs.open
@@ -4098,9 +4106,9 @@ class ZombieAndInstanceLockTests(unittest.TestCase):
         child = subprocess.Popen([sys.executable, "-c", "pass"])
         try:
             deadline = time.time() + 10
-            while time.time() < deadline and D._proc_state(child.pid) != "Z":   # завершился, но не реапнут (wait не звали)
+            while time.time() < deadline and PROCS._proc_state(child.pid) != "Z":   # завершился, но не реапнут (wait не звали)
                 time.sleep(0.05)
-            self.assertEqual(D._proc_state(child.pid), "Z")
+            self.assertEqual(PROCS._proc_state(child.pid), "Z")
             self.assertFalse(D._pid_alive(child.pid, expect_name=""))
         finally:
             child.wait(timeout=10)
@@ -4263,9 +4271,9 @@ class ProjectRootTests(unittest.TestCase):
 
     def test_cli_hints_use_sys_executable(self):  # TK-110 В-1
         with mock.patch("shutil.which", return_value="/usr/bin/python"):
-            self.assertTrue(D.tickets_cli().startswith("python "))
+            self.assertTrue(RA.tickets_cli().startswith("python "))
         with mock.patch("shutil.which", return_value=None):
-            cli = D.tickets_cli()
+            cli = RA.tickets_cli()
             self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
 
     def test_tickets_cli_from_subfolder_creates_ticket_in_project_root(self):

@@ -53,6 +53,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
 import cfg as cfg_mod  # noqa: E402
 import dispatch as D  # noqa: E402
+import signals as SIG  # noqa: E402
+import cost as COST  # noqa: E402
+import stop as STOP  # noqa: E402
 import config as CFG  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import project as P  # noqa: E402
@@ -118,8 +121,8 @@ def cmd_new(args) -> int:
 
     if args.executor == "haiku":
         # судья TK-002 п.5г: обход проверки Судьи запрещён — отказ до создания файла, не постфактум
-        if args.kind not in D.HAIKU_ALLOWED_KINDS:
-            print(f"--executor haiku требует --kind из {sorted(D.HAIKU_ALLOWED_KINDS)}", file=sys.stderr)
+        if args.kind not in SIG.HAIKU_ALLOWED_KINDS:
+            print(f"--executor haiku требует --kind из {sorted(SIG.HAIKU_ALLOWED_KINDS)}", file=sys.stderr)
             return 1
         if reviewer == "judge":
             print("--executor haiku нельзя вместе с --reviewer judge — числа/вердикты не на Haiku",
@@ -175,7 +178,7 @@ def cmd_comment(args) -> int:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
             T.write_header_updates(path, {"next": nxt}, stamp_updated=False)
             # №15 аудита: blocked + next: роль — запись без запуска; ход роли снимает blocked (иначе тикет висит с будильником)
-            if nxt in D.P.ROLES and T.read_ticket(path).status == "blocked":
+            if nxt in P.ROLES and T.read_ticket(path).status == "blocked":
                 T.write_header_updates(path, {"status": "in_progress"}, stamp_updated=False)
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
@@ -220,7 +223,7 @@ def _result_proof(args, role: str, tkt) -> str:
         head, _ = routes_mod.tracked_at_head(PROJECT_ROOT, args.path)  # TK-225: формальное закрытие по артефакту в git
         proof = f" закрыт по артефакту {args.path}@{head}"
     if args.result == "done" and role == "ceo":
-        proof += f" ({D.NO_REVIEW_MARK})"
+        proof += f" ({SIG.NO_REVIEW_MARK})"
     return proof
 
 
@@ -309,7 +312,7 @@ def cmd_result(args) -> int:
 def _caller_role() -> str:
     """Роль вызывающей сессии: `RPV_ROLE` запуска роли, а стёрта — по дереву процессов (`project.caller_role`); у CEO и
     владельца её нет."""
-    return D.P.caller_role(CFG.PROJECT_ROOT)
+    return P.caller_role(CFG.PROJECT_ROOT)
 
 
 def _decisions_ack(args) -> tuple[str, str]:
@@ -470,7 +473,7 @@ def cmd_accept(args) -> int:
         return 1
     import merge_rule
     import routes
-    slug = (getattr(args, "repo", None) or D.P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
+    slug = (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
@@ -604,7 +607,7 @@ def cmd_stop(args) -> int:
     if not text:
         print("stop: --text пуст — нужна новая постановка", file=sys.stderr)
         return 1
-    D.write_stop_request(path.stem, args.next or "", text)
+    STOP.write_stop_request(path.stem, args.next or "", text)
     print(f"{args.id}: заявка на остановку принята — на ближайшем тике диспетчер снимет запущенную роль; дальше: "
           + (f"todo, next: {args.next}" if args.next else "status: stopped (не будить)"))
     return 0
@@ -775,8 +778,8 @@ def cmd_status(args) -> int:
             print(f"{tkt.id}: {left}")
         if by_left := T.by_left_text(tkt, now):
             print(f"{tkt.id}: {by_left}")
-    print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(D._today(now), 0.0):.2f}, "
-          f"за последний час ${D._rolling_hour_cost(state, now):.2f}")
+    print(f"потрачено: за сутки ${state.get('daily_cost', {}).get(COST._today(now), 0.0):.2f}, "
+          f"за последний час ${COST._rolling_hour_cost(state, now):.2f}")
     return 0
 
 
