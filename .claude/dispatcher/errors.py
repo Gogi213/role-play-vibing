@@ -31,6 +31,11 @@ FAIL («менять проверку можно только через Суд�
 Записи в `.claude/errors/` напрямую роли запуска (`RPV_ROLE`) не пишут — страж (`delete_guard.py`) закрывает каталог; пишет скрипт.
 Отказ приёмки из-за упавшей проверки (регресс) дописывает строку в `<проект>/.claude/dispatcher/regressions.log`: время, тикет,
 упавшие ошибки через запятую (поля — через табуляцию); её читает ежедневный отчёт (`report.py`, критерий 7).
+У проверки три исхода: прошла, упала (код ≠ 0 — регресс, работа возвращается) и «не запустилась» (не стартовала — OSError — или не
+уложилась в срок): не проверено, не вина работы. Отказ тогда велит ждать (`wait at:…`), а не возвращать; в regressions.log
+строка с четвёртым полем `infra` (регрессом в отчёте не считается); после 3 таких отказов подряд по тикету — сигнал CEO. Читать
+вывод проверки на «BUILD FAILED» и подобное нельзя: его печатает и ошибка компиляции в самой работе.
+Исправление, чей `fixed_sha` не предок головы каталога запуска (ветка PR ещё не влита), приёмка пропускает: «исправление ещё не влито».
 """
 from __future__ import annotations
 
@@ -57,6 +62,8 @@ SCRIPT_DIRS = ("tools", ".claude")
 PYTEST_FLAGS = ("-q", "-qq", "-v", "-vv", "-x", "-s")
 UNITTEST_FLAGS = ("-q", "-v", "-f", "-b")
 CHECK_TIMEOUT_S = 300.0   # одна проверка; дольше — убита деревом процессов
+INFRA_MAX = 3             # приёмок подряд с «не запустилась» без сигнала CEO; следующая — сигнал
+NOT_MERGED = "исправление ещё не влито"
 TAIL = 600     # знаков конца вывода проверки в отказе
 SHOWN = 5      # сколько упавших проверок раскрывает отказ приёмки
 
@@ -171,8 +178,10 @@ def _tail(b, limit: int = TAIL) -> str:
     return (b or b"").decode("utf-8", "replace").strip()[-limit:]
 
 
-def run_check(argv, cwd: Path, timeout: float) -> tuple[bool, str]:
-    """Прогон одной проверки в `cwd`. (True, "") — код 0; иначе (False, причина и конец вывода). Вывод — во временный
+def run_check(argv, cwd: Path, timeout: float) -> tuple[bool | None, str]:
+    """Прогон одной проверки в `cwd`. (True, "") — код 0; (False, причина и конец вывода) — красная (код ≠ 0); (None, причина) —
+    «не запустилась»: не стартовала (OSError) или не уложилась в срок. Это «не проверено», а не «проверка упала»: «BUILD FAILED»
+    печатает и ошибка компиляции в самой работе, поэтому по тексту вывода инфраструктуру не отличаем. Вывод — во временный
     файл, не в трубу: внук, переживший убитую проверку, не повесит чтение. Таймаут — дерево процессов убито."""
     run_argv = [sys.executable if argv[0] in ("python", "python3") else argv[0], *argv[1:]]   # тот же Python, что у команды
     kw = hide.hidden() if os.name == "nt" else {"start_new_session": True}
@@ -182,7 +191,7 @@ def run_check(argv, cwd: Path, timeout: float) -> tuple[bool, str]:
             proc = subprocess.Popen(run_argv, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, env=env, **kw)
         except OSError as e:
-            return False, f"не запустилась: {type(e).__name__}: {e}"
+            return None, f"не запустилась: {type(e).__name__}: {e}"
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -198,7 +207,7 @@ def run_check(argv, cwd: Path, timeout: float) -> tuple[bool, str]:
     if code == 0:
         return True, ""
     why = f"таймаут {timeout:g} с, дерево процессов убито" if code is None else f"код {code}"
-    return False, why + (f"\n{tail}" if tail else "")
+    return (False if code is not None else None), why + (f"\n{tail}" if tail else "")
 
 
 def _seconds(v) -> float:
@@ -370,11 +379,20 @@ def run_before(argv, cwd: Path, sha: str, timeout: float) -> tuple:
         _git(cwd, "worktree", "prune")
 
 
-def run_all(root: Path, cwd=None, timeout: float | None = None, report=None) -> list:
+def _not_merged(cwd: Path, sha: str) -> bool:
+    """`fixed_sha` известен git, но не предок головы `cwd`: исправление лежит в невлитой ветке — проверять его здесь нечем и рано.
+    Неизвестный коммит или не git — не «не влито» (дальше решает обычная сверка)."""
+    r = _git(cwd, "merge-base", "--is-ancestor", sha, "HEAD") if sha else None
+    return r is not None and r.returncode == 1
+
+
+def run_all(root: Path, cwd=None, timeout: float | None = None, report=None, infra: list | None = None) -> list:
     """Проверки всех исправленных ошибок в `cwd` (по умолчанию корень проекта). -> [(E-NNN, название, причина)] упавших;
     пусто — всё зелёно или проверять нечего. `report(E-NNN, название, ok, причина)` — по каждой проверке (вывод `run`); у
     прошедшей причина — пометка, если сверку файла проверки с `fixed_sha` пришлось пропустить. Перед запуском файлы проверки в
-    `cwd` сверяются с версией на `fixed_sha`: изменены после исправления — FAIL, проверка не запускается."""
+    `cwd` сверяются с версией на `fixed_sha`: изменены после исправления — FAIL, проверка не запускается. Исправление, чей
+    `fixed_sha` не предок головы `cwd`, пропускается («исправление ещё не влито»). Проверка «не запустилась» (`run_check` дал
+    None): в `infra`, если список передан (в упавшие не идёт), иначе — в упавшие, как раньше; `report` получает ok=None."""
     cwd = Path(cwd or root)
     bad = []
     for eid, path in errors(root).items():
@@ -382,7 +400,9 @@ def run_all(root: Path, cwd=None, timeout: float | None = None, report=None) -> 
         if h.get("status") != "fixed":
             continue
         title, spec = h.get("title", ""), h.get("check", "")
-        if not spec:
+        if _not_merged(cwd, h.get("fixed_sha", "")):
+            ok, note = True, NOT_MERGED
+        elif not spec:
             ok, note = False, "исправлена без проверки (check пуст) — приложить проверку или вернуть в open"
         else:
             argv, why = check_argv(spec, cwd)
@@ -397,33 +417,80 @@ def run_all(root: Path, cwd=None, timeout: float | None = None, report=None) -> 
                     note = skipped if ok else note
         if report:
             report(eid, title, ok, note)
-        if not ok:
+        if ok is None and infra is not None:
+            infra.append((eid, title, note))
+        elif not ok:
             bad.append((eid, title, note))
     return bad
 
 
-def _log_refusal(root: Path, tid: str, bad: list) -> None:
-    """Отказ приёмки из-за регресса — строка «время · тикет · упавшие ошибки» в regressions.log (мера критерия 7: должно
-    быть 0). Сбой записи приёмку не ломает."""
+def _log_line(root: Path, tid: str, eids: list, mark: str = "") -> None:
+    """Строка regressions.log: время, тикет, ошибки через запятую (мера критерия 7: регрессов должно быть 0) и, если это не
+    регресс, пометка: `infra` — проверка не запустилась, `ok` — приёмка прошла (обрывает счёт «подряд»). Сбой записи
+    приёмку не ломает."""
     try:
         d = root / ".claude" / "dispatcher"
         d.mkdir(parents=True, exist_ok=True)
         with (d / "regressions.log").open("a", encoding="utf-8") as f:
-            f.write("\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), tid or "-",
-                               ",".join(eid for eid, _, _ in bad))) + "\n")
+            f.write("\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), tid or "-", ",".join(eids),
+                               *([mark] if mark else []))) + "\n")
     except OSError:
         pass
 
 
-def gate(root: Path, tid: str = "") -> str:
-    """Приёмка Судьи: пусто — проверки всех исправленных ошибок зелёные (или их нет), принимать можно; иначе текст отказа.
-    Идут в worktree тикета `.claude/worktrees/<ID>`, если он есть, иначе в корне проекта."""
+def _infra_streak(root: Path, tid: str) -> int:
+    """Сколько приёмок тикета подряд закончились «не запустилась»: последние его строки regressions.log с пометкой `infra`
+    (строка регресса или `ok` счёт обрывает; строки других тикетов не в счёт)."""
+    try:
+        lines = (root / ".claude" / "dispatcher" / "regressions.log").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    n = 0
+    for ln in reversed(lines):
+        f = ln.split("\t")
+        if len(f) < 3 or f[1] != (tid or "-"):
+            continue
+        if f[3:4] != ["infra"]:
+            break
+        n += 1
+    return n
+
+
+def _infra_refusal(root: Path, tid: str, cwd: Path, infra: list, signal) -> str:
+    """Приёмка не смогла проверить: отказ «не проверено, не вина работы», строка infra в regressions.log, а на повторе сверх
+    потолка INFRA_MAX — ещё и сигнал CEO через `signal(tid, вид, текст)`."""
+    n = _infra_streak(root, tid) + 1
+    _log_line(root, tid, [eid for eid, _, _ in infra], "infra")
+    lines = [f"{eid} «{title}»: " + note.replace("\n", "\n    ") for eid, title, note in infra[:SHOWN]]
+    if len(infra) > SHOWN:
+        lines.append(f"…и ещё не запустилось: {len(infra) - SHOWN}")
+    text = (f"не проверено — проверка не запустилась (прогон в {cwd}):\n" + "\n".join(lines)
+            + "\nНе проверено, не вина работы: не return. Поставь `wait <ID> at:<время ISO, +10–15 мин>` и повтори приёмку "
+              f"позже; запись в тикете не сделана. Подряд не запустилась: {n} из {INFRA_MAX} допустимых.")
+    if n > INFRA_MAX:
+        if signal:
+            signal(tid or "-", "проверка-не-запустилась", f"приёмка не смогла проверить {n} раз подряд: "
+                   + ", ".join(eid for eid, _, _ in infra) + f" (прогон в {cwd})")
+        text += " Потолок исчерпан — CEO позван, не повторяй."
+    return text
+
+
+def gate(root: Path, tid: str = "", signal=None) -> str:
+    """Приёмка Судьи: пусто — проверки всех исправленных ошибок зелёные (или их нет), принимать можно; иначе текст отказа:
+    регресс (проверка красная) — вернуть работу; «не запустилась» (OSError, таймаут) — не проверено, ждать и повторить, с
+    четвёртого раза подряд ещё и `signal` (сигнал CEO). Идут в worktree тикета `.claude/worktrees/<ID>`, если он есть,
+    иначе в корне проекта."""
     wt = root / ".claude" / "worktrees" / tid
     cwd = wt if tid and wt.is_dir() else root
-    bad = run_all(root, cwd)
+    infra = []
+    bad = run_all(root, cwd, infra=infra)
     if not bad:
+        if infra:
+            return _infra_refusal(root, tid, cwd, infra, signal)
+        if _infra_streak(root, tid):
+            _log_line(root, tid, [], "ok")
         return ""
-    _log_refusal(root, tid, bad)
+    _log_line(root, tid, [eid for eid, _, _ in bad])
     lines = [f"{eid} «{title}»: " + note.replace("\n", "\n    ") for eid, title, note in bad[:SHOWN]]
     if len(bad) > SHOWN:
         lines.append(f"…и ещё упавших: {len(bad) - SHOWN}")
@@ -558,11 +625,12 @@ def cmd_run(a, root: Path) -> int:
     def report(eid, title, ok, note):
         seen.append(eid)
         print(f"{eid} ok — {title}" + (f" ({note})" if note else "") if ok
-              else f"{eid} FAIL — {title}: " + note.replace("\n", "\n    "))
-    bad = run_all(root, cwd, a.timeout, report)
+              else f"{eid} {'FAIL' if ok is False else 'НЕ ЗАПУСТИЛАСЬ'} — {title}: " + note.replace("\n", "\n    "))
+    infra = []
+    bad = run_all(root, cwd, a.timeout, report, infra)
     if not seen:
         print("исправленных ошибок с проверками нет")
-    return 1 if bad else 0
+    return 1 if bad else 2 if infra else 0
 
 
 def cmd_show(a, root: Path) -> int:
@@ -601,7 +669,7 @@ def main(argv=None) -> int:
     fx.add_argument("--timeout", type=float, default=None, help=f"секунд на проверку (по умолчанию {CHECK_TIMEOUT_S:g})")
     fx.add_argument("--cwd", default=None, help="каталог запуска (по умолчанию корень проекта), например worktree тикета")
     fx.set_defaults(func=cmd_fix)
-    rn = sub.add_parser("run", help="проверки всех исправленных ошибок; упала любая — код 1")
+    rn = sub.add_parser("run", help="проверки всех исправленных ошибок; упала любая — код 1, не запустилась (OSError, таймаут) — 2")
     rn.add_argument("--cwd", default=None)
     rn.add_argument("--timeout", type=float, default=None, help="секунд на каждую проверку (поверх записи ошибки)")
     rn.set_defaults(func=cmd_run)
