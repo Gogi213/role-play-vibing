@@ -325,7 +325,7 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
 def cmd_regrade(a) -> int:
     """Проверки заново по сохранённым ответам и рабочим копиям: эталон или проверка поправлены — запуски не нужны."""
     data, out = Path(a.data).resolve(), Path(a.out).resolve()
-    cases = {c["id"]: c for c in (json.loads(l) for l in (data / "cases.jsonl").open(encoding="utf-8") if l.strip())}
+    cases = {c["id"]: c for c in read_jsonl(data / "cases.jsonl")}
     rows = {}
     for r in read_jsonl(out / "results.jsonl"):
         rows[(r["id"], r["model"])] = r
@@ -393,7 +393,7 @@ def cmd_run(a) -> int:
     # resolve(): короткое имя Windows (`ABCD~1`) Claude Code считает подозрительным и не даёт писать без вопроса
     data, out = Path(a.data).resolve(), Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    cases = [json.loads(l) for l in (data / "cases.jsonl").open(encoding="utf-8") if l.strip()]
+    cases = read_jsonl(data / "cases.jsonl")
     tasks = set(a.tasks.split(","))
     only = set(a.only.split(",")) if a.only else None
     cases = [c for c in cases if c["task"] in tasks and (only is None or c["id"] in only)]
