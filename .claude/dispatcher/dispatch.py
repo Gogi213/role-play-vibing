@@ -246,41 +246,33 @@ def _resume_store(state: dict, tid: str, role: str) -> dict:
     return state.setdefault("ticket_sessions", {}).setdefault(f"{tid}::{role}", {})
 
 
-_tokens_of = transcript.context_of
 
 
-def _context_tokens_sum(usage: dict) -> int:
-    """Сумма input+cache_read+cache_creation по ВСЕМУ usage из JSON `claude -p` — это сумма по всем
-    ходам запуска, не контекст одного хода (см. _context_tokens_last). Для runs.log (ctx_sum=)."""
-    return _tokens_of(usage)
+
+
+
+
+
+
+import runlog as RL  # noqa: E402
+from runlog import (  # noqa: E402,F401 — итог запуска в runs.log вынесен в runlog.py; имена для finish и тестов
+    tokens_of as _tokens_of, context_tokens_sum as _context_tokens_sum, read_run_result as _read_run_result)
 
 
 def _transcript_last_turn_tokens(session_id) -> int:
-    """Контекст ПОСЛЕДНЕГО хода сессии по её транскрипту (usage последнего ответа модели); 0 — транскрипта нет."""
-    path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
-    return transcript.last_turn_tokens(path) if path else 0
+    return RL.transcript_last_turn_tokens(session_id, CLAUDE_PROJECTS_DIR)
 
 
 def _context_tokens_last(result: dict) -> int:
-    """Контекст, который реально понесёт следующий `--resume` — последний ход ЭТОГО запуска, не сумма
-    по всем его ходам: usage в JSON claude -p суммирует по ходам, и на многоходовом запуске это
-    завышает контекст в разы, рвя ротацию раньше времени (CEO 27.09, живой прогон: ctx_sum=333 886
-    при реальном контексте хода ~52 тыс.). usage.iterations[-1] — контекст последнего хода; нет
-    iterations (аудит 03.10) — последний ход из транскрипта сессии; нет и его — запасная оценка
-    ctx_sum // num_turns (среднее по ходам, занижена)."""
-    usage = result.get("usage") or {}
-    iterations = usage.get("iterations")
-    if isinstance(iterations, list) and iterations:
-        return _tokens_of(iterations[-1])
-    last = _transcript_last_turn_tokens(result.get("session_id"))
-    if last:
-        return last
-    total = _context_tokens_sum(usage)
-    try:
-        num_turns = int(result.get("num_turns") or 1) or 1
-    except (TypeError, ValueError):
-        num_turns = 1
-    return total // num_turns
+    return RL.context_tokens_last(result, CLAUDE_PROJECTS_DIR)
+
+
+def _transcript_usage_since(session_id, started) -> dict:
+    return RL.transcript_usage_since(session_id, started, CLAUDE_PROJECTS_DIR)
+
+
+def _log_run_summary(*args, **kwargs) -> None:
+    RL.log_run_summary(CLAUDE_PROJECTS_DIR, *args, **kwargs)
 
 
 def _role_busy(role: str) -> bool:
@@ -466,74 +458,10 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     save_state(state)
 
 
-def _read_run_result(run_file: Path) -> dict:
-    try:
-        data = Path(run_file).read_text(encoding="utf-8").strip()
-        return json.loads(data) if data else {}
-    except Exception:
-        return {}
 
 
-def _transcript_usage_since(session_id, started) -> dict:
-    """Токены запуска по транскрипту сессии (TK-055): сумма usage ответов модели с отметкой >= started (ISO или
-    datetime), по одному на message.id (потоковые дубли — последний). Для запусков без JSON (таймаут/убит): {} —
-    сессии/транскрипта нет."""
-    try:
-        path = transcript.find(CLAUDE_PROJECTS_DIR, session_id)
-        if path is None:
-            return {}
-        t0 = started if isinstance(started, datetime) else P.parse_time(started, strict=True)
-        if t0.tzinfo is None:
-            t0 = t0.astimezone()
-        per = {}
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if '"usage"' not in line:
-                    continue
-                try:
-                    row = json.loads(line)
-                    ts = P.parse_time(row["timestamp"], strict=True)
-                except Exception:
-                    continue
-                msg = row.get("message") or {}
-                u = msg.get("usage")
-                if ts >= t0 and isinstance(u, dict):
-                    per[msg.get("id") or row.get("uuid") or len(per)] = u
-        tot = {"input_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 0}
-        for u in per.values():
-            for k in tot:
-                tot[k] += int(u.get(k) or 0)
-        return tot if per else {}
-    except Exception:
-        return {}
 
 
-def _log_run_summary(tid: str, info: dict, result: dict, now, timed_out: bool, resolved_cost: float,
-                      ticket_spent: float, cost_note: bool = False, stopped: bool = False) -> None:
-    CFG.RUNS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    usage = result.get("usage") or {}
-    src = "json"
-    if not usage:  # таймаут/убит: токены — из транскрипта сессии с момента старта запуска
-        usage = _transcript_usage_since(info.get("session_id"), info.get("started")) or {}
-        src = "jsonl" if usage else "none"
-    status = ("stopped" if stopped else "timeout" if timed_out else "api_error" if _api_error(result)
-              else ("ok" if result else "no_output"))
-    # cost_usd — сырой (кумулятивный за сессию) из JSON; resolved_cost — разница с прошлым итогом ТОЙ ЖЕ
-    # session_id (судья TK-002 п.1) — то, что реально начислено этому запуску; cost_note=asis — не было
-    # с чем сравнить (новая/ротированная сессия) или разница < 0 — использован сырой итог как есть.
-    # ticket_spent — накоплено по ЭТОЙ задаче ПОСЛЕ этого запуска (колонка CEO, роль её не видит).
-    line = (f"{T.now_iso(now)} {tid} {info['role']} reason={info.get('reason')} "
-            f"attempt={info.get('attempt', 0)} session={result.get('session_id') or info.get('session_id') or '-'} "
-            f"cost_usd={result.get('total_cost_usd', '-')} resolved_cost={resolved_cost:.4f} "
-            f"cost_note={'asis' if cost_note else 'diff'} ticket_spent={ticket_spent:.4f} "
-            f"in_tok={usage.get('input_tokens', '-')} out_tok={usage.get('output_tokens', '-')} "
-            f"cr_tok={usage.get('cache_read_input_tokens', '-')} cw_tok={usage.get('cache_creation_input_tokens', '-')} "
-            f"tok_src={src} "
-            f"ctx_last={_context_tokens_last(result)} ctx_sum={_context_tokens_sum(usage)} "
-            f"terminal_reason={result.get('terminal_reason') or '-'} is_error={result.get('is_error', '-')} "
-            f"status={status}\n")
-    with open(CFG.RUNS_LOG, "a", encoding="utf-8") as fh:
-        fh.write(line)
 
 
 def _role_logged(tkt: T.Ticket, role: str, info: dict) -> bool:
@@ -829,137 +757,30 @@ def run_on_met(path: Path, tkt: T.Ticket, state: dict, now) -> bool:
 
 
 IDLE_SLO_MIN = 10.0
-IDLE_GRACE_S = 600.0
-INVARIANT_GRACE_S = 600.0  # TK-076 п.6: открытый тикет без хода дольше этого — владельца будим сами
-LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее часа: дальше пробный запуск (429 бесплатен), новая метка — новая пауза
-
-
-def _waits_without_condition(tkt: T.Ticket, now) -> bool:
-    if tkt.status != "waiting" or tkt.owner not in P.ROLES or tkt.next_role:
-        return False
-    if (tkt.header.get("wait_for") or "").strip():
-        return False
-    try:
-        return (now - T.parse_dt(tkt.header.get("updated", ""))).total_seconds() > IDLE_GRACE_S
-    except Exception:
-        return False
-
-
-def _drop_ceo_handoff(state: dict, tid: str) -> None:
-    (state.get("ceo_handoffs") or {}).pop(tid, None)
-    (state.get("ceo_handoff_reminded") or {}).pop(tid, None)
+import handoff as HO  # noqa: E402
+from handoff import (  # noqa: E402,F401 — ход у открытого тикета вынесен в handoff.py; имена для tick и тестов
+    IDLE_GRACE_S, INVARIANT_GRACE_S, _waits_without_condition, _drop_ceo_handoff, _ceo_handoff_pending, _no_move_reason,
+    enforce_move_invariant, notify_wait_cycle)
 
 
 def _expire_ceo_handoff(tkt: T.Ticket, state: dict) -> None:
-    """Метка передачи CEO кончается на тике, как только тикет вышел из ожидания (waiting/in_review): CEO вернул его
-    шапкой, done/stopped/blocked. Запуск любой роли и запись CEO снимают её в launch_run / _ceo_handoff_pending."""
-    at = (state.get("ceo_handoffs") or {}).get(tkt.id)
-    if not at or tkt.id in RUNNING or tkt.status in ("waiting", "in_review"):
-        return
-    # `--next ceo` и смена статуса роли — две команды: тик между ними видит старый статус при свежей метке. Статус
-    # сменили после метки (updated новее) — это ход CEO/роли; иначе метку не трогаем, роль ещё допишет `waiting`.
-    try:
-        if tkt.status in ("todo", "in_progress") and T.parse_dt(tkt.header.get("updated", "")) <= T.parse_dt(at):
-            return
-    except (ValueError, TypeError):
-        pass
-    _drop_ceo_handoff(state, tkt.id)
+    HO.expire_ceo_handoff(tkt, state, RUNNING)
+
+LIMIT_PAUSE_MAX = timedelta(hours=1)  # пауза 429 не длиннее часа: дальше пробный запуск (429 бесплатен), новая метка — новая пауза
 
 
-def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
-    """Передача CEO (`--next ceo`) — ход, пока CEO не ответил: метка живёт до первой записи CEO после неё (или смены
-    статуса на не-ожидание). Без ответа дольше INVARIANT_GRACE_S — одна повторная строка CEO, владельца не будим."""
-    handoffs = state.get("ceo_handoffs") or {}
-    at = handoffs.get(tkt.id)
-    if not at:
-        return False
-    try:
-        at_dt = T.parse_dt(at)
-    except (ValueError, TypeError):
-        handoffs.pop(tkt.id, None)
-        return False
-    if tkt.status not in ("waiting", "in_review") or any(
-            T.author_is(e.author, "ceo") and e.ts >= at_dt.replace(microsecond=0) for e in tkt.log):
-        handoffs.pop(tkt.id, None)
-        return False
-    if (now - at_dt).total_seconds() > INVARIANT_GRACE_S:
-        reminded = state.setdefault("ceo_handoff_reminded", {})
-        if reminded.get(tkt.id) != at:
-            reminded[tkt.id] = at
-            append_ceo_inbox(tkt.id, "ждёт-ceo", f"передача CEO без ответа дольше {int(INVARIANT_GRACE_S // 60)} мин "
-                             f"(владельца не будим, ход за CEO)", now)
-    return True
 
 
-def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | None":
-    """TK-076 п.6: у открытого тикета есть ход — роль запущена / next / годный wait_for / передача CEO. Здесь —
-    тикет, которого decide() не будит, а хода нет дольше INVARIANT_GRACE_S (от `updated`): причина или None."""
-    if tkt.next_role or tkt.status not in ("waiting", "in_review"):
-        return None
-    try:
-        last = T.parse_dt(tkt.header.get("updated", ""))
-        # `tickets.py comment` без --next `updated` не двигает: запись CEO и смена статуса — две команды, грейс считаем и от записи
-        stamps = [e.ts for e in tkt.log[-1:] if e.ts <= now.replace(microsecond=0)]
-        if (now - max([last] + stamps)).total_seconds() <= INVARIANT_GRACE_S:
-            return None
-    except Exception:
-        return None
-    if state is not None and _ceo_handoff_pending(tkt, state, now):
-        return None
-    if tkt.status == "waiting":
-        spec = (tkt.header.get("wait_for") or "").strip()
-        if not spec:
-            return "waiting без wait_for и без next"
-        if T.parse_wait_for(spec) is None:
-            return f"wait_for не понят ({spec[:80]})"
-        return None
-    if tkt.reviewer in P.ROLES and _review_returns(state or {}, tkt.id) < MAX_REVIEW_RETURNS:  # предел — вопрос CEO
-        return "in_review: последняя запись — ревьюера, статус не сменён, next не задан"
-    return None
 
 
-def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ticket":
-    """Нарушение инварианта: будим владельца (status → in_progress, запись диспетчера) + строка CEO (раз на эпизод)."""
-    reason = _no_move_reason(tkt, now, state)
-    if not reason:
-        return tkt
-    STALLED.append(_stall_title(tkt))
-    key = f"{tkt.id}|{tkt.header.get('updated', '')}"
-    sig = state.setdefault("invariant_signaled", {})
-    if sig.get(tkt.id) != key:
-        sig[tkt.id] = key
-        append_ceo_inbox(tkt.id, "нет-хода", f"{reason} дольше {int(INVARIANT_GRACE_S // 60)} мин — "
-                         + (f"владелец {tkt.owner} разбужен" if tkt.owner in P.ROLES else "владельца-роли нет, нужен CEO"), now)
-    if tkt.owner not in P.ROLES:
-        return tkt
-    T.write_header_updates(path, {"status": "in_progress"}, now=now)
-    T.append_log(path, "dispatcher", f"инвариант «у открытого тикета есть ход»: {reason} — владелец разбужен "
-                 f"(status: in_progress). Следующий ход обязателен: работа / `--next <роль>` / "
-                 f"`tickets.py wait <ID> <форма>` / вопрос владельцу.", now=now)
-    return T.read_ticket(path)
 
 
-def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
-    """TK-076 п.7: уже существующий цикл ожиданий ticket:<ID> → строка CEO (раз в сутки, от тикета с наименьшим ID)."""
-    if tkt.status != "waiting":
-        return
-    parsed = T.parse_wait_for(tkt.header.get("wait_for", ""))
-    if not parsed or parsed[0] != "ticket":
-        return
-    cycle = T.wait_cycle(CFG.TICKETS_DIR, tkt.id, parsed[1])
-    if not cycle or tkt.id != min(cycle[:-1]):
-        return
-    STALLED.append(_stall_title(tkt))
-    notified = state.setdefault("ceo_wait_cycle_notified", {})
-    prev = notified.get(tkt.id)
-    if prev:
-        try:
-            if now - T.parse_dt(prev) < WAIT_NOTICE_EVERY:
-                return
-        except ValueError:
-            pass
-    append_ceo_inbox(tkt.id, "цикл-ожиданий", " -> ".join(cycle) + " — каждый ждёт следующего, никто не пойдёт; разорвать", now)
-    notified[tkt.id] = T.now_iso(now)
+
+
+
+
+
+
 
 
 STALL_ALARM_MIN = 15.0  # CP5: столько минут подряд стоит готовая работа — тревога
