@@ -5,11 +5,15 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
 import dispatch as D  # noqa: E402
+import doctor as DOC  # noqa: E402
+import heartbeat as HB  # noqa: E402
+import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
 import transcript as TR  # noqa: E402
 import watch as W  # noqa: E402
@@ -98,6 +102,32 @@ class UsageKeys(unittest.TestCase):
         self.write(_row(100), '{"usage": [', '[1, 2, "usage"]', '{"message": "usage"}')
         self.assertEqual(TR.last_turn_tokens(self.path), 100)
         self.assertEqual(TR.last_turn_tokens(self.dir / "none.jsonl"), 0)
+
+
+class HeartbeatStale(unittest.TestCase):
+    """Свежесть сердцебиения: сторож служб ждал 600 с, хук подсказок — 240 с. Теперь порог один — `heartbeat.STALE_S`."""
+
+    def test_one_threshold(self):
+        self.assertEqual(HB.STALE_S, 600.0)
+        self.assertEqual(SV.STALE_S, HB.STALE_S)
+        self.assertIs(SV.heartbeat_age, HB.read_age)
+        src = (Path(__file__).resolve().parent.parent / "hooks" / "role_memory.py").read_text(encoding="utf-8")
+        self.assertNotIn("WATCH_STALE_S", src)
+        self.assertIn("heartbeat.STALE_S", src)
+
+    def test_age(self):
+        now = datetime.now().astimezone()
+        f = Path(tempfile.mkdtemp()) / "hb.json"
+        f.write_text(json.dumps({"ts": (now - timedelta(seconds=90)).isoformat()}), encoding="utf-8")
+        self.assertAlmostEqual(HB.read_age(f, "ts", now.timestamp()), 90, delta=1)
+        f.write_text(json.dumps({"ts": (now - timedelta(seconds=90)).isoformat().replace("+00:00", "Z")}), encoding="utf-8")
+        self.assertIsNotNone(HB.read_age(f, "ts", now.timestamp()))
+        self.assertIsNone(HB.read_age(f.with_name("none.json"), "ts", now.timestamp()))
+
+    def test_decide_and_doctor_share_it(self):
+        self.assertEqual(SV.decide(HB.STALE_S - 1, True), "ok")
+        self.assertEqual(SV.decide(HB.STALE_S + 1, True), "restart")
+        self.assertIs(DOC.SV, SV)
 
 
 if __name__ == "__main__":

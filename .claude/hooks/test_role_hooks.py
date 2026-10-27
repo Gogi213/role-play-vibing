@@ -345,6 +345,21 @@ class Prompts(unittest.TestCase):
             fh.write(json.dumps({"isSidechain": True, "message": {"usage": usage(9000)}}) + chr(10))
         self.assertEqual(rm.context_tokens(path), 300)
 
+    def test_watch_alert_uses_supervise_threshold(self):
+        """Сердцебиение сторожа старше 240 с, но моложе 600 с — не тревога: сторож служб перезапустит его только после 600 с."""
+        import datetime as dt
+        hb_file = os.path.join(TMP, "watch-hb.json")
+        old = rm.WATCH_HEARTBEAT_FILE
+        rm.WATCH_HEARTBEAT_FILE = hb_file
+        try:
+            for age, expect in ((300, None), (700, "stale")):
+                with open(hb_file, "w", encoding="utf-8") as fh:
+                    json.dump({"ts": (dt.datetime.now().astimezone() - dt.timedelta(seconds=age)).isoformat()}, fh)
+                got = rm.watch_alert()
+                self.assertEqual(got[0] if got else None, expect, age)
+        finally:
+            rm.WATCH_HEARTBEAT_FILE = old
+
     def test_no_deck_alert_and_no_reminders(self):
         for name in ("deck_alert", "on_prompt", "consolidate_due", "CONSOLIDATE_TEXT", "on_skill"):
             self.assertFalse(hasattr(rm, name), name)

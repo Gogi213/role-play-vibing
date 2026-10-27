@@ -19,24 +19,20 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import heartbeat as HB  # noqa: E402
 import notify  # noqa: E402
 import project as P  # noqa: E402
 import start as S  # noqa: E402
 
 CODE_DIR = Path(__file__).resolve().parent
-STALE_S = 600.0
+STALE_S = HB.STALE_S
 PERIOD_MIN = 5
 # служба -> (файл сердцебиения, поле времени)
 BEATS = {"dispatch": ("state.json", "last_tick"), "watch": ("watch-heartbeat.json", "ts"),
          "ci_watch": ("ci-heartbeat.json", "ts")}
 
 
-def heartbeat_age(path: Path, field: str, now: float) -> float | None:
-    """Возраст сердцебиения в секундах; None — файла/поля нет или он нечитаем."""
-    try:
-        return now - datetime.fromisoformat(json.loads(path.read_text(encoding="utf-8"))[field]).timestamp()
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+heartbeat_age = HB.read_age
 
 
 def decide(age: float | None, alive: bool | None, stale_s: float = STALE_S) -> str:

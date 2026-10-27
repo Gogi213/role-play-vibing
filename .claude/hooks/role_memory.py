@@ -232,7 +232,6 @@ def _dispatcher_module(name):
 # сердцебиения на каждый цикл; здесь только её возраст (сам сторож — свой процесс, не этот хук).
 DISPATCHER_DIR = os.path.join(ROOT, ".claude", "dispatcher")  # для проверок
 WATCH_HEARTBEAT_FILE = os.path.join(DISPATCHER_DIR, "watch-heartbeat.json")
-WATCH_STALE_S = 2 * 120  # 2 интервала сторожа (WATCH_INTERVAL_S по умолчанию в watch.py — 120 с)
 
 
 def watch_alert():
@@ -244,11 +243,11 @@ def watch_alert():
         return ("missing", "[сторож] .claude/dispatcher/watch-heartbeat.json не найден — сторож CEO (watch.py) "
                            "ни разу не отчитался или не запущен.")
     try:
-        ts = datetime.datetime.fromisoformat(str(hb.get("ts", "")).replace("Z", "+00:00"))
-        age = (datetime.datetime.now(ts.tzinfo) - ts).total_seconds()
+        heartbeat = _dispatcher_module("heartbeat")  # порог тот же, что у supervise: он перезапускает сторожа на нём
+        age = heartbeat.age_of(hb.get("ts", ""), time.time())
     except Exception:
         return "broken", "[сторож] watch-heartbeat.json повреждён — не разобрать время последнего цикла."
-    if age > WATCH_STALE_S:
+    if age > heartbeat.STALE_S:
         return "stale", f"[сторож] сердцебиение watch.py устарело на {age / 60:.0f} мин — проверить, жив ли сторож."
     return None
 
