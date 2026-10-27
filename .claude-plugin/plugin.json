@@ -1,6 +1,6 @@
 {
   "name": "role-play-vibing",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "A team of AI roles for Claude Code: you talk to the CEO; a Researcher, an Engineer and a Judge work through tickets under a dispatcher, with a watcher and role hooks.",
   "author": {
     "name": "Gogi213"
