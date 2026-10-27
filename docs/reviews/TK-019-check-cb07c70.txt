@@ -1,0 +1,7 @@
+TK-019 · PR #130@cb07c70 · проверки Судьи в копии tk019
+radon E/F в tools/ на PR: 0 (python -m radon cc -s -n E tools/)
+radon E/F в tools/ на main 085f98e: 9
+radon D в tools/ на PR: 8
+длинных файлов и функций сверх порога в tools/: 0 (AST)
+E-003: errors.py fix — падала на 81dd7a407b, проходит на cb07c70
+pytest -n auto: 1296 passed, 8 skipped in 274.23s

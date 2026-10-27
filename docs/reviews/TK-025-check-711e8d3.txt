@@ -1,0 +1,8 @@
+Проверка Судьи · TK-025 · PR #135 @ 711e8d3 · 2026-10-27 · копия .claude/worktrees/TK-025
+порог по .claude/ и tools/ (80 файлов .py без test_*/conftest):
+самый длинный файл: 827 .claude/dispatcher/watch.py; файлов > 900: 0
+самая длинная функция: 83 dispatch.launch_run; функций > 100: 0
+radon 6.0.1 cc -n E: 0 блоков E/F
+pytest -n auto: 1318 passed, 8 skipped in 142.75s
+pyflakes изменённых файлов: 1 — tools/bench/common.py:101 import resource (noqa F401, POSIX-проверка, до PR, не в диффе)
+CI PR #135: ubuntu, windows, macos, systemd, ci-ok — SUCCESS

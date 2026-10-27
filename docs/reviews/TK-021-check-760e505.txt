@@ -1,0 +1,15 @@
+head: 760e505e44700c0a8a14795c5d71fc9b7d4bbe49
+65 passed, 6 skipped in 7.18s
+radon E/F (tools, haiku_aux):
+radon E/F count: 0
+   39 tools/eval_common.py
+  500 tools/helper_eval.py
+  469 tools/overseer_eval.py
+ 1008 total
+CI PR 131:
+tests (ubuntu-latest, py3.12): SUCCESS
+tests (windows-latest, py3.12): SUCCESS
+tests (macos-latest, py3.12): SUCCESS
+jobrun на настоящем systemd: SUCCESS
+чистый проект (${{ matrix.os }}): SKIPPED
+ci-ok: SUCCESS
