@@ -245,29 +245,15 @@ def watch_alert():
 
 
 # Диспетчер задач (.claude/dispatcher/): непрочитанные строки ceo-inbox.md — одна короткая строка; сами строки CEO
-# читает из файла. Отметка прочитанного — число уже показанных строк; пока новых нет, подсказки нет.
+# читает из файла (`tickets.py inbox`, он и двигает отметку; хук её не трогает, пока CEO не прочитал — подсказка повторяется).
 DISPATCHER_CEO_INBOX = os.path.join(DISPATCHER_DIR, "ceo-inbox.md")
-DISPATCHER_CEO_INBOX_SEEN = os.path.join(DISPATCHER_DIR, ".ceo-inbox-seen")
 
 
 def ceo_inbox_alert():
-    try:
-        with open(DISPATCHER_CEO_INBOX, encoding="utf-8") as f:
-            lines = f.readlines()
-    except OSError:
-        return None
-    try:
-        with open(DISPATCHER_CEO_INBOX_SEEN, encoding="utf-8") as f:
-            seen = int(f.read().strip() or 0)
-    except (OSError, ValueError):
-        seen = 0
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+    import ceo_inbox
+    lines, seen = ceo_inbox.read(DISPATCHER_CEO_INBOX, os.path.join(DISPATCHER_DIR, ceo_inbox.SEEN_NAME))
     new = [ln for ln in lines[seen:] if ln.strip()]
-    if len(lines) != seen:
-        try:
-            with open(DISPATCHER_CEO_INBOX_SEEN, "w", encoding="utf-8") as f:
-                f.write(str(len(lines)))
-        except OSError:
-            pass
     if not new:
         return None
     return f"[диспетчер] {len(new)} новых в .claude/dispatcher/ceo-inbox.md"

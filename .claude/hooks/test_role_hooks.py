@@ -300,10 +300,14 @@ class Prompts(unittest.TestCase):
         inbox = rm.DISPATCHER_CEO_INBOX
         with open(inbox, "w", encoding="utf-8") as fh:
             fh.write("[blocked] TK-1 очень длинная строка " + "x" * 500 + "\n[needs_owner] TK-2 y\n")
-        with open(rm.DISPATCHER_CEO_INBOX_SEEN, "w", encoding="utf-8") as fh:
+        seen_f = os.path.join(os.path.dirname(inbox), ".ceo-inbox-seen")
+        with open(seen_f, "w", encoding="utf-8") as fh:
             fh.write("0")
-        first = rm.ceo_inbox_alert()
-        self.assertEqual(first, "[диспетчер] 2 новых в .claude/dispatcher/ceo-inbox.md")
+        msg = "[диспетчер] 2 новых в .claude/dispatcher/ceo-inbox.md"
+        self.assertEqual(rm.ceo_inbox_alert(), msg)
+        self.assertEqual(rm.ceo_inbox_alert(), msg)      # хук отметку не двигает: пока CEO не прочитал, подсказка есть
+        with open(seen_f, "w", encoding="utf-8") as fh:
+            fh.write("2")                                # CEO прочитал (`tickets.py inbox`)
         self.assertIsNone(rm.ceo_inbox_alert())          # ничего нового — тишина
         with open(inbox, "a", encoding="utf-8") as fh:
             fh.write("[blocked] TK-3\n")
