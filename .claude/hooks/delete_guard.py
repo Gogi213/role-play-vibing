@@ -46,12 +46,16 @@ create|upload|edit`, `gh pr merge` (вливает программа `merge_rul
 `-T`, `--upload-file`, `-Method Post|Put|Patch|Delete`, `-Body`) на `api.github.com`/`uploads.github.com`; чтение свободно — если в шапке
 тикета запуска (`RPV_TICKET`) нет `allow: publish (В-N)`. Поле ставит только CEO
 (`tickets.py allow`); запуск диспетчера строку `allow:` в файл тикета не пишет; шапка не прочитана — отказ. Сессии CEO и владельца не ограничены.
+Пуш в main/master при `guard_push_scope: true` (TK-040, по умолчанию выключено) — и из запуска роли (после согласия), и из сессии CEO —
+сверяет `<удалённый>/<ветка>..<что уходит>` с принятым тикетом: уйти могут коммиты голов PR из `accepted:` в шапке (роль — её
+тикета `RPV_TICKET`, CEO — любого) и merge-коммиты принятых голов; чужие — отказ с sha и подсказкой «завести тикет или пушить
+отдельно»; не сверить (нет `git fetch`, удалённая машина, каталог не определить) — тоже отказ (`dguard/push_scope.py`).
 Через обёртки (sudo/env/nohup/xargs/systemd-run/timeout/…), `ssh хост '<строка>'`, `bash|sh -c`, `powershell -Command`,
 `cmd /c`, eval — разбор рекурсивный. Текст в аргументах прочих команд (git commit -m, tickets.py --text, echo, grep,
 `cat > файл <<EOF`) удалением не считается. Не удалось разобрать (незакрытая кавычка) — прежний регэксп как страховка.
 
 Устройство: этот файл — вход хука (`main`, `check_tool`); разбор и правила лежат в пакете `dguard/`
-(config → messages → tools → paths → lexer → words → cmd_scan/publish/writes/git_scan → legacy → policy → ceo_signal → checks).
+(config → messages → tools → paths → lexer → words → cmd_scan/publish/writes/git_scan → legacy → policy → push_scope → ceo_signal → checks).
 Изменяемые настройки (`LOCAL_ROOTS`, `PROTECTED`, `REMOTE_ROOTS`, `STAGE`, `CLOSED_RE`, …) живут в `dguard.config`.
 """
 import json

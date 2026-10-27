@@ -7,6 +7,7 @@ from dguard.lexer import ParseError
 from dguard.messages import BranchDelete, Forbid, Over, Publish, REASON, REASON_BRANCH_DELETE, REASON_CRASH, REASON_FILE, REASON_IRREVERSIBLE, REASON_OVERWRITE, REASON_PUBLISH
 from dguard.paths import allowed, Ctx, temp_rest, write_only_ok
 from dguard.policy import dispatcher_role, protected, publish_consent
+from dguard.push_scope import push_scope_reason
 from dguard.words import FUNC_DEF
 from dguard.writes import may_exist
 
@@ -44,6 +45,9 @@ def check(cmd, cwd, trace=None):
                     if not granted:
                         return _deny(trace, "publish", REASON_PUBLISH.format(t=target, who=who))
                     trace.append(("publish", "allow"))
+                why = push_scope_reason(target, ctx.remote, role)       # пуш в main/master: только коммиты принятого тикета
+                if why:
+                    return _deny(trace, "publish", why)
                 continue
             if isinstance(target, BranchDelete) and not role:       # CEO/владелец: только с согласием на каждую ветку
                 granted, why = branch_delete_consent(target.branches)

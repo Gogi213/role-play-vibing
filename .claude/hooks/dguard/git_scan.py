@@ -202,44 +202,68 @@ def head_branch(repo, ctx):
     return None
 
 
-def push_publication(rest, repo, ctx):
-    """Метка публикации у `git push` — основная ветка (main/master) в любой записи refspec (`HEAD:main`, `refs/heads/main`,
-    `x:main`), тег (`--tags`, `--follow-tags`, `refs/tags/…`, `tag <имя>`, `v1.2.3`), все ветки (`--all`, шаблон `*`); пуш без
-    ветки (`git push`, `origin HEAD`) — по текущей ветке репозитория, не определена — тоже публикация. Рабочая ветка и
-    `--dry-run` — None."""
-    if any(a in ("--dry-run", "-n") for a in rest):
-        return None
-    flag = next((a for a in rest if a in ("--tags", "--all", "--branches") or a.startswith("--follow-tags")), None)
-    if flag:
-        return f"git push {flag}"
-    pos, k = [], 0
+class PushRefs:
+    """Пуш в main/master: каталог репозитория, удалённый и пары (источник, ветка назначения, необязательная) — по ним
+    `push_scope` сверяет коммиты. Необязательная пара (`--all`, шаблон) пропускается, если ветки нет."""
+
+    def __init__(self, repo, remote, pairs):
+        self.repo, self.remote, self.pairs = repo, remote, tuple(pairs)
+
+
+ALL_BRANCHES = tuple((f"refs/heads/{b}", b, True) for b in DEFAULT_BRANCHES)
+
+
+def push_words(rest):
+    """Позиционные слова `git push` без значений опций и значение `--repo`: (слова, удалённый из `--repo` или None)."""
+    pos, repo_opt, k = [], None, 0
     while k < len(rest):
         a = rest[k]
         k += 1
-        if a in PUSH_VALUE_OPTS:
+        if a.startswith("--repo="):
+            repo_opt = a.partition("=")[2]
+        elif a in PUSH_VALUE_OPTS:
+            if a == "--repo" and k < len(rest):
+                repo_opt = rest[k]
             k += 1
         elif not a.startswith("-"):
             pos.append(a)
-    specs = pos if any(a == "--repo" or a.startswith("--repo=") for a in rest) else pos[1:]    # первое слово — удалённый репозиторий
+    return pos, repo_opt
+
+
+def push_publication(rest, repo, ctx):
+    """Публикация `git push` (`Publish`) либо None. Публикация — основная ветка (main/master) в любой записи refspec
+    (`HEAD:main`, `refs/heads/main`, `x:main`), тег (`--tags`, `--follow-tags`, `refs/tags/…`, `tag <имя>`, `v1.2.3`), все
+    ветки (`--all`, шаблон `*`); пуш без ветки (`git push`, `origin HEAD`) — по текущей ветке репозитория, не определена —
+    тоже публикация. Рабочая ветка и `--dry-run` — None. Если уходит main/master, у `Publish` есть `main` (`PushRefs`)."""
+    if any(a in ("--dry-run", "-n") for a in rest):
+        return None
+    pos, repo_opt = push_words(rest)
+    remote = repo_opt or (pos[0] if pos else "origin")
+    specs = pos if repo_opt is not None else pos[1:]                                  # первое слово — удалённый репозиторий
+    flag = next((a for a in rest if a in ("--tags", "--all", "--branches") or a.startswith("--follow-tags")), None)
+    label, pairs = (f"git push {flag}" if flag else None), ([] if flag not in ("--all", "--branches") else list(ALL_BRANCHES))
     if specs[:1] == ["tag"]:
-        return "git push tag: тег"
+        label = label or "git push tag: тег"
+        specs = []
     for spec in specs:
         src, sep, dst = spec.partition(":")
         ref = dst if sep and dst else src
         name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
         if ref.startswith("refs/tags/") or TAG_NAME.match(ref):
-            return f"git push {spec}: тег"
-        if name in DEFAULT_BRANCHES:
-            return f"git push {spec}: основная ветка"
-        if "*" in ref:
-            return f"git push {spec}: все ветки по шаблону"
-    if not specs or "HEAD" in specs or "@" in specs:                  # ветка не названа: уйдёт текущая
+            label = label or f"git push {spec}: тег"
+        elif name in DEFAULT_BRANCHES:
+            label = label or f"git push {spec}: основная ветка"
+            pairs.append((src, name, False))
+        elif "*" in ref:
+            label = label or f"git push {spec}: все ветки по шаблону"
+            pairs.extend(ALL_BRANCHES)
+    if not label and (not specs or "HEAD" in specs or "@" in specs):     # ветка не названа: уйдёт текущая
         cur = head_branch(repo, ctx)
         if cur in DEFAULT_BRANCHES:
-            return f"git push без ветки: текущая — {cur}"
-        if cur is None:
-            return "git push без ветки: текущую не определить"
-    return None
+            label, pairs = f"git push без ветки: текущая — {cur}", [("HEAD", cur, False)]
+        elif cur is None:
+            label = "git push без ветки: текущую не определить"
+    return Publish(label, PushRefs(repo, remote, pairs) if pairs else None) if label else None
 
 
 def scratch_ok(exotic, repo, ctx):
@@ -282,8 +306,8 @@ def push_scan(rest, repo, ctx):
         label = "git push --delete/--mirror/:ветка (удаление веток на удалённом)"
         names = None if any(a in ("--mirror", "--prune") for a in rest) else delete_branch_names(rest, pos)
         yield (BranchDelete(label, names) if names else Forbid(label), ctx.copy())
-    elif label := push_publication(rest, repo, ctx):
-        yield (Publish(label), ctx.copy())
+    elif publication := push_publication(rest, repo, ctx):
+        yield (publication, ctx.copy())
 
 
 def clean_scan(rest, base, exotic, repo, ctx):

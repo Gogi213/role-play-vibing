@@ -58,6 +58,7 @@ KEYS = {
     "guard_remote_roots": (_str_list, "список каталогов"),
     "guard_stage": (_text, "непустая строка"),
     "guard_forbidden_hosts": (_str_list, "список хостов"),
+    "guard_push_scope": (lambda v: isinstance(v, bool), "true или false"),
 }
 
 
