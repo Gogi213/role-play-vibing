@@ -73,10 +73,6 @@ def read_log(root: Path) -> list:
     return P.read_log(log_path(root))
 
 
-def _atomic(path: Path, data) -> None:
-    P.write_json(path, data)
-
-
 def _read_rpv(root: Path):
     """(объект, ошибка): нет файла — ({}, None); не объект JSON — ошибка (чужой файл не затираем)."""
     p = rpv_path(root)
@@ -133,12 +129,12 @@ def set_value(root: Path, key: str, raw: str, why: str, ref: str = "", now=None)
             old = e.get("old")
             e["state"] = "superseded"
     cur[key] = value
-    _atomic(rpv_path(root), cur)
+    P.write_json(rpv_path(root), cur)
     entry = {"id": f"CFG-{len(log) + 1}", "at": now.isoformat(timespec="seconds"), "key": key, "old": old, "new": value,
              "why": " ".join(why.split()), "ref": ref, "quote": quote, "question": question, "state": "pending",
              "deadline": (now + timedelta(seconds=ROLLBACK_AFTER_S)).isoformat(timespec="seconds"), "ticket": ""}
     log.append(entry)
-    _atomic(log_path(root), log)
+    P.write_json(log_path(root), log)
     return entry, None
 
 
@@ -147,7 +143,7 @@ def attach_ticket(root: Path, entry_id: str, ticket_id: str) -> None:
     for e in log:
         if e.get("id") == entry_id:
             e["ticket"] = ticket_id
-    _atomic(log_path(root), log)
+    P.write_json(log_path(root), log)
 
 
 def quote_text(e: dict) -> str:
@@ -172,7 +168,7 @@ def accept(root: Path, entry_id: str):
             if e.get("state") != "pending":
                 return None, f"{entry_id}: уже {e.get('state')}"
             e["state"] = "accepted"
-            _atomic(log_path(root), log)
+            P.write_json(log_path(root), log)
             return e, None
     return None, f"нет правки {entry_id}"
 
@@ -198,14 +194,14 @@ def rollback_due(root: Path, now=None) -> list:
                 cur.pop(e["key"], None)
             else:
                 cur[e["key"]] = e["old"]
-            _atomic(rpv_path(root), cur)
+            P.write_json(rpv_path(root), cur)
             e["state"] = "rolled_back"
         else:
             e["state"] = "superseded"
         e["closed_at"] = now.isoformat(timespec="seconds")
         done.append(e)
     if done:
-        _atomic(log_path(root), log)
+        P.write_json(log_path(root), log)
     return done
 
 
