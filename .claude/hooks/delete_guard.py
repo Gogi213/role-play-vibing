@@ -61,9 +61,9 @@ from dguard.ceo_signal import ceo_signal_write
 from dguard.checks import _deny, check, check_file
 from dguard.config import configure
 from dguard.git_scan import BRANCH_CONSENT_NAMES, CONFIG_LOG_NAMES
-from dguard.messages import (REASON_BRANCH_CONSENT_FILE, REASON_CEO_SIGNAL, REASON_CONFIG_LOG, REASON_CONSENT, REASON_CRASH,
+from dguard.messages import (REASON_BRANCH_CONSENT_FILE, REASON_CEO_CHARTER, REASON_CEO_SIGNAL, REASON_CONFIG_LOG, REASON_CONSENT, REASON_CRASH,
                              REASON_DECIDE, REASON_IDENTITY, REASON_OWNER_RECORD)
-from dguard.policy import (charter_table_edit, consent_forge, decide_outside_secretary, dispatcher_role, identity_change,
+from dguard.policy import (charter_shell_write, charter_table_edit, consent_forge, decide_outside_secretary, dispatcher_role, identity_change,
                            owner_record_write)
 from dguard.tools import GUARDED_TOOLS, SHELL_TOOLS, file_target
 
@@ -90,6 +90,8 @@ def check_tool(data, trace=None):
         role = dispatcher_role()
         if role is None and charter_table_edit(tool, ti):
             return None
+        if role is None and (charter := charter_shell_write(tool, ti, cwd)):
+            return _deny(trace, "protected", REASON_CEO_CHARTER.format(t=charter))
         if role is None and decide_outside_secretary(tool, ti, data):
             return _deny(trace, "protected", REASON_DECIDE)
         if role and owner_record_write(tool, ti):

@@ -141,7 +141,7 @@ def delete_branch_names(rest, pos):
     return tuple(names) or None
 
 
-CONFIG_LOG_NAMES = ("config-log.json",)               # журнал правок настроек (TK-007): пишет только `tickets.py config`
+CONFIG_LOG_NAMES = ("config-log.json", "charter-log.json")  # журналы правок настроек (TK-007) и уставов (TK-029): пишут только `tickets.py config|charter`
 BRANCH_CONSENT_NAMES = ("branch-delete.json",)       # согласия на удаление веток: пишет только `tickets.py allow-delete`
 
 

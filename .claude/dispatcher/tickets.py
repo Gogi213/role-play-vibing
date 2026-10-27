@@ -19,6 +19,7 @@
     tickets.py due TK-001 --by 18:00 [--said "к шести"]          # только CEO: срок, названный владельцу (due / due_first)
     tickets.py allow TK-001 publish --ref В-12                  # только CEO: согласие владельца на публикацию по тикету
     tickets.py allow TK-001 --revoke                            # только CEO: снять согласие
+    tickets.py charter sync [--file judge.md]                    # только CEO: уставы из templates/roles/ плагина в .claude/roles/
     tickets.py status                                           # потрачено по задачам
 
 Приёмка Судьи (`result … accept`, `accept`) сначала гоняет проверки всех исправленных ошибок (`errors.py`; в worktree
@@ -51,6 +52,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
+import charter as charter_mod  # noqa: E402
 import rpv_config as cfg_mod  # noqa: E402
 import signals as SIG  # noqa: E402
 import cost as COST  # noqa: E402
@@ -753,6 +755,11 @@ def cmd_config(args) -> int:
     return 0
 
 
+def cmd_charter(args) -> int:
+    """CEO: перенос уставов из шаблонов плагина (`charter.py`): руками уставы не правятся (страж, TK-007)."""
+    return charter_mod.run(args, _caller_role(), PROJECT_ROOT)
+
+
 def cmd_status(args) -> int:
     state = CFG.load_state()
     rows = []
@@ -795,7 +802,7 @@ def _handlers() -> dict:
     """Подкоманда → обработчик; собирается при вызове, чтобы тесты могли подменять обработчики на модуле."""
     return {"new": cmd_new, "comment": cmd_comment, "accept": cmd_accept, "result": cmd_result, "start": cmd_start,
             "wait": cmd_wait, "due": cmd_due, "stop": cmd_stop, "allow": cmd_allow, "allow-delete": cmd_allow_delete,
-            "config": cmd_config, "inbox": cmd_inbox, "status": cmd_status}
+            "config": cmd_config, "charter": cmd_charter, "inbox": cmd_inbox, "status": cmd_status}
 
 
 def main(argv=None) -> int:
