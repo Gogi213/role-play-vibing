@@ -328,11 +328,11 @@ class TriageWaitsTests(WatchSandbox):
             arg = "/data/sched/job-a.rc"
             self.assertEqual(W.probe_wait_target("gpu1", "path", arg), "met")
             self.assertIn("cat /data/sched/job-a.rc", sent[0])
-            self.assertEqual(W.WAITS._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
-            self.assertTrue(W.WAITS._path_met(("gpu1", "path", arg), "rc=0 done"))
+            self.assertEqual(WAITS._WAIT_RC[("gpu1", "path", arg)], "rc=0 done")
+            self.assertTrue(WAITS._path_met(("gpu1", "path", arg), "rc=0 done"))
         finally:
             sp.run, WAITS._ssh_cmd = orig, orig_ssh
-            W.WAITS._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
+            WAITS._WAIT_RC.pop(("gpu1", "path", "/data/sched/job-a.rc"), None)
 
     def test_ci_run_form_parse_and_dispatcher_check(self):
         import ci_watch
