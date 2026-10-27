@@ -299,11 +299,12 @@ def m_repeats(p: Period) -> str:
 
 def m_regressions(p: Period) -> str:
     """Критерий 7. Отказы приёмки из-за упавшей проверки исправленной ошибки (`regressions.log`, пишет `errors.gate`) и ошибки,
-    заведённые заново: новая запись за период, чьё название похоже (≥ 0,8, как у дубля тикета) на более раннюю."""
+    заведённые заново: новая запись за период, чьё название похоже (≥ 0,8, как у дубля тикета) на более раннюю. Строки с
+    пометкой в четвёртом поле (`infra` — проверка не запустилась, `ok`) — не регресс, не в счёте."""
     lines = _read_lines(_dispatcher_dir(p.root) / "regressions.log")
     if lines is None and not errors_mod.errors_dir(p.root).is_dir():
         return _nodata("реестр ошибок не заведён")
-    refused = sum(1 for ln in lines or [] if p.inside(_ts(ln.split("\t")[0])))
+    refused = sum(1 for ln in lines or [] if len(ln.split("\t")) < 4 and p.inside(_ts(ln.split("\t")[0])))
     found = []
     for path in errors_mod.errors(p.root).values():
         h = errors_mod.header(path)
