@@ -51,11 +51,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
-import cfg as cfg_mod  # noqa: E402
+import rpv_config as cfg_mod  # noqa: E402
 import signals as SIG  # noqa: E402
 import cost as COST  # noqa: E402
 import stop as STOP  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import project as P  # noqa: E402
 import registry as registry_mod  # noqa: E402
@@ -712,7 +712,7 @@ def _write_consents(path: Path, data: dict) -> None:
 
 
 def cmd_config(args) -> int:
-    """CEO: правка `.claude/rpv.json` — ключ из закрытого списка, значение проверено (`cfg.KEYS`); правка пишется в журнал,
+    """CEO: правка `.claude/rpv.json` — ключ из закрытого списка, значение проверено (`rpv_config.KEYS`); правка пишется в журнал,
     Судье заводится проверка, не принятая за 2 ч правка откатывается сама. Судья: `config accept CFG-N`."""
     role = _caller_role()
     if args.action == "accept":

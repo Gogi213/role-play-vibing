@@ -9,7 +9,7 @@ import shutil
 import sys
 from pathlib import Path
 
-import config as CFG
+import project_paths as CFG
 import project as P
 import routes as ROUTES
 

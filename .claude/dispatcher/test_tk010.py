@@ -310,7 +310,7 @@ class AtomicJsonOnce(unittest.TestCase):
 
     def test_no_private_writers(self):
         here = Path(__file__).resolve().parent
-        for name in ("cfg", "overseer", "tickets", "dispatch", "ci_watch", "merge_rule", "lifewatch"):
+        for name in ("rpv_config", "overseer", "tickets", "dispatch", "ci_watch", "merge_rule", "lifewatch"):
             src = (here / f"{name}.py").read_bytes().decode("utf-8")
             self.assertNotIn("os.replace(tmp", src, name)
             self.assertNotIn("indent=1", src, name)

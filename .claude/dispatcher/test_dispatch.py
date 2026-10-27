@@ -41,7 +41,7 @@ import role_args as RA  # noqa: E402
 import runlog as RUNLOG  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import waits as W  # noqa: E402
 import on_met as OM  # noqa: E402
 import procs  # noqa: E402

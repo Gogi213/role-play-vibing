@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import decide as DEC  # noqa: E402
 import signals as SIG  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import merge_rule as M  # noqa: E402
 import ticket as T  # noqa: E402
 import watch as W  # noqa: E402

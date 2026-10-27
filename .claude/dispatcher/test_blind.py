@@ -55,7 +55,7 @@ def test_flap_keeps_original_since():
 def test_alert_file_removed_when_target_leaves_active(tmp_path, monkeypatch):
     import time
     import dispatch as D
-    import config as CFG  # noqa: E402
+    import project_paths as CFG  # noqa: E402
     import waits as W
     monkeypatch.setattr(CFG, "DISPATCHER_DIR", tmp_path)
     monkeypatch.setattr(CFG, "CEO_INBOX", tmp_path / "ceo-inbox.md")

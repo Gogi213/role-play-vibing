@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 

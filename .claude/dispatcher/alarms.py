@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-import config as CFG
+import project_paths as CFG
 import hide
 import notify
 import project as P

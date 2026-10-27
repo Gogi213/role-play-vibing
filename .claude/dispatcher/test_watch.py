@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
 import cost as COST  # noqa: E402
 import handoff as HO  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import waits as WAITS  # noqa: E402
 import procs  # noqa: E402
 import ticket as T  # noqa: E402

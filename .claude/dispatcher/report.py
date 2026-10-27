@@ -32,7 +32,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import cfg as cfg_mod  # noqa: E402
+import rpv_config as cfg_mod  # noqa: E402
 import downtime  # noqa: E402
 import errors as errors_mod  # noqa: E402
 import haiku_aux as HA  # noqa: E402

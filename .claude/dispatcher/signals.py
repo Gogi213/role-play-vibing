@@ -1,5 +1,5 @@
 """Сигналы CEO и уведомления диспетчера: строка в ceo-inbox.md, механика в mechanics.log, сводка, возвраты ревью, «готово»,
-претензии к wait_for — вынесено из dispatch.py (TK-011, ось 4). Состояние — `config.save_state`; идущие запуски
+претензии к wait_for — вынесено из dispatch.py (TK-011, ось 4). Состояние — `project_paths.save_state`; идущие запуски
 (`running`) передаёт вызывающий."""
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
-import config as CFG
+import project_paths as CFG
 import project as P
 import ticket as T
 

@@ -29,11 +29,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import cfg as cfg_mod  # noqa: E402
+import rpv_config as cfg_mod  # noqa: E402
 import lifewatch as LW  # noqa: E402
 import runs as RL  # noqa: E402
 import signals as SIG  # noqa: E402
-import config as CFG  # noqa: E402
+import project_paths as CFG  # noqa: E402
 import waits as W  # noqa: E402 — ssh-проба и разбор условий ожидания
 import procs  # noqa: E402 — замок экземпляра
 import project as P  # noqa: E402

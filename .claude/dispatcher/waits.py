@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import blind
-import config as CFG
+import project_paths as CFG
 import hide
 import project as P
 import ticket as T
