@@ -220,8 +220,8 @@ class AnswerTests(NoClaude):
         self.assertEqual((r["outcome"], r["invented_numbers"]), ("accepted", ["99"]))
         self.assertEqual(self.g(self.finding(action="вернуть роли с В-183 по TK-12, запусков 7"))["invented_numbers"], [])
         self.assertEqual(ov.core.invented_numbers("1,2× и 3.00", "потрачено $3.00; ускорение 1,2×"), [])
-        self.assertEqual(ov.invented_numbers("ускорение 1.2 при 3,00", "потрачено $3.00; ускорение 1,2×"), [])  # запятая и точка — одно
-        self.assertEqual(ov.invented_numbers("33 ч и $3.5", "часов от начала 33.0, потрачено $3.50"), [])
+        self.assertEqual(ov.core.invented_numbers("ускорение 1.2 при 3,00", "потрачено $3.00; ускорение 1,2×"), [])  # запятая и точка — одно
+        self.assertEqual(ov.core.invented_numbers("33 ч и $3.5", "часов от начала 33.0, потрачено $3.50"), [])
 
 
 class SetTests(NoClaude):
