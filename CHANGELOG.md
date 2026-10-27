@@ -2,6 +2,56 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/). Заголовок раздела — `## X.Y.Z — ГГГГ-ММ-ДД`: версию в начале заголовка читает `release.py`.
 
+## 2.0.8 — 2026-10-27
+
+Раунд ревью 1 кода плагина по пяти осям — мёртвый код, избыточность, сложность и длина файлов, дизайн, дублирование (В-2, В-3, команда самого плагина). Поиск — TK-006 (53 находки на снимке a8c7d76); правки — TK-009 (PR #118), TK-010 (#119), TK-011 (#126), TK-014 (#123), TK-015 (#124), TK-016 (#125); проход 2 — TK-019 (#130), TK-020 (#129), TK-021 (#131); проход 3 — TK-023 (#133); проход 4 — TK-025 (#135). Находок по проходам: 53 → 17 → 7 → 4 → 0; на пятом проходе Судья записал «раунд чист: да». Отдельно — TK-018 (PR #127). Код TK-009 уже лежал в 2.0.7, в его записи не назван.
+
+### Было → стало (порог Судьи: файл > 900 строк, функция > 100 строк, radon E/F)
+| | было (a8c7d76) | стало (v2.0.8) |
+|---|---|---|
+| самый длинный файл | `dispatch.py` 2727 | `watch.py` 827 |
+| файлов > 900 строк | 3: `dispatch.py` 2727, `hooks/delete_guard.py` 2671, `tickets.py` 973 | 0 (`dispatch.py` 796, `delete_guard.py` 170, `tickets.py` 805) |
+| функций > 100 строк | 5: `scan_one` 159, `triage_waits` 151, `tickets.main` 128, `tick` 112, `launch_run` 104 | 0 (длиннейшая `launch_run` 83) |
+| radon E/F | в диспетчере и хуках 5 (`overseer.look` F 48, `dispatch.tick` F 44, `merge_rule.merge_once` F 42, `routes.check` E 40, `_finish_role_part` E 35) и ещё 2 при разбиении (`tickets.cmd_result` F 48, `watch.triage_waits` E 34); в `tools/` 9 | 0 |
+
+Полный набор тестов после правок — 1318 зелёных; тесты правились только в путях импорта и там, где менялось поведение (список ниже).
+
+### Изменено (поведение прежнее)
+- **`dispatch.py` разрезан по ответственностям (TK-011, PR #126).** 2727 → 796 строк; вынесены `procs`, `on_met`, `waits`, `cost`, `alarms`, `signals`, `role_args`, `limits`, `stop`, `decide`, `runlog`, `handoff`, `finish`, `ci_core`, пути проекта — `project_paths` (был `config`), настройки `.claude/rpv.json` — `rpv_config` (был `cfg`). Циклы импортов `dispatch` ↔ `ci_watch`/`merge_rule` разорваны. `tick` 112 → 28 строк, `launch_run` 104 → 83.
+- **Страж `delete_guard.py` — вход 170 строк плюс пакет `.claude/hooks/dguard/` (TK-014, PR #123).** 2671 строка → 14 модулей не длиннее 480; `scan_one` 159 → 41. Хук вызывается тем же путём из `hooks/hooks.json` (`delete_guard.py`); `rm -rf /etc` по-прежнему deny. Позже (TK-020) из стража убран `import *` — имена берутся из `dguard.*`.
+- **`tickets.py` 973 → 805 строк, `watch.py`, `overseer.py`, `routes.py` (TK-015, PR #124; TK-016, PR #125).** Вынесены `tickets_cli.py` и `tickets_numbers.py`; команда `tickets.py` с теми же 13 подкомандами и флагами (`--help` совпал побайтно). `overseer.look` F → C, `routes.check` E → C, `tickets.cmd_result` F → B, `watch.triage_waits` E → B.
+- **Мёртвый код и избыточность без смены поведения (TK-009, PR #118).** Убраны константы `GREEN`, `REF`, `EVERY_S`, функции `strip_project_arg`, `LogEntry.mentions` (+`MENTION_RE`), `Ticket.logged_since` вместе с тестами, проверявшими только их; параметр `as_json` у `haiku_aux`, обёртки `_pid_alive_name`; четыре одинаковых `try/except` в `tick` — одна `_guarded`; роли `("researcher","engineer","judge")` вместо литерала в 9 файлах — `project.ROLES`; страж разбирает `rpv.json` один раз вместо до четырёх. Остальное отклонено с причиной (осталось как было): двойная проверка `isinstance`/`GUARDED_TOOLS` в страже (без неё меняется поведение), обёртка `_popen` под подмену в тестах; у `ask_reporter` общим стал только `clean_env`, не весь запуск.
+- **Проход 2 (TK-019 `tools/`, PR #130; TK-020 `.claude/`, PR #129; TK-021, PR #131).** `tools/`: radon E/F 9 → 0 (`e2e.run_task` F 54 → D 21, `compare._micro` F 60 и `_e2e` F 67 разбиты на разделы, `judge_ab.render` F 50 → C 11 и др.); ошибка E-003 (`tools/bench/bench_dispatch.py` — `NameError`) исправлена, проверка `tools/bench/test_bench_dispatch.py`. `.claude/`: убраны 32 + 20 реэкспортов `dispatch.py` и мёртвые импорты, `D.*` в `tickets`/`watch` заменены модулями-хозяевами. Одна `haiku_aux.agent_def`/`agent_cmd` вместо трёх разборов шапки `agents/<имя>.md` и трёх сборок `claude -p`; `tools/eval_common.py` общий для `helper_eval` и `overseer_eval`.
+- **Проходы 3 и 4 (TK-023, PR #133; TK-025, PR #135).** Один список статусов вместо четырёх (`ticket.ACTIVE_STATUSES`, `OPEN_STATUSES`), `bench/common` берёт `clean_env` из `haiku_aux`, одна `haiku_aux.load_agent`, одна `bench/common.run_jsons`, docstring-и по текущим именам.
+
+### Что поменялось для проекта-пользователя
+- Команды `tickets.py`, `errors.py`, `release.py` и `hooks/hooks.json` — прежние пути и флаги; `templates/`, `commands/`, `agents/` не менялись — переносить в проект ничего не нужно.
+- Пути модулей: код, импортировавший из `dispatch` вынесенные имена (52 реэкспорта убраны), `cfg`/`config` и имена стража `delete_guard.<имя>`, берёт их у модуля-хозяина (`procs`, `signals`, `waits`, `rpv_config`, `project_paths`, `dguard.*` и т. д.).
+- Страж: вход `.claude/hooks/delete_guard.py` (его зовёт хук) и пакет `.claude/hooks/dguard/` — тесты и скрипты, обращавшиеся к `delete_guard.<имя>`, берут имя из `dguard.*`.
+
+### Правки со сменой поведения (каждая утверждена Судьёй, В-10)
+- **Закрытие после слияния (TK-018, PR #127, ошибка E-004).** Запись автора `merge` после закрытия по слиянию больше не будит Судью (в живом случае TK-011 это дало повтор приёмки и второй сигнал `done`); повторное закрытие тем же PR@sha не пишет второй `done`; в тексте закрытия вместо «закрыто без ревью» при наличии приёмки — «приёмка Судьи <sha> есть».
+- **Один маркер «прочитано» у `ceo-inbox.md` (TK-010).** `.ceo-inbox-seen`; хук его не двигает, `tickets.py inbox` и хук больше не ведут разные счётчики.
+- **«Закрыт» — `done` или `stopped`.** Значение `cancelled` (его нигде не ставили) из проверки `watch` убрано.
+- **Свежесть сторожа — один порог 600 с (`heartbeat.py`).** Хук считал службу неживой через 4 минуты, сторож — через 10; теперь решение одно.
+- **Контекст хода считается одинаково (`transcript.py`).** Сумма «вход + кэш» без вывода везде; записи `isSidechain` пропускаются везде (раньше — только в `dispatch.py`).
+- **Разбор `runs.log` — `runs.py`.** Строка, где меньше четырёх полей, — не запуск; цена: `resolved_cost` → `cost_usd` → 0.0.
+- **Время ISO — `project.parse_time`.** Пояса прежние (UTC у записей тикета, GMT+4 у Надзирателя, местное у `at:` и отчёта); заголовок лога Надзирателя с невозможным временем (2026-13-45) пропускается, а не роняет разбор `ValueError`; `similar_recent_ticket` сравнивает и время без пояса (раньше пропускал).
+- **ssh-проба ожидания читает файл итога `.rc` (`watch.probe_wait_target`)** так же, как диспетчер.
+- **`claude -p` помощника, отчёта и Надзирателя — `haiku_aux.run_claude`:** скрытое окно (`hide.run`) и окружение без `RPV_*` и `CLAUDE_PROJECT_DIR` (у Надзирателя этого не было).
+- **Одна атомарная запись `project.atomic_write_text`:** повтор при `PermissionError` (Windows) для конфигурации, Надзирателя, `tickets`, `dispatch`, pid-замка; `errors._set_header` пишет под замком тикета.
+- **Одна обёртка git `hide.git`:** `routes.py` и `release.py` вызывают git в скрытом окне и с пределом времени.
+- **Один способ остановить процесс `dispatch._kill`:** Windows — `taskkill [/T] /F`, POSIX — SIGKILL группе роли, иначе SIGTERM (`force` — SIGKILL); тест на настоящем потомке.
+- **Один сканер таблицы процессов `project.scan_processes`:** предел 30 с у всех (было 10/60/20/30/10), если командная строка не нужна, на Windows — Toolhelp32 (0,03 с вместо 0,84 с у CIM).
+- **Одна тревога «раз на эпизод» `notify.episode`:** `dispatch._stall_alarm` и `supervise._alarm`; строки в `ceo-inbox` у `supervise` по-прежнему нет.
+- **Одна шапка тикета `project.frontmatter`:** принимает и CRLF (раньше — только `ticket`).
+- **JSON состояния пишется `project.write_json`:** `indent=2` везде; читаются те же ключи.
+- **Замок диспетчера:** при сбое `stat` ждёт и повторяет по сроку (раньше крутился без срока).
+- **`tools/bench/common.find_bash` на Windows (TK-023):** не берёт заглушку WSL из System32.
+
+### Поправка к 2.0.7
+В записи 2.0.7 («Закрытие после слияния…», PR #112, TK-002) сказано, что CEO узнаёт о `blocked`/`ask-owner` исполнителя, когда Судья ответил. Для `blocked` неточно: сигнал CEO уходит либо после ответа Судьи, либо через 25 минут без ответа (`JUDGE_GRACE`, `signals.py`) — льгота Судье, а не ожидание его ответа. Код 2.0.7 так и работал, поправка — в тексте.
+
 ## 2.0.7 — 2026-10-27
 
 По обратной связи alpha и invoice (PR #106–110, разбор — в команде самого плагина): PR #111 (TK-001), #112 (TK-002), #114 (TK-003), #117 (TK-004), #116 (TK-005), #113 (TK-007).
