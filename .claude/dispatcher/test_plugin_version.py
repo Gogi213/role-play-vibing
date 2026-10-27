@@ -1,8 +1,10 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plugin_version as PV  # noqa: E402
@@ -74,6 +76,20 @@ class StaleLine(unittest.TestCase):
         self.assertIsNone(PV.stale_line(PROJECT, roots["2.0.5"], str(Path(self.tmp.name) / "нет")))
         cfg, roots = self.install([("project", "/other", "2.0.9")], versions=("2.0.5", "2.0.9"))
         self.assertIsNone(PV.stale_line(PROJECT, roots["2.0.5"], cfg))
+
+    def test_claude_dir_follows_env_else_home(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "/cfg"}):
+            self.assertEqual(PV.claude_dir(), "/cfg")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(PV.claude_dir(), os.path.join(os.path.expanduser("~"), ".claude"))
+
+    def test_plugin_entry_takes_name_not_root(self):
+        cfg, roots = self.install([("user", None, "2.0.5"), ("local", PROJECT, "2.0.9")])
+        got = PV.plugin_entry(PROJECT, "role-play-vibing", config_dir=cfg)
+        self.assertEqual((got["version"], got["scope"], got["installPath"]), ("2.0.9", "local", roots["2.0.9"]))
+        self.assertIsNone(PV.plugin_entry(PROJECT, "нет-такого", config_dir=cfg))
+        self.assertIsNone(PV.plugin_entry(PROJECT, "", config_dir=cfg))
 
     def test_root_of_walks_up_to_plugin_json(self):
         _, roots = self.install([("user", None, "2.0.9")])

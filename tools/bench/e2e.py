@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import signal
@@ -17,6 +16,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import common as C
+import plugin_version as PV
 import tasks as TK
 
 TERMINAL = ("done", "blocked", "needs_owner", "stopped")
@@ -24,7 +24,7 @@ HOOKED_TOOLS = {"Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdi
 
 
 def claude_projects_dir() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
+    return Path(PV.claude_dir()) / "projects"
 
 
 class Watcher:

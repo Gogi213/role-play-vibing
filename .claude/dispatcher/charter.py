@@ -20,6 +20,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import plugin_version as PV
 import project as P
 import registry as registry_mod
 import rpv_config as cfg_mod
@@ -39,7 +40,7 @@ def read_log(root: Path) -> list:
 
 
 def plugin_version(plugin_root: Path) -> str:
-    return str(P.read_json(Path(plugin_root) / ".claude-plugin" / "plugin.json", {}).get("version") or "?")
+    return str(PV.meta(plugin_root).get("version") or "?")
 
 
 def _cell(line: str) -> str:

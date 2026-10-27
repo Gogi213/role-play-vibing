@@ -11,7 +11,6 @@ start, присмотр и doctor всё равно идут, синк уста�
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -21,35 +20,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import charter  # noqa: E402
 import hide  # noqa: E402
+import plugin_version as PV  # noqa: E402
 import project as P  # noqa: E402
 from doctor import FAIL, OFF, OK, render  # noqa: E402
 
 CODE_DIR = Path(__file__).resolve().parent
 MARKETPLACE = "role-play-vibing"
 PLUGIN = f"{MARKETPLACE}@{MARKETPLACE}"
+PLUGIN_NAME = MARKETPLACE
 RESTART = "Перезапустите Claude Code — до перезапуска сессия на старой версии."
 
 
-def installed_json() -> Path:
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
-    return Path(base) / "plugins" / "installed_plugins.json"
-
-
-def read_installed() -> dict:
-    return P.read_json(installed_json(), {})
-
-
-def _same_path(a, b) -> bool:
-    return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
-
-
-def install_entry(data: dict, project: Path) -> dict | None:
-    """Установка плагина для проекта: запись его проекта, иначе пользовательская, иначе первая."""
-    entries = (data.get("plugins") or {}).get(PLUGIN) or []
-    for e in entries:
-        if e.get("projectPath") and _same_path(e["projectPath"], project):
-            return e
-    return next((e for e in entries if e.get("scope") == "user"), entries[0] if entries else None)
+def install_entry(project: Path) -> dict | None:
+    """Установка плагина для проекта — `plugin_version.plugin_entry` (то же правило, что у хуков и doctor)."""
+    return PV.plugin_entry(project, PLUGIN_NAME)
 
 
 def run_cmd(cmd: list, timeout: float) -> tuple:
@@ -70,7 +54,7 @@ def _fail_names(out: str) -> str:
     return ", ".join(ln.split(None, 1)[1].split("  ")[0].strip() for ln in out.splitlines() if ln.startswith("FAIL"))
 
 
-def update(project: Path, run=run_cmd, installed=read_installed, ref: str = "",
+def update(project: Path, run=run_cmd, installed=install_entry, ref: str = "",
            python: str = sys.executable, claude: str = "claude") -> tuple:
     """(строки таблицы, версия после обновления). Сбой обновления самого плагина — дальше не идём."""
     rows = []
@@ -79,14 +63,14 @@ def update(project: Path, run=run_cmd, installed=read_installed, ref: str = "",
         rows.append((name, OK if rc == 0 else FAIL, ok_text or _last(out) or f"код {rc}"))
         return rc == 0
 
-    before = install_entry(installed(), project) or {}
+    before = installed(project) or {}
     old = str(before.get("version") or "?")
     scope = ["--scope", before["scope"]] if before.get("scope") else []
     if not step("marketplace", *run([claude, "plugin", "marketplace", "update", MARKETPLACE], 300)):
         return rows, old
     if not step("плагин", *run([claude, "plugin", "update", PLUGIN, *scope], 300)):
         return rows, old
-    after = install_entry(installed(), project) or {}
+    after = installed(project) or {}
     new, root = str(after.get("version") or "?"), Path(str(after.get("installPath") or ""))
     code = root / ".claude" / "dispatcher"
     if not (code / "start.py").is_file():

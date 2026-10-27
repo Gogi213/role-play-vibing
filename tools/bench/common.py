@@ -18,7 +18,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DISP = ROOT / ".claude" / "dispatcher"
-HOOKS = ROOT / ".claude" / "hooks"
 PY = sys.executable
 GIT_ID = ["-c", "user.name=bench", "-c", "user.email=bench@example.invalid"]
 sys.path.insert(0, str(DISP))
