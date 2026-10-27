@@ -160,45 +160,20 @@ def cmd_new(args) -> int:
     return 0
 
 
-def _ceo_next_pending(tkt):
-    """Запись `ceo` — последняя в логе, а `next` в шапке не пуст (диспетчер гасит его при пробуждении): заказ CEO ещё не
-    исполнен (alpha TK-282: заметка Судьи сбросила `next: engineer` CEO на researcher). → запись CEO или None."""
-    nxt = (tkt.header.get("next") or "").strip()
-    if nxt and tkt.log and T.author_is(tkt.log[-1].author, "ceo"):
-        return tkt.log[-1]
-    return None
-
-
-def _closed_ticket_refusal(tkt, role: str, result: str) -> str:
-    """`done` исполнителя и `accept` Судьи по тикету в статусе done без нового заказа — отказ (alpha TK-266, TK-267, TK-282:
-    повторные запуски после «CEO закрыл / PR влит»). Заказ — запись ceo/владельца после последней приёмки, кроме самого
-    закрытия `[итог: done]`. → текст отказа или ""."""
-    if tkt.status != "done" or not ((role in ("researcher", "engineer") and result == "done")
-                                    or (role == "judge" and result == "accept")):
-        return ""
-    last = max((i for i, e in enumerate(tkt.log) if T.author_is(e.author, "judge") and re.match(r"ПРИНЯТО|\[итог:\s*accept\]", e.text.strip())),
-               default=-1)
-    for e in tkt.log[last + 1:]:
-        if any(T.author_is(e.author, a) for a in ("ceo", "owner", "владелец")) and not re.match(r"\[итог:\s*done\]", e.text.strip()):
-            return ""
-    return "тикет закрыт; нового заказа нет"
-
-
 def cmd_comment(args) -> int:
     path = TICKETS_DIR / f"{args.id}.md"
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
-    nxt, auto_next, kept = args.next, False, None
+    nxt, auto_next, kept = args.next, False, ""
     with T.ticket_lock(path):  # запись, `next` и сжатие лога — одним куском (диспетчер правит шапку тем же замком)
-        before = T.read_ticket(path)
         T.append_log(path, args.author, args.text)
         if not nxt and T.author_is(args.author, "judge"):
             # Судья вернул тикет без `--next`: пока тикет в todo/in_progress/in_review/waiting, ход возвращается
-            # владельцу; done, stopped, needs_owner, blocked — не будим. Невыполненный заказ CEO (`next` от его записи) не затираем
-            kept = _ceo_next_pending(before)
+            # владельцу; done, stopped, needs_owner, blocked — не будим. Непустой `next` (заказ CEO, ещё не исполненный) не затираем
             tkt = T.read_ticket(path)
-            if kept is None and tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
+            kept = (tkt.header.get("next") or "").strip()
+            if not kept and tkt.status in ("todo", "in_progress", "in_review", "waiting") and tkt.owner in ("researcher", "engineer"):
                 nxt, auto_next = tkt.owner, True
         if nxt:
             # v2: единственный будильник другой роли/CEO; `updated` не двигаем (маркеры уведомлений CEO по нему)
@@ -209,7 +184,7 @@ def cmd_comment(args) -> int:
         moved = T.compact_log(path)
     print(f"дописано в {path}" + (f"; next: {nxt}" if nxt else "")
           + (f"; next проставлен автоматически (запись Судьи без --next → владелец тикета: {nxt})" if auto_next else "")
-          + (f"; next оставлен: ceo поставил {before.header.get('next').strip()} в {kept.ts.strftime('%H:%M')}" if kept else "")
+          + (f"; next оставлен: {kept}" if kept else "")
           + (f"; в архив перенесено записей: {moved}" if moved else ""))
     return 0
 
@@ -236,10 +211,6 @@ def cmd_result(args) -> int:
     err = routes.check(role, args.result, args.why, pr=args.pr, sha=args.sha or "", path=args.path or "",
                        form=args.form or "", root=PROJECT_ROOT, owner=tkt.owner or "",
                        why_owner=getattr(args, "why_owner", None) or "")
-    if err:
-        print(f"result: {err}", file=sys.stderr)
-        return 1
-    err = _closed_ticket_refusal(tkt, role, args.result)
     if err:
         print(f"result: {err}", file=sys.stderr)
         return 1
@@ -592,10 +563,6 @@ def cmd_accept(args) -> int:
         return 1
     if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
-        return 1
-    err = _closed_ticket_refusal(T.read_ticket(path), role or "judge", "accept")
-    if err:
-        print(f"accept: {err}", file=sys.stderr)
         return 1
     import merge_rule
     import routes

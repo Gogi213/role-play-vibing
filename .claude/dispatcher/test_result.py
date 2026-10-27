@@ -552,55 +552,23 @@ class ResultTests(unittest.TestCase):
                 self._v2_done(text)
                 self.refused("judge", "accept", path="review.md", decisions="-", numbers="-", tail="-")
 
-    # --- закрытый тикет (alpha TK-266, PR #107 П0): повторные done/accept без нового заказа
-    def _closed_by_ceo(self):
-        (self.base / "out.md").write_text("x", encoding="utf-8")
-        (self.base / "review.md").write_text("x", encoding="utf-8")
-        self.assertEqual(self.res("engineer", "done", path="out.md"), 0)
-        self.assertEqual(self.res("judge", "accept", path="review.md"), 0)
-        self.assertEqual(self.res("ceo", "done", path="out.md"), 0)  # CEO закрыл сам
-        os.environ.pop("RPV_ROLE", None)
-        self.assertEqual(self.tkt().status, "done")
-
-    def test_repeat_done_and_accept_on_closed_ticket_refused(self):
-        self._closed_by_ceo()
-        self.refused("engineer", "done", path="out.md")  # TK-266: «Уже закрыт … Дела нет»
-        self.refused("judge", "accept", path="review.md")  # TK-266: «Повтор: PR уже принят»
-        self.refused("judge", "accept", pr=7, sha=SHA)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            self.res("engineer", "done", path="out.md")
-        self.assertIn("тикет закрыт; нового заказа нет", err.getvalue())
-
-    def test_closed_ticket_accepts_done_after_new_order(self):
-        self._closed_by_ceo()
-        with contextlib.redirect_stdout(io.StringIO()):
-            TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="допиши выкладку", next="engineer"))())
-        self.assertEqual(self.res("engineer", "done", path="out.md"), 0)
-
-    def test_closing_done_by_ceo_is_not_an_order(self):
-        """Закрытие `ceo done` после приёмки — не заказ: сразу после него повтор исполнителя отказывает (TK-266: 12:57:34 → 12:57:59)."""
-        self._closed_by_ceo()
-        self.assertIn("[итог: done]", self.tkt().log[-1].text)
-        self.refused("engineer", "done", path="out.md")
-
-    # --- next CEO не затирается записью Судьи (alpha TK-282, PR #107 П2а)
+    # --- непустой next не затирается записью Судьи (alpha TK-282, PR #107 П2а)
     def _judge_comment(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             TK.cmd_comment(type("A", (), dict(id=self.tid, author="judge", text="заметка Судьи", next=None))())
         return out.getvalue()
 
-    def test_judge_comment_keeps_pending_ceo_next(self):
+    def test_judge_comment_keeps_nonempty_next(self):
         T.write_header_updates(self.path, {"owner": "researcher"}, now=NOW)
         with contextlib.redirect_stdout(io.StringIO()):
             TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="нужна выкладка", next="engineer"))())
         out = self._judge_comment()
         self.assertEqual(self.tkt().header.get("next"), "engineer", "заказ CEO не сброшен на владельца тикета")
-        self.assertRegex(out, r"next оставлен: ceo поставил engineer в \d\d:\d\d")
+        self.assertIn("next оставлен: engineer", out)
         self.assertNotIn("проставлен автоматически", out)
 
-    def test_judge_comment_sets_owner_when_ceo_order_already_answered(self):
+    def test_judge_comment_sets_owner_when_next_empty(self):
         T.write_header_updates(self.path, {"owner": "researcher"}, now=NOW)
         with contextlib.redirect_stdout(io.StringIO()):
             TK.cmd_comment(type("A", (), dict(id=self.tid, author="ceo", text="нужна выкладка", next="engineer"))())
