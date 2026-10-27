@@ -66,10 +66,15 @@ def agent_def(path: Path, with_tools: bool = False) -> dict:
     return d
 
 
-def agent_cmd(claude: str, agents_file, agent: str, model: str, effort: str, budget, extra: tuple = ()) -> list:
-    """Командная строка `claude -p --agent <agent>` без инструментов и без сессии (Надзиратель, отчёт); extra — флаги вызывающего."""
-    return [claude, "-p", "--agents", str(agents_file), "--agent", agent, "--model", model, "--effort", effort,
-            "--output-format", "json", "--no-session-persistence", "--max-budget-usd", str(budget), "--tools", "", *extra]
+def agent_cmd(claude: str, agents_file, agent: str, model: str, effort: str, budget, extra: tuple = (),
+              tools: str | None = "") -> list:
+    """Командная строка `claude -p --agent <agent>` без сессии; по умолчанию без инструментов (Надзиратель, отчёт), tools=None —
+    флага `--tools` нет (инструменты задаёт определение агента, как у помощников в tools/helper_eval); extra — флаги вызывающего."""
+    cmd = [claude, "-p", "--agents", str(agents_file), "--agent", agent, "--model", model, "--effort", effort,
+           "--output-format", "json", "--no-session-persistence", "--max-budget-usd", str(budget)]
+    if tools is not None:
+        cmd += ["--tools", tools]
+    return cmd + list(extra)
 
 
 def ask(system: str, text: str, runner=hide.run, claude: str | None = None, timeout: int = TIMEOUT_S):

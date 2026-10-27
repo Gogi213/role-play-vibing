@@ -58,18 +58,11 @@ def registry_cmd(work: Path) -> str:
 # ------------------------------------------------------------------------------------------------------------
 
 def load_agent(name: str) -> dict:
-    """agents/<name>.md → {description, prompt, tools, model, effort} (фронтматтер YAML-подобный, плоский)."""
+    """agents/<name>.md → {description, prompt, tools, model, effort}."""
     try:
-        meta, prompt = HA.agent_meta(ROOT / "agents" / f"{name}.md")
+        return HA.agent_def(ROOT / "agents" / f"{name}.md", with_tools=True)
     except ValueError as e:
         raise SystemExit(str(e))
-    out = {"description": meta.get("description", name), "prompt": prompt}
-    if meta.get("tools"):
-        out["tools"] = [t.strip() for t in meta["tools"].split(",") if t.strip()]
-    for k in ("model", "effort"):
-        if meta.get(k):
-            out[k] = meta[k]
-    return out
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -296,10 +289,9 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
                 defs[name] = d
             agents.write_text(json.dumps(defs, ensure_ascii=False), encoding="utf-8")
     tools = load_agent(task).get("tools", [])
-    cmd = [CLAUDE, "-p", "--agents", str(agents), "--agent", task, "--model", model, "--effort", effort,
-           "--output-format", "json", "--no-session-persistence", "--max-budget-usd", str(budget),
-           # копия заготовки во временном каталоге; `.claude/` Claude Code без полного режима не даёт писать молча
-           "--permission-mode", "bypassPermissions", "--allowedTools", ",".join(tools)]
+    # копия заготовки во временном каталоге; `.claude/` Claude Code без полного режима не даёт писать молча
+    cmd = HA.agent_cmd(CLAUDE, agents, task, model, effort, budget, tools=None,
+                       extra=("--permission-mode", "bypassPermissions", "--allowedTools", ",".join(tools)))
     t0 = time.time()
     try:
         r = subprocess.run(cmd, input=PROMPTS[task](c, work), capture_output=True, text=True, encoding="utf-8",

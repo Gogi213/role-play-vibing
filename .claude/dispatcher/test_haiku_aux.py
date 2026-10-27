@@ -46,5 +46,17 @@ class HaikuAux(unittest.TestCase):
             H.compact = orig
 
 
+class AgentCmd(unittest.TestCase):
+    def test_default_has_empty_tools_and_extra_last(self):
+        cmd = H.agent_cmd("claude", "a.json", "overseer", "m", "low", 1, extra=("--x",))
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertEqual(cmd[-1], "--x")
+
+    def test_tools_none_has_no_tools_flag(self):
+        cmd = H.agent_cmd("claude", "a.json", "secretary", "m", "low", 1, extra=("--allowedTools", "Read"), tools=None)
+        self.assertNotIn("--tools", cmd)
+        self.assertEqual(cmd[-2:], ["--allowedTools", "Read"])
+
+
 if __name__ == "__main__":
     unittest.main()
