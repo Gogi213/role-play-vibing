@@ -22,7 +22,6 @@ import re
 import shutil
 import subprocess
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -31,6 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "dispatcher"))
 import haiku_aux as HA  # noqa: E402
+from eval_common import LOCK, append_jsonl, emit, parse_claude_json, read_jsonl  # noqa: E402
 CLAUDE = shutil.which("claude") or "claude"
 WRITERS = {"secretary"}  # помощники, которые пишут в проект: каждому запуску — своя копия заготовки
 OPEN_STATUSES = ("todo", "in_progress", "in_review", "waiting", "blocked", "needs_owner")
@@ -58,18 +58,11 @@ def registry_cmd(work: Path) -> str:
 # ------------------------------------------------------------------------------------------------------------
 
 def load_agent(name: str) -> dict:
-    """agents/<name>.md → {description, prompt, tools, model, effort} (фронтматтер YAML-подобный, плоский)."""
+    """agents/<name>.md → {description, prompt, tools, model, effort}."""
     try:
-        meta, prompt = HA.agent_meta(ROOT / "agents" / f"{name}.md")
+        return HA.agent_def(ROOT / "agents" / f"{name}.md", with_tools=True)
     except ValueError as e:
         raise SystemExit(str(e))
-    out = {"description": meta.get("description", name), "prompt": prompt}
-    if meta.get("tools"):
-        out["tools"] = [t.strip() for t in meta["tools"].split(",") if t.strip()]
-    for k in ("model", "effort"):
-        if meta.get(k):
-            out[k] = meta[k]
-    return out
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -268,9 +261,6 @@ GRADERS = {"secretary": grade_secretary, "inbox": grade_inbox, "reporter": grade
 # Прогон
 # ------------------------------------------------------------------------------------------------------------
 
-_LOCK = threading.Lock()
-
-
 def work_dir(c: dict, model: str, out: Path) -> Path:
     slug = model.replace("claude-", "")
     return out / "work" / slug / (c["id"] if c["task"] in WRITERS else f"_{c['fixture']}")
@@ -286,11 +276,11 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
         shutil.copytree(fixture, work)
     else:
         work = work_dir(c, model, out)
-        with _LOCK:
+        with LOCK:
             if not work.exists():
                 shutil.copytree(fixture, work)
     agents = out / f"agents-{slug}.json"
-    with _LOCK:
+    with LOCK:
         if not agents.exists():
             defs = {}
             for name in PROMPTS:
@@ -299,10 +289,9 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
                 defs[name] = d
             agents.write_text(json.dumps(defs, ensure_ascii=False), encoding="utf-8")
     tools = load_agent(task).get("tools", [])
-    cmd = [CLAUDE, "-p", "--agents", str(agents), "--agent", task, "--model", model, "--effort", effort,
-           "--output-format", "json", "--no-session-persistence", "--max-budget-usd", str(budget),
-           # копия заготовки во временном каталоге; `.claude/` Claude Code без полного режима не даёт писать молча
-           "--permission-mode", "bypassPermissions", "--allowedTools", ",".join(tools)]
+    # копия заготовки во временном каталоге; `.claude/` Claude Code без полного режима не даёт писать молча
+    cmd = HA.agent_cmd(CLAUDE, agents, task, model, effort, budget, tools=None,
+                       extra=("--permission-mode", "bypassPermissions", "--allowedTools", ",".join(tools)))
     t0 = time.time()
     try:
         r = subprocess.run(cmd, input=PROMPTS[task](c, work), capture_output=True, text=True, encoding="utf-8",
@@ -311,10 +300,7 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
     except subprocess.TimeoutExpired:
         raw = ""
     dur = round(time.time() - t0, 1)
-    try:
-        res = json.loads(raw)
-    except ValueError:
-        res = {"is_error": True, "result": raw[-2000:]}
+    res = parse_claude_json(raw)
     ans = res.get("result") or ""
     row = {"id": c["id"], "task": task, "model": model, "effort": effort, "cost": res.get("total_cost_usd"),
            "turns": res.get("num_turns"), "dur": dur, "error": bool(res.get("is_error")) or not ans,
@@ -323,9 +309,7 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
         row["grade"] = GRADERS[task](c, ans, work, fixture)
     except Exception as e:  # проверка не должна ронять прогон
         row["grade"] = {"grader_error": f"{type(e).__name__}: {e}"}
-    with _LOCK:
-        with (out / "results.jsonl").open("a", encoding="utf-8") as w:
-            w.write(json.dumps(row, ensure_ascii=False) + "\n")
+    append_jsonl(out / "results.jsonl", row)
     print(f"{c['id']:<14} {slug:<12} ${row['cost'] or 0:.4f} {dur:>6}s {'ОШИБКА' if row['error'] else ''}", flush=True)
     return row
 
@@ -333,10 +317,9 @@ def run_case(c: dict, model: str, effort: str, data: Path, out: Path, budget: fl
 def cmd_regrade(a) -> int:
     """Проверки заново по сохранённым ответам и рабочим копиям: эталон или проверка поправлены — запуски не нужны."""
     data, out = Path(a.data).resolve(), Path(a.out).resolve()
-    cases = {c["id"]: c for c in (json.loads(l) for l in (data / "cases.jsonl").open(encoding="utf-8") if l.strip())}
+    cases = {c["id"]: c for c in read_jsonl(data / "cases.jsonl")}
     rows = {}
-    for l in (out / "results.jsonl").open(encoding="utf-8"):
-        r = json.loads(l)
+    for r in read_jsonl(out / "results.jsonl"):
         rows[(r["id"], r["model"])] = r
     with (out / "results.jsonl").open("w", encoding="utf-8") as w:
         for r in rows.values():
@@ -353,8 +336,7 @@ def cmd_regrade(a) -> int:
 
 def _load(out: Path, model: str) -> dict:
     rows = {}
-    for l in (out / "results.jsonl").open(encoding="utf-8"):
-        r = json.loads(l)
+    for r in read_jsonl(out / "results.jsonl"):
         if r["model"] == model:
             rows[r["id"]] = r
     return rows
@@ -395,8 +377,7 @@ def cmd_pair(a) -> int:
                   f"{len(wrong_a)} | {len(caught)} | {cost:.4f} |")
         md += [f"  - разошлись: `{i}` A={_pair_key(ra[i])} B={_pair_key(rb[i])}" for i in ids if i not in same]
         md += [f"  - совпали, но мимо эталона: `{i}` {_pair_key(ra[i])}" for i in same if not _pair_ok(ra[i])]
-    sys.stdout.reconfigure(encoding="utf-8")
-    print("\n".join(md))
+    emit("\n".join(md))
     return 0
 
 
@@ -404,16 +385,14 @@ def cmd_run(a) -> int:
     # resolve(): короткое имя Windows (`ABCD~1`) Claude Code считает подозрительным и не даёт писать без вопроса
     data, out = Path(a.data).resolve(), Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    cases = [json.loads(l) for l in (data / "cases.jsonl").open(encoding="utf-8") if l.strip()]
+    cases = read_jsonl(data / "cases.jsonl")
     tasks = set(a.tasks.split(","))
     only = set(a.only.split(",")) if a.only else None
     cases = [c for c in cases if c["task"] in tasks and (only is None or c["id"] in only)]
     done = set()
-    if (out / "results.jsonl").exists():  # продолжение: готовые пары (случай, модель) не повторяем
-        for l in (out / "results.jsonl").open(encoding="utf-8"):
-            r = json.loads(l)
-            if not r.get("error"):
-                done.add((r["id"], r["model"]))
+    for r in read_jsonl(out / "results.jsonl", missing_ok=True):  # продолжение: готовые пары (случай, модель) не повторяем
+        if not r.get("error"):
+            done.add((r["id"], r["model"]))
     jobs = [(c, m) for m in a.models.split(",") for c in cases if (c["id"], m) not in done]
     print(f"запусков: {len(jobs)} (готово раньше: {len(done)})", flush=True)
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
@@ -478,8 +457,7 @@ def _misses(rows: list[dict]) -> list[str]:
 def cmd_report(a) -> int:
     out = Path(a.out)
     rows = {}
-    for l in (out / "results.jsonl").open(encoding="utf-8"):
-        r = json.loads(l)
+    for r in read_jsonl(out / "results.jsonl"):
         rows[(r["id"], r["model"])] = r  # последний запуск пары
     rows = list(rows.values())
     models = sorted({r["model"] for r in rows})
@@ -488,8 +466,7 @@ def cmd_report(a) -> int:
         md += _task_table(task, mets, rows, models)
     md += _misses(rows)
     (out / "summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
-    sys.stdout.reconfigure(encoding="utf-8")
-    print("\n".join(md))
+    emit("\n".join(md))
     return 0
 
 
