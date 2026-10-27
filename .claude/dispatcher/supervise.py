@@ -12,10 +12,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from xml.sax.saxutils import escape
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import heartbeat as HB  # noqa: E402
@@ -156,10 +158,36 @@ def systemd_files(name: str, python: str, script: Path, project: Path) -> dict:
     return {f"{name}.service": svc, f"{name}.timer": tim}
 
 
-def launchd_plist(label: str, python: str, script: Path, project: Path) -> str:
+def launchd_path(python: str, which=shutil.which, environ=os.environ) -> str:
+    """PATH для launchd (у него только /usr/bin:/bin:/usr/sbin:/sbin — `claude` из homebrew не находится, роли не
+    стартуют): каталог `claude`, каталог python, затем системные."""
+    claude = environ.get("CLAUDE_BIN") or which("claude")
+    dirs = [str(PurePosixPath(claude).parent) if claude else "", str(PurePosixPath(python).parent), "/usr/local/bin", "/usr/bin", "/bin"]
+    return ":".join(dict.fromkeys(d for d in dirs if d))
+
+
+def launchd_env(python: str, which=shutil.which, environ=os.environ) -> dict:
+    env = {"PATH": launchd_path(python, which, environ)}
+    if environ.get("CLAUDE_BIN"):
+        env["CLAUDE_BIN"] = environ["CLAUDE_BIN"]
+    return env
+
+
+def launchd_label(project: Path) -> str:
+    return f"dev.rpv.{task_name(project)}"
+
+
+def plist_path(label: str) -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+
+
+def launchd_plist(label: str, python: str, script: Path, project: Path, env: dict | None = None) -> str:
+    env = launchd_env(python) if env is None else env
+    env_xml = "".join(f"<key>{escape(k)}</key><string>{escape(v)}</string>" for k, v in env.items())
     return ('<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n'
             f"<key>Label</key><string>{label}</string>\n<key>ProgramArguments</key><array>"
             f"<string>{python}</string><string>{script}</string><string>--project</string><string>{project}</string></array>\n"
+            f"<key>EnvironmentVariables</key><dict>{env_xml}</dict>\n"
             f"<key>StartInterval</key><integer>{PERIOD_MIN * 60}</integer>\n<key>RunAtLoad</key><true/>\n</dict></plist>\n")
 
 
@@ -189,8 +217,8 @@ def install(project: Path, remove: bool = False) -> None:
         if not remove:
             subprocess.run(schtasks_settings(name), check=True)
     elif sys.platform == "darwin":
-        label = f"dev.rpv.{name}"
-        plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+        label = launchd_label(project)
+        plist = plist_path(label)
         subprocess.run(["launchctl", "unload", str(plist)])
         if remove:
             plist.unlink(missing_ok=True)

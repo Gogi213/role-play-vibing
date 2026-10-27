@@ -12,6 +12,8 @@
 
 ## Как обновиться пользователю
 
-Штатно, средствами Claude Code: меню `/plugin` или `claude plugin marketplace update role-play-vibing`, затем `claude plugin update role-play-vibing@role-play-vibing`. После обновления перезапустите Claude Code и службы проекта (`/rpv-start` останавливает работающие и запускает заново уже из новой версии).
+Одной командой: `/rpv-update` (в сессии CEO; слово владельца об обновлении — сначала в реестр, номер `В-N` — в `--ref`; из терминала — `python <плагин>/.claude/dispatcher/update.py --ref В-N`). Она делает `claude plugin marketplace update role-play-vibing`, `claude plugin update role-play-vibing@role-play-vibing`, затем из новой версии: `start.py` (службы), `supervise.py --install` (присмотр ОС; на macOS plist с `PATH` и `CLAUDE_BIN`), `tickets.py charter sync --ref В-N` (уставы) и `doctor.py`, и печатает одну таблицу. Любой FAIL назван как есть. Версия уже последняя — скрипт так и скажет и всё равно проверит службы. Последняя строка — «перезапустите Claude Code»: до перезапуска открытая сессия работает на хуках старой версии.
+
+По частям, штатно средствами Claude Code: меню `/plugin` или те же две команды `claude plugin …`, затем перезапуск Claude Code, `/rpv-start` и `tickets.py charter sync`.
 
 Нужна прежняя версия — переподключите маркетплейс на её тег и поставьте плагин заново: `/plugin marketplace remove role-play-vibing`, `/plugin marketplace add Gogi213/role-play-vibing#vX.Y.Z`, `/plugin install role-play-vibing@role-play-vibing`.
