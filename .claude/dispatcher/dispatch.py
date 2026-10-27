@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
 import hide  # noqa: E402
+import plugin_version as PV  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import downtime  # noqa: E402
@@ -162,7 +163,7 @@ CLAUDE_HAIKU_MODEL = "claude-haiku-5-5"
 # (`role_parallel` в rpv.json, по умолчанию 1); на один тикет — один запуск роли.
 # транскрипты сессий claude (`<projects>/<проект>/<session_id>.jsonl`): контекст последнего хода, когда в JSON нет
 # `usage.iterations` (см. runlog.context_tokens_last)
-CLAUDE_PROJECTS_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "projects"
+CLAUDE_PROJECTS_DIR = Path(PV.claude_dir()) / "projects"
 
 
 RUNNING = {}  # tid -> {role, popen, pid, started, attempt, run_file, err_file, out_fh, err_fh, reason}

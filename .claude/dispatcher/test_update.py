@@ -1,5 +1,6 @@
 """/rpv-update (В-13): порядок шагов с подменённым `claude`; PATH в plist присмотра и проверка doctor (П3)."""
 import io
+import os
 import plistlib
 import sys
 import tempfile
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import doctor as D  # noqa: E402
 import supervise as SV  # noqa: E402
 import update as U  # noqa: E402
+from test_plugin_version import make_install  # noqa: E402
 
 PROJ = Path("/p/proj")
 DOCTOR_FAIL = "OK    сторож     pid 1\nFAIL  диспетчер  не запущен (pid-файл: нет)\nFAIL  простой    26 мин из 10"
@@ -21,7 +23,7 @@ def _entry(version, scope="user", project=None):
     e = {"scope": scope, "version": version, "installPath": f"/cache/{version}"}
     if project:
         e["projectPath"] = str(project)
-    return {"plugins": {U.PLUGIN: [e]}}
+    return e
 
 
 class Fake:
@@ -30,7 +32,7 @@ class Fake:
     def __init__(self, old="2.0.9", new="2.1.0", doctor=(0, "OK  всё"), fail_on=None):
         self.cmds, self.version, self.new, self.doctor, self.fail_on = [], old, new, doctor, fail_on
 
-    def installed(self):
+    def installed(self, project):
         return _entry(self.version)
 
     def run(self, cmd, timeout):
@@ -76,7 +78,7 @@ class UpdateOrder(unittest.TestCase):
 
     def test_scope_of_install_is_passed(self):
         f = Fake()
-        f.installed = lambda: _entry(f.version, "project", PROJ)
+        f.installed = lambda project: _entry(f.version, "project", PROJ)
         _update(f, ref="В-13")
         upd = next(c for c in f.cmds if c[1:3] == ["plugin", "update"])
         self.assertEqual(upd[-2:], ["--scope", "project"])
@@ -112,12 +114,22 @@ class UpdateOrder(unittest.TestCase):
         self.assertEqual(f.steps(), ["plugin marketplace update"])
         self.assertEqual(rows[-1][:2], ("marketplace", D.FAIL))
 
-    def test_install_entry_prefers_project_then_user(self):
-        both = {"plugins": {U.PLUGIN: [{"scope": "user", "version": "1"}, {"scope": "project", "version": "2",
-                                                                          "projectPath": str(PROJ)}]}}
-        self.assertEqual(U.install_entry(both, PROJ)["version"], "2")
-        self.assertEqual(U.install_entry(both, Path("/other"))["version"], "1")
-        self.assertIsNone(U.install_entry({}, PROJ))
+    def _entry_for(self, entries, project=PROJ):
+        """`install_entry` на настоящем `installed_plugins.json` во временном каталоге настроек (TK-044, #4)."""
+        with tempfile.TemporaryDirectory() as d:
+            cfg, _ = make_install(d, sorted({v for *_, v in entries}) or ["0"], entries)
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+                return U.install_entry(project)
+
+    def test_install_entry_is_the_hook_reader_narrowest_scope_wins(self):
+        proj = str(PROJ)
+        self.assertEqual(self._entry_for([("user", None, "1"), ("project", proj, "2")])["version"], "2")
+        self.assertEqual(self._entry_for([("user", None, "1"), ("project", proj, "2")], Path("/other"))["version"], "1")
+        # несколько записей этого проекта: самая узкая область, а не первая в файле (раньше update брал первую)
+        self.assertEqual(self._entry_for([("project", proj, "2"), ("local", proj, "3"), ("user", None, "1")])["version"], "3")
+        # запись только чужого проекта — не установка этого (раньше update брал entries[0])
+        self.assertIsNone(self._entry_for([("project", "/other", "2")]))
+        self.assertIsNone(self._entry_for([]))
 
 
 class MainLines(unittest.TestCase):

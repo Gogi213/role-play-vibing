@@ -230,6 +230,28 @@ def push_words(rest):
     return pos, repo_opt
 
 
+def refspec_publication(spec):
+    """Одна запись refspec (`src`, `src:dst`): (метка, пары) — метка None, если запись ничего не публикует."""
+    src, sep, dst = spec.partition(":")
+    ref = dst if sep and dst else src
+    name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+    if ref.startswith("refs/tags/") or TAG_NAME.match(ref):
+        return f"git push {spec}: тег", []
+    if name in DEFAULT_BRANCHES:
+        return f"git push {spec}: основная ветка", [(src, name, False)]
+    if "*" in ref:
+        return f"git push {spec}: все ветки по шаблону", list(ALL_BRANCHES)
+    return None, []
+
+
+def current_branch_publication(repo, ctx):
+    """`git push` без названной ветки: уйдёт текущая — (метка, пары) либо (None, [])."""
+    cur = head_branch(repo, ctx)
+    if cur in DEFAULT_BRANCHES:
+        return f"git push без ветки: текущая — {cur}", [("HEAD", cur, False)]
+    return ("git push без ветки: текущую не определить", []) if cur is None else (None, [])
+
+
 def push_publication(rest, repo, ctx):
     """Публикация `git push` (`Publish`) либо None. Публикация — основная ветка (main/master) в любой записи refspec
     (`HEAD:main`, `refs/heads/main`, `x:main`), тег (`--tags`, `--follow-tags`, `refs/tags/…`, `tag <имя>`, `v1.2.3`), все
@@ -246,23 +268,11 @@ def push_publication(rest, repo, ctx):
         label = label or "git push tag: тег"
         specs = []
     for spec in specs:
-        src, sep, dst = spec.partition(":")
-        ref = dst if sep and dst else src
-        name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
-        if ref.startswith("refs/tags/") or TAG_NAME.match(ref):
-            label = label or f"git push {spec}: тег"
-        elif name in DEFAULT_BRANCHES:
-            label = label or f"git push {spec}: основная ветка"
-            pairs.append((src, name, False))
-        elif "*" in ref:
-            label = label or f"git push {spec}: все ветки по шаблону"
-            pairs.extend(ALL_BRANCHES)
+        spec_label, spec_pairs = refspec_publication(spec)
+        label = label or spec_label
+        pairs.extend(spec_pairs)
     if not label and (not specs or "HEAD" in specs or "@" in specs):     # ветка не названа: уйдёт текущая
-        cur = head_branch(repo, ctx)
-        if cur in DEFAULT_BRANCHES:
-            label, pairs = f"git push без ветки: текущая — {cur}", [("HEAD", cur, False)]
-        elif cur is None:
-            label = "git push без ветки: текущую не определить"
+        label, pairs = current_branch_publication(repo, ctx)
     return Publish(label, PushRefs(repo, remote, pairs) if pairs else None) if label else None
 
 
