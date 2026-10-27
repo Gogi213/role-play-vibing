@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 
-DISPATCH_ROLES = ("researcher", "engineer", "judge")
+DISPATCH_ROLES = P.ROLES
 DECISION = re.compile(r"^## В-(\d+) · (.+)$", re.M)
 GOAL_ID = re.compile(r"^G-(\d{3,})$")
 REF = re.compile(r"^(?:В-\d+|G-\d{3,})$")

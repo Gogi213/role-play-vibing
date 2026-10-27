@@ -202,7 +202,7 @@ def _expected_model_family(info: dict) -> str:
 CLAUDE_HAIKU_MODEL = "claude-haiku-5-5"
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
-ROLE_KEYS = ("researcher", "engineer", "judge")  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
+ROLE_KEYS = P.ROLES  # роли, которых диспетчер запускает; ceo — человек/CEO-сессия
 
 # Сессия: каждое пробуждение роли — новая (бабочка); память между запусками — блокнот роли и лог тикета.
 # --resume — только повтор после таймаута в том же запуске (TK-056 п.3′). Предел запусков на роль — _role_busy

@@ -15,12 +15,13 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import project as P
 import registry as registry_mod
 
 ROLLBACK_AFTER_S = 2 * 3600
 LOG_NAME = "config-log.json"
 ABSENT = None                                    # «ключа не было» в журнале: откат удаляет ключ
-ROLES = ("researcher", "engineer", "judge")
+ROLES = P.ROLES
 
 
 def _text(v) -> bool:

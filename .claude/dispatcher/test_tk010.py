@@ -10,11 +10,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_inbox as CI  # noqa: E402
+import cfg as CFG  # noqa: E402
 import dispatch as D  # noqa: E402
 import doctor as DOC  # noqa: E402
 import heartbeat as HB  # noqa: E402
 import overseer as OV  # noqa: E402
+import project as P  # noqa: E402
+import registry as REG  # noqa: E402
 import report as RP  # noqa: E402
+import routes as RT  # noqa: E402
 import runs as RL  # noqa: E402
 import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
@@ -171,6 +175,30 @@ class RunsLogLine(unittest.TestCase):
         d.mkdir(parents=True)
         (d / "runs.log").write_text(line + "\n", encoding="utf-8")
         return root
+
+
+class RolesOneTuple(unittest.TestCase):
+    """Роли, которых запускает диспетчер, — кортеж `project.ROLES`; в остальных модулях его литерала нет."""
+
+    def test_aliases_are_the_same_object(self):
+        self.assertIs(CFG.ROLES, P.ROLES)
+        self.assertIs(D.ROLE_KEYS, P.ROLES)
+        self.assertIs(REG.DISPATCH_ROLES, P.ROLES)
+        self.assertEqual(T.ROLE_TOKENS, P.ROLES + ("ceo",))
+        self.assertEqual(set(RT.ALL_ROLES), set(P.ROLES))
+
+    def test_routes_follow_roles(self):
+        for role in P.ROLES:
+            self.assertTrue(RT.verbs_for(role), role)
+        self.assertEqual(RT.verbs_for("ceo"), list(RT.RESULTS))
+
+    def test_no_literal_copies(self):
+        here = Path(__file__).resolve().parent
+        literal = '"researcher", "engineer", "judge"'
+        for path in sorted(here.glob("*.py")) + sorted((here.parent / "hooks").glob("*.py")):
+            if path.name.startswith("test_") or path.name in ("project.py", "delete_guard.py"):
+                continue  # страж — отдельный файл с отказом по умолчанию, без импорта диспетчера
+            self.assertNotIn(literal, path.read_bytes().decode("utf-8"), path.name)
 
 
 if __name__ == "__main__":

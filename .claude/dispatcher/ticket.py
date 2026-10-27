@@ -50,7 +50,7 @@ HEADER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.S)
 LOG_HEADING_RE = re.compile(r"^##\s*Лог\s*$", re.M)
 ENTRY_RE = re.compile(r"^###\s+(\S+)\s+(.+?)\s*$", re.M)
 MENTION_RE = re.compile(r"@(researcher|engineer|judge|ceo)\b", re.I)
-ROLE_TOKENS = ("researcher", "engineer", "judge", "ceo")
+ROLE_TOKENS = P.ROLES + ("ceo",)
 VALID_EFFORTS = ("low", "medium", "high", "xhigh")
 
 # v2 (02.10): компакция лога тикета — файл > LOG_COMPACT_BYTES → всё, кроме последних LOG_KEEP_ENTRIES

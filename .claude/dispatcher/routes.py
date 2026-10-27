@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project as P  # noqa: E402
 
 RESULTS = ("done", "pr", "accept", "return", "blocked", "ask-owner", "wait", "continue")
 WHY_MAX = 200
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 
+ALL_ROLES = set(P.ROLES)
 # итог → (кто вправе, обязательное доказательство)
 RULES = {
     "done": ({"researcher", "engineer", "ceo"}, "path"),  # ceo — сессия без роли: закрыть тикет (TK-090 б)
     "pr": ({"engineer", "researcher"}, "pr+sha"),
     "accept": ({"judge"}, "pr+sha|path"),
     "return": ({"judge"}, "sha|path"),
-    "blocked": ({"researcher", "engineer", "judge"}, ""),
-    "ask-owner": ({"researcher", "engineer", "judge"}, ""),
-    "wait": ({"researcher", "engineer", "judge"}, "form"),
+    "blocked": (ALL_ROLES, ""),
+    "ask-owner": (ALL_ROLES, ""),
+    "wait": (ALL_ROLES, "form"),
     "continue": ({"researcher", "engineer"}, ""),  # TK-090 в: длинная работа кусками — следующий запуск той же роли
 }
 OWNER_REASONS = ("деньги", "направление", "необратимое", "бизнес-правило")  # V2-1: поводы вопроса владельцу (TK-233 п.4; «направление» вместо «видимого»)
@@ -44,7 +49,7 @@ PROOF_SHORT = {  # доказательство итога в одну стро�
 def verbs_for(role: str) -> list:
     """Итоги, которые роль вправе сдавать (по RULES): Инженеру и Исследователю не показываем accept/return, Судье — done/pr/continue.
     CEO и роль не из таблицы — все (их сессии не запускает диспетчер)."""
-    if role not in ("researcher", "engineer", "judge"):
+    if role not in P.ROLES:
         return list(RESULTS)
     return [r for r in RESULTS if role in RULES[r][0]]
 
