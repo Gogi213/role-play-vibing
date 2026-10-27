@@ -1705,7 +1705,8 @@ def _log_run_summary(tid: str, info: dict, result: dict, now, timed_out: bool, r
     if not usage:  # таймаут/убит: токены — из транскрипта сессии с момента старта запуска
         usage = _transcript_usage_since(info.get("session_id"), info.get("started")) or {}
         src = "jsonl" if usage else "none"
-    status = "stopped" if stopped else "timeout" if timed_out else ("ok" if result else "no_output")
+    status = ("stopped" if stopped else "timeout" if timed_out else "api_error" if _api_error(result)
+              else ("ok" if result else "no_output"))
     # cost_usd — сырой (кумулятивный за сессию) из JSON; resolved_cost — разница с прошлым итогом ТОЙ ЖЕ
     # session_id (судья TK-002 п.1) — то, что реально начислено этому запуску; cost_note=asis — не было
     # с чем сравнить (новая/ротированная сессия) или разница < 0 — использован сырой итог как есть.
@@ -1717,7 +1718,9 @@ def _log_run_summary(tid: str, info: dict, result: dict, now, timed_out: bool, r
             f"in_tok={usage.get('input_tokens', '-')} out_tok={usage.get('output_tokens', '-')} "
             f"cr_tok={usage.get('cache_read_input_tokens', '-')} cw_tok={usage.get('cache_creation_input_tokens', '-')} "
             f"tok_src={src} "
-            f"ctx_last={_context_tokens_last(result)} ctx_sum={_context_tokens_sum(usage)} status={status}\n")
+            f"ctx_last={_context_tokens_last(result)} ctx_sum={_context_tokens_sum(usage)} "
+            f"terminal_reason={result.get('terminal_reason') or '-'} is_error={result.get('is_error', '-')} "
+            f"status={status}\n")
     with open(RUNS_LOG, "a", encoding="utf-8") as fh:
         fh.write(line)
 
@@ -1873,6 +1876,51 @@ def _limit_hit(result: dict) -> bool:
     return (result or {}).get("api_error_status") == 429 or "hit your session limit" in text
 
 
+API_PAUSE = timedelta(minutes=5)  # ошибка API (обрыв сети, 5xx): запуски на паузе, по образцу лимита сессии
+API_AUTH_PAUSE = timedelta(minutes=30)  # вход истёк: повтор бессмыслен, пока CEO не войдёт заново
+MAX_API_ERRORS = 3  # подряд ошибок API у (задача, роль) → blocked с настоящей причиной
+
+
+def _api_error(result: dict) -> bool:
+    """Запуск оборвала ошибка API (обрыв ECONNRESET, 5xx, вход истёк), кроме 429 — это лимит (`_limit_hit`)."""
+    r = result or {}
+    if _limit_hit(r):
+        return False
+    return r.get("terminal_reason") == "api_error" or (bool(r.get("is_error")) and r.get("api_error_status") is not None)
+
+
+def _auth_error(result: dict) -> bool:
+    r = result or {}
+    return r.get("api_error_status") == 401 or "Failed to authenticate" in str(r.get("result") or "")
+
+
+def _handle_api_error(tid: str, info: dict, state: dict, now, result: dict) -> None:
+    """Ошибка API — не холостой ход и не провал роли: пауза запусков, счётчик подряд; N подряд — blocked с причиной;
+    вход истёк — сразу сигнал CEO (повтор не поможет)."""
+    role = info["role"]
+    key = f"{tid}::{role}"
+    text = _first_line(str(result.get("result") or ""), 160) or f"api_error_status={result.get('api_error_status')}"
+    counts = state.setdefault("api_errors", {})
+    counts[key] = n = counts.get(key, 0) + 1
+    until = now + (API_AUTH_PAUSE if _auth_error(result) else API_PAUSE)
+    cur = state.get("limit_pause_until")
+    if not cur or T.parse_dt(cur) < until:
+        state["limit_pause_until"] = T.now_iso(until)
+    state.setdefault("idle_runs", {}).pop(key, None)
+    _reset_same_status(state, key)
+    state.setdefault("sessions", {}).setdefault(key, {})["retries"] = 0
+    print(f"[dispatch] {T.now_iso(now)} ошибка API на {tid} ({role}) x{n}: {text}; запуски на паузе до {T.now_iso(until)}",
+          file=sys.stderr, flush=True)
+    path = TICKETS_DIR / f"{tid}.md"
+    if _auth_error(result):
+        append_ceo_inbox(tid, "auth", f"{role}: вход Claude истёк — {text}. Войти заново (`claude /login`)", now)
+    elif n >= MAX_API_ERRORS and path.exists():
+        counts.pop(key, None)
+        _block_ticket(path, tid, role, f"ошибка API x{n}: {text}", state, now,
+                      f"Запусков роли {role} подряд оборвала ошибка API: {n} — {text}. Задача заблокирована, нужен CEO.")
+    save_state(state)
+
+
 def _limit_reset_at(result: dict, now, ref=None) -> datetime:
     """Ближайшее «resets 5am (TZ)» / «resets 3:30pm»; не разобрали — через час (проверим снова, пауза продлится).
     ref — момент ответа (конец запуска; по умолчанию now): метка раньше него — завтра, но метка в пределах
@@ -1977,6 +2025,10 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
         return  # лимит — не провал запуска: ни повтора, ни холостого хода, ни blocked
     if stopped:
         return  # остановка CEO — не провал: ни повтора, ни «не оставил запись» (след и счётчики — _apply_stop)
+    if _api_error(result):
+        _handle_api_error(tid, info, state, now, result)
+        return  # ошибка API (обрыв сети, 5xx, вход) — не холостой ход: пауза, N подряд — blocked с причиной
+    state.get("api_errors", {}).pop(f"{tid}::{info['role']}", None)
     _finish_role_part(tid, info, state, now, timed_out, result)
 
 
