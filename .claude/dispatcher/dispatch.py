@@ -135,6 +135,11 @@ def role_parallel() -> dict:
 
 RUN_TIMEOUT = 20 * 60.0
 
+# Резюме своего continue (ниже, launch_run) — только пока жив серверный кэш прошлой сессии. Замер на runs.log
+# живого проекта (alpha): cw_tok при --resume растёт с разрывом — до часа ~9-11 тыс., после часа ~59 тыс. (64%
+# накопленного контекста) — дороже, чем свежая сессия. 50 мин — запас перед обрывом у часа.
+CONTINUE_RESUME_MAX_AGE_S = 50 * 60.0
+
 # Защита от петли (владелец 27.09, v1.1). MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — троттлинг решений (а)-(г):
 # тикет просто пропускается этот тик, без ceo-inbox (не ошибка, а пауза); ретраи правила (д) их не считают —
 # они и так ограничены одной попыткой. Денежных ограничений НЕТ вовсе: В-149 снял часовой и суточный лимит,
@@ -1564,6 +1569,13 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
 
     store = _resume_store(state, tid, role)
     sid = store.get("session_id")
+    if own_continue and sid:
+        try:
+            age_s = (now - T.parse_dt(store.get("ts", ""))).total_seconds()
+        except Exception:
+            age_s = None
+        if age_s is None or age_s > CONTINUE_RESUME_MAX_AGE_S:
+            own_continue = False  # кэш прошлой сессии уже остыл — резюме дороже свежего старта
     state.get("on_met_chain", {}).pop(tid, None)  # запуск роли обрывает цепочку on_met
     if state.get("stopped_runs", {}).pop(tid, None):
         # прошлый запуск этого тикета оборван CEO (`tickets.py stop`): сессия НОВАЯ (без --resume), в промпте — пометка
@@ -1604,7 +1616,12 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     if executor == "haiku":
         effort = "xhigh"  # решение владельца 08.10: Haiku 5.5 везде на xhigh
     cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
-           "--model", model, "--effort", effort] + role_mcp_args(run_file.stem) + plugin_dir_args()
+           "--model", model, "--effort", effort,
+           # роль не печатает «/команду» сама и устав её ни в одну не зовёт (Skill — тоже): лишний прогрев кэша
+           # на меню навыков/команд и на settings.json владельца сессии (не проекта) не нужен; CLAUDE.md проекта
+           # и настройки .claude/settings.json проекта остаются — только `user` источник убран.
+           "--disable-slash-commands", "--setting-sources", "project",
+           ] + role_mcp_args(run_file.stem) + plugin_dir_args()
     if sid:
         cmd += ["--resume", sid]
     else:
@@ -1786,6 +1803,7 @@ def _finish_role_part(tid: str, info: dict, state: dict, now, timed_out: bool, r
         store["session_id"] = result["session_id"]
     elif timed_out and info.get("session_id") and not store.get("session_id") and             next(CLAUDE_PROJECTS_DIR.glob(f"*/{info['session_id']}.jsonl"), None) is not None:
         store["session_id"] = info["session_id"]  # убитая новая сессия: транскрипт есть — повтор продолжит её, не с нуля
+    store["ts"] = T.now_iso(now)  # когда роль закончила этот запуск — для возрастного предела резюме своего continue
 
     path = TICKETS_DIR / f"{tid}.md"
     if not path.exists():

@@ -1278,20 +1278,38 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(".claude/roles/notes/engineer.md", call["prompt"])
 
     def test_own_continue_resumes_same_session(self):
-        """Своя же запись «continue» (ещё не доделал кусок — не вернул Судья) — резюмирует прошлую сессию роли,
-        а не платит новый прогрев кэша: находка по runs.log живого проекта (continue — 14,5% денег диспетчера)."""
+        """Своя же запись «continue» (ещё не доделал кусок — не вернул Судья), прошлая сессия свежая (кэш жив) —
+        резюмирует её, а не платит новый прогрев кэша: находка по runs.log живого проекта (continue — 14,5% денег
+        диспетчера)."""
         self.set_fake_bin(FAKE_BIN_RECORD)
         path = T.create_ticket(self.tickets_dir, owner="engineer", title="Длинная задача кусками")
         T.write_header_updates(path, {"status": "in_progress", "next": "engineer"})
         T.append_log(path, "engineer", "[итог: continue] — следом: остальное")
         state = D.load_state()
-        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old"}}
+        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old", "ts": T.now_iso()}}
         D.save_state(state)
         D.tick()
         self.wait_running()
         call = json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
         self.assertEqual(call["resumed"], "old", "продолжение своего continue — та же сессия, не новая")
         self.assertNotIn("Начинаем новую сессию", call["prompt"])
+
+    def test_own_continue_after_long_gap_starts_fresh(self):
+        """Своя же «continue», но прошлая сессия кончилась больше CONTINUE_RESUME_MAX_AGE_S назад — кэш остыл
+        (замер: --resume после часа платит ~64% прежнего контекста заново, дороже свежего старта), новая сессия."""
+        self.set_fake_bin(FAKE_BIN_RECORD)
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Длинная задача кусками, с паузой")
+        T.write_header_updates(path, {"status": "in_progress", "next": "engineer"})
+        T.append_log(path, "engineer", "[итог: continue] — следом: остальное")
+        old_ts = (datetime.now(timezone.utc) - timedelta(seconds=D.CONTINUE_RESUME_MAX_AGE_S + 60)).isoformat()
+        state = D.load_state()
+        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old", "ts": old_ts}}
+        D.save_state(state)
+        D.tick()
+        self.wait_running()
+        call = json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertIsNone(call["resumed"], "кэш прошлой сессии остыл — резюме дороже свежей сессии")
+        self.assertIn("Начинаем новую сессию", call["prompt"])
 
     def test_stuck_todo_after_log_retries_then_blocks(self):
         """TK-070 п.6: роль оставила запись и не трогала status — диспетчер уже поставил in_progress при старте: ни повтора, ни blocked."""
