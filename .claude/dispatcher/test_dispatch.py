@@ -1277,6 +1277,22 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("Начинаем новую сессию", call["prompt"])
         self.assertIn(".claude/roles/notes/engineer.md", call["prompt"])
 
+    def test_own_continue_resumes_same_session(self):
+        """Своя же запись «continue» (ещё не доделал кусок — не вернул Судья) — резюмирует прошлую сессию роли,
+        а не платит новый прогрев кэша: находка по runs.log живого проекта (continue — 14,5% денег диспетчера)."""
+        self.set_fake_bin(FAKE_BIN_RECORD)
+        path = T.create_ticket(self.tickets_dir, owner="engineer", title="Длинная задача кусками")
+        T.write_header_updates(path, {"status": "in_progress", "next": "engineer"})
+        T.append_log(path, "engineer", "[итог: continue] — следом: остальное")
+        state = D.load_state()
+        state["ticket_sessions"] = {f"{path.stem}::engineer": {"session_id": "old"}}
+        D.save_state(state)
+        D.tick()
+        self.wait_running()
+        call = json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(call["resumed"], "old", "продолжение своего continue — та же сессия, не новая")
+        self.assertNotIn("Начинаем новую сессию", call["prompt"])
+
     def test_stuck_todo_after_log_retries_then_blocks(self):
         """TK-070 п.6: роль оставила запись и не трогала status — диспетчер уже поставил in_progress при старте: ни повтора, ни blocked."""
         self.set_fake_bin(FAKE_BIN_STUCK_TODO)

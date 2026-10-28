@@ -1556,6 +1556,12 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
     run_file = RUNS_DIR / f"{ts}-{tid}-{role}.json"
     err_file = RUNS_DIR / f"{ts}-{tid}-{role}.err.log"
 
+    own_continue = False  # запись лога — «continue» этой же роли подряд: это не новый раунд, а та же работа кусками
+    try:
+        own_continue = ROUTES.continue_streak(T.read_ticket(ticket_path), role) > 0
+    except Exception:
+        pass
+
     store = _resume_store(state, tid, role)
     sid = store.get("session_id")
     state.get("on_met_chain", {}).pop(tid, None)  # запуск роли обрывает цепочку on_met
@@ -1563,8 +1569,12 @@ def launch_run(ticket_path, role: str, state: dict, now, reason: str, attempt: i
         # прошлый запуск этого тикета оборван CEO (`tickets.py stop`): сессия НОВАЯ (без --resume), в промпте — пометка
         sid = None
         extra_note = " ".join(x for x in (extra_note, STOP_NOTE) if x)
-    if sid and not attempt:
-        # каждое пробуждение — новая сессия; --resume только у повтора после таймаута (attempt > 0)
+    if sid and not attempt and not own_continue:
+        # каждое пробуждение — новая сессия; --resume — у повтора после таймаута (attempt > 0) и у продолжения
+        # своего «continue» (запись лога), иначе же раунд, который сам же не закончила (не таймаут CLI, а лимит
+        # запуска RUN_TIMEOUT), платит полный прогрев кэша устава/инструментов заново на каждый кусок — замер на
+        # живом проекте (runs.log): continue — 14,5% всех денег диспетчера, из них больше половины — именно
+        # повторная запись контекста в кэш (cw_tok), не сама работа.
         sid = None
         rotate_note = (f"Начинаем новую сессию: прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
                        f"docs/research/reviews/ по нужной задаче.")
