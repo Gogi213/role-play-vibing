@@ -208,8 +208,16 @@ from decide import (  # noqa: E402,F401 — решение «кого будит
 import decide as DEC  # noqa: E402
 
 
+def _wait_alive(tkt: T.Ticket) -> bool:
+    """TK-054: сторож видит задание ожидающего тикета живым; флаг `hold_alive_waits: false` — прежнее поведение."""
+    if not P.setting("hold_alive_waits", True):
+        return False
+    import lifewatch
+    return lifewatch.wait_alive(W.project_where().dispatcher_dir, tkt.id, (tkt.header.get("wait_for") or "").strip(), time.time())
+
+
 def decide(tkt: T.Ticket, state: dict, now) -> "Decision | None":
-    return DEC.decide(tkt, state, now, check_wait_for)
+    return DEC.decide(tkt, state, now, check_wait_for, _wait_alive)
 
 
 # --- сессия запуска ----------------------------------------------------------------------------

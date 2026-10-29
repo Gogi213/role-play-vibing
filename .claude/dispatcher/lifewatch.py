@@ -54,6 +54,25 @@ def job_done(dispatcher_dir, alias: str, jid: str) -> bool:
         return False
 
 
+ALIVE_NAME = "wait-alive.json"
+ALIVE_TTL_S = 900.0  # отметка старше — сторож не отвечает: ожидание не удерживается, будит как раньше (TK-054)
+
+
+def save_alive(dispatcher_dir, alive: dict, now_ts: float) -> None:
+    """`{"ts": <секунды>, "alive": {"<тикет>": "<wait_for>"}}` — ожидания, где сторож в этом проходе видел признак жизни
+    задания (юнит/процесс, задание в очереди или идёт). Диспетчер по нему не запускает роль на невыполненном условии."""
+    P.write_json(Path(dispatcher_dir) / ALIVE_NAME, {"ts": now_ts, "alive": alive}, sort_keys=True)
+
+
+def wait_alive(dispatcher_dir, tid: str, spec: str, now_ts: float) -> bool:
+    """Сторож недавно (ALIVE_TTL_S) видел задание тикета живым именно под этим `wait_for`."""
+    try:
+        data = json.loads((Path(dispatcher_dir) / ALIVE_NAME).read_text(encoding="utf-8"))
+        return now_ts - float(data["ts"]) <= ALIVE_TTL_S and data["alive"].get(tid) == spec
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def reason(jid: str, tail: str) -> str:
     """Одна строка причины по хвосту лога — Haiku (`haiku_aux.diagnose`, TK-087), только разбор. Нет помощника,
     claude или ответа — пусто: пробуждение владельца от разбора не зависит."""

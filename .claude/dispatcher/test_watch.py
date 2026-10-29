@@ -685,9 +685,9 @@ class TriageWaitsTests(WatchSandbox):
         T.write_header_updates(p, {"wait_by": by.isoformat(timespec="seconds")})
         ws = {}
         for n in (self.now, by + timedelta(minutes=W.BY_GRACE_MIN - 1)):
-            W.triage_waits(ws, n, probe=lambda *a: "producer", owners_probe=lambda al: None)
+            W.triage_waits(ws, n, probe=lambda *a: "unknown", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")
-        W.triage_waits(ws, by + timedelta(minutes=W.BY_GRACE_MIN + 1), probe=lambda *a: "producer", owners_probe=lambda al: None)
+        W.triage_waits(ws, by + timedelta(minutes=W.BY_GRACE_MIN + 1), probe=lambda *a: "unknown", owners_probe=lambda al: None)
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", ""), t.header.get("wait_by", "")), ("in_progress", "", ""))
         self.assertIn("срок ожидания", t.log[-1].text)
@@ -701,6 +701,37 @@ class TriageWaitsTests(WatchSandbox):
         W.triage_waits({}, self.now, probe=lambda *a: "met", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")  # цель выполнена — будит диспетчер, не срок
         self.assertFalse((CFG.DISPATCHER_DIR / "jobs.jsonl").exists())
+
+    # --- TK-054 (В-18): живое задание — отметка в wait-alive.json, срок его не будит; нет признаков жизни — будит ---
+    def test_producer_marks_alive_and_deadline_does_not_wake(self):
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
+        tid = T.read_ticket(p).id
+        by = self.now + timedelta(hours=1)
+        T.write_header_updates(p, {"wait_by": by.isoformat(timespec="seconds")})
+        late = by + timedelta(minutes=W.BY_GRACE_MIN + 30)
+        W.triage_waits({}, late, probe=lambda *a: "producer", owners_probe=lambda al: None)
+        self.assertEqual(T.read_ticket(p).status, "waiting")
+        self.assertTrue(W.LW.wait_alive(CFG.DISPATCHER_DIR, tid, "host:gpu1:/data/x/tier1.done", late.timestamp()))
+        W.triage_waits({}, by + timedelta(hours=W.BY_ALIVE_MAX_H, minutes=1), probe=lambda *a: "producer", owners_probe=lambda al: None)
+        self.assertEqual(T.read_ticket(p).status, "in_progress")  # живой «юнит» без конца за потолок — зависший, будим
+
+    def test_queued_job_marks_alive(self):
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
+        tid = T.read_ticket(p).id
+        W.triage_waits({}, self.now, probe=lambda *a: "unknown", owners_probe=lambda al: [{"id": "1", "ticket": tid, "unit": "u", "state": "queued"}])
+        self.assertTrue(W.LW.wait_alive(CFG.DISPATCHER_DIR, tid, "host:gpu1:/data/x/tier1.done", self.now.timestamp()))
+
+    def test_no_sign_of_life_no_mark(self):
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
+        tid = T.read_ticket(p).id
+        W.triage_waits({}, self.now, probe=lambda *a: "unknown", owners_probe=lambda al: None)
+        self.assertFalse(W.LW.wait_alive(CFG.DISPATCHER_DIR, tid, "host:gpu1:/data/x/tier1.done", self.now.timestamp()))
+
+    def test_stale_mark_or_other_spec_does_not_hold(self):
+        W.LW.save_alive(CFG.DISPATCHER_DIR, {"TK-001": "host:a:/x"}, 1000.0)
+        self.assertTrue(W.LW.wait_alive(CFG.DISPATCHER_DIR, "TK-001", "host:a:/x", 1000.0 + W.LW.ALIVE_TTL_S))
+        self.assertFalse(W.LW.wait_alive(CFG.DISPATCHER_DIR, "TK-001", "host:a:/x", 1000.0 + W.LW.ALIVE_TTL_S + 1))
+        self.assertFalse(W.LW.wait_alive(CFG.DISPATCHER_DIR, "TK-001", "host:a:/y", 1000.0))
 
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
@@ -933,3 +964,4 @@ class WatchLogTests(WatchSandbox):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -105,14 +105,18 @@ def close_after_merge(path: Path, tkt: T.Ticket, now, state: dict = None) -> "T.
     return closed
 
 
-def decide(tkt: T.Ticket, state: dict, now, check_wait_for) -> "Decision | None":
+def decide(tkt: T.Ticket, state: dict, now, check_wait_for, alive=None) -> "Decision | None":
     """Кого будить по тикету. v2 (02.10): @упоминания в тексте больше не будят (аудит: 77 % запусков и 67 %
     денег — запуски по упоминаниям, в том числе «для сведения» и на статусе waiting). Будят: явное поле
     `next:` (пишет `tickets.py comment --next`), `todo` → владелец, `in_progress` → владелец (продолжить),
     `waiting` с выполненным `wait_for` → владелец, `done` с `reviewer` → ревьюер. `waiting` без `wait_for`
-    молчит всегда — только явный `next`. `next: ceo` — не запуск роли (см. handle_next_ceo)."""
+    молчит всегда — только явный `next`. `next: ceo` — не запуск роли (см. handle_next_ceo).
+    TK-054 (В-18): `alive(tkt)` истинно — сторож видит задание живым под этим `wait_for`; пока условие не выполнено, роль не
+    запускается ни по какому поводу (в том числе `next:` — он остаётся в шапке и сработает, когда ожидание кончится)."""
     if tkt.status == "backlog":
         return None  # перенесено из TASKS.md, ещё не в работе — диспетчер не трогает; см. `tickets.py start`
+    if alive is not None and tkt.status == "waiting" and tkt.owner in P.ROLES and alive(tkt)             and not check_wait_for(tkt.header.get("wait_for", "")):
+        return None
 
     # (0) явная передача: `next: <роль>` — один запуск этой роли, поле очищается при запуске (tick)
     nxt = tkt.next_role

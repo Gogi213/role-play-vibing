@@ -136,6 +136,7 @@ AT_GRACE_MIN = 30  # допуск после времени `at:` до трев�
 EMPTY_WAIT_STRIKES = 3  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
 MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (waits.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
 BY_GRACE_MIN = 15  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
+BY_ALIVE_MAX_H = 12  # TK-054: задание живо (юнит/процесс, очередь) — срок не будит владельца ещё столько часов; зависший юнит всё равно поймает
 IDLE_WAIT_MIN = 15  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
 SSH_FAIL_STRIKES = 5  # подряд молчаний ssh до тревоги владельцу тикета
 
@@ -287,12 +288,14 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     return st
 
 
-def _past_deadline(path, tkt, ws: dict, spec: str, now) -> bool:
+def _past_deadline(path, tkt, ws: dict, spec: str, now, life: bool = False) -> bool:
     """Срок ожидания (`wait_by`, TK-117) вышел больше BY_GRACE_MIN назад, а цель не выполнена — владелец будится с причиной.
     Вызывать только для невыполненной цели. Нет срока (старые ожидания, `at:`, наблюдения) — не трогаем."""
     raw = (tkt.header.get("wait_by") or "").strip()
     by = T.parse_at(raw) if raw else None
     if by is None or now - by <= timedelta(minutes=BY_GRACE_MIN):
+        return False
+    if life and now - by <= timedelta(hours=BY_ALIVE_MAX_H):  # TK-054 (В-18): срок вышел, а признаки жизни есть — будит только их отсутствие
         return False
     parsed = T.parse_wait_for(spec)
     if parsed and parsed[0] == "file" and W.check_wait_for(spec, W.project_where()):  # файл лёг — будит диспетчер, срок ни при чём
@@ -495,6 +498,7 @@ class _Pass:
         self.ws, self.now, self.probe, self.job_probe, self.run_probe = ws, now, probe, job_probe, run_probe
         self.owners, self.link_up, self._link = owners, link_up, None
         self.alive, self.seen, self.states, self.empty_seen, self.bad_seen = set(), set(), {}, set(), set()
+        self.life = {}  # TK-054: тикет -> wait_for, где в этом проходе виден признак жизни задания (файл wait-alive.json)
 
     def link_ok(self) -> bool:
         if self._link is None:
@@ -507,9 +511,19 @@ def _triage_job_wait(path: Path, tkt, spec: str, parsed, c: _Pass) -> None:
     if not _triage_job(path, tkt, parsed, c.ws, c.now, c.job_probe, c.states, c.owners):
         _mark_failed_seen(c.ws, tkt.id, c.owners, parsed[2])
         return
-    if c.states.get(f"{parsed[1]}:{parsed[2]}") != "done" and _past_deadline(path, tkt, c.ws, spec, c.now):
+    state = c.states.get(f"{parsed[1]}:{parsed[2]}")
+    life = state in ("running", "queued")
+    if life:
+        c.life[tkt.id] = spec
+    if state != "done" and _past_deadline(path, tkt, c.ws, spec, c.now, life):
         return
     c.alive.add(tkt.id)
+
+
+def _owned_running(tkt, parsed, owners: dict) -> bool:
+    """У тикета на машине ожидания есть задание в адаптере в running/queued."""
+    return bool(parsed and parsed[0] == "host" and any(j["ticket"] == tkt.id and j["state"] in ("running", "queued")
+                                                         for j in owners.get(parsed[1], [])))
 
 
 def _settle_target(path: Path, tkt, spec: str, parsed, st: str, c: _Pass) -> None:
@@ -518,7 +532,10 @@ def _settle_target(path: Path, tkt, spec: str, parsed, st: str, c: _Pass) -> Non
         c.seen.add(tkt.id)
         _triage_dead(path, tkt, spec, c.ws, c.now)
         return
-    if (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, c.ws, spec, c.now):
+    life = st == "producer" or _owned_running(tkt, parsed, c.owners)
+    if life:
+        c.life[tkt.id] = spec
+    if (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, c.ws, spec, c.now, life):
         return
     if _idle_wait(path, tkt, c.ws, spec, parsed, c.owners, c.now, st):
         return
@@ -576,6 +593,14 @@ def _save_job_states(ws: dict, states: dict) -> None:
         ws["job_states_written"] = bool(states)
 
 
+def _save_alive(life: dict, now) -> None:
+    """Диспетчер читает отметку «жив» (decide, TK-054); запись не удалась — отметка устареет сама через ALIVE_TTL_S."""
+    try:
+        LW.save_alive(CFG.DISPATCHER_DIR, life, now.timestamp())
+    except OSError:
+        pass
+
+
 def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
@@ -596,6 +621,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         if tkt.status == "waiting":
             _triage_ticket(path, tkt, c)
     _save_job_states(ws, c.states)
+    _save_alive(c.life, now)
     _prune_wait_state(ws, c.alive, c.seen, c.bad_seen, c.empty_seen)
     return c.alive
 
