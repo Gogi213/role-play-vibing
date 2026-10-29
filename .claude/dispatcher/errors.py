@@ -138,6 +138,23 @@ def _valued(argv, i: int, module: str) -> bool:
     return a == "-k" or (module == "pytest" and a == "-n" and bool(PYTEST_WORKERS.fullmatch(argv[i + 1])))
 
 
+def command_targets(argv, module: str) -> tuple[list[str], str]:
+    """Цели `python -m pytest|unittest …` (argv[3:]) и первый недопущенный флаг (пусто — все допущены)."""
+    flags = PYTEST_FLAGS if module == "pytest" else UNITTEST_FLAGS
+    targets, i = [], 3
+    while i < len(argv):
+        a = argv[i]
+        if _valued(argv, i, module):
+            i += 2
+            continue
+        if a.startswith("-") and a not in flags:
+            return targets, a
+        if not a.startswith("-"):
+            targets.append(a)
+        i += 1
+    return targets, ""
+
+
 def check_argv(spec: str, cwd: Path):
     """(argv, None) | (None, причина отказа). Оболочки нет — argv идёт в процесс как есть."""
     try:
@@ -152,17 +169,9 @@ def check_argv(spec: str, cwd: Path):
             if module not in ("pytest", "unittest"):
                 return None, "после `-m` допустимы только pytest и unittest"
             flags = PYTEST_FLAGS if module == "pytest" else UNITTEST_FLAGS
-            targets, i = [], 3
-            while i < len(argv):
-                a = argv[i]
-                if _valued(argv, i, module):
-                    i += 2
-                    continue
-                if a.startswith("-") and a not in flags:
-                    return None, f"флаг `{a}` не допущен (допустимы: -k, {'-n auto|N, ' if module == 'pytest' else ''}{', '.join(flags)})"
-                if not a.startswith("-"):
-                    targets.append(a)
-                i += 1
+            targets, bad = command_targets(argv, module)
+            if bad:
+                return None, f"флаг `{bad}` не допущен (допустимы: -k, {'-n auto|N, ' if module == 'pytest' else ''}{', '.join(flags)})"
             if not targets:
                 return None, f"`-m {module}` без теста: укажите путь или модуль из git"
             for t in targets:
@@ -258,16 +267,8 @@ def check_targets(argv, cwd: Path) -> list[str]:
     коммит «до исправления» и сверяют с версией на `fixed_sha`."""
     if argv[0] == "bash" or argv[1] != "-m":
         return [argv[1]]
-    module, out, i = argv[2], [], 3
-    while i < len(argv):
-        a = argv[i]
-        if _valued(argv, i, module):
-            i += 2
-            continue
-        if not a.startswith("-"):
-            out.append(_module_path(a, cwd) if module == "unittest" else a.split("::")[0])
-        i += 1
-    return out
+    module = argv[2]
+    return [_module_path(a, cwd) if module == "unittest" else a.split("::")[0] for a in command_targets(argv, module)[0]]
 
 
 def _files_at(root: Path, sha: str, targets) -> list[str] | None:

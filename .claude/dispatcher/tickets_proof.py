@@ -6,11 +6,14 @@
 Приёмка перезапускает команды сама, в копии тикета `.claude/worktrees/<ID>` (нет копии — в корне проекта): код выхода не 0 —
 отказ; ярлык «тест» или «запуск» без команды — тоже отказ. Прогон идёт при каждой приёмке заново, поэтому последний прогон — всегда
 тот, что решает: более свежий провал отменяет прежний успех. Договор — последняя запись исполнителя, где есть ярлык доказательства;
-договор без ярлыков (старый) приёмку не меняет. Только stdlib.
+договор без ярлыков (старый) приёмку не меняет. Команда — только на тесты самой правки: полный прогон проекта (pytest без пути, по
+корню или по всему `.claude`) приёмка отказывает (TK-056, В-21) — его подтверждает зелёный CI PR, а срок одной проверки короче. Только stdlib.
 """
 from __future__ import annotations
 
+import posixpath
 import re
+import shlex
 from pathlib import Path
 
 import errors as errors_mod
@@ -20,6 +23,21 @@ LABEL = re.compile(r"\[(тест|запуск|чтение(?:\s+кода)?)(?:\s
 NEED_COMMAND = ("тест", "запуск")
 HINT = ("пункт договора с ярлыком тест/запуск несёт команду проверки: `[тест: python -m pytest <файл>]`, "
         "`[запуск: python tools/<скрипт>.py]` (допустимые команды — как у `errors.py fix`); без неё — ярлык `[чтение кода]`")
+FULL_RUN_HINT = ("полный прогон в договор не пишется — его подтверждает зелёный CI PR; укажи тесты самой правки: "
+                 "`[тест: python -m pytest .claude/dispatcher/test_<правка>.py]`")
+WHOLE_PROJECT = (".", ".claude")   # цели pytest, которые охватывают все тесты проекта
+
+
+def full_run(cmd: str) -> bool:
+    """Команда — `python -m pytest` без пути, по корню проекта или по всему `.claude` (полный прогон, не тесты правки)."""
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return False
+    if len(argv) < 3 or argv[0] not in ("python", "python3") or argv[1:3] != ["-m", "pytest"]:
+        return False
+    targets, _ = errors_mod.command_targets(argv, "pytest")
+    return not targets or any(posixpath.normpath(t.split("::")[0]) in WHOLE_PROJECT for t in targets)
 
 
 def contract_labels(tkt) -> list[tuple[str, str]]:
@@ -47,6 +65,8 @@ def proof_ack(tid: str, tkt, root: Path) -> tuple[str, str]:
     cwd = wt if wt.is_dir() else root
     cmds = list(dict.fromkeys(cmd for k, cmd in labels if cmd))
     for cmd in cmds:
+        if full_run(cmd):
+            return f"команда договора `{cmd}` — полный прогон проекта: {FULL_RUN_HINT}", ""
         argv, why = errors_mod.check_argv(cmd, cwd)
         if argv is None:
             return f"команда договора `{cmd}` не допущена: {why}", ""
