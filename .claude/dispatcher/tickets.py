@@ -65,6 +65,7 @@ import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
 import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
+import tickets_proof as proof_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
 # Проект и тикеты берутся у диспетчера (CFG.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
@@ -235,7 +236,9 @@ def _accept_checks(args) -> tuple[str, str, str]:
     nerr, nack = _numbers_ack(args, args.id)
     terr, tack, tail_ceo = _tail_ack(args, args.id)
     lerr, lack = _live_ack(args, args.id)
-    return err or nerr or terr or lerr, ack + nack + tack + lack, tail_ceo
+    err = err or nerr or terr or lerr
+    perr, pack = ("", "") if err or args.pr else _proof_ack(args.id)  # с PR команды гонит cmd_accept: дважды не гоняем
+    return err or perr, ack + nack + tack + lack + pack, tail_ceo
 
 
 def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
@@ -394,6 +397,12 @@ def _live_ack(args, tid: str) -> tuple[str, str]:
     return "", f" вживую: {rel}"
 
 
+def _proof_ack(tid: str) -> tuple[str, str]:
+    """Ярлыки доказательства договора (TK-050): приёмка сама перезапускает его команды, код не 0 — отказ (`tickets_proof`)."""
+    path = TICKETS_DIR / f"{tid}.md"
+    return proof_mod.proof_ack(tid, T.read_ticket(path), PROJECT_ROOT) if path.exists() else ("", "")
+
+
 def _tail_ack(args, tid: str) -> tuple[str, str, str]:
     """Приёмка Судьи в V2-проекте — с ответом про хвосты (`--tail`). «Не сделано / не достигнуто» в сдаче исполнителя при
     `--tail -` — отказ: недоделанное либо `return`, либо хвост заведён тикетом, либо передан CEO. → (отказ, пометка, текст CEO)."""
@@ -497,10 +506,11 @@ def cmd_accept(args) -> int:
     nerr, nack = _numbers_ack(args, args.id)
     terr, tack, tail_ceo = _tail_ack(args, args.id)
     lerr, lack = _live_ack(args, args.id)
-    if derr or nerr or terr or lerr:
-        print(f"accept: {derr or nerr or terr or lerr}", file=sys.stderr)
+    perr, pack = ("", "") if derr or nerr or terr or lerr else _proof_ack(args.id)
+    if derr or nerr or terr or lerr or perr:
+        print(f"accept: {derr or nerr or terr or lerr or perr}", file=sys.stderr)
         return 1
-    ack += nack + tack + lack
+    ack += nack + tack + lack + pack
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:
