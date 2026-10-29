@@ -115,7 +115,8 @@ def decide(tkt: T.Ticket, state: dict, now, check_wait_for, alive=None) -> "Deci
     запускается ни по какому поводу (в том числе `next:` — он остаётся в шапке и сработает, когда ожидание кончится)."""
     if tkt.status == "backlog":
         return None  # перенесено из TASKS.md, ещё не в работе — диспетчер не трогает; см. `tickets.py start`
-    if alive is not None and tkt.status == "waiting" and tkt.owner in P.ROLES and alive(tkt)             and not check_wait_for(tkt.header.get("wait_for", "")):
+    if (alive is not None and tkt.status == "waiting" and tkt.owner in P.ROLES and alive(tkt)
+            and not check_wait_for(tkt.header.get("wait_for", ""))):
         return None
 
     # (0) явная передача: `next: <роль>` — один запуск этой роли, поле очищается при запуске (tick)

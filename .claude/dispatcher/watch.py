@@ -306,7 +306,7 @@ def _past_deadline(path, tkt, ws: dict, spec: str, now, life: bool = False) -> b
     by = T.parse_at(raw) if raw else None
     if by is None or now - by <= timedelta(minutes=BY_GRACE_MIN):
         return False
-    if life and now - by <= timedelta(hours=BY_ALIVE_MAX_H):  # TK-054 (В-18): срок вышел, а признаки жизни есть — будит только их отсутствие
+    if life and P.setting("hold_alive_waits", True) and now - by <= timedelta(hours=BY_ALIVE_MAX_H):  # TK-054 (В-18): срок вышел, а признаки жизни есть — будит только их отсутствие; флаг false — прежний срок
         return False
     parsed = T.parse_wait_for(spec)
     if parsed and parsed[0] == "file" and W.check_wait_for(spec, W.project_where()):  # файл лёг — будит диспетчер, срок ни при чём

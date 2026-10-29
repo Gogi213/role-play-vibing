@@ -680,14 +680,20 @@ class TriageWaitsTests(WatchSandbox):
         self.assertTrue(T.wait_needs_by("host:gpu1:/x/y.done") and T.wait_needs_by("file:x") and not T.wait_needs_by("at:2026-10-10T02:00+04:00"))
 
     def test_deadline_passed_wakes_owner_only_after_grace(self):
+        """Исходный тест TK-117 (probe producer): срок будит и при живом задании — прежнее поведение, `hold_alive_waits: false` (TK-054)."""
+        off = lambda key, default=None, root=None: False if key == "hold_alive_waits" else default
+        with mock.patch.object(W.P, "setting", side_effect=off):
+            self._deadline_passed_wakes_owner_only_after_grace()
+
+    def _deadline_passed_wakes_owner_only_after_grace(self):
         p = self._waiting("host:gpu1:/data/x/tier1.done")
         by = self.now + timedelta(hours=1)
         T.write_header_updates(p, {"wait_by": by.isoformat(timespec="seconds")})
         ws = {}
         for n in (self.now, by + timedelta(minutes=W.BY_GRACE_MIN - 1)):
-            W.triage_waits(ws, n, probe=lambda *a: "unknown", owners_probe=lambda al: None)
+            W.triage_waits(ws, n, probe=lambda *a: "producer", owners_probe=lambda al: None)
         self.assertEqual(T.read_ticket(p).status, "waiting")
-        W.triage_waits(ws, by + timedelta(minutes=W.BY_GRACE_MIN + 1), probe=lambda *a: "unknown", owners_probe=lambda al: None)
+        W.triage_waits(ws, by + timedelta(minutes=W.BY_GRACE_MIN + 1), probe=lambda *a: "producer", owners_probe=lambda al: None)
         t = T.read_ticket(p)
         self.assertEqual((t.status, t.header.get("wait_for", ""), t.header.get("wait_by", "")), ("in_progress", "", ""))
         self.assertIn("срок ожидания", t.log[-1].text)
