@@ -733,6 +733,55 @@ class TriageWaitsTests(WatchSandbox):
         self.assertFalse(W.LW.wait_alive(CFG.DISPATCHER_DIR, "TK-001", "host:a:/x", 1000.0 + W.LW.ALIVE_TTL_S + 1))
         self.assertFalse(W.LW.wait_alive(CFG.DISPATCHER_DIR, "TK-001", "host:a:/y", 1000.0))
 
+    # --- TK-054 п.3: ход «N из M, ETA» пишет код сторожа, без модели ---
+    def _progress_probe(self, done, total=16):
+        def probe(*a):
+            got = W.Probe("producer")
+            got.progress = (done, total)
+            return got
+        return probe
+
+    def test_progress_note_written_by_code_with_eta_and_throttled(self):
+        p = self._waiting("host:gpu1:/var/rpv/progress/calc.json")
+        ws = {}
+        W.triage_waits(ws, self.now, probe=self._progress_probe(4), owners_probe=lambda al: None)
+        first = T.read_ticket(p).log[-1]
+        self.assertEqual(first.author, "watch")
+        self.assertIn("жив, 4 из 16, ETA неизвестен", first.text)  # одна отметка — скорости ещё нет
+        n = len(T.read_ticket(p).log)
+        W.triage_waits(ws, self.now + timedelta(minutes=30), probe=self._progress_probe(6), owners_probe=lambda al: None)
+        self.assertEqual(len(T.read_ticket(p).log), n)  # раньше PROGRESS_NOTE_MIN — тишина
+        W.triage_waits(ws, self.now + timedelta(minutes=W.PROGRESS_NOTE_MIN + 60), probe=self._progress_probe(8), owners_probe=lambda al: None)
+        last = T.read_ticket(p).log[-1]
+        self.assertIn("жив, 8 из 16, ETA ~", last.text)
+        W.triage_waits(ws, self.now + timedelta(hours=6), probe=self._progress_probe(8), owners_probe=lambda al: None)
+        self.assertEqual(T.read_ticket(p).log[-1].text, last.text)  # N не сдвинулось — не пишем
+        self.assertEqual(T.read_ticket(p).status, "waiting")  # запись роль не будит и ожидание не снимает
+
+    def test_progress_note_eta_from_rate(self):
+        p = self._waiting("host:gpu1:/var/rpv/progress/calc.json")
+        ws = {}
+        W.triage_waits(ws, self.now, probe=self._progress_probe(0, 10), owners_probe=lambda al: None)
+        later = self.now + timedelta(hours=2)
+        W.triage_waits(ws, later, probe=self._progress_probe(5, 10), owners_probe=lambda al: None)
+        self.assertIn("ETA ~" + (later + timedelta(hours=2)).strftime("%H:%M" if (later + timedelta(hours=2)).date() == later.date() else "%d.%m %H:%M"),
+                      T.read_ticket(p).log[-1].text)  # 5 за 2 ч → ещё 5 за 2 ч
+
+    def test_plain_producer_writes_no_progress_note(self):
+        p = self._waiting("host:gpu1:/data/x/tier1.done")
+        n = len(T.read_ticket(p).log)
+        W.triage_waits({}, self.now, probe=lambda *a: "producer", owners_probe=lambda al: None)
+        self.assertEqual(len(T.read_ticket(p).log), n)
+
+    def test_probe_returns_progress_from_progress_file(self):
+        def probe(body):
+            r = types.SimpleNamespace(returncode=0, stdout=("exists\n" + body).encode())
+            with mock.patch.object(W.hide, "run", return_value=r):
+                return W.probe_wait_target("gpu1", "path", "/var/rpv/progress/calc.json")
+        got = probe('{"done": 3, "total": 12}')
+        self.assertEqual((str(got), got.progress), ("producer", (3.0, 12.0)))
+        self.assertEqual(probe('{"done": 12, "total": 12}'), "met")
+
     # --- TK-101: ложные блоки сторожа жизни ---
     def _jobs(self, tid, *rows):
         return lambda alias: [{"id": i, "ticket": tid, "unit": u, "state": st} for i, u, st in rows]
