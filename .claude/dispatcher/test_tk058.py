@@ -59,8 +59,11 @@ class CeoTemplateTests(unittest.TestCase):
         self.assertIn("«на проверке»", self.rule)
 
     def test_template_routes_thinking_to_a_ticket(self):
-        self.assertIn("тикет Инженеру или Исследователю", self.rule)
-        self.assertIn("разбор данных, сверка, скрипт с логикой", self.rule)
+        self.assertIn("несложный разбор и подсчёт по xlsx, JSON, БД", self.rule)
+        self.assertIn("расчётный скрипт — Исследователю", self.rule)
+        self.assertIn("`tickets.py new --effort medium` — план готов", self.rule)
+        self.assertIn("`--effort high` — нужен протокол или отладка", self.rule)
+        self.assertIn("правка кода продукта — Инженеру", self.rule)
 
     def test_template_forbids_builtin_general_purpose_and_fork(self):
         self.assertIn("не `fork`", self.rule)
