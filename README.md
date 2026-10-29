@@ -61,7 +61,7 @@ It runs `claude plugin marketplace update` and `claude plugin update`, then, fro
 | Judge | review and verdict | one short run per wake | Opus 5.5, effort high |
 | Overseer | every 15 minutes, while tickets change: cost rules and a model reading the ticket logs; a finding goes to the Judge | a short process on a timer, no ticket | Haiku 5.5, effort xhigh |
 
-Other helper subagents are not roles: the CEO uses `inbox` (triages signals) and `reporter` (status answers and daily-report lines); roles use `coder` and `reader`.
+Other helper subagents are not roles: the CEO uses `inbox` (triages signals), `reporter` (status answers and daily-report lines) and `worker-light` (Haiku, routine without thought, writes only to the session scratchpad); roles use `coder` and `reader`.
 
 1. You tell the CEO what you want. The CEO hands your words, verbatim, to the Secretary, which records them in the registry. Then the CEO files a ticket, `.claude/tickets/TK-NNN.md` (a header with `status` and `next`, and a log of every step); `tickets.py new` refuses a ticket without `--ref` to a registry entry, so no work starts that the owner did not order.
 2. Every 15 seconds the dispatcher (`dispatch.py`) reads the tickets and starts the role each one calls for (the owner of a new ticket, the role named in `next`, the Judge for finished work) as a short `claude -p` session.
@@ -132,7 +132,7 @@ Without pytest: `python -m unittest discover -s .claude/dispatcher`, then the sa
 
 ```
 commands/            slash commands
-agents/              helpers: coder, reader, overseer; CEO helpers: secretary, inbox, reporter
+agents/              helpers: coder, reader, overseer; CEO helpers: secretary, inbox, reporter, critic, worker-light
 hooks/               hooks.json and the hook launcher
 tools/               fastcheck.py, jobrun.sh, benchmarks
 templates/roles/     role charters copied into a project by /rpv-init
