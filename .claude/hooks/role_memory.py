@@ -4,13 +4,15 @@
   сессии (запасной путь к метке, которую ставит сама команда).
   Роль (не CEO): строка «молчание» — итог в лог тикета, не текстом в ход.
   CEO: одна строка «[диспетчер] N новых в ceo-inbox.md» — только когда пришли новые; сторож и разрешения —
-  по разу на 10 сообщений; сторож контекста — от 400 тыс. токенов (40 % окна), не чаще раза в 10 сообщений.
+  по разу на 10 сообщений; порог контекста CEO (`ceo_context.py`, TK-052): от 350 тыс. токенов вставка на каждое сообщение,
+  от 400 тыс. — хардстоп (сообщение в модель не уходит). Сторож контекста других ролей с владельцем — от 400 тыс.
+  токенов (40 % окна), не чаще раза в 10 сообщений.
 - SessionEnd (клир, выход, остановка): конспект разговора — сообщения владельца/диспетчера и сессий, ответы
   (без инструментов и рассуждений) — в `.claude/roles/log/<роль>/`. Не сработал — `role_context.py` на следующем
   старте догоняет конспект по записанному пути.
 - Ключ состояния сессии: для запуска диспетчера — `RPV_ROLE[-<RPV_TICKET>]` (раньше все роли писали в
   `unknown.json` и конспекты путались), для Desktop — id сессии приложения. Переменные — `RPV_*`.
-Хук никогда не падает и не блокирует: ошибка — тишина.
+Хук никогда не падает; блокирует только хардстоп контекста CEO (`ceo_context.py`): ошибка — тишина.
 """
 import datetime
 import glob
@@ -21,6 +23,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ceo_context  # noqa: E402
 from role_context import (ROLE_NAMES, ROLES, ROOT, STATE_DIR, env_role, find_title, read_label,  # noqa: E402
                           stale_line, ticket_id, write_label)
 
@@ -330,8 +333,19 @@ def context_advice(hook_in, state):
     return f"контекст ≈ {tokens // 1000} тыс. — закончи шаг, обнови блокнот и попроси владельца сделать клир"
 
 
-def on_prompt_all(hook_in, role):
-    """Подсказки к сообщению (или None). Состояние — по ключу роли/тикета/сессии."""
+def ceo_gate(hook_in):
+    """Порог контекста сессии CEO (TK-052): `("stop", причина)`, `("warn", вставка)` или None. Только для CEO с владельцем."""
+    try:
+        tokens = context_tokens(hook_in.get("transcript_path"))
+        warn, stop = ceo_context.limits(ROOT)
+        return ceo_context.verdict(tokens, hook_in.get("prompt"), warn, stop)
+    except Exception:    # сбой подсчёта не блокирует сообщение владельца
+        return None
+
+
+def on_prompt_all(hook_in, role, gate=...):
+    """Подсказки к сообщению (или None). Состояние — по ключу роли/тикета/сессии. `gate` — уже посчитанный `ceo_gate`
+    (None — порога нет); не передан — считается здесь."""
     cli_id = hook_in.get("session_id")
     state = load_state(role)
     if state.get("cli") != cli_id:
@@ -355,7 +369,11 @@ def on_prompt_all(hook_in, role):
             pass
     if env_role() is None:
         try:
-            parts.append(context_advice(hook_in, state))
+            if role == "ceo":
+                gate = ceo_gate(hook_in) if gate is ... else gate
+                parts.append(gate[1] if gate else None)
+            else:
+                parts.append(context_advice(hook_in, state))
         except Exception:
             pass
     try:
@@ -390,7 +408,11 @@ def main():
         if role is None:
             return 0
         if event == "UserPromptSubmit":
-            text = on_prompt_all(hook_in, role)
+            gate = ceo_gate(hook_in) if role == "ceo" and env_role() is None else None
+            if gate and gate[0] == "stop":   # хардстоп: сообщение в модель не уходит, владелец видит причину
+                sys.stdout.write(json.dumps({"decision": "block", "reason": gate[1]}, ensure_ascii=True))
+                return 0
+            text = on_prompt_all(hook_in, role, gate)
             if text:
                 sys.stdout.write(json.dumps({"hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit", "additionalContext": text}}, ensure_ascii=True))
