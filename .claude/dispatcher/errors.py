@@ -13,7 +13,7 @@
 
 Команда проверки (запускается без оболочки, из корня проекта или `--cwd`):
     python|python3|bash <скрипт под tools/ или .claude/, отслеживаемый git> [арг…]
-    python -m pytest <путь или путь::тест, в git> [-k выражение] [-q|-v|-x|-s]
+    python -m pytest <путь или путь::тест, в git> [-k выражение] [-n auto|logical|N] [-q|-v|-x|-s]
     python -m unittest <путь или модуль, в git> [-v|-q|-f|-b]
 Красный → зелёный: `fix` сначала гоняет проверку сейчас (в `--cwd` или корне проекта) — должна пройти; потом на коммите «до
 исправления» — должна упасть. Коммит «до» — `--before <коммит>`, иначе `added_sha` записи (HEAD проекта в момент `add`); ни того, ни
@@ -61,6 +61,7 @@ ERROR_ID = re.compile(r"^E-(\d{3,})$")
 INTERPRETERS = ("python", "python3", "bash")   # то же правило, что у on_met диспетчера (`on_met._on_met_argv`)
 SCRIPT_DIRS = ("tools", ".claude")
 PYTEST_FLAGS = ("-q", "-qq", "-v", "-vv", "-x", "-s")
+PYTEST_WORKERS = re.compile(r"auto|logical|[1-9]\d?")   # значение `-n` (pytest-xdist): параллельный прогон
 UNITTEST_FLAGS = ("-q", "-v", "-f", "-b")
 CHECK_TIMEOUT_S = 300.0   # одна проверка; дольше — убита деревом процессов
 INFRA_MAX = 3             # приёмок подряд с «не запустилась» без сигнала CEO; следующая — сигнал
@@ -129,6 +130,14 @@ def _target_problem(target: str, module: str, cwd: Path) -> str:
     return "" if _tracked(cwd, path) else f"`{path}` не отслеживается git"
 
 
+def _valued(argv, i: int, module: str) -> bool:
+    """`argv[i]` — флаг со значением (`-k выражение`; у pytest ещё `-n auto|logical|N` — xdist): значение — не цель."""
+    a = argv[i]
+    if i + 1 >= len(argv):
+        return False
+    return a == "-k" or (module == "pytest" and a == "-n" and bool(PYTEST_WORKERS.fullmatch(argv[i + 1])))
+
+
 def check_argv(spec: str, cwd: Path):
     """(argv, None) | (None, причина отказа). Оболочки нет — argv идёт в процесс как есть."""
     try:
@@ -146,11 +155,11 @@ def check_argv(spec: str, cwd: Path):
             targets, i = [], 3
             while i < len(argv):
                 a = argv[i]
-                if a == "-k" and i + 1 < len(argv):
+                if _valued(argv, i, module):
                     i += 2
                     continue
                 if a.startswith("-") and a not in flags:
-                    return None, f"флаг `{a}` не допущен (допустимы: -k, {', '.join(flags)})"
+                    return None, f"флаг `{a}` не допущен (допустимы: -k, {'-n auto|N, ' if module == 'pytest' else ''}{', '.join(flags)})"
                 if not a.startswith("-"):
                     targets.append(a)
                 i += 1
@@ -252,7 +261,7 @@ def check_targets(argv, cwd: Path) -> list[str]:
     module, out, i = argv[2], [], 3
     while i < len(argv):
         a = argv[i]
-        if a == "-k" and i + 1 < len(argv):
+        if _valued(argv, i, module):
             i += 2
             continue
         if not a.startswith("-"):
