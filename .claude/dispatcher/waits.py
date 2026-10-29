@@ -155,18 +155,23 @@ def _ssh_cmd(alias: str, remote_cmd: str) -> list:
     return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", alias, remote_cmd]
 
 
-def _progress_done(text: str):
-    """Содержимое `.json` — файл хода (числа `done`/`total`)? → done >= total (и total > 0, чтобы
-    не сработать на заготовке с нулями); иначе None — это не файл хода, достаточно того, что он существует."""
+def progress_of(text: str):
+    """Содержимое `.json` — файл хода (числа `done`/`total`)? → (done, total); иначе None."""
     try:
         obj = json.loads(text)
         done, total = obj["done"], obj["total"]
         if isinstance(done, bool) or isinstance(total, bool):
             return None
-        done, total = float(done), float(total)
+        return float(done), float(total)
     except (ValueError, KeyError, TypeError):
         return None
-    return total > 0 and done >= total
+
+
+def _progress_done(text: str):
+    """Файл хода → done >= total (и total > 0, чтобы не сработать на заготовке с нулями); иначе None — это не файл хода,
+    достаточно того, что он существует."""
+    got = progress_of(text)
+    return None if got is None else got[1] > 0 and got[0] >= got[1]
 
 
 def _reads_body(arg: str) -> bool:

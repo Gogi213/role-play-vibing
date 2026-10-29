@@ -136,6 +136,8 @@ AT_GRACE_MIN = 30  # допуск после времени `at:` до трев�
 EMPTY_WAIT_STRIKES = 3  # подряд проверок waiting без wait_for и без next: диспетчер берёт next за ~15 с, сторож ходит раз в ~2 мин — 3 цикла (~6 мин) отсекают гонку с ci_watch/снятием условия
 MET_GRACE_MIN = 15  # условие host-пути выполнено, а тикет ещё waiting: диспетчер сверяет раз в 300 с (waits.WAIT_RECON_S) — 15 мин = 3 сверки без реакции
 BY_GRACE_MIN = 15  # срок `wait_by` прошёл и цель не выполнена — через столько минут владелец будится (TK-117)
+BY_ALIVE_MAX_H = 12  # TK-054: задание живо (юнит/процесс, очередь) — срок не будит владельца ещё столько часов; зависший юнит всё равно поймает
+PROGRESS_NOTE_MIN = 60  # TK-054 п.3: запись «жив, N из M, ETA» в тикет не чаще раза в столько минут (и только если ход сдвинулся)
 IDLE_WAIT_MIN = 15  # тикет ждёт host-путь, а у него 0 идущих/ждущих заданий машины дольше этого — будим владельца (TK-117 П-1)
 SSH_FAIL_STRIKES = 5  # подряд молчаний ssh до тревоги владельцу тикета
 
@@ -145,6 +147,11 @@ def _producer_pattern(path: str) -> str:
     job = job.rsplit(".", 1)[0] if "." in job else job
     job = re.sub(r"[^A-Za-z0-9_-]", "", job)
     return f"[{job[0]}]{job[1:]}" if len(job) >= 4 else ""
+
+
+class Probe(str):
+    """Ответ пробы цели (`producer`…) с ходом задания из файла хода: `.progress` = (done, total) или None (TK-054 п.3)."""
+    progress = None
 
 
 def probe_wait_target(alias: str, what: str, arg: str) -> str:
@@ -168,7 +175,12 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     if r.returncode != 0 or not out or out[0] not in ("exists", "producer", "dead"):
         return "ssh-error"
     if out[0] == "exists":  # как у диспетчера (_host_probe): файл хода — готов при done>=total, прочее — достаточно наличия
-        return "met" if W._path_met((alias, what, arg), "\n".join(out[1:])) else "producer"
+        body = "\n".join(out[1:])
+        if W._path_met((alias, what, arg), body):
+            return "met"
+        got = Probe("producer")
+        got.progress = W.progress_of(body)
+        return got
     return out[0]
 
 
@@ -287,12 +299,14 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
     return st
 
 
-def _past_deadline(path, tkt, ws: dict, spec: str, now) -> bool:
+def _past_deadline(path, tkt, ws: dict, spec: str, now, life: bool = False) -> bool:
     """Срок ожидания (`wait_by`, TK-117) вышел больше BY_GRACE_MIN назад, а цель не выполнена — владелец будится с причиной.
     Вызывать только для невыполненной цели. Нет срока (старые ожидания, `at:`, наблюдения) — не трогаем."""
     raw = (tkt.header.get("wait_by") or "").strip()
     by = T.parse_at(raw) if raw else None
     if by is None or now - by <= timedelta(minutes=BY_GRACE_MIN):
+        return False
+    if life and P.setting("hold_alive_waits", True) and now - by <= timedelta(hours=BY_ALIVE_MAX_H):  # TK-054 (В-18): срок вышел, а признаки жизни есть — будит только их отсутствие; флаг false — прежний срок
         return False
     parsed = T.parse_wait_for(spec)
     if parsed and parsed[0] == "file" and W.check_wait_for(spec, W.project_where()):  # файл лёг — будит диспетчер, срок ни при чём
@@ -482,7 +496,7 @@ def _triage_dead(path: Path, tkt, spec: str, ws: dict, now) -> None:
 def _prune_wait_state(ws: dict, alive: set, seen: set, bad_seen: set, empty_seen: set) -> None:
     """Счётчики тикетов, которых этот проход не видел (или они уже не ждут), снимаются."""
     for key, keep in (("dead_wait", seen | alive), ("ssh_fail_wait", alive), ("met_since", alive), ("bad_form", bad_seen),
-                      ("idle_wait", alive), ("empty_wait", empty_seen)):
+                      ("idle_wait", alive), ("empty_wait", empty_seen), ("progress_note", alive)):
         counters = ws.get(key, {})
         for tid in [t for t in counters if t not in keep]:
             counters.pop(tid, None)
@@ -495,6 +509,7 @@ class _Pass:
         self.ws, self.now, self.probe, self.job_probe, self.run_probe = ws, now, probe, job_probe, run_probe
         self.owners, self.link_up, self._link = owners, link_up, None
         self.alive, self.seen, self.states, self.empty_seen, self.bad_seen = set(), set(), {}, set(), set()
+        self.life = {}  # TK-054: тикет -> wait_for, где в этом проходе виден признак жизни задания (файл wait-alive.json)
 
     def link_ok(self) -> bool:
         if self._link is None:
@@ -507,9 +522,42 @@ def _triage_job_wait(path: Path, tkt, spec: str, parsed, c: _Pass) -> None:
     if not _triage_job(path, tkt, parsed, c.ws, c.now, c.job_probe, c.states, c.owners):
         _mark_failed_seen(c.ws, tkt.id, c.owners, parsed[2])
         return
-    if c.states.get(f"{parsed[1]}:{parsed[2]}") != "done" and _past_deadline(path, tkt, c.ws, spec, c.now):
+    state = c.states.get(f"{parsed[1]}:{parsed[2]}")
+    life = state in ("running", "queued")
+    if life:
+        c.life[tkt.id] = spec
+    if state != "done" and _past_deadline(path, tkt, c.ws, spec, c.now, life):
         return
     c.alive.add(tkt.id)
+
+
+def _owned_running(tkt, parsed, owners: dict) -> bool:
+    """У тикета на машине ожидания есть задание в адаптере в running/queued."""
+    return bool(parsed and parsed[0] == "host" and any(j["ticket"] == tkt.id and j["state"] in ("running", "queued")
+                                                         for j in owners.get(parsed[1], [])))
+
+
+def _eta_text(ent: dict, done: float, total: float, now) -> str:
+    """ETA по скорости с первой отметки: (done − первое done) за прошедшее время; хода нет — «ETA неизвестен»."""
+    gained, spent = done - ent["done0"], (now - T.parse_dt(ent["ts0"])).total_seconds()
+    if gained <= 0 or spent <= 0:
+        return "ETA неизвестен"
+    eta = now + timedelta(seconds=(total - done) * spent / gained)
+    return "ETA ~" + eta.strftime("%H:%M" if eta.date() == now.date() else "%d.%m %H:%M")
+
+
+def _note_progress(path: Path, tkt, spec: str, progress, c: _Pass) -> None:
+    """TK-054 п.3: ход задания («жив, N из M, ETA») пишет в тикет код сторожа, без модели: первый раз при виде файла хода, дальше
+    не чаще PROGRESS_NOTE_MIN и только если N сдвинулось. Запись роль не будит (будит лишь `next`/статус)."""
+    done, total = progress
+    notes = c.ws.setdefault("progress_note", {})
+    ent = notes.get(tkt.id)
+    if not ent or ent.get("spec") != spec or done < ent["done0"]:  # новое ожидание или задание перезапущено — отсчёт заново
+        ent = notes[tkt.id] = {"spec": spec, "ts0": T.now_iso(c.now), "done0": done, "ts": "", "done": -1.0}
+    if ent["ts"] and (done == ent["done"] or c.now - T.parse_dt(ent["ts"]) < timedelta(minutes=PROGRESS_NOTE_MIN)):
+        return
+    ent["ts"], ent["done"] = T.now_iso(c.now), done
+    T.append_log(path, "watch", f"сторож: жив, {done:g} из {total:g}, {_eta_text(ent, done, total, c.now)} (`{spec}`; без запуска модели)", c.now)
 
 
 def _settle_target(path: Path, tkt, spec: str, parsed, st: str, c: _Pass) -> None:
@@ -518,7 +566,12 @@ def _settle_target(path: Path, tkt, spec: str, parsed, st: str, c: _Pass) -> Non
         c.seen.add(tkt.id)
         _triage_dead(path, tkt, spec, c.ws, c.now)
         return
-    if (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, c.ws, spec, c.now):
+    life = st == "producer" or _owned_running(tkt, parsed, c.owners)
+    if life:
+        c.life[tkt.id] = spec
+    if getattr(st, "progress", None):
+        _note_progress(path, tkt, spec, st.progress, c)
+    if (tkt.header.get("wait_by") or "").strip() and _past_deadline(path, tkt, c.ws, spec, c.now, life):
         return
     if _idle_wait(path, tkt, c.ws, spec, parsed, c.owners, c.now, st):
         return
@@ -576,6 +629,14 @@ def _save_job_states(ws: dict, states: dict) -> None:
         ws["job_states_written"] = bool(states)
 
 
+def _save_alive(life: dict, now) -> None:
+    """Диспетчер читает отметку «жив» (decide, TK-054); запись не удалась — отметка устареет сама через ALIVE_TTL_S."""
+    try:
+        LW.save_alive(CFG.DISPATCHER_DIR, life, now.timestamp())
+    except OSError:
+        pass
+
+
 def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
@@ -596,6 +657,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         if tkt.status == "waiting":
             _triage_ticket(path, tkt, c)
     _save_job_states(ws, c.states)
+    _save_alive(c.life, now)
     _prune_wait_state(ws, c.alive, c.seen, c.bad_seen, c.empty_seen)
     return c.alive
 
