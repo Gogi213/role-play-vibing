@@ -47,7 +47,7 @@ class Sandbox(unittest.TestCase):
         return self.transcript(row("m0", cache_read=10), row("m1", ctx_in=1, cache_read=tokens - 1), name=name)
 
     def label(self, role, session):
-        with open(os.path.join(self.project, ".claude", "roles", ".state", f"session-{session}.role"), "w") as fh:
+        with open(os.path.join(self.project, ".claude", "roles", ".state", f"session-{session}.role"), "w", encoding="utf-8") as fh:
             fh.write(role)
 
     def settings(self, **kv):
@@ -194,7 +194,7 @@ class SettingsTests(Sandbox):
             self.assertEqual(cc.limits(self.project), (350_000, 400_000), bad)
 
     def test_settings_broken_file_gives_defaults(self):
-        with open(os.path.join(self.project, ".claude", "rpv.json"), "w") as fh:
+        with open(os.path.join(self.project, ".claude", "rpv.json"), "w", encoding="utf-8") as fh:
             fh.write("{не json")
         self.assertEqual(cc.limits(self.project), (350_000, 400_000))
 
