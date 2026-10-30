@@ -1,6 +1,6 @@
 ---
 description: Пометить эту сессию как CEO команды ролей (метку читают хуки; роль держится и после /clear в Desktop)
-allowed-tools: Bash
+allowed-tools: Bash, Monitor
 disable-model-invocation: true
 ---
 
@@ -20,7 +20,9 @@ disable-model-invocation: true
    `python "${CLAUDE_PLUGIN_ROOT}/.claude/dispatcher/tickets.py" --project "<корень проекта>"` + подкоманда (`new`,
    `comment`, `start`, `stop`, `allow`, `status`). `${CLAUDE_PLUGIN_ROOT}` пуст — найди каталог плагина `role-play-vibing` под
    `~/.claude/plugins`. Диспетчер и сторож запускает `/rpv-start`.
-5. Ответь владельцу одной строкой: «Сессия помечена как CEO». Дальше веди себя по уставу CEO.
+5. Взведи наблюдение: `Monitor` на `<корень проекта>/.claude/dispatcher/ceo-wake.log` (устав CEO, «Будильник»). Он живёт до 30 мин
+   (потолок инструмента): при «Monitor expired» и после рестарта сессии перевзводи сразу; «напишу, когда …» не обещай, пока наблюдение не включено.
+6. Ответь владельцу одной строкой: «Сессия помечена как CEO». Дальше веди себя по уставу CEO.
 
 Роль определяют хуки: `RPV_ROLE` → эта метка → название сессии Claude Desktop (последний
 запасной путь). После `/clear` в CLI метка теряется (новый id сессии) — повтори `/ceo`.
