@@ -39,6 +39,7 @@ import procs  # noqa: E402 — замок экземпляра
 import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
+import unreleased as UNR  # noqa: E402 — «влито, не выпущено» (TK-062)
 
 # Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
 # CFG.configure_project() при импорте dispatch (по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd) и в main().
@@ -68,7 +69,7 @@ WATCH_DEDUP_REPEAT_HOURS = 2.0
 # v2: виды находок, которые повторяются не чаще раза в сутки (или пока не изменятся по сути); blocked/needs_owner
 # диспетчер уже сообщил один раз (`ceo-inbox`), сторож лишь страхует — раз в сутки
 WATCH_LONG_REPEAT_HOURS = 24.0
-WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner"}
+WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner", "unreleased"}
 ORPHAN_TICKET_HOURS = 2.0
 
 
@@ -769,6 +770,12 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
     return acted
 
 
+def check_unreleased(ws: dict, now, gh=None) -> list:
+    """TK-062 (В-24): очередь пуста, а в main влито и не выпущено — ключ `watch_unreleased` (умолчание выключен)."""
+    text = UNR.unreleased_message(ws, now, gh)
+    return [Finding("unreleased", "main", text)] if text else []
+
+
 def collect_findings(now, alive_waits=()) -> list:
     findings = []
     findings += check_blocked_and_needs_owner(now)
@@ -850,7 +857,13 @@ def run_once(now=None, probes=True) -> list:
             stray_findings = check_strays(ws, now)
     except Exception as e:
         print(f"[watch] check_strays: {type(e).__name__}: {e}", file=sys.stderr)
-    findings = collect_findings(now, alive_waits=alive_waits) + stray_findings
+    unreleased_findings = []
+    try:
+        if probes:  # GitHub — как проверки машин: тесты выключают
+            unreleased_findings = check_unreleased(ws, now)
+    except Exception as e:
+        print(f"[watch] check_unreleased: {type(e).__name__}: {e}", file=sys.stderr)
+    findings = collect_findings(now, alive_waits=alive_waits) + stray_findings + unreleased_findings
     posted = notify_findings(findings, ws, now)
     save_watch_state(ws)
     write_heartbeat(now, len(findings))
