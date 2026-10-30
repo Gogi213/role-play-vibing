@@ -51,6 +51,8 @@ def _add_ticket_parsers(sub) -> None:
     p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл:строка |» или - (чисел нет)")
     p_accept.add_argument("--tail", default=None, help="хвосты: - (нет) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_accept.add_argument("--live", default=None, help="договор с [вживую]: файл живой проверки (что увидит владелец)")
+    p_accept.add_argument("--critic", default=None, help="critic_before_accept: отчёт критика — файл в docs/reviews/")
+    p_accept.add_argument("--critic-skip", dest="critic_skip", default=None, help="critic_before_accept: обход критика, причина ≥ 10 знаков")
     p_accept.add_argument("--after-merge", dest="after_merge", default=None,
                           help="шаг после слияния (тег, выкладка, выпуск): после влива диспетчер будит автора на него, а не закрывает тикет")
 
@@ -79,6 +81,9 @@ def _add_result_parser(sub) -> None:
                           help="accept: хвосты — - (нет; сверяется со сдачей исполнителя) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_result.add_argument("--live", default=None,
                           help="accept: договор с [вживую] — файл живой проверки на настоящих данных (что увидит владелец)")
+    p_result.add_argument("--critic", default=None, help="accept (critic_before_accept): отчёт критика — файл в docs/reviews/")
+    p_result.add_argument("--critic-skip", dest="critic_skip", default=None,
+                          help="accept (critic_before_accept): обход критика, причина ≥ 10 знаков (считается в отчёт)")
     p_result.add_argument("--after-merge", dest="after_merge", default=None,
                           help="accept по PR: шаг после слияния (тег, выкладка, выпуск) — после влива будится автор, тикет не закрывается")
 
