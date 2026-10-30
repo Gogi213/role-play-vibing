@@ -64,6 +64,8 @@ KEYS = {
     "critic_before_accept": (lambda v: isinstance(v, bool), "true или false"),
     "require_probe": (lambda v: isinstance(v, bool), "true или false"),
     "probe_threshold_min": (_int_min, "целое ≥ 1, минуты"),
+    "host_free_cmd": (_text, "непустая строка"),
+    "host_mem_reserve": (lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1, "число ≥ 1"),
     "ceo_context_warn": (_int_min, "целое ≥ 1, токены контекста; ниже ceo_context_stop"),
     "ceo_context_stop": (_int_min, "целое ≥ 1, токены контекста; выше ceo_context_warn"),
 }

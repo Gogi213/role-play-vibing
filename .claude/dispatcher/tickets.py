@@ -57,6 +57,7 @@ import rpv_config as cfg_mod  # noqa: E402
 import signals as SIG  # noqa: E402
 import cost as COST  # noqa: E402
 import probe as PROBE  # noqa: E402
+import hostload as LOAD  # noqa: E402
 import stop as STOP  # noqa: E402
 import project_paths as CFG  # noqa: E402
 import errors as errors_mod  # noqa: E402
@@ -624,8 +625,12 @@ def cmd_wait(args) -> int:
     if probe_err:
         print(f"wait: {probe_err}", file=sys.stderr)
         return 1
+    load_err, load_upd, load_log = LOAD.gate(T.read_ticket(path), spec, getattr(args, "probe", None), PROJECT_ROOT)  # TK-070 (G-009)
+    if load_err:
+        print(f"wait: {load_err}", file=sys.stderr)
+        return 1
     try:
-        upd = {"status": "waiting", "wait_for": spec, "wait_by": by_dt.isoformat(timespec="seconds") if by else "", **probe_upd}
+        upd = {"status": "waiting", "wait_for": spec, "wait_by": by_dt.isoformat(timespec="seconds") if by else "", **probe_upd, **load_upd}
         if getattr(args, "on_met", None):
             upd["on_met"] = args.on_met.strip()
         T.write_header_updates(path, upd)
@@ -634,6 +639,10 @@ def cmd_wait(args) -> int:
         return 1
     if probe_log:
         T.append_log(path, _caller_role() or "ceo", probe_log)
+    if load_log:
+        T.append_log(path, _caller_role() or "ceo", load_log)
+    if load_upd:
+        LOAD.clear_oom(args.id)  # новый замер принят — отметка OOM снята
     print(f"{args.id}: status: waiting, wait_for: {spec}" + (f", срок {upd['wait_by']}" if by else ""))
     return 0
 

@@ -28,7 +28,8 @@ ROLES = PLUGIN / "templates" / "roles"
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=timezone(timedelta(hours=4)))
 GOOD = """Способ 1 (как есть): 4 мин, пик 900 МБ на срезе 1000 строк
 Способ 2 (векторно): 0,2 мин, пик 1,5 ГБ на срезе 1000 строк
-Тяжёлый: инструмент с самой длинной историей
+Тяжёлый: инструмент с самой длинной историей · пик 5,5 ГБ
+N: 4
 Оценка: 100 мин"""
 
 
@@ -61,7 +62,7 @@ class ProbeFormTests(unittest.TestCase):
         self.assertIn("как есть", PR.problem(GOOD.replace("(как есть)", "(базовый)"), 120))
 
     def test_no_heavy_item_refused(self):
-        self.assertIn("тяжёлый", PR.problem(GOOD.replace("Тяжёлый: инструмент с самой длинной историей\n", ""), 120))
+        self.assertIn("тяжёлый", PR.problem(GOOD.replace("Тяжёлый: инструмент с самой длинной историей · пик 5,5 ГБ\n", ""), 120))
 
     def test_no_estimate_or_unit_refused(self):
         self.assertIn("оценка", PR.problem(GOOD.replace("Оценка: 100 мин", ""), 120))
