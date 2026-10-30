@@ -71,6 +71,7 @@ def _add_result_parser(sub) -> None:
                           help="ask-owner Судьи: повод вопроса владельцу (деньги|направление|необратимое|бизнес-правило)")
     p_result.add_argument("--by", default=None, help="wait: срок ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_result.add_argument("--allow-met", dest="allow_met", action="store_true", help="wait: условие уже выполнено — всё равно ждать")
+    p_result.add_argument("--probe", default=None, help="wait: проба до долгого расчёта — запись или файл (с require_probe, срок дальше порога)")
     p_result.add_argument("--repo", default=None, help="accept по PR: <владелец/репо> (иначе ci_repo в .claude/rpv.json)")
     p_result.add_argument("--decisions", default=None,
                           help="accept: решения владельца, с которыми сверена сдача: В-N[,В-M] или - (связанных нет)")
@@ -98,6 +99,7 @@ def _add_control_parsers(sub) -> None:
     p_wait.add_argument("id")
     p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
     p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
+    p_wait.add_argument("--probe", default=None, help="проба до долгого расчёта — запись или файл (с require_probe, срок дальше порога)")
     p_wait.add_argument("--on-met", default=None,
                         help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
 
