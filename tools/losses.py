@@ -2,6 +2,7 @@
 Запуск: python tools/losses.py <путь проекта> [--since 2026-10-23] [--until 2026-10-31] [--loop 20]
 Читает <проект>/.claude/: dispatcher/runs.log, dispatcher/guard.log, dispatcher/ceo-inbox.md, tickets/TK-*.md и tickets/archive/*-log.md."""
 import argparse
+import bisect
 import re
 import statistics as st
 from collections import Counter, defaultdict
@@ -193,6 +194,23 @@ def refusals(claude_dir, since, until):
     return c, ex
 
 
+def refusal_runs(claude_dir, runs, since, until, window=60):
+    """Запуски с отказом охранника: отказ (guard.log без тикета) относится к ближайшему по времени запуску,
+    закончившемуся после него не позже чем через window мин. При параллельных запусках привязка приблизительна.
+    Возвращает {индекс запуска: число отказов}."""
+    ends = sorted(range(len(runs)), key=lambda i: runs[i]["ts"])
+    stamps = [runs[i]["ts"] for i in ends]
+    hit = Counter()
+    for ln in read(claude_dir / "dispatcher" / "guard.log").splitlines():
+        p = ln.split("	")
+        if len(p) < 5 or p[3] != "deny" or not in_period(p[0], since, until):
+            continue
+        k = bisect.bisect_left(stamps, p[0])
+        if k < len(stamps) and minutes(p[0], stamps[k]) <= window:
+            hit[ends[k]] += 1
+    return hit
+
+
 def report(root, since="", until="", loop=20):
     cd = Path(root) / ".claude"
     runs = parse_runs(cd / "dispatcher" / "runs.log", since, until)
@@ -239,12 +257,19 @@ def report(root, since="", until="", loop=20):
     c, ex = refusals(cd, since, until)
     L += ["", "## 4. Отказы команд и петли", f"- отказов охранника: {sum(c.values())}"]
     L += [f"  - {k[0]}: {k[1]} — {n} (первый {ex[k]})" for k, n in c.most_common(5)]
+    hit = refusal_runs(cd, runs, since, until)
+    hc = sum(runs[i]["cost"] for i in hit)
+    L += [f"- запусков с отказом охранника: {len(hit)} из {len(runs)}, ${hc:.2f} ({pct(hc, total)} расхода; "
+          f"расход запусков целиком, не стоимость самих отказов — верхняя оценка)"]
+    L += [f"  пример: {runs[i]['tk']} {runs[i]['role']} {runs[i]['ts']} — {n} отказов, ${runs[i]['cost']:.2f}"
+          for i, n in sorted(hit.items(), key=lambda x: -x[1])[:2]]
     per = Counter(r["tk"] for r in runs)
     cost_tk = defaultdict(float)
     for r in runs:
         cost_tk[r["tk"]] += r["cost"]
     loops = [(t, n) for t, n in per.most_common() if n > loop]
-    L += [f"- тикетов с >{loop} запусков: {len(loops)}, ${sum(cost_tk[t] for t, _ in loops):.2f}"]
+    L += [f"- расход тикетов-петель (>{loop} запусков; не потеря, а весь их расход): {len(loops)} тикетов, "
+          f"${sum(cost_tk[t] for t, _ in loops):.2f} ({pct(sum(cost_tk[t] for t, _ in loops), total)})"]
     L += [f"  - {t}: {n} запусков, ${cost_tk[t]:.2f}" for t, n in loops[:5]]
     return "\n".join(L)
 

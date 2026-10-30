@@ -60,3 +60,11 @@ def test_returns_delay_refusals_report(tmp_path):
     c, _ = losses.refusals(d, "", "")
     assert sum(c.values()) == 1
     assert "расход $2.00" in losses.report(tmp_path)
+
+
+def test_refusal_runs_attribution(tmp_path):
+    d = make(tmp_path)
+    runs = losses.parse_runs(d / "dispatcher" / "runs.log")
+    hit = losses.refusal_runs(d, runs, "", "")
+    assert dict(hit) == {0: 1}
+    assert "запусков с отказом охранника: 1 из 4, $1.00" in losses.report(tmp_path)
