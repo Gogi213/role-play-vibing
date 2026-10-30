@@ -42,6 +42,12 @@ class ProbeFormTests(unittest.TestCase):
         self.assertEqual(PR.estimate_min(GOOD), 100)
         self.assertEqual(PR.estimate_min("оценка: 5,5 ч"), 330)
 
+    def test_full_russian_unit_words_count(self):
+        text = GOOD.replace("4 мин, пик 900 МБ", "12 минут, пик 300 МБ").replace("0,2 мин", "40 секунд")
+        self.assertEqual(PR.problem(text, 120), "")
+        self.assertEqual(PR.estimate_min("оценка: 90 минут"), 90)
+        self.assertEqual(PR.estimate_min("Оценка: 2 часа"), 120)
+
     def test_one_method_refused(self):
         text = GOOD.replace("Способ 2 (векторно): 0,2 мин, пик 1,5 ГБ на срезе 1000 строк\n", "")
         self.assertIn("нужно ≥ 2", PR.problem(text, 120))
@@ -137,7 +143,7 @@ class WaitProbeTests(unittest.TestCase):
         f.write_text(GOOD, encoding="utf-8")
         self.assertEqual(self.wait(by_min=130, probe=str(f)), 0)
         self.assertIn("файл " + str(f), self.tkt().header["probe"])
-        self.assertNotIn("[проба]", self.tkt().path.read_text(encoding="utf-8"))
+        self.assertIn("[проба] файл " + str(f) + " · оценка 100 мин", self.tkt().path.read_text(encoding="utf-8"))
 
     def test_bad_probe_refused_with_form_hint(self):
         self.assertEqual(self.wait(by_min=130, probe="оценка: 10 мин"), 1)

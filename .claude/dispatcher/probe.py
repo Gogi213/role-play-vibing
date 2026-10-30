@@ -22,11 +22,11 @@ FORM = ("способы — по строке на способ, в строке
 
 _NUM = r"\d+(?:[.,]\d+)?"
 _END = r"(?![а-яёa-z])"
-_TIME_RE = re.compile(_NUM + r"\s*(?:мс|сек|с|мин|ч|час\w*)" + _END, re.I)
+_TIME_RE = re.compile(_NUM + r"\s*(?:мс|сек\w*|с|мин\w*|ч|час\w*)" + _END, re.I)
 _MEM_RE = re.compile(_NUM + r"\s*(?:[кмгт]и?б|[kmgt]i?b)" + _END, re.I)
 _ASIS_RE = re.compile(r"как есть", re.I)
 _HEAVY_RE = re.compile(r"тяж[её]л\w*\s*:\s*\S", re.I)
-_ESTIMATE_RE = re.compile(r"оценк\w*[^:\n]{0,30}:\s*(" + _NUM + r")\s*(мин|ч|час\w*)" + _END, re.I)
+_ESTIMATE_RE = re.compile(r"оценк\w*[^:\n]{0,30}:\s*(" + _NUM + r")\s*(мин\w*|ч|час\w*)" + _END, re.I)
 
 
 def enabled() -> bool:
@@ -43,7 +43,7 @@ def estimate_min(text: str):
     if not m:
         return None
     value = float(m.group(1).replace(",", "."))
-    return value if m.group(2).lower() == "мин" else value * 60
+    return value if m.group(2).lower().startswith("мин") else value * 60
 
 
 def _method_lines(text: str) -> list:
@@ -98,5 +98,7 @@ def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple
     why = problem(text, left)
     if why:
         return f"проба не принята: {why}. Нужно: {FORM}", {}, ""
-    label = f"файл {src}" if src else "в логе"
-    return "", {HEADER_KEY: f"{label} · оценка {estimate_min(text):.0f} мин"}, "" if src else f"[проба] {text}"
+    est = f"оценка {estimate_min(text):.0f} мин"
+    if src:
+        return "", {HEADER_KEY: f"файл {src} · {est}"}, f"[проба] файл {src} · {est}"
+    return "", {HEADER_KEY: f"в логе · {est}"}, f"[проба] {text}"
