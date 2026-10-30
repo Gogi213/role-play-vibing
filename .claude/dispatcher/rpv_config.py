@@ -61,6 +61,7 @@ KEYS = {
     "guard_push_scope": (lambda v: isinstance(v, bool), "true или false"),
     "hold_alive_waits": (lambda v: isinstance(v, bool), "true или false"),
     "watch_unreleased": (lambda v: isinstance(v, bool), "true или false"),
+    "critic_before_accept": (lambda v: isinstance(v, bool), "true или false"),
     "ceo_context_warn": (_int_min, "целое ≥ 1, токены контекста; ниже ceo_context_stop"),
     "ceo_context_stop": (_int_min, "целое ≥ 1, токены контекста; выше ceo_context_warn"),
 }
