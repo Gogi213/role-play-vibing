@@ -85,7 +85,7 @@ class MathTests(unittest.TestCase):
     def test_is_oom_ignores_negation_and_bare_word(self):
         for yes in ("rc 137: oom-kill", "OOM-killed", "Out of memory: Killed process", "MemoryError", "Cannot allocate memory"):
             self.assertTrue(HL.is_oom(yes), yes)
-        for no in ("не oom-kill, а ошибка данных", "not out of memory", "причина: не OOM", "oom_score сброшен", "", None):
+        for no in ("не oom-kill, а ошибка данных", "not out of memory", "причина: не OOM", "нет oom-kill", "oom_score сброшен", "", None):
             self.assertFalse(HL.is_oom(no), no)
 
     def test_free_parses_first_line_two_numbers(self):
@@ -232,6 +232,25 @@ class WaitLoadTests(unittest.TestCase):
         job = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 137: oom-kill"}
         self.assertEqual(watch._apply_owned_jobs(self.path, self.tkt(), {}, spec, "dead", {"gpu1": [job]}, NOW), "woken")
         self.assertIsNotNone(HL.oom_mark(self.tid))
+
+    def test_watch_job_form_failed_takes_adapter_reason_for_oom_mark(self):
+        import watch
+        job = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 137: oom-kill"}
+        T.write_header_updates(self.path, {"status": "waiting", "wait_for": "job:gpu1:7"}, now=NOW)
+        with mock.patch.object(watch, "_to_judge"):
+            alive = watch._triage_job(self.path, self.tkt(), T.parse_wait_for("job:gpu1:7"), {}, NOW,
+                                      lambda alias, jid: ("failed", "Traceback: ValueError"), {}, {"gpu1": [job]})
+        self.assertFalse(alive)
+        self.assertIsNotNone(HL.oom_mark(self.tid))  # слова OOM нет в хвосте лога — только в причине адаптера
+
+    def test_watch_job_form_failed_other_reason_no_oom_mark(self):
+        import watch
+        job = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 1: ошибка данных"}
+        T.write_header_updates(self.path, {"status": "waiting", "wait_for": "job:gpu1:7"}, now=NOW)
+        with mock.patch.object(watch, "_to_judge"):
+            watch._triage_job(self.path, self.tkt(), T.parse_wait_for("job:gpu1:7"), {}, NOW,
+                              lambda alias, jid: ("failed", "Traceback: ValueError"), {}, {"gpu1": [job]})
+        self.assertIsNone(HL.oom_mark(self.tid))
 
     def test_watch_failed_owned_job_other_reason_no_oom_mark(self):
         import watch

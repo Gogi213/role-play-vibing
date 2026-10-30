@@ -25,7 +25,7 @@ import ticket as T
 RESERVE = 1.2
 OOM_NAME = "oom-state.json"
 _OOM_RE = re.compile(r"oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory", re.I)
-_NEG_RE = re.compile(r"(?:\bне|\bnot|\bno|\bбез)\W{0,3}$", re.I)  # «не oom-kill», «not out of memory»
+_NEG_RE = re.compile(r"(?:\bнет|\bне|\bnot|\bno|\bбез)\W{0,3}$", re.I)  # «не oom-kill», «нет oom-kill», «not out of memory»
 _NUMS = re.compile(r"\d+(?:[.,]\d+)?")
 
 
