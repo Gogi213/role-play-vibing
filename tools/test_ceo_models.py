@@ -100,3 +100,26 @@ def test_main_end_to_end(tmp_path, capsys):
     cm.main(["--rpv", str(tmp_path / "rpv"), "--alpha", str(tmp_path / "alpha"), "--segments"])
     out = capsys.readouterr().out
     assert "Интерактивных сессий CEO: 2" in out and "| rpv | opus |" in out and "| alpha | sonnet |" in out
+
+
+def test_inbox_delay_counted_once(tmp_path):
+    line = "- 2026-10-30T10:00:30+00:00 TK-050 [done] Бэктест готов"
+    tr = {"type": "user", "timestamp": "2026-10-30T10:02:00Z",
+          "message": {"content": [{"type": "tool_result", "content": line}]}}
+    tr2 = dict(tr, timestamp="2026-10-30T10:05:00Z")
+    rows = [_u("01", "жду"), _a("01", "m0", "claude-opus-4-7"), tr, _a("03", "m1", "claude-sonnet-5-5"), tr2,
+            _a("06", "m2", "claude-sonnet-5-5")]
+    got = cm.inbox_delays(_write(tmp_path / "s.jsonl", rows))
+    assert got == [("sonnet", 90.0, 60.0)]      # строка→прочитано 90 с, прочитано→следующий ответ 60 с; повтор не считается
+
+
+def test_ctx_growth_skips_reset_and_flags(tmp_path):
+    big = {"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 5000, "output_tokens": 1}
+    small = {"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 900, "output_tokens": 1}
+    rows = [_u("01", "а"), _a("02", "m1", "claude-opus-4-7", usage=small),
+            _u("03", "не надо, я не просил"), _a("04", "m2", "claude-opus-4-7", text="я ошибся в сумме", usage=big),
+            _u("05", "б"), _a("06", "m3", "claude-opus-4-7", usage=small)]
+    t = cm.read_turns(_write(tmp_path / "s.jsonl", rows))
+    assert [cm.ctx_growth(x) for x in t] == [None, 4100, None]      # первый хода нет, третий — сброс контекста
+    assert cm.violated(t[0]) is True and cm.violated(t[1]) is False
+    assert [x["self_fix"] for x in t] == [False, True, False]

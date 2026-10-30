@@ -19,6 +19,13 @@ FIX_RE = re.compile(
     r"ты охуел|ну и|не надо",
     re.I)
 CRITIC_RE = re.compile(r"критик", re.I)
+# нарушение устава, названное владельцем: задача без слова / не отдал роли / правка уставов
+VIOL_RE = re.compile(r"не просил|не говорил|без (?:моего )?(?:слова|разрешения)|почему ты (?:сам|не дал|не завёл|не завел)|"
+                     r"не дал (?:инженеру|исследователю)|сам (?:сделал|написал|правил)|устав", re.I)
+# CEO сам признаёт и исправляет свою ошибку в ответе (без дозапроса владельца)
+SELF_RE = re.compile(r"ошибся|моя ошибка|я ошибс|неверно (?:сказал|написал)|поправлюсь|исправляю (?:свою|себя)|"
+                     r"было неточно|я неправильно|я не так", re.I)
+INBOX_DONE_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d) (TK-\d+) \[done\]")
 
 
 def weight(u):
@@ -98,7 +105,7 @@ def read_turns(path):
                 e = msgs.get(m["id"])
                 if e is None:
                     e = msgs[m["id"]] = {"model": m["model"], "usage": m.get("usage", {}), "ts": ts_of(d), "end": ts_of(d),
-                                         "tools": 0, "chars": 0}
+                                         "tools": 0, "chars": 0, "text": ""}
                     events.append(("a", m["id"]))
                 e["end"] = ts_of(d)
                 for b in m.get("content", []):
@@ -106,6 +113,7 @@ def read_turns(path):
                         e["tools"] += 1
                     elif b.get("type") == "text":
                         e["chars"] += len(b.get("text", ""))
+                        e["text"] += b.get("text", "")
     turns, cur = [], None
     for ev in events:
         if ev[0] == "u":
@@ -123,7 +131,8 @@ def read_turns(path):
             "weight": sum(weight(m["usage"]) for m in t["msgs"]), "tools": sum(m["tools"] for m in t["msgs"]),
             "chars": sum(m["chars"] for m in t["msgs"]), "n_msgs": len(t["msgs"]),
             "first_latency": t["msgs"][0]["ts"] - t["user_ts"], "duration": t["msgs"][-1]["end"] - t["user_ts"],
-            "ctx_last": ctx(t["msgs"][-1]["usage"]), "next_user": turns[i + 1]["user"] if i + 1 < len(turns) else None,
+            "ctx_last": ctx(t["msgs"][-1]["usage"]), "self_fix": bool(SELF_RE.search(" ".join(m["text"] for m in t["msgs"]))),
+            "ctx_prev": ctx(turns[i - 1]["msgs"][-1]["usage"]) if i and turns[i - 1]["msgs"] else None, "next_user": turns[i + 1]["user"] if i + 1 < len(turns) else None,
         })
     return out
 
@@ -164,6 +173,56 @@ def critic_asked(turn):
     """Следующее сообщение владельца требует критика (Г4: ошибка, исправляемая обращением к критику)."""
     nxt = turn["next_user"]
     return bool(nxt and CRITIC_RE.search(nxt))
+
+
+def violated(turn):
+    """Следующее сообщение владельца называет нарушение порядка (кодом по ключам; точность — по ручной выборке)."""
+    nxt = turn["next_user"]
+    return bool(nxt and VIOL_RE.search(nxt))
+
+
+def ctx_growth(turn):
+    """Прирост контекста за ход (токены); None, если предыдущего хода нет или контекст сбросили (сжатие/clear)."""
+    if turn["ctx_prev"] is None or turn["ctx_last"] < turn["ctx_prev"]:
+        return None
+    return turn["ctx_last"] - turn["ctx_prev"]
+
+
+def inbox_delays(path):
+    """Задержки по строкам «<время> TK-N [done]» из ceo-inbox, прочитанным CEO (результат инструмента).
+    [(семейство модели следующего ответа, строка→прочитано, с; прочитано→следующий ответ, с)]; строка считается один раз."""
+    seen, recs, out = set(), [], []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("isSidechain") or "message" not in d:
+                continue
+            if d.get("type") == "assistant":
+                m = d["message"]
+                if m.get("model") not in (None, "<synthetic>"):
+                    recs.append(("a", ts_of(d), family(m["model"]), None))
+            elif d.get("type") == "user" and "[done]" in line:
+                c = d["message"]["content"]
+                body = c if isinstance(c, str) else " ".join(str(b.get("content", "")) for b in c if b.get("type") == "tool_result")
+                new = [(m.group(1), m.group(2)) for m in INBOX_DONE_RE.finditer(body) if m.groups() not in seen]
+                seen.update(new)
+                if new:
+                    recs.append(("r", ts_of(d), None, new))
+    from datetime import datetime
+    for i, r in enumerate(recs):
+        if r[0] != "r":
+            continue
+        nxt = next((x for x in recs[i + 1:] if x[0] == "a"), None)
+        if nxt is None:
+            continue
+        for stamp, _tk in r[3]:
+            written = datetime.fromisoformat(stamp).timestamp()
+            if 0 <= r[1] - written < 86400:
+                out.append((nxt[2], r[1] - written, nxt[1] - r[1]))
+    return out
 
 
 def wilson(k, n, z=1.96):
@@ -215,6 +274,9 @@ def summarize(turns):
         "lat_med": st.median(t["first_latency"] for t in turns), "dur_med": st.median(t["duration"] for t in turns),
         "fix": k, "fix_n": nn, "fix_ci": wilson(k, nn), "critic": sum(critic_asked(t) for t in turns),
         "ctx_med": st.median(t["ctx_last"] for t in turns),
+        "growth_med": st.median(g) if (g := [x for x in map(ctx_growth, turns) if x is not None]) else 0,
+        "viol": sum(violated(t) for t in turns if t["next_user"] is not None),
+        "self": sum(t["self_fix"] for t in turns),
     }
 
 
@@ -229,8 +291,9 @@ def report(data, sessions):
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for proj, fam, ns, s in rows:
         lines.append(f"| {proj} | {fam} | {ns} | {s['n']} | {s['w_med']:.0f} | {s['w_mean']:.0f} | {s['tools']:.1f} | "
-                     f"{s['chars_med']:.0f} | {s['lat_med']:.0f} | {s['dur_med']:.0f} | {s['ctx_med']:.0f} | "
-                     f"{s['fix']}/{s['fix_n']} | {s['fix']/max(s['fix_n'],1):.1%} [{s['fix_ci'][0]:.1%}–{s['fix_ci'][1]:.1%}] | {s['critic']} |")
+                     f"{s['chars_med']:.0f} | {s['lat_med']:.0f} | {s['dur_med']:.0f} | {s['ctx_med']:.0f} | {s['growth_med']:.0f} | "
+                     f"{s['fix']}/{s['fix_n']} | {s['fix']/max(s['fix_n'],1):.1%} [{s['fix_ci'][0]:.1%}–{s['fix_ci'][1]:.1%}] | {s['critic']} | "
+                     f"{s['viol']} | {s['self']} |")
     lines.append("")
     lines.append("Разность Opus − Sonnet (95% ДИ бутстрепом по сессиям):")
     for proj in sorted({p for p, _ in data}):
@@ -241,7 +304,10 @@ def report(data, sessions):
                            ("до 1-го ответа, с (медиана)", lambda xs: st.median(t["first_latency"] for t in xs)),
                            ("ход целиком, с (медиана)", lambda xs: st.median(t["duration"] for t in xs)),
                            ("доля поправок", lambda xs: sum(corrected(t) for t in xs) / len(xs)),
-                           ("доля «включай критика»", lambda xs: sum(critic_asked(t) for t in xs) / len(xs))):
+                           ("доля «включай критика»", lambda xs: sum(critic_asked(t) for t in xs) / len(xs)),
+                           ("прирост контекста/ход, медиана", lambda xs: st.median([g for g in map(ctx_growth, xs) if g is not None] or [0])),
+                           ("доля «названо нарушение порядка»", lambda xs: sum(violated(t) for t in xs) / len(xs)),
+                           ("доля «сам признал ошибку»", lambda xs: sum(t["self_fix"] for t in xs) / len(xs))):
             ci = boot_diff(list(a.values()), list(b.values()), stat)
             lines.append(f"- {proj} · {name}: " + (f"[{ci[0]:.3g}; {ci[1]:.3g}]" + (" — ноль внутри (шум)" if ci[0] <= 0 <= ci[1] else " — ноль вне интервала")
                                                     if ci else "нет данных у одной из моделей"))
@@ -283,6 +349,13 @@ def main(argv=None):
         txt += "\n\nОтрезки с одной моделью (проект, модель: отрезков, сообщений, вес/сообщение мед.):\n" + "\n".join(
             f"- {p} · {f}: {len(v)}, {sum(s['n'] for s in v)}, {st.median(s['weight'] / s['n'] for s in v):.0f}"
             for (p, f), v in sorted(segs.items()))
+    delays = {}
+    for proj, name in sessions:
+        for fam, w, r in inbox_delays(Path(a.rpv if proj == "rpv" else a.alpha) / name):
+            delays.setdefault((proj, fam), []).append((w, r))
+    txt += ("\n\nЗадержка по [done] из ceo-inbox (проект, модель: n, строка→прочитано мед. с, прочитано→следующий ответ мед. с):\n"
+            + "\n".join(
+        f"- {p} · {f}: {len(v)}, {st.median(x[0] for x in v):.0f}, {st.median(x[1] for x in v):.1f}" for (p, f), v in sorted(delays.items())))
     print(txt)
     if a.out:
         Path(a.out).write_text(txt, encoding="utf-8")
