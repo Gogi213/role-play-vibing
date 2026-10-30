@@ -13,6 +13,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+import hide
 import project as P
 
 KEY = "critic_before_accept"  # читается литералом в critic_ack (test_configuration_doc ищет `setting("ключ"`)
@@ -34,22 +35,17 @@ def log_path(root: Path) -> Path:
 def head_time(root: Path, sha: str) -> float | None:
     """Время коммита `sha` (эпоха) в git проекта; нет коммита или git — None."""
     try:
-        out = subprocess.run(["git", "-C", str(root), "show", "-s", "--format=%ct", sha], capture_output=True, text=True,
-                             timeout=20)
+        out = hide.git(root, "show", "-s", "--format=%ct", sha, timeout=20, text=True)
         return float(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
 
-def _find(root: Path, tid: str, raw: str) -> Path | None:
-    """Отчёт в проекте: от корня, затем от копии тикета; несколько — самый новый."""
+def _find(root: Path, raw: str) -> Path | None:
+    """Отчёт в проекте: путь от корня (или абсолютный внутри корня); нет файла — None."""
     root = root.resolve()
-    hits = []
-    for base in (root, root / ".claude" / "worktrees" / tid):
-        f = (Path(raw) if Path(raw).is_absolute() else base / raw).resolve()
-        if f.is_file() and f.is_relative_to(root):
-            hits.append(f)
-    return max(hits, key=lambda f: f.stat().st_mtime) if hits else None
+    f = (Path(raw) if Path(raw).is_absolute() else root / raw).resolve()
+    return f if f.is_file() and f.is_relative_to(root) else None
 
 
 def parse_report(text: str) -> tuple[dict[str, str], set[str]]:
@@ -92,7 +88,7 @@ def critic_ack(args, tid: str, root: Path, sha: str = "", head_ts=head_time) -> 
         return "", f" критик: обход ({skip[:80]})"
     if not raw:
         return f"включён ключ {KEY}: приёмка — с отчётом критика --critic <файл в docs/reviews/>: {HINT}", ""
-    f = _find(root, tid, raw)
+    f = _find(root, raw)
     if not f:
         return f"--critic {raw}: файла нет в проекте — {HINT}", ""
     rel = f.relative_to(root.resolve())

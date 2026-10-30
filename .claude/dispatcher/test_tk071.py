@@ -146,6 +146,16 @@ class WiringTests(unittest.TestCase):
         for must in ("critic_before_accept", "--critic <файл>", "Ответ Судьи на N", "--critic-skip"):
             self.assertIn(must, judge)
 
+    def test_critic_agent_model_and_effort_fixed(self):
+        head = (PLUGIN / "agents" / "critic.md").read_text(encoding="utf-8").split("---")[1].splitlines()
+        self.assertIn("model: claude-sonnet-5-5", head)
+        self.assertIn("effort: xhigh", head)
+
+    def test_head_time_goes_through_hide_git(self):
+        with mock.patch.object(CG.hide, "git", return_value=SimpleNamespace(returncode=0, stdout="1700000000")) as g:
+            self.assertEqual(CG.head_time(Path("."), "abc1234"), 1700000000.0)
+        self.assertEqual(g.call_args.args[:2], (Path("."), "show"))
+
 
 if __name__ == "__main__":
     unittest.main()
