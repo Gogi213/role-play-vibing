@@ -7,6 +7,7 @@ import json
 import random
 import re
 import statistics as st
+from functools import lru_cache
 from pathlib import Path
 
 CEO_HDR = re.compile(r"РОЛЬ СЕССИИ: ты — «(?:Alpha - )?CEO»")
@@ -164,21 +165,23 @@ def segments(path):
     return out
 
 
+@lru_cache(maxsize=None)
+def _has(rx, text):
+    return bool(text and rx.search(text))
+
+
 def corrected(turn):
-    nxt = turn["next_user"]
-    return bool(nxt and FIX_RE.search(nxt))
+    return _has(FIX_RE, turn["next_user"])
 
 
 def critic_asked(turn):
     """Следующее сообщение владельца требует критика (Г4: ошибка, исправляемая обращением к критику)."""
-    nxt = turn["next_user"]
-    return bool(nxt and CRITIC_RE.search(nxt))
+    return _has(CRITIC_RE, turn["next_user"])
 
 
 def violated(turn):
     """Следующее сообщение владельца называет нарушение порядка (кодом по ключам; точность — по ручной выборке)."""
-    nxt = turn["next_user"]
-    return bool(nxt and VIOL_RE.search(nxt))
+    return _has(VIOL_RE, turn["next_user"])
 
 
 def ctx_growth(turn):
@@ -287,8 +290,9 @@ def report(data, sessions):
         s = summarize(turns)
         rows.append((proj, fam, len(by_s), s))
     lines = ["| проект | модель | сессий | ходов | вес/ход мед. | вес/ход средн. | инстр./ход | ответ, знаков мед. | "
-             "до 1-го ответа, с мед. | ход целиком, с мед. | контекст, ток. мед. | поправок / ходов | доля [95% ДИ] | про критика |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "до 1-го ответа, с мед. | ход целиком, с мед. | контекст, ток. мед. | прирост контекста/ход мед. | поправок / ходов | доля [95% ДИ] | про критика | "
+             "названо нарушение порядка | CEO сам признал ошибку |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for proj, fam, ns, s in rows:
         lines.append(f"| {proj} | {fam} | {ns} | {s['n']} | {s['w_med']:.0f} | {s['w_mean']:.0f} | {s['tools']:.1f} | "
                      f"{s['chars_med']:.0f} | {s['lat_med']:.0f} | {s['dur_med']:.0f} | {s['ctx_med']:.0f} | {s['growth_med']:.0f} | "
