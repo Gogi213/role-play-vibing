@@ -40,22 +40,38 @@ class CeoCharterTests(unittest.TestCase):
         self.text = CEO_TEMPLATE.read_text(encoding="utf-8")
 
     def test_watch_is_kept_always(self):
-        r = rule(self.text, "Наблюдение держишь всегда")
+        r = rule(self.text, "Наблюдение держишь, пока есть работа")
         for must in ("30 мин", "постоянного режима нет", "Monitor expired", "после рестарта", "перевзводи сразу",
+                     "`timeout_ms: 1800000`", "умолчание инструмента — 5 мин", "без фильтра `grep` по `TK-`",
+                     "строки сторожа идут с «*»", "молча", "сразу прочитай `tickets.py inbox`", "`tail -n 0` теряет строки",
+                     "Очередь пуста и владельцу ничего не обещано — не перевзводи",
                      "«Напишу, когда …» владельцу не обещай, пока наблюдение не включено"):
             self.assertIn(must, r)
 
     def test_covered_by_decision_acts_without_asking(self):
         r = rule(self.text, "Покрыто решением")
-        for must in ("сверь реестр", "действующее (не заменённое) решение", "цитатой владельца прямо называет",
+        for must in ("сверь реестр", "действующее решение В-N", "цитатой владельца прямо называет",
                      "сразу заводи тикет со ссылкой `--ref В-N`", "вопрос не задавай"):
             self.assertIn(must, r)
+
+    def test_covered_rule_quotes_only_owner_line(self):
+        r = rule(self.text, "Покрыто решением")
+        for must in ("Цитата — только строка «>» самого владельца", "«Суть» и «Вопрос CEO» цитатой не считаются",
+                     "цепочку «Заменяет» проверь: замена бывает частичной",
+                     "«да» / «ок делай» покрывают только названное в «Вопрос CEO» этой записи и один раз",
+                     "«Толкование CEO» или «при сомнении переспросить» — спрашивай"):
+            self.assertIn(must, r)
+        self.assertNotIn("выпуск после приёмки Судьи", r)
 
     def test_covered_rule_does_not_widen_authority(self):
         r = rule(self.text, "Покрыто решением")
         for must in ("«похожее» решение не в счёт", "деньги, необратимое, направление и бизнес-правило — владельцу",
-                     "`allow <ID> publish --ref В-N`", "строке про самодеятельность"):
+                     "`allow <ID> publish --ref В-N`", "строке про самодеятельность",
+                     "по строке «Перенос, переименование, удаление»",
+                     "по строкам «Согласие на публикацию» и «Удаление веток на удалённом»"):
             self.assertIn(must, r)
+        for head in ("Перенос, переименование, удаление", "Согласие на публикацию", "Удаление веток на удалённом"):
+            self.assertTrue(any(ln.startswith(f"- **{head}") for ln in self.text.splitlines()), head)
 
     def test_no_contradiction_with_neighbouring_rules(self):
         # строки, с которыми новое правило согласовано, на месте и называют те же понятия
@@ -76,7 +92,7 @@ class CeoCharterTests(unittest.TestCase):
             _, _, err = charter.sync(Path(tmp), ["ceo.md"], now=W.datetime.now().astimezone())
             self.assertIsNone(err)
             synced = (roles / "ceo.md").read_text(encoding="utf-8")
-            self.assertIn("**Наблюдение держишь всегда:**", synced)
+            self.assertIn("**Наблюдение держишь, пока есть работа:**", synced)
             self.assertIn("**Покрыто решением — делай, не спрашивай:**", synced)
 
 
@@ -86,7 +102,11 @@ class CeoCommandTests(unittest.TestCase):
         self.assertIn("allowed-tools: Bash, Monitor", text)
         self.assertIn("`Monitor` на `<корень проекта>/.claude/dispatcher/ceo-wake.log`", text)
         self.assertIn("Monitor expired", text)
-        self.assertIn("после рестарта сессии перевзводи сразу", text)
+        self.assertIn("после рестарта сессии перевзводи сразу и молча", text)
+        self.assertIn("с `timeout_ms: 1800000`", text)
+        self.assertIn("без фильтра `grep` по `TK-`", text)
+        self.assertIn("сразу прочитай `tickets.py inbox`", text)
+        self.assertIn("очередь пуста и владельцу ничего не обещано — не перевзводи", text)
         self.assertIn("не обещай, пока наблюдение не включено", text)
 
     def test_monitor_step_precedes_the_reply(self):
@@ -278,7 +298,9 @@ class UnreleasedDocsTests(unittest.TestCase):
     def test_signals_doc_says_monitor_expires(self):
         text = SIGNALS_DOC.read_text(encoding="utf-8")
         self.assertIn("не дольше 30 мин", text)
-        self.assertIn("перевзводит сразу", text)
+        self.assertIn("перевзводит молча и сразу", text)
+        self.assertIn("`timeout_ms: 1800000`", text)
+        self.assertIn("не перевзводит", text)
 
 
 if __name__ == "__main__":
