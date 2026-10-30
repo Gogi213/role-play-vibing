@@ -24,16 +24,23 @@ import ticket as T
 
 RESERVE = 1.2
 OOM_NAME = "oom-state.json"
-_OOM_RE = re.compile(r"\boom\b|oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory", re.I)
+_OOM_RE = re.compile(r"oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory", re.I)
+_NEG_RE = re.compile(r"(?:\bне|\bnot|\bno|\bбез)\W{0,3}$", re.I)  # «не oom-kill», «not out of memory»
 _NUMS = re.compile(r"\d+(?:[.,]\d+)?")
 
 
 def reserve() -> float:
-    return float(P.setting("host_mem_reserve", RESERVE))
+    """Запас по памяти: ключ `host_mem_reserve`, не меньше 1 (в rpv.json могли вписать руками); не число — умолчание."""
+    try:
+        return max(1.0, float(P.setting("host_mem_reserve", RESERVE)))
+    except (TypeError, ValueError):
+        return RESERVE
 
 
 def n_max(cores: int, mem_gb: float, peak: float, res: float) -> int:
     """Сколько процессов выдержит машина: меньшее из свободных ядер и памяти ÷ (пик × запас)."""
+    if peak * res <= 0:  # пика нет (≤ 0) — память не ограничивает, остаются ядра
+        return max(0, int(cores))
     return max(0, min(int(cores), int(mem_gb // (peak * res))))
 
 
@@ -68,9 +75,15 @@ def oom_mark(tid: str):
     return _oom_read().get(tid)
 
 
+def is_oom(text: str) -> bool:
+    """В тексте есть OOM-kill / нехватка памяти без отрицания перед ним («не oom-kill»)."""
+    return any(not _NEG_RE.search(text[max(0, m.start() - 8):m.start()]) for m in _OOM_RE.finditer(text or ""))
+
+
 def note_oom(tkt, why: str, now: datetime = None) -> bool:
-    """Сторож: в тексте причины падения задания тикета есть OOM-kill — запомнить пик и N из шапки на тот момент."""
-    if not PROBE.enabled() or not _OOM_RE.search(why or ""):
+    """Сторож: `why` — причина падения самого задания тикета (поле адаптера или хвост его лога, не текст пробуждения):
+    в ней OOM-kill — запомнить пик и N из шапки на тот момент."""
+    if not PROBE.enabled() or not is_oom(why):
         return False
     peak, n = PROBE.load_of_header(tkt) or (None, None)
     data = _oom_read()
@@ -104,6 +117,8 @@ def gate(tkt, spec: str, arg, root, ssh_cmd=None) -> tuple:
         return "", {}, ""
     text, _ = PROBE.load(arg, root) if (arg or "").strip() else ("", "")
     new = (PROBE.peak_gb(text), PROBE.procs(text))
+    if new[0] is not None and round(new[0], 2) <= 0:
+        return "пик памяти одного процесса должен быть больше 0 (не меньше 0,01 ГБ ≈ 10 МБ): замерь на тяжёлом элементе", {}, ""
     new = new if None not in new else None
     mark = oom_mark(tkt.id)
     if mark:
@@ -111,6 +126,8 @@ def gate(tkt, spec: str, arg, root, ssh_cmd=None) -> tuple:
         if why:
             return (f"прошлый запуск тикета убит по памяти (OOM, {mark.get('at', '')}): повтор без нового замера не принимается. "
                     f"Замерь заново и передай `--probe` с {why}"), {}, ""
+        if form := PROBE.problem(text, float("inf")):  # короткий --by форму не проверил, а новая запись снимает отметку
+            return f"запись пробы не принята: {form}. Нужно: {PROBE.FORM}", {}, ""
     load = new or PROBE.load_of_header(tkt)
     upd = {PROBE.LOAD_KEY: PROBE.load_line(*load)} if new else {}
     parsed = T.parse_wait_for(spec)

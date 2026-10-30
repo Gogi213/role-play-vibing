@@ -61,12 +61,32 @@ class RecordFormTests(unittest.TestCase):
         self.assertIn("«N:", PR.problem(BASE.format(heavy="Тяжёлый: x · пик 5 ГБ", procs=""), 120))
         self.assertIn("«N:", PR.problem(record(n="0"), 120))
 
+    def test_zero_or_rounded_to_zero_peak_refused(self):
+        for peak in ("0 ГБ", "0 МБ", "4 МБ"):  # 4 МБ в шапке было бы «0.00»
+            self.assertIn("больше 0", PR.problem(record(peak=peak), 120), peak)
+        self.assertEqual(PR.problem(record(peak="10 МБ"), 120), "")
+
 
 class MathTests(unittest.TestCase):
     def test_n_max_is_min_of_cores_and_memory(self):
         self.assertEqual(HL.n_max(24, 40, 5.5, 1.2), 6)   # память: 40 / 6,6
         self.assertEqual(HL.n_max(4, 400, 5.5, 1.2), 4)   # ядра
         self.assertEqual(HL.n_max(8, 1, 5.5, 1.2), 0)
+
+    def test_n_max_zero_peak_or_reserve_does_not_divide_by_zero(self):
+        self.assertEqual(HL.n_max(8, 40, 0.0, 1.2), 8)
+        self.assertEqual(HL.n_max(8, 40, 5.0, 0.0), 8)
+
+    def test_reserve_never_below_one_or_non_number(self):
+        for raw, want in ((0, 1.0), (0.5, 1.0), (2, 2.0), ("много", HL.RESERVE), (None, HL.RESERVE)):
+            with mock.patch.object(P, "setting", lambda k, d=None, raw=raw: raw):
+                self.assertEqual(HL.reserve(), want, raw)
+
+    def test_is_oom_ignores_negation_and_bare_word(self):
+        for yes in ("rc 137: oom-kill", "OOM-killed", "Out of memory: Killed process", "MemoryError", "Cannot allocate memory"):
+            self.assertTrue(HL.is_oom(yes), yes)
+        for no in ("не oom-kill, а ошибка данных", "not out of memory", "причина: не OOM", "oom_score сброшен", "", None):
+            self.assertFalse(HL.is_oom(no), no)
 
     def test_free_parses_first_line_two_numbers(self):
         run = mock.Mock(return_value=mock.Mock(returncode=0, stdout="16 24,5\nлишнее".encode()))
@@ -206,11 +226,51 @@ class WaitLoadTests(unittest.TestCase):
         HL.note_oom(self.tkt(), "oom-kill", NOW)
         self.assertIsNone(HL.oom_mark("TK-999"))
 
-    def test_watch_wake_records_oom(self):
+    def test_watch_failed_owned_job_records_oom(self):
+        import watch
+        spec = "host:gpu1:/tmp/job.rc"
+        job = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 137: oom-kill"}
+        self.assertEqual(watch._apply_owned_jobs(self.path, self.tkt(), {}, spec, "dead", {"gpu1": [job]}, NOW), "woken")
+        self.assertIsNotNone(HL.oom_mark(self.tid))
+
+    def test_watch_failed_owned_job_other_reason_no_oom_mark(self):
+        import watch
+        job = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 1: ошибка данных"}
+        watch._apply_owned_jobs(self.path, self.tkt(), {}, "host:gpu1:/tmp/job.rc", "dead", {"gpu1": [job]}, NOW)
+        self.assertIsNone(HL.oom_mark(self.tid))
+
+    def test_oom_idle_wake_with_old_oom_in_last_does_not_mark(self):
+        import watch
+        spec = "host:gpu1:/tmp/job.rc"
+        old = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 137: oom-kill"}
+        ws = {"idle_wait": {self.tid: {"spec": spec, "ts": T.now_iso(NOW - timedelta(hours=3))}}}
+        self.assertTrue(watch._idle_wait(self.path, self.tkt(), ws, spec, T.parse_wait_for(spec), {"gpu1": [old]}, NOW))
+        self.assertIn("oom-kill", self.log())  # старая причина в записи пробуждения есть, отметки от неё нет
+        self.assertIsNone(HL.oom_mark(self.tid))
+
+    def test_oom_wake_text_without_job_reason_does_not_mark(self):
         import watch
         with mock.patch.object(watch, "_to_judge"):
-            watch._wake_owner_job(self.path, self.tkt(), {}, "job:gpu1:7", "сторож: задание упало [rc 137: oom-kill]", NOW)
+            watch._wake_owner_job(self.path, self.tkt(), {}, "job:gpu1:7", "сторож: срок прошёл; последние: u1 failed [oom-kill]", NOW)
+            watch._wake_owner_job(self.path, self.tkt(), {}, "job:gpu1:7", "сторож: задание упало\nПричина (Haiku): не OOM", NOW,
+                                  oom_src="Traceback ...\nValueError: не oom-kill, а данные")
+        self.assertIsNone(HL.oom_mark(self.tid))
+
+    def test_zero_peak_in_short_wait_refused_without_traceback(self):
+        self.assertEqual(self.wait(record(peak="0 ГБ", n="4"), by_min=5), 1)
+        self.assertIn("больше 0", self.err)
+        self.assertEqual(self.tkt().status, "in_progress")
+
+    def test_oom_mark_short_wait_still_checks_record_form(self):
+        self.assertEqual(self.wait(record(n="4")), 0)
+        T.write_header_updates(self.path, {"status": "in_progress", "wait_for": ""})
+        HL.note_oom(self.tkt(), "rc 137: oom-kill", NOW)
+        two_lines = "Тяжёлый: инструмент · пик 7 ГБ\nN: 2"  # без способов и оценки; срок короткий — пробу не проверяет
+        self.assertEqual(self.wait(two_lines, by_min=5), 1)
+        self.assertIn("не принята", self.err)
         self.assertIsNotNone(HL.oom_mark(self.tid))
+        self.assertEqual(self.wait(record(peak="7 ГБ", n="2"), by_min=5), 0)
+        self.assertIsNone(HL.oom_mark(self.tid))
 
 
 class ConfigTests(unittest.TestCase):

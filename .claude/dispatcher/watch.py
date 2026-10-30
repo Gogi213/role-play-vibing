@@ -225,10 +225,10 @@ def _to_judge(path, why: str, now, clear_wait: bool = True) -> None:
     T.write_header_updates(path, {"status": "in_progress", "next": "judge", **({"wait_for": "", "on_met": ""} if clear_wait else {})}, now)
 
 
-def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "job_wakes") -> None:
-    """Задание из `job:` упало/исчезло: владелец тикета будится записью (хвост лога + причина), при повторе после
-    пробуждения — Судья (`_to_judge`)."""
-    HL.note_oom(tkt, why, now)  # TK-070: убито по памяти — следующий wait тикета требует новый замер
+def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "job_wakes", oom_src: str = "") -> None:
+    """Задание из `job:` упало/исчезло: владелец будится записью (хвост лога + причина), при повторе — Судья (`_to_judge`).
+    `oom_src` — причина падения самого задания (поле адаптера, хвост лога): отметка OOM только по ней, не по тексту пробуждения."""
+    HL.note_oom(tkt, oom_src, now)  # TK-070: убито по памяти — следующий wait тикета требует новый замер
     acted = ws.setdefault(key, {})  # у каждой причины свой счётчик повторов: пробуждение по заданию не делает пустое ожидание «вторым разом»
     repeat = tkt.id in acted
     with T.ticket_lock(path):
@@ -295,7 +295,8 @@ def _apply_owned_jobs(path, tkt, ws: dict, spec: str, st: str, owners: dict, now
             if _covered_failure(mine, j):  # живой сосед: только отложить — кончится волна без пересдачи, упавшее разбудит
                 continue
             _mark_failed_seen(ws, tkt.id, owners, j["id"])
-            _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало{_why(j)}; wait_for `{spec}` не дождётся", now)
+            _wake_owner_job(path, tkt, ws, spec, f"сторож: задание {j['unit']} (id {j['id']}) тикета упало{_why(j)}; wait_for `{spec}` не дождётся", now,
+                            oom_src=j.get("reason") or "")
             return "woken"
     if st == "dead" and any(j["state"] in ("running", "queued") for j in mine):
         return "producer"
@@ -382,7 +383,7 @@ def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict, owner
         why = f"сторож: задание `{spec}` упало"
         why += f"\nХвост лога:\n{tail}" if tail else ""
         r = LW.reason(jid, tail)
-        _wake_owner_job(path, tkt, ws, spec, why + (f"\nПричина (Haiku): {r}" if r else ""), now)
+        _wake_owner_job(path, tkt, ws, spec, why + (f"\nПричина (Haiku): {r}" if r else ""), now, oom_src=tail or "")
         return False
     ent = dead.get(tkt.id) or {}  # missing: задание не найдено
     n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1
