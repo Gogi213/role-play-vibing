@@ -851,19 +851,13 @@ def run_once(now=None, probes=True) -> list:
         cfg_mod.rollback_due(CFG.PROJECT_ROOT, now)          # TK-007: непринятая Судьёй правка настроек за 2 ч откатывается
     except Exception as e:
         print(f"[watch] rollback_due: {type(e).__name__}: {e}", file=sys.stderr)
-    stray_findings = []
-    try:
-        if probes:  # тесты выключают — боевые машины не трогают
-            stray_findings = check_strays(ws, now)
-    except Exception as e:
-        print(f"[watch] check_strays: {type(e).__name__}: {e}", file=sys.stderr)
-    unreleased_findings = []
-    try:
-        if probes:  # GitHub — как проверки машин: тесты выключают
-            unreleased_findings = check_unreleased(ws, now)
-    except Exception as e:
-        print(f"[watch] check_unreleased: {type(e).__name__}: {e}", file=sys.stderr)
-    findings = collect_findings(now, alive_waits=alive_waits) + stray_findings + unreleased_findings
+    probed = []
+    for check in ((check_strays, check_unreleased) if probes else ()):  # тесты выключают — боевые машины и GitHub не трогают
+        try:
+            probed += check(ws, now)
+        except Exception as e:
+            print(f"[watch] {getattr(check, '__name__', 'check')}: {type(e).__name__}: {e}", file=sys.stderr)
+    findings = collect_findings(now, alive_waits=alive_waits) + probed
     posted = notify_findings(findings, ws, now)
     save_watch_state(ws)
     write_heartbeat(now, len(findings))
