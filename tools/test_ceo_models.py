@@ -123,3 +123,13 @@ def test_ctx_growth_skips_reset_and_flags(tmp_path):
     assert [cm.ctx_growth(x) for x in t] == [None, 4100, None]      # первый хода нет, третий — сброс контекста
     assert cm.violated(t[0]) is True and cm.violated(t[1]) is False
     assert [x["self_fix"] for x in t] == [False, True, False]
+
+
+def test_sample_masks_secrets(tmp_path):
+    tok = "8647110839:" + "A" * 35
+    rows = [_u("01", f"в эту телегу {tok} бот"), _a("02", "m1", "claude-opus-4-7"),
+            _u("03", "ключ sk-" + "b" * 24 + " держи")]
+    d = {("alpha", "opus"): {"s1": cm.read_turns(_write(tmp_path / "s.jsonl", rows))}}
+    out = "\n".join("\t".join(map(str, r)) for r in cm.sample(d, 20, 7))
+    assert tok not in out and "sk-" + "b" * 24 not in out and out.count("<токен скрыт>") >= 2
+    assert cm.mask("порт 8080: ok") == "порт 8080: ok"

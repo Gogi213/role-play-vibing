@@ -318,6 +318,14 @@ def report(data, sessions):
     return "\n".join(lines)
 
 
+SECRET_RE = re.compile(r"\d{8,}:[A-Za-z0-9_-]{30,}|sk-[A-Za-z0-9_-]{20,}|gh[pous]_[A-Za-z0-9]{30,}")
+
+
+def mask(text):
+    """Заменяет похожее на токены (бот Telegram, sk-…, ghp_…) — выборка уходит в публичный репозиторий."""
+    return SECRET_RE.sub("<токен скрыт>", text)
+
+
 def sample(data, n, seed, fam_list=("opus", "sonnet")):
     rnd = random.Random(seed)
     rows = []
@@ -328,8 +336,8 @@ def sample(data, n, seed, fam_list=("opus", "sonnet")):
         free = [x for x in pool if not corrected(x[2])]
         pick = rnd.sample(flagged, min(n // 2, len(flagged))) + rnd.sample(free, min(n - n // 2, len(free)))
         for proj, sid, t in pick:
-            rows.append((fam, proj, sid[:8], int(corrected(t)), t["user"][:140].replace("\n", " "),
-                         (t["next_user"] or "")[:200].replace("\n", " ")))
+            rows.append((fam, proj, sid[:8], int(corrected(t)), mask(t["user"])[:140].replace("\n", " "),
+                         mask(t["next_user"] or "")[:200].replace("\n", " ")))
     return rows
 
 
