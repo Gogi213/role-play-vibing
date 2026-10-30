@@ -56,6 +56,7 @@ import charter as charter_mod  # noqa: E402
 import rpv_config as cfg_mod  # noqa: E402
 import signals as SIG  # noqa: E402
 import cost as COST  # noqa: E402
+import probe as PROBE  # noqa: E402
 import stop as STOP  # noqa: E402
 import project_paths as CFG  # noqa: E402
 import errors as errors_mod  # noqa: E402
@@ -260,7 +261,7 @@ def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
 def _wait_in_result(args, path: Path, role: str, why: str, proof: str) -> int:
     """Итог wait: сначала условие (цикл, форма), и только при успехе — запись: отказ ничего не пишет."""
     rc = cmd_wait(type("A", (), {"id": args.id, "spec": args.form, "on_met": None, "by": getattr(args, "by", None),
-                                  "allow_met": getattr(args, "allow_met", False)})())
+                                  "allow_met": getattr(args, "allow_met", False), "probe": getattr(args, "probe", None)})())
     if rc == 0:
         with T.ticket_lock(path):
             T.append_log(path, role, f"[итог: wait]{proof} — {why}")
@@ -607,14 +608,21 @@ def cmd_wait(args) -> int:
             print(f"wait: цикл ожиданий {' -> '.join(cycle)} — каждый ждёт следующего, никто не пойдёт. Ждите "
                   f"результат (file:/host:…), а не тикет, или разорвите цепочку.", file=sys.stderr)
             return 1
+    probe_err, probe_upd, probe_log = PROBE.gate(T.read_ticket(path), spec, by_dt if by else None,
+                                                 getattr(args, "probe", None), PROJECT_ROOT)  # TK-069 (G-008)
+    if probe_err:
+        print(f"wait: {probe_err}", file=sys.stderr)
+        return 1
     try:
-        upd = {"status": "waiting", "wait_for": spec, "wait_by": by_dt.isoformat(timespec="seconds") if by else ""}
+        upd = {"status": "waiting", "wait_for": spec, "wait_by": by_dt.isoformat(timespec="seconds") if by else "", **probe_upd}
         if getattr(args, "on_met", None):
             upd["on_met"] = args.on_met.strip()
         T.write_header_updates(path, upd)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
+    if probe_log:
+        T.append_log(path, _caller_role() or "ceo", probe_log)
     print(f"{args.id}: status: waiting, wait_for: {spec}" + (f", срок {upd['wait_by']}" if by else ""))
     return 0
 
