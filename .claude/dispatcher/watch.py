@@ -40,6 +40,7 @@ import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import unreleased as UNR  # noqa: E402 — «влито, не выпущено» (TK-062)
+import hostload as HL  # noqa: E402 — отметка OOM-kill (TK-070)
 
 # Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
 # CFG.configure_project() при импорте dispatch (по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/cwd) и в main().
@@ -227,6 +228,7 @@ def _to_judge(path, why: str, now, clear_wait: bool = True) -> None:
 def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "job_wakes") -> None:
     """Задание из `job:` упало/исчезло: владелец тикета будится записью (хвост лога + причина), при повторе после
     пробуждения — Судья (`_to_judge`)."""
+    HL.note_oom(tkt, why, now)  # TK-070: убито по памяти — следующий wait тикета требует новый замер
     acted = ws.setdefault(key, {})  # у каждой причины свой счётчик повторов: пробуждение по заданию не делает пустое ожидание «вторым разом»
     repeat = tkt.id in acted
     with T.ticket_lock(path):
