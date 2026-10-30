@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import charter as charter_mod  # noqa: E402
+import critic_gate  # noqa: E402
 import rpv_config as cfg_mod  # noqa: E402
 import downtime  # noqa: E402
 import errors as errors_mod  # noqa: E402
@@ -511,6 +512,12 @@ def build(p: Period, ask=None):
                "Источники принятого (по запросу владельца; в сообщение не входят):"]
     details += [f"- {gid or 'без цели'}: {', '.join(it['id'] for it in its)} — строка: {sums[i][1]}"
                 for i, (gid, _, its) in enumerate(groups, 1)] or ["- принятого нет"]
+    try:
+        n_skip, n_ok = critic_gate.skips(p.root, p.since, p.until)
+    except Exception:  # noqa: BLE001 — учёт критика не лишает отчёта
+        n_skip = n_ok = 0
+    if n_skip or n_ok:
+        details.append(f"Критик перед приёмкой (TK-071): проходов с отчётом {n_ok}, обходов {n_skip}")
     if cost is not None:
         details.append(f"Пересказ reporter стоил ${float(cost):.4f}")
     return text, "\n".join(details)

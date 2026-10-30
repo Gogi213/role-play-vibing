@@ -67,6 +67,7 @@ import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
 import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
+import critic_gate  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
@@ -239,8 +240,10 @@ def _accept_checks(args) -> tuple[str, str, str]:
     terr, tack, tail_ceo = _tail_ack(args, args.id)
     lerr, lack = _live_ack(args, args.id)
     err = err or nerr or terr or lerr
+    cerr, cack = ("", "") if err else _critic_ack(args, args.id)
+    err = err or cerr
     perr, pack = ("", "") if err or args.pr else _proof_ack(args.id)  # с PR команды гонит cmd_accept: дважды не гоняем
-    return err or perr, ack + nack + tack + lack + pack, tail_ceo
+    return err or perr, ack + nack + tack + lack + cack + pack, tail_ceo
 
 
 def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
@@ -252,6 +255,8 @@ def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
                                   "numbers": getattr(args, "numbers", None),
                                   "tail": getattr(args, "tail", None),
                                   "live": getattr(args, "live", None),
+                                  "critic": getattr(args, "critic", None),
+                                  "critic_skip": getattr(args, "critic_skip", None),
                                   "after_merge": getattr(args, "after_merge", None)})())
     if rc == 0:
         with T.ticket_lock(path):
@@ -404,6 +409,11 @@ def _live_ack(args, tid: str) -> tuple[str, str]:
     return "", f" вживую: {rel}"
 
 
+def _critic_ack(args, tid: str) -> tuple[str, str]:
+    """Ворота критика (TK-071): за ключом `critic_before_accept`; свежесть отчёта — от головы PR (`--sha`)."""
+    return critic_gate.critic_ack(args, tid, PROJECT_ROOT, getattr(args, "sha", None) or "")
+
+
 def _proof_ack(tid: str) -> tuple[str, str]:
     """Ярлыки доказательства договора (TK-050): приёмка сама перезапускает его команды, код не 0 — отказ (`tickets_proof`)."""
     path = TICKETS_DIR / f"{tid}.md"
@@ -513,11 +523,12 @@ def cmd_accept(args) -> int:
     nerr, nack = _numbers_ack(args, args.id)
     terr, tack, tail_ceo = _tail_ack(args, args.id)
     lerr, lack = _live_ack(args, args.id)
-    perr, pack = ("", "") if derr or nerr or terr or lerr else _proof_ack(args.id)
-    if derr or nerr or terr or lerr or perr:
-        print(f"accept: {derr or nerr or terr or lerr or perr}", file=sys.stderr)
+    cerr, cack = ("", "") if derr or nerr or terr or lerr else _critic_ack(args, args.id)
+    perr, pack = ("", "") if derr or nerr or terr or lerr or cerr else _proof_ack(args.id)
+    if derr or nerr or terr or lerr or cerr or perr:
+        print(f"accept: {derr or nerr or terr or lerr or cerr or perr}", file=sys.stderr)
         return 1
-    ack += nack + tack + lack + pack
+    ack += nack + tack + lack + cack + pack
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:
