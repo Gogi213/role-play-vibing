@@ -16,7 +16,8 @@ class DirectAnswerRuleTests(unittest.TestCase):
         self.direct = " ".join(rule(self.text, "Ответ на прямой вопрос владельца").split())
 
     def test_three_lines_only_for_own_initiative(self):
-        self.assertIn("в сообщении по своей инициативе (статус, сигнал, «готово — выпустить?»)", self.short)
+        self.assertIn("в сообщении по своей инициативе (свой статус, сигнал, «готово — выпустить?»;", self.short)
+        self.assertIn("запрос владельца «статус?» — `reporter`", self.short)
         self.assertIn("до трёх строк", self.short)
 
     def test_direct_answer_has_no_line_limit(self):
@@ -26,6 +27,10 @@ class DirectAnswerRuleTests(unittest.TestCase):
     def test_both_quality_rules_present(self):
         self.assertIn("вывод первым, без воды", self.direct)
         self.assertIn("каждый термин выброшен или объяснён рядом полфразой", self.direct)
+
+    def test_mechanics_allowed_when_owner_asked(self):
+        self.assertIn("механику не пиши — кроме той, о которой владелец спросил", self.direct)
+        self.assertIn("Детали — только по вопросу владельца", self.short)
 
     def test_details_only_on_question_and_ticket_number_kept(self):
         self.assertIn("Детали — только по вопросу владельца", self.short)
