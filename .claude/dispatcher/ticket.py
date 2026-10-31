@@ -216,6 +216,16 @@ def file_wait_problem(spec: str) -> str:
     if _IS_WINDOWS and p and p[0] == "file" and p[1].startswith("/") and not p[1].startswith("//"):
         return (f"file:{p[1]} — posix-путь на Windows: диспетчер и оболочка роли понимают его по-разному. "
                 f"Дай путь с диском (file:C:/…) или относительный от корня проекта")
+    return ci_wait_problem(spec)
+
+
+def ci_wait_problem(spec: str) -> str:
+    """`ci:<репо>#<PR>` при `has_ci: false` (TK-084): клеток CI нет, состояние PR вечно pending — ожидание не снимется.
+    Пусто — форма годится. Ждать влития — `merged:<репо>#<PR>`."""
+    p = parse_wait_for(spec)
+    if p and p[0] == "ci" and P.setting("has_ci", True) is False:
+        return (f"ci:{p[1]}#{p[2]} — в проекте нет CI (`has_ci: false` в `.claude/rpv.json`): ожидание не снимется. "
+                f"Жди влития — merged:{p[1]}#{p[2]} — или ticket:/file:")
     return ""
 
 

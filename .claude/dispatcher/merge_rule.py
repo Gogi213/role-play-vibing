@@ -26,6 +26,13 @@ def no_ci() -> bool:
     return P.setting("has_ci", True) is False
 
 
+def accept_note() -> str:
+    """Запись приёмки по умолчанию (`tickets.py accept` без --text, TK-084): что нужно для слияния — при `has_ci: false` без CI."""
+    if no_ci():
+        return "Влить, когда нет конфликта (CI на PR нет — `has_ci: false`) — сделает merge_rule."
+    return "Влить, когда CI зелёный и нет конфликта — сделает merge_rule."
+
+
 def merge_state_path() -> Path:
     return CFG.STATE_FILE.parent / "merge-state.json"
 
