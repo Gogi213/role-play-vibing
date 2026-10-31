@@ -18,7 +18,7 @@ import rpv_config  # noqa: E402
 
 PLUGIN = Path(__file__).resolve().parents[2]
 SHA = "a" * 40
-OK = "1. «пункт один» — **держится**\n2. «пункт два» — **не хватает**\n"
+OK = "1. «пункт один» — **держится**\n2. «пункт два» — **держится**\n"
 BAD = "1. «пункт один» — **держится**\n2. «пункт два» — **не держится**\n   - не держится: файл.py:3\n"
 
 
@@ -40,7 +40,7 @@ class GateTests(unittest.TestCase):
 
     def report(self, text, name="TK-9-critic.md", age=0):
         f = self.root / "docs" / "reviews" / name
-        f.write_text(text, encoding="utf-8")
+        f.write_text(text if text.startswith("RAW:") else "Тикет: TK-9" + chr(10) + "Голова: aaaaaaa" + chr(10) + text, encoding="utf-8")
         if age:
             t = f.stat().st_mtime - age
             os.utime(f, (t, t))
@@ -95,7 +95,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(self.rows(), [])
         self.report(BAD + "Ответ Судьи на 1: принял\n")  # ответ не на тот пункт
         self.assertIn("пунктам 2", self.ack(critic=rel)[0])
-        self.report(BAD + "Ответ Судьи на 2: принял, правка в e5f6a7\n")
+        self.report(BAD + "Ответ Судьи на 2: возражение — файл.py:3 это тест, а не код\n")
         err, note = self.ack(critic=rel)
         self.assertEqual(err, "")
         self.assertIn("не держится 1", note)

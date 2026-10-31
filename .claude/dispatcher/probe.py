@@ -25,13 +25,17 @@ FORM = ("способы — по строке на способ, в строке
 
 _NUM = r"\d+(?:[.,]\d+)?"
 _END = r"(?![а-яёa-z])"
-_TIME_RE = re.compile(_NUM + r"\s*(?:мс|сек\w*|с|мин\w*|ч|час\w*)" + _END, re.I)
-_MEM_RE = re.compile(_NUM + r"\s*(?:[кмгт]и?б|[kmgt]i?b)" + _END, re.I)
+_TIME_RE = re.compile(_NUM + r"\s*(?:мс|ms|сек\w*|sec\w*|с|s|мин\w*|min\w*|ч|час\w*|h|hr|hours?)" + _END, re.I)
+_MEM_RE = re.compile(_NUM + r"\s*(?:[кмгт]и?б|[kmgt]i?b|(?-i:[MGT]))" + _END, re.I)  # «512 M», «4G» — только заглавные
 _ASIS_RE = re.compile(r"как есть", re.I)
 _HEAVY_RE = re.compile(r"^.*тяж[её]л\w*\s*:\s*\S.*$", re.I | re.M)
-_PROCS_RE = re.compile(r"^\s*[nн]\s*[:=]\s*(\d+)", re.I | re.M)
+_PROCS_RE = re.compile(r"^\s*(?:[-•]\s+|\d+[.)]\s+)?[nн]\s*[:=]\s*(\d+)", re.I | re.M)  # после _clean: «- N: 15», «1) N: 15»
 _GB = {"к": 1 / 1048576, "м": 1 / 1024, "г": 1.0, "т": 1024.0, "k": 1 / 1048576, "m": 1 / 1024, "g": 1.0, "t": 1024.0}
-_ESTIMATE_RE = re.compile(r"оценк\w*[^:\n]{0,30}:\s*(" + _NUM + r")\s*(мин\w*|ч|час\w*)" + _END, re.I)
+_EST_PART = r"(" + _NUM + r")\s*(мин\w*|min\w*|ч|час\w*|h|hr|hours?)" + _END
+_ESTIMATE_RE = re.compile(r"оценк\w*[^:\n]{0,30}:\s*(?:~|≈|около\s+)?\s*((?:" + _NUM + r"\s*(?:мин\w*|min\w*|ч|час\w*|h|hr|hours?)"
+                          + _END + r"\s*)+)", re.I)
+_PEAK_RE = re.compile(r"пик\w*\s*(?:памяти)?\s*[:=]?\s*(?:~|≈|около\s+)?\s*(" + _NUM
+                      + r"\s*(?:[кмгт]и?б|[kmgt]i?b|(?-i:[MGT])))" + _END, re.I)
 
 
 def enabled() -> bool:
@@ -39,7 +43,10 @@ def enabled() -> bool:
 
 
 def threshold_min() -> int:
-    return int(P.setting("probe_threshold_min", THRESHOLD_MIN))
+    try:
+        return int(P.setting("probe_threshold_min", THRESHOLD_MIN))
+    except (TypeError, ValueError):
+        return THRESHOLD_MIN  # в rpv.json вписано не число — умолчание, а не падение `wait`
 
 
 def waited_min(tkt) -> float:
@@ -50,22 +57,31 @@ def waited_min(tkt) -> float:
         return 0.0
 
 
+def _clean(text: str) -> str:
+    """Без разметки: `**оценка:**` и `код` читаются как оценка: и код."""
+    return (text or "").replace("*", "").replace("`", "")
+
+
 def estimate_min(text: str):
-    """«оценка: 5,5 ч» → 330.0 минут; строки нет — None."""
-    m = _ESTIMATE_RE.search(text or "")
+    """«оценка: 5,5 ч», «оценка ≈ 1 ч 40 мин» → минуты (330.0; 100.0); строки нет — None."""
+    m = _ESTIMATE_RE.search(_clean(text))
     if not m:
         return None
-    value = float(m.group(1).replace(",", "."))
-    return value if m.group(2).lower().startswith("мин") else value * 60
+    return sum(float(v.replace(",", ".")) * (1 if u.lower().startswith("мин") or u.lower().startswith("min") else 60)
+               for v, u in re.findall(_EST_PART, m.group(1), re.I))
 
 
 def peak_gb(text: str):
-    """Пик памяти одного процесса на тяжёлом элементе, ГБ: первое «число + МБ|ГБ» в строке «тяжёлый: …»; нет — None (TK-070)."""
-    heavy = _HEAVY_RE.search(text or "")
-    m = _MEM_RE.search(heavy.group(0)) if heavy else None
-    if not m:
+    """Пик памяти одного процесса на тяжёлом элементе, ГБ: «пик <число МБ|ГБ>» в строке «тяжёлый: …»; без слова «пик» —
+    единственное «число + МБ|ГБ» в строке; несколько без «пик» («вход 2 ГБ · 5 ГБ») или нет — None (TK-070, TK-073)."""
+    heavy = _HEAVY_RE.search(_clean(text))
+    if not heavy:
         return None
-    return _gb_of(m.group(0))
+    m = _PEAK_RE.search(heavy.group(0))
+    if m:
+        return _gb_of(m.group(1))
+    found = [x.group(0) for x in _MEM_RE.finditer(heavy.group(0))]
+    return _gb_of(found[0]) if len(found) == 1 else None
 
 
 def _gb_of(token: str) -> float:
@@ -86,16 +102,18 @@ def load_of_header(tkt):
 
 def procs(text: str):
     """«N: 15» — число параллельных процессов полного расчёта (≥ 1); нет строки — None (TK-070)."""
-    m = _PROCS_RE.search(text or "")
+    m = _PROCS_RE.search(_clean(text))
     return int(m.group(1)) if m and int(m.group(1)) >= 1 else None
 
 
 def _method_lines(text: str) -> list:
-    return [ln for ln in (text or "").splitlines() if _TIME_RE.search(ln) and _MEM_RE.search(ln)]
+    return [ln for ln in _clean(text).splitlines() if _TIME_RE.search(ln) and _MEM_RE.search(ln)]
 
 
-def problem(text: str, left_min: float) -> str:
-    """Причина отказа по форме записи пробы (пусто — годится); `left_min` — минут от сейчас до срока `--by`."""
+def problem(text: str, left_min: float, elapsed_min: float = 0.0) -> str:
+    """Причина отказа по форме записи пробы (пусто — годится); `left_min` — минут от сейчас до срока `--by`,
+    `elapsed_min` — уже прошедшие ожидания тикета: срок сверяется с остатком оценки, не с полной."""
+    text = _clean(text)
     methods = _method_lines(text)
     if len(methods) < 2:
         return f"способов с временем и пиком памяти в одной строке: {len(methods)}, нужно ≥ 2"
@@ -104,7 +122,8 @@ def problem(text: str, left_min: float) -> str:
     if not _HEAVY_RE.search(text):
         return "нет строки «тяжёлый: <самый тяжёлый элемент среза> · пик <МБ|ГБ> одного процесса»"
     if peak_gb(text) is None:
-        return "в строке «тяжёлый: …» нет пика памяти одного процесса на этом элементе (число и МБ|ГБ)"
+        return ("в строке «тяжёлый: …» нет пика памяти одного процесса (однозначного): напиши «пик <число> МБ|ГБ» "
+                "(несколько чисел с единицами без слова «пик» не читаются)")
     if round(peak_gb(text), 2) <= 0:
         return "пик памяти одного процесса должен быть больше 0 (не меньше 0,01 ГБ ≈ 10 МБ)"
     if procs(text) is None:
@@ -112,27 +131,33 @@ def problem(text: str, left_min: float) -> str:
     est = estimate_min(text)
     if est is None:
         return "нет строки «оценка: N мин|ч» — полное время расчёта"
-    if left_min < est:
-        return f"срок --by через {left_min:.0f} мин, а оценка пробы {est:.0f} мин — срок не короче оценки"
+    if left_min + elapsed_min < est:
+        return (f"срок --by через {left_min:.0f} мин (+ уже прошло {elapsed_min:.0f}), а оценка пробы {est:.0f} мин — "
+                f"срок не короче оценки (за вычетом уже прошедшего)")
     return ""
 
 
 def load(arg: str, root) -> tuple:
     """`--probe`: путь к существующему файлу (от корня проекта или абсолютный) → (текст, путь); иначе сам аргумент."""
     arg = (arg or "").strip()
-    try:
-        p = Path(arg)
-        p = p if p.is_absolute() else Path(root) / p
-        if "\n" not in arg and p.is_file():
-            return p.read_text(encoding="utf-8-sig"), arg
-    except OSError:
-        pass
+    if not arg or "\n" in arg:
+        return arg, ""
+    p = Path(arg)
+    for base in ((None,) if p.is_absolute() else (Path(root), Path.cwd())):  # корень проекта, затем копия (worktree)
+        try:
+            q = p if base is None else base / p
+            if q.is_file():
+                return q.read_text(encoding="utf-8-sig"), arg
+        except OSError:
+            continue
     return arg, ""
 
 
 def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple:
     """→ (отказ, поля шапки, запись для лога). Флаг выключен, ожидание не расчёта или срок в пределах порога — пусто."""
-    if not enabled() or by_dt is None or not T.wait_needs_by(spec):
+    if not enabled():
+        return "", {}, (f"[проба] {load(arg, root)[0]}" if (arg or "").strip() else "")  # флаг выключен: запись — в лог, без проверки
+    if by_dt is None or not T.wait_needs_by(spec):
         return "", {}, ""
     now = now or datetime.now().astimezone()
     left = (by_dt - now).total_seconds() / 60
@@ -148,7 +173,7 @@ def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple
                 f"{threshold_min()} мин — расчёт не принимается в ожидание без пробы. "
                 f"Добавь `--probe <запись|файл>`: {FORM} (G-008)"), {}, ""
     text, src = load(arg, root)
-    why = problem(text, left)
+    why = problem(text, left, before)
     if why:
         return f"проба не принята: {why}. Нужно: {FORM}", {}, ""
     est = f"оценка {estimate_min(text):.0f} мин"

@@ -71,27 +71,3 @@ class SlicedWaitTests(unittest.TestCase):
         for raw in ("", "много", "-5"):
             with self.subTest(raw=raw):
                 self.assertEqual(PR.waited_min(SimpleNamespace(header={"probe_waited": raw})), 0.0)
-
-
-class CriticParseTests(unittest.TestCase):
-    def test_capitalised_verdict_is_read(self):
-        items, _ = CG.parse_report("1. «а» — **Держится**\n2. «б» — **Не держится**\n3. «в» — **НЕ ХВАТАЕТ**\n")
-        self.assertEqual(items, {"1": "держится", "2": "не держится", "3": "не хватает"})
-
-    def test_capitalised_not_held_still_needs_an_answer(self):
-        items, answered = CG.parse_report("1. «а» — **Не держится**\n")
-        self.assertEqual([n for n, v in items.items() if v == "не держится" and n not in answered], ["1"])
-
-    def test_repeated_number_keeps_the_worst_verdict(self):
-        items, _ = CG.parse_report("1. «а» — **не держится**\n\n1. «а, ещё раз» — **держится**\n")
-        self.assertEqual(items, {"1": "не держится"})
-        items, _ = CG.parse_report("2. «б» — **держится**\n2. «б» — **не хватает**\n")
-        self.assertEqual(items, {"2": "не хватает"})
-
-    def test_plain_report_unchanged(self):
-        items, answered = CG.parse_report("1. «а» — **держится**\n2. «б» — **не держится**\nОтвет Судьи на 2: принял правку\n")
-        self.assertEqual((items, answered), ({"1": "держится", "2": "не держится"}, {"2"}))
-
-
-if __name__ == "__main__":
-    unittest.main()

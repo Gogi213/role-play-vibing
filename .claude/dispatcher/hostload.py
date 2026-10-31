@@ -24,7 +24,8 @@ import ticket as T
 
 RESERVE = 1.2
 OOM_NAME = "oom-state.json"
-_OOM_RE = re.compile(r"oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory", re.I)
+_OOM_RE = re.compile(r"oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory|(?:exit(?: code)?|rc|status|код)\W{0,3}137(?!\d)", re.I)
+_OOM_ZERO = re.compile(r"oom[-_ ]?kill\w*\s*[:=]?\s*0(?!\d)", re.I)  # счётчик «oom_kill 0» — убийств не было
 _NEG_RE = re.compile(r"(?:\bнет|\bне|\bnot|\bno|\bбез)\W{0,3}$", re.I)  # «не oom-kill», «нет oom-kill», «not out of memory»
 _NUMS = re.compile(r"\d+(?:[.,]\d+)?")
 
@@ -77,7 +78,8 @@ def oom_mark(tid: str):
 
 def is_oom(text: str) -> bool:
     """В тексте есть OOM-kill / нехватка памяти без отрицания перед ним («не oom-kill»)."""
-    return any(not _NEG_RE.search(text[max(0, m.start() - 8):m.start()]) for m in _OOM_RE.finditer(text or ""))
+    text = _OOM_ZERO.sub("", text or "")
+    return any(not _NEG_RE.search(text[max(0, m.start() - 8):m.start()]) for m in _OOM_RE.finditer(text))
 
 
 def note_oom(tkt, why: str, now: datetime = None) -> bool:
@@ -105,9 +107,9 @@ def _oom_problem(mark: dict, new) -> str:
     if new is None:
         return "нужен `--probe` с «тяжёлый: … пик …» и «N: …»"
     old_peak, old_n = mark.get("peak"), mark.get("n")
-    if (old_peak is None or round(new[0], 2) != round(old_peak, 2)) or (old_n is not None and new[1] < old_n):
+    if (old_peak is None or round(new[0], 2) < round(old_peak, 2)) or (old_n is not None and new[1] < old_n):
         return ""
-    return f"новый пик (был {old_peak:.2f} ГБ) или меньшее N (было {old_n})"
+    return f"новый пик меньше прежнего (был {old_peak:.2f} ГБ) или меньшее N (было {old_n})"
 
 
 # --- ворота wait ------------------------------------------------------------------------------------------------
