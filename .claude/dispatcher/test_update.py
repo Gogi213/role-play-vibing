@@ -144,7 +144,11 @@ class MainLines(unittest.TestCase):
 
     def _main(self, session, rows, new="2.1.0"):
         out = io.StringIO()
-        with tempfile.TemporaryDirectory() as d, redirect_stdout(out),                 mock.patch.object(U.P, "resolve_project", return_value=d),                 mock.patch.object(U.shutil, "which", return_value="claude"),                 mock.patch.object(U, "session_version", return_value=session),                 mock.patch.object(U, "update", return_value=(rows, new)):
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(out), \
+                mock.patch.object(U.P, "resolve_project", return_value=d), \
+                mock.patch.object(U.shutil, "which", return_value="claude"), \
+                mock.patch.object(U, "session_version", return_value=session), \
+                mock.patch.object(U, "update", return_value=(rows, new)):
             rc = U.main(["--ref", "В-13"])
         return rc, out.getvalue()
 
@@ -174,6 +178,7 @@ class MainLines(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("НЕ ГОТОВО", text)
         self.assertNotIn("Готово:", text)
+        self.assertNotIn(U.RESTART, text)
 
 
 class SessionVersion(unittest.TestCase):
@@ -193,13 +198,19 @@ class SessionVersion(unittest.TestCase):
         self.assertEqual(U.session_version({}), "?")
 
     def test_script_from_new_dir_session_on_old_says_restart(self):
-        """Скрипт лежит в каталоге новой версии, переменная указывает на старую → строка о перезапуске."""
+        """Скрипт лежит в каталоге новой версии (2.0.99 — не реальная), переменная указывает на старую → строка о перезапуске.
+        session_version не мокается; CODE_DIR — каталог новой версии (до правки версию сессии брали по нему)."""
         with tempfile.TemporaryDirectory() as d:
-            old, new = self._root(d, "2.0.16"), "2.0.17"
-            with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_ROOT": str(old)}):
-                _, text = MainLines()._main(U.session_version(), [("плагин", D.OK, "2.0.16 → 2.0.17")], new=new)
-        self.assertIn(U.RESTART, text)
-        self.assertNotIn("уже на", text)
+            old, new = self._root(d, "2.0.98"), self._root(d, "2.0.99")
+            out = io.StringIO()
+            with redirect_stdout(out), mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_ROOT": str(old)}), \
+                    mock.patch.object(U, "CODE_DIR", new / ".claude" / "dispatcher", create=True), \
+                    mock.patch.object(U.P, "resolve_project", return_value=d), \
+                    mock.patch.object(U.shutil, "which", return_value="claude"), \
+                    mock.patch.object(U, "update", return_value=([("плагин", D.OK, "2.0.98 → 2.0.99")], "2.0.99")):
+                U.main(["--ref", "В-32"])
+        self.assertIn(U.RESTART, out.getvalue())
+        self.assertNotIn("уже на", out.getvalue())
 
 
 class PlistPath(unittest.TestCase):
