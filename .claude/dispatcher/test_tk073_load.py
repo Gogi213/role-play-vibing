@@ -73,7 +73,8 @@ class LoadCommandTests(unittest.TestCase):
     def oom_clear(self, why, role):
         os.environ["RPV_ROLE"] = role
         err = mock.MagicMock()
-        with mock.patch("sys.stderr", err), mock.patch("sys.stdout", mock.MagicMock()):
+        with mock.patch("sys.stderr", err), mock.patch("sys.stdout", mock.MagicMock()), \
+                mock.patch.object(TK, "_caller_role", lambda: role):  # не по state.json настоящего проекта
             rc = TK.cmd_oom_clear(type("A", (), dict(id=self.tid, why=why))())
         self.err = "".join(c.args[0] for c in err.write.call_args_list)
         return rc

@@ -110,10 +110,11 @@ class HostloadTests(unittest.TestCase):
 
     def test_oom_forms(self):
         for yes in ("Out of memory: Killed process 4242 (python)", "oom-kill: constraint=CONSTRAINT_NONE", "Result: oom-kill",
-                    "exit code 137", "rc=137"):
+                    "exit code 137", "rc=137", "упал: oom-kill", "процесс не ответил, oom-kill"):
             with self.subTest(yes=yes):
                 self.assertTrue(HL.is_oom(yes))
-        for no in ("oom_kill 0", "oom_kill 0\n", "не было oom", "exit code 1370"):
+        for no in ("oom_kill 0", "oom_kill 0\n", "не было oom", "exit code 1370", "не было oom-kill", "не было ни одного oom-kill",
+                   "no oom-kill", "not out of memory", "без Out of memory"):
             with self.subTest(no=no):
                 self.assertFalse(HL.is_oom(no))
 
@@ -128,9 +129,16 @@ class DispatchTests(unittest.TestCase):
         self.assertIsNotNone(D._model_usage_warning(usage, "opus"))
         self.assertIsNone(D._model_usage_warning(usage, "opus", also=("sonnet",)))
         self.assertIsNotNone(D._model_usage_warning({"claude-haiku-5-5": {}}, "opus", also=("sonnet",)))
-        self.assertEqual(D._extra_models({"role": "judge"}, critic_on=True), ("sonnet",))
-        self.assertEqual(D._extra_models({"role": "judge"}, critic_on=False), ())
-        self.assertEqual(D._extra_models({"role": "engineer"}, critic_on=True), ())
+        crit = {"by_type": {"role-play-vibing:critic": 1}}
+        self.assertEqual(D._extra_models({"role": "judge"}, True, crit), ("sonnet",))
+        self.assertEqual(D._extra_models({"role": "judge"}, False, crit), ())
+        self.assertEqual(D._extra_models({"role": "engineer"}, True, crit), ())
+
+    def test_sonnet_alarm_stays_without_critic_in_subagent_stats(self):
+        for stats in (None, {}, {"by_type": {}}, {"by_type": {"role-play-vibing:reader": 4}},
+                      {"by_type": {"role-play-vibing:critic": 0}}, "critic"):
+            with self.subTest(stats=stats):
+                self.assertEqual(D._extra_models({"role": "judge"}, True, stats), ())
 
 
 if __name__ == "__main__":

@@ -26,7 +26,8 @@ RESERVE = 1.2
 OOM_NAME = "oom-state.json"
 _OOM_RE = re.compile(r"oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory|(?:exit(?: code)?|rc|status|код)\W{0,3}137(?!\d)", re.I)
 _OOM_ZERO = re.compile(r"oom[-_ ]?kill\w*\s*[:=]?\s*0(?!\d)", re.I)  # счётчик «oom_kill 0» — убийств не было
-_NEG_RE = re.compile(r"(?:\bнет|\bне|\bnot|\bno|\bбез)\W{0,3}$", re.I)  # «не oom-kill», «нет oom-kill», «not out of memory»
+_NEG_RE = re.compile(r"(?:\bнет|\bне|\bnot|\bno|\bnever|\bwithout|\bбез)\b(?:\W+\w+){0,3}\W*$", re.I)  # «не oom-kill», «не было oom-kill», «нет …», «not out of memory»; запятая/точка отрезают оговорку
+_CLAUSE_END = re.compile(r"[.;,!?\n]")
 _NUMS = re.compile(r"\d+(?:[.,]\d+)?")
 
 
@@ -76,14 +77,19 @@ def oom_mark(tid: str):
     return _oom_read().get(tid)
 
 
+def _negated(text: str, start: int) -> bool:
+    """Перед совпадением в той же фразе (до 3 слов) стоит отрицание: «не было oom-kill»."""
+    return bool(_NEG_RE.search(_CLAUSE_END.split(text[max(0, start - 40):start])[-1]))
+
+
 def is_oom(text: str) -> bool:
     """В тексте есть OOM-kill / нехватка памяти без отрицания перед ним («не oom-kill»)."""
     text = _OOM_ZERO.sub("", text or "")
-    return any(not _NEG_RE.search(text[max(0, m.start() - 8):m.start()]) for m in _OOM_RE.finditer(text))
+    return any(not _negated(text, m.start()) for m in _OOM_RE.finditer(text))
 
 
 def note_oom(tkt, why: str, now: datetime = None) -> bool:
-    """Сторож: `why` — причина падения самого задания тикета (поле адаптера или хвост его лога, не текст пробуждения):
+    """Сторож: `why` — причина падения самого задания тикета (поле адаптера; хвост лога не читаем, как и текст пробуждения):
     в ней OOM-kill — запомнить пик и N из шапки на тот момент."""
     if not PROBE.enabled() or not is_oom(why):
         return False

@@ -49,6 +49,16 @@ class ParseTests(unittest.TestCase):
                     if "«утверждение дословно»" in ln)
         self.assertNotIn("`", line)
 
+    def test_templates_and_docs_ask_for_ticket_and_head_lines(self):
+        for rel in ("agents/critic.md", "templates/roles/judge.md", "docs/configuration.md"):
+            with self.subTest(rel=rel):
+                text = (PLUGIN / rel).read_text(encoding="utf-8")
+                self.assertIn("«Тикет: TK-N»", text)
+                self.assertIn("«Голова: <sha", text)
+                # строки, которые просят шаблоны, код принимает
+                self.assertRegex("Тикет: TK-73\nГолова: 19e931c\n", CG._HEADER_TICKET)
+                self.assertRegex("Тикет: TK-73\nГолова: 19e931c\n", CG._HEADER_HEAD)
+
 
 class GateTests(unittest.TestCase):
     def setUp(self):

@@ -280,9 +280,11 @@ from cost import (  # noqa: E402,F401 — учёт стоимости вынес
     _add_cost, ticket_cost_spent, add_ticket_cost, _record_cost_event, resolve_run_cost)
 
 
-def _extra_models(info: dict, critic_on: bool) -> tuple:
-    """Судья с включённым критиком (`critic_before_accept`) зовёт агента critic на Sonnet: это не чужая модель (TK-073)."""
-    return ("sonnet",) if critic_on and info.get("role") == "judge" else ()
+def _extra_models(info: dict, critic_on: bool, stats=None) -> tuple:
+    """Судья с критиком: Sonnet не чужая модель, только если `subagent_stats` запуска показывает агента critic (TK-073)."""
+    by_type = stats.get("by_type") if isinstance(stats, dict) else None
+    ran = isinstance(by_type, dict) and any(str(k).rsplit(":", 1)[-1] == "critic" and v for k, v in by_type.items())
+    return ("sonnet",) if critic_on and ran and info.get("role") == "judge" else ()
 
 
 def _model_usage_warning(model_usage_diff: dict, expected: str = None, also: tuple = ()) -> str:
@@ -521,7 +523,8 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
 
     expected_model = _expected_model_family(info)
     model_warn = _model_usage_warning(model_usage_diff, expected_model,
-                                      _extra_models(info, bool(P.setting("critic_before_accept", False))))
+                                      _extra_models(info, bool(P.setting("critic_before_accept", False)),
+                                                    result.get("subagent_stats")))
     if model_warn:
         route_ceo_signal(tid, "model", model_warn, state, now)
     if info.get("role") == "judge" and P.setting("critic_before_accept", False):  # TK-073: запуск критика — в журнал с ценой
