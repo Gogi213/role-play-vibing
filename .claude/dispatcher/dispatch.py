@@ -524,6 +524,9 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
                                       _extra_models(info, bool(P.setting("critic_before_accept", False))))
     if model_warn:
         route_ceo_signal(tid, "model", model_warn, state, now)
+    if info.get("role") == "judge" and P.setting("critic_before_accept", False):  # TK-073: запуск критика — в журнал с ценой
+        import critic_gate
+        critic_gate.record_run(CFG.PROJECT_ROOT, tid, Path(info["run_file"]).name, model_usage_diff, result.get("subagent_stats"))
 
     if _limit_hit(result) and not stopped:
         try:

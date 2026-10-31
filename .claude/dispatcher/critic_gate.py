@@ -110,6 +110,21 @@ def _record(root: Path, row: dict) -> None:
         pass  # журнал — учёт, не ворота: приёмку из-за него не рушим
 
 
+def record_run(root: Path, tid: str, run_id: str, usage: dict, stats=None) -> bool:
+    """Запуск критика внутри запуска Судьи: в `modelUsage` разницы запуска есть Sonnet — строка в critic-runs.log с фактом
+    и ценой (сумма costUSD по Sonnet; `subagent_stats` JSON запуска — как есть). Нет Sonnet — критик не запускался."""
+    sonnet = {m: v for m, v in (usage or {}).items() if "sonnet" in str(m).lower()}
+    if not sonnet:
+        return False
+    cost = 0.0
+    for v in sonnet.values():
+        c = v.get("costUSD", v.get("cost_usd", 0)) if isinstance(v, dict) else v
+        cost += float(c) if isinstance(c, (int, float)) else 0.0
+    _record(root, {"tid": tid, "kind": "run", "file": run_id, "sha": "", "why": "", "cost_usd": round(cost, 4),
+                   "models": sorted(sonnet), "subagent_stats": stats})
+    return True
+
+
 def critic_ack(args, tid: str, root: Path, sha: str = "", head_ts=head_time) -> tuple[str, str]:
     """Ворота критика на `accept`. → (отказ, пометка для лога). Ключ выключен — ("", "")."""
     if not P.setting("critic_before_accept", False, root=root):
