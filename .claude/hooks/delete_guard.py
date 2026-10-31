@@ -62,7 +62,7 @@ import json
 import os
 
 from dguard.ceo_signal import ceo_signal_write
-from dguard.checks import _deny, check, check_file
+from dguard.checks import _deny, check, check_file, check_ws
 from dguard.config import configure
 from dguard.git_scan import BRANCH_CONSENT_NAMES, CONFIG_LOG_NAMES
 from dguard.messages import (REASON_BRANCH_CONSENT_FILE, REASON_CEO_CHARTER, REASON_CEO_SIGNAL, REASON_CONFIG_LOG, REASON_CONSENT, REASON_CRASH,
@@ -105,6 +105,8 @@ def check_tool(data, trace=None):
             return _deny(trace, "publish", REASON_CONSENT)
         if role and identity_change(tool, ti):
             return _deny(trace, "identity", REASON_IDENTITY)
+        if tool == "Monitor" and ti.get("ws") is not None and (reason := check_ws(ti["ws"], trace)):
+            return reason                               # источник ws вместо command (TK-075): хост проверяем так же
         if tool in SHELL_TOOLS:
             reason = check(str(ti.get("command") or ""), cwd, trace)
             if tool == "PowerShell" and trace and trace[-1] == ("rm", "deny"):

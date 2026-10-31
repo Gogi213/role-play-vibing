@@ -776,7 +776,7 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
 def check_unreleased(ws: dict, now, gh=None) -> list:
     """TK-062 (В-24): очередь пуста, а в main влито и не выпущено — ключ `watch_unreleased` (умолчание выключен)."""
     text = UNR.unreleased_message(ws, now, gh)
-    return [] if text == "" else [Finding("unreleased", "main", text or "", unknown=text is None)]
+    return [] if text == "" else [Finding("unreleased", str(ws.get(UNR.BRANCH_KEY) or "main"), text or "", unknown=text is None)]
 
 
 def collect_findings(now, alive_waits=()) -> list:

@@ -16,6 +16,7 @@ import ticket as T  # noqa: E402
 
 UNRELEASED_IDLE_MIN = 10  # очередь пуста дольше этого — и только тогда проверяем теги (сторож ходит раз в ~2 мин)
 IDLE_SINCE_KEY = "unreleased_idle_since"  # watch-state.json: когда сторож впервые увидел пустую очередь
+BRANCH_KEY = "unreleased_branch"  # watch-state.json: ветка репозитория по последнему ответу GitHub — ключ дедупа находки (TK-075)
 _VERSION_TAG = re.compile(r"v(\d+(?:\.\d+)*)")
 NOT_RELEASE_DIRS = ("docs/", "tools/")  # правки только здесь выпуска не требуют
 FILES_CAP = 300  # потолок `files` в ответе GitHub compare (на 1-й странице; per_page листает коммиты): все 300 из docs/tools — «не доказано, что только docs»
@@ -77,7 +78,7 @@ def unreleased_message(ws: dict, now, gh=None) -> "str | None":
         tag = last_release_tag(gh(f"repos/{repo}/tags?per_page=100"))
         if not tag:
             return ""
-        branch = str(gh(f"repos/{repo}")["default_branch"])
+        branch = ws[BRANCH_KEY] = str(gh(f"repos/{repo}")["default_branch"])
         compare = gh(f"repos/{repo}/compare/{tag}...{branch}?per_page=1")
         ahead = int(compare.get("ahead_by", 0))
     except Exception:
