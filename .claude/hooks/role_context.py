@@ -211,6 +211,21 @@ def short_context(role, title, source):
     return "\n".join(lines)
 
 
+def no_ci_line(role):
+    """Строка «CI на PR нет» (TK-080) — только ролям кроме CEO и только при `has_ci: false` в `.claude/rpv.json`; иначе и при сбое пусто."""
+    if role == "ceo":
+        return ""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
+        import project
+        if project.setting("has_ci", True, root=ROOT) is not False:
+            return ""
+    except Exception:
+        return ""
+    return ("CI на PR нет (`has_ci: false` в `.claude/rpv.json`): полный прогон тестов проекта остаётся за ролью и пишется в отчёт "
+            "«Итог», не в команду ярлыка договора.")
+
+
 def full_context(role, title, source, hook_in, reserve=0):
     """startup/clear: личность + устав роли + конец блокнота + пути; итог ≤ LIMIT (`reserve` знаков — под строку сверху)."""
     dispatcher = env_role() is not None
@@ -250,6 +265,9 @@ def full_context(role, title, source, hook_in, reserve=0):
     if role != "ceo":
         head.append("Общую память проекта (CLAUDE.md, решения и цели владельца, автопамять) пишет только `CEO`; ты "
                     "работаешь по своему тикету.")
+    ci = no_ci_line(role)
+    if ci:
+        head.append(ci)
     try:  # память ролей: догнать конспект прошлой сессии, дать на него ссылку
         from role_memory import on_session_start
         last = on_session_start(hook_in, role, title)
