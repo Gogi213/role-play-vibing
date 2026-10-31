@@ -1,6 +1,6 @@
 """Вливание PR по правилу без ИИ (TK-079 п.2, В-195). Вливает, когда вместе: вердикт Судьи `accepted: <PR>@<sha>` на ТЕКУЩЕЙ
-голове (`tickets.py accept`) + CI зелёный на ней (ci-state.json) + GitHub считает PR сливаемым. Голова сменилась после
-вердикта — не вливает. Конфликт — запись и `next` владельцу тикета (не CEO), один раз на голову. База не main (цепочка):
+голове (`tickets.py accept`) + CI зелёный на ней (ci-state.json; при `has_ci: false` CI не требуется) + GitHub считает PR
+сливаемым. Голова сменилась после вердикта — не вливает. Конфликт — запись и `next` владельцу тикета (не CEO), один раз на голову. База не main (цепочка):
 пока родительский PR открыт — ждёт; родитель влит — переключает базу на main. После слияния — проверка `merged`, запись
 в тикет. Защиту main не ставим (В-193): `sha` в запросе слияния защищает от гонки со сменой головы."""
 from __future__ import annotations
@@ -18,6 +18,12 @@ import ticket as T  # noqa: E402
 
 ERR_LIMIT = 3          # подряд сбоев GitHub (5xx, сеть) на одном PR, после которых о нём узнаёт владелец
 _TRANSIENT = re.compile(r"HTTP 5\d\d|timed out|timeout|connection", re.I)
+
+
+def no_ci() -> bool:
+    """`has_ci: false` в `.claude/rpv.json` (TK-083): на PR проекта CI нет, «CI зелёный» недостижим — вместо него вливает
+    вердикт Судьи на текущей голове + «сливаем» от GitHub. Умолчание (`true`, нет ключа) — CI нужен, как прежде."""
+    return P.setting("has_ci", True) is False
 
 
 def merge_state_path() -> Path:
@@ -237,7 +243,7 @@ def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, o
     if not acc or not sha.startswith(acc):
         return
     key = f"{repo}#{n}"
-    ci_ok = (ci.get(key) or {}).get("sha") == sha and (ci.get(key) or {}).get("state") == "success"
+    ci_ok = no_ci() or ((ci.get(key) or {}).get("sha") == sha and (ci.get(key) or {}).get("state") == "success")
     base = pr["base"]["ref"]
     if base != default:
         if ci_ok and base not in open_heads:
