@@ -7,7 +7,8 @@
 отказ; ярлык «тест» или «запуск» без команды — тоже отказ. Прогон идёт при каждой приёмке заново, поэтому последний прогон — всегда
 тот, что решает: более свежий провал отменяет прежний успех. Договор — последняя запись исполнителя, где есть ярлык доказательства;
 договор без ярлыков (старый) приёмку не меняет. Команда — только на тесты самой правки: полный прогон проекта (pytest без пути, по
-корню или по всему `.claude`) приёмка отказывает (TK-056, В-21) — его подтверждает зелёный CI PR, а срок одной проверки короче. Только stdlib.
+корню или по всему `.claude`) приёмка отказывает (TK-056, В-21) — его подтверждает зелёный CI PR, а срок одной проверки короче;
+при `has_ci: false` в `.claude/rpv.json` (TK-083) CI нет — полный прогон гоняет роль и пишет в отчёт «Итог», отказ тот же. Только stdlib.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import shlex
 from pathlib import Path
 
 import errors as errors_mod
+import project as P
 import ticket as T
 
 LABEL = re.compile(r"\[(тест|запуск|чтение(?:\s+кода)?)(?:\s*:\s*(?:`([^`\n]*)`|([^\]\n]*)))?\s*\]", re.I)
@@ -25,6 +27,13 @@ HINT = ("пункт договора с ярлыком тест/запуск н�
         "`[запуск: python tools/<скрипт>.py]` (допустимые команды — как у `errors.py fix`); без неё — ярлык `[чтение кода]`")
 FULL_RUN_HINT = ("полный прогон в договор не пишется — его подтверждает зелёный CI PR; укажи тесты самой правки: "
                  "`[тест: python -m pytest .claude/dispatcher/test_<правка>.py]`")
+FULL_RUN_HINT_NO_CI = ("полный прогон в договор не пишется — CI на PR нет (`has_ci: false`), его гоняет роль и пишет в отчёт «Итог»; "
+                       "укажи тесты самой правки: `[тест: python -m pytest .claude/dispatcher/test_<правка>.py]`")
+
+
+def full_run_hint() -> str:
+    """Подсказка отказа на полный прогон: без CI на PR (`has_ci: false`) ссылка на зелёный CI была бы неверной."""
+    return FULL_RUN_HINT_NO_CI if P.setting("has_ci", True) is False else FULL_RUN_HINT
 WHOLE_PROJECT = (".", ".claude")   # цели pytest, которые охватывают все тесты проекта
 
 
@@ -66,7 +75,7 @@ def proof_ack(tid: str, tkt, root: Path) -> tuple[str, str]:
     cmds = list(dict.fromkeys(cmd for k, cmd in labels if cmd))
     for cmd in cmds:
         if full_run(cmd):
-            return f"команда договора `{cmd}` — полный прогон проекта: {FULL_RUN_HINT}", ""
+            return f"команда договора `{cmd}` — полный прогон проекта: {full_run_hint()}", ""
         argv, why = errors_mod.check_argv(cmd, cwd)
         if argv is None:
             return f"команда договора `{cmd}` не допущена: {why}", ""
