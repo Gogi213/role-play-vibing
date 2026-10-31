@@ -1,5 +1,5 @@
 """Сторож «влито, не выпущено» (TK-062, В-24): тикетов в работе нет дольше UNRELEASED_IDLE_MIN, а на origin/main (у GitHub,
-не в локальном main) есть коммиты после последнего тега `v*` — очередь пуста, выпуск никто не заведёт. Вид `watch-unreleased`
+не в локальном main) есть коммиты после последнего тега `v*` с файлами вне docs/ и tools/ — очередь пуста, выпуск никто не заведёт. Вид `watch-unreleased`
 будит CEO; за ключом `watch_unreleased` в `.claude/rpv.json` (умолчание — выключен), репозиторий — `ci_repo`.
 Находку собирает `watch.check_unreleased`; здесь только проверка без записи сигналов."""
 from __future__ import annotations
@@ -17,6 +17,8 @@ import ticket as T  # noqa: E402
 UNRELEASED_IDLE_MIN = 10  # очередь пуста дольше этого — и только тогда проверяем теги (сторож ходит раз в ~2 мин)
 IDLE_SINCE_KEY = "unreleased_idle_since"  # watch-state.json: когда сторож впервые увидел пустую очередь
 _VERSION_TAG = re.compile(r"v(\d+(?:\.\d+)*)")
+NOT_RELEASE_DIRS = ("docs/", "tools/")  # правки только здесь выпуска не требуют
+FILES_CAP = 300  # потолок `files` в ответе GitHub compare (на 1-й странице; per_page листает коммиты): все 300 из docs/tools — «не доказано, что только docs»
 
 
 def queue_empty() -> bool:
@@ -53,11 +55,18 @@ def idle_minutes(ws: dict, now) -> float:
     return max((now - since).total_seconds() / 60, 0.0)
 
 
-def unreleased_message(ws: dict, now, gh=None) -> str:
-    """Текст находки или пустая строка: ключ выключен, нет `ci_repo`, очередь не пуста / пуста меньше порога, тегов нет,
-    GitHub не ответил (сторож не падает и не шумит), после последнего тега ничего не влито. `gh(путь)` — вызов GitHub."""
+def has_release_files(compare: dict) -> bool:
+    """В ответе GitHub `compare` есть файл вне docs/ и tools/; упёршийся в потолок список без таких — тоже да (хвост не виден)."""
+    files = [str(f.get("filename", "")) for f in compare.get("files") or [] if isinstance(f, dict)]
+    return len(files) >= FILES_CAP or any(not name.startswith(NOT_RELEASE_DIRS) for name in files)
+
+
+def unreleased_message(ws: dict, now, gh=None) -> "str | None":
+    """Текст находки; пустая строка — находки нет: ключ выключен (только `true`), нет `ci_repo`, очередь не пуста / пуста меньше
+    порога, тегов нет, после последнего тега ничего не влито или влиты только docs/ и tools/. None — GitHub не ответил: «не знаю»,
+    сторож не снимает метку суточного повтора. `gh(путь)` — вызов GitHub; ветку берём у репозитория (`default_branch`)."""
     gh = gh or CORE.gh_api
-    repo = P.setting("watch_unreleased", False) and P.setting("ci_repo", "")
+    repo = P.setting("watch_unreleased", False) is True and P.setting("ci_repo", "")
     if not repo:
         ws.pop(IDLE_SINCE_KEY, None)
         return ""
@@ -66,10 +75,14 @@ def unreleased_message(ws: dict, now, gh=None) -> str:
         return ""
     try:
         tag = last_release_tag(gh(f"repos/{repo}/tags?per_page=100"))
-        ahead = int(gh(f"repos/{repo}/compare/{tag}...main?per_page=1").get("ahead_by", 0)) if tag else 0
+        if not tag:
+            return ""
+        branch = str(gh(f"repos/{repo}")["default_branch"])
+        compare = gh(f"repos/{repo}/compare/{tag}...{branch}?per_page=1")
+        ahead = int(compare.get("ahead_by", 0))
     except Exception:
+        return None
+    if ahead <= 0 or not has_release_files(compare):
         return ""
-    if ahead <= 0:
-        return ""
-    return (f"влито, не выпущено: на {repo} в main {ahead} коммит(ов) после {tag}, тикетов в работе нет {idle:.0f} мин — "
-            "выпуск не заведён")
+    return (f"влито, не выпущено: на {repo} в {branch} {ahead} коммит(ов) после {tag} (есть файлы вне docs/ и tools/), "
+            f"тикетов в работе нет {idle:.0f} мин — выпуск не заведён")

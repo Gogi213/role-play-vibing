@@ -20,7 +20,7 @@ import plugin_version as PV
 import tasks as TK
 
 TERMINAL = ("done", "blocked", "needs_owner", "stopped")
-HOOKED_TOOLS = {"Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdit"}  # на них висит PreToolUse страж
+HOOKED_TOOLS = {"Bash", "PowerShell", "Monitor", "Write", "Edit", "MultiEdit", "NotebookEdit"}  # на них висит PreToolUse страж
 
 
 def claude_projects_dir() -> Path:

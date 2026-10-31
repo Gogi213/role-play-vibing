@@ -44,7 +44,7 @@ class CeoCharterTests(unittest.TestCase):
         for must in ("30 мин", "постоянного режима нет", "Monitor expired", "после рестарта", "перевзводи сразу",
                      "`timeout_ms: 1800000`", "умолчание инструмента — 5 мин", "без фильтра `grep` по `TK-`",
                      "строки сторожа идут с «*»", "молча", "сразу прочитай `tickets.py inbox`", "`tail -n 0` теряет строки",
-                     "Очередь пуста и владельцу ничего не обещано — не перевзводи",
+                     "Исключение одно — «Monitor expired» при пустой очереди", "`watch_unreleased` выключен — не перевзводи",
                      "«Напишу, когда …» владельцу не обещай, пока наблюдение не включено"):
             self.assertIn(must, r)
 
@@ -106,7 +106,7 @@ class CeoCommandTests(unittest.TestCase):
         self.assertIn("с `timeout_ms: 1800000`", text)
         self.assertIn("без фильтра `grep` по `TK-`", text)
         self.assertIn("сразу прочитай `tickets.py inbox`", text)
-        self.assertIn("очередь пуста и владельцу ничего не обещано — не перевзводи", text)
+        self.assertIn("не перевзводи только при «Monitor expired» с пустой очередью", text)
         self.assertIn("не обещай, пока наблюдение не включено", text)
 
     def test_monitor_step_precedes_the_reply(self):
@@ -125,7 +125,9 @@ class UnreleasedSandbox(WatchSandbox):
         self.addCleanup(P.set_root, old)
         self.calls = []
         self.ahead = 2
-        self.fail = False
+        self.gh_down = False
+        self.branch = "main"
+        self.files = [{"filename": ".claude/dispatcher/watch.py"}]
 
     def rpv(self, **kv):
         (Path(self.root.name) / ".claude" / "rpv.json").write_text(json.dumps(kv), encoding="utf-8")
@@ -135,9 +137,13 @@ class UnreleasedSandbox(WatchSandbox):
 
     def gh(self, path):
         self.calls.append(path)
-        if self.fail:
+        if self.gh_down:
             raise RuntimeError("gh: нет сети")
-        return TAGS if "/tags" in path else {"ahead_by": self.ahead}
+        if "/tags" in path:
+            return TAGS
+        if "/compare/" in path:
+            return {"ahead_by": self.ahead, "files": self.files}
+        return {"default_branch": self.branch}
 
     def check(self, minutes_after_first=0, ws=None):
         ws = {} if ws is None else ws
@@ -226,7 +232,8 @@ class UnreleasedGithubTests(UnreleasedSandbox):
 
     def test_compares_latest_version_tag_with_origin_main(self):
         out, _ = self.check(0, self.ws)
-        self.assertEqual(self.calls, ["repos/owner/repo/tags?per_page=100", "repos/owner/repo/compare/v2.0.14...main?per_page=1"])
+        self.assertEqual(self.calls, ["repos/owner/repo/tags?per_page=100", "repos/owner/repo",
+                                      "repos/owner/repo/compare/v2.0.14...main?per_page=1"])
         self.assertIn("2 коммит", out[0].message)
         self.assertIn("v2.0.14", out[0].message)
         self.assertIn("owner/repo", out[0].message)
@@ -241,8 +248,10 @@ class UnreleasedGithubTests(UnreleasedSandbox):
             self.assertEqual(W.check_unreleased(self.ws, self.now, self.gh), [])
 
     def test_github_failure_is_silent_not_a_crash(self):
-        self.fail = True
-        self.assertEqual(self.check(0, self.ws)[0], [])
+        self.gh_down = True
+        out, _ = self.check(0, self.ws)
+        self.assertEqual([(f.kind, f.unknown) for f in out], [("unreleased", True)])  # «не знаю», текста нет
+        self.assertEqual(W.notify_findings(out, {}, self.now), [])
 
     def test_latest_tag_is_by_number_not_by_order(self):
         self.assertEqual(UNR.last_release_tag(TAGS), "v2.0.14")
@@ -300,7 +309,7 @@ class UnreleasedDocsTests(unittest.TestCase):
         self.assertIn("не дольше 30 мин", text)
         self.assertIn("перевзводит молча и сразу", text)
         self.assertIn("`timeout_ms: 1800000`", text)
-        self.assertIn("не перевзводит", text)
+        self.assertIn("Не перевзводит он только при «Monitor expired» с пустой очередью", text)
 
 
 if __name__ == "__main__":

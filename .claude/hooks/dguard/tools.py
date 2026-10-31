@@ -2,7 +2,7 @@
 
 
 FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
-SHELL_TOOLS = ("Bash", "PowerShell")
+SHELL_TOOLS = ("Bash", "PowerShell", "Monitor")  # Monitor запускает команду оболочки (`tool_input.command`) — те же проверки
 GUARDED_TOOLS = SHELL_TOOLS + FILE_TOOLS
 FILE_KEYS = ("file_path", "notebook_path", "path", "filePath")
 
