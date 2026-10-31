@@ -41,8 +41,8 @@ class CeoCharterTests(unittest.TestCase):
 
     def test_watch_is_kept_always(self):
         r = rule(self.text, "Наблюдение держишь, пока есть работа")
-        for must in ("30 мин", "постоянного режима нет", "Monitor expired", "после рестарта", "перевзводи сразу",
-                     "`timeout_ms: 1800000`", "умолчание инструмента — 5 мин", "без фильтра `grep` по `TK-`",
+        for must in ("потолок 10 мин", "постоянного режима нет", "Monitor expired", "после рестарта", "перевзводи сразу",
+                     "`timeout_ms: 600000`", "умолчание инструмента — 5 мин", "без фильтра `grep` по `TK-`",
                      "строки сторожа идут с «*»", "молча", "сразу прочитай `tickets.py inbox`", "`tail -n 0` теряет строки",
                      "Исключение одно — «Monitor expired» при пустой очереди", "`watch_unreleased` выключен — не перевзводи",
                      "«Напишу, когда …» владельцу не обещай, пока наблюдение не включено"):
@@ -103,7 +103,7 @@ class CeoCommandTests(unittest.TestCase):
         self.assertIn("`Monitor` на `<корень проекта>/.claude/dispatcher/ceo-wake.log`", text)
         self.assertIn("Monitor expired", text)
         self.assertIn("после рестарта сессии перевзводи сразу и молча", text)
-        self.assertIn("с `timeout_ms: 1800000`", text)
+        self.assertIn("с `timeout_ms: 600000`", text)
         self.assertIn("без фильтра `grep` по `TK-`", text)
         self.assertIn("сразу прочитай `tickets.py inbox`", text)
         self.assertIn("не перевзводи только при «Monitor expired» с пустой очередью", text)
@@ -306,9 +306,9 @@ class UnreleasedDocsTests(unittest.TestCase):
 
     def test_signals_doc_says_monitor_expires(self):
         text = SIGNALS_DOC.read_text(encoding="utf-8")
-        self.assertIn("не дольше 30 мин", text)
+        self.assertIn("не дольше 10 мин", text)
         self.assertIn("перевзводит молча и сразу", text)
-        self.assertIn("`timeout_ms: 1800000`", text)
+        self.assertIn("`timeout_ms: 600000`", text)
         self.assertIn("Не перевзводит он только при «Monitor expired» с пустой очередью", text)
 
 

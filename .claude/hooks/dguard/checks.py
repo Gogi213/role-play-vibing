@@ -4,8 +4,8 @@ from dguard.config import norm
 from dguard.git_scan import branch_delete_consent
 from dguard.legacy import legacy_found
 from dguard.lexer import ParseError
-from dguard.messages import BranchDelete, Forbid, Over, Publish, REASON, REASON_BRANCH_DELETE, REASON_CRASH, REASON_FILE, REASON_IRREVERSIBLE, REASON_OVERWRITE, REASON_PUBLISH
-from dguard.paths import allowed, Ctx, temp_rest, write_only_ok
+from dguard.messages import BranchDelete, Forbid, Over, Publish, REASON, REASON_BRANCH_DELETE, REASON_CRASH, REASON_FILE, REASON_IRREVERSIBLE, REASON_OVERWRITE, REASON_PUBLISH, REASON_WS
+from dguard.paths import allowed, closed_host, Ctx, temp_rest, write_only_ok
 from dguard.policy import dispatcher_role, protected, publish_consent
 from dguard.push_scope import push_scope_reason
 from dguard.words import FUNC_DEF
@@ -97,3 +97,15 @@ def check_file(path, cwd, trace=None):
         return _deny(trace, "file", REASON_FILE.format(t=path))
     except Exception as e:
         return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
+
+
+def check_ws(ws, trace=None):
+    """Источник `ws` инструмента Monitor (`{url, protocols}`, без `command`): адрес не строка или назван закрытый хост из
+    `guard_forbidden_hosts` — отказ (fail-closed: схема могла измениться); прочие адреса поток только читает — разрешены."""
+    trace = [] if trace is None else trace
+    url = ws.get("url") if isinstance(ws, dict) else None
+    if not isinstance(url, str) or not url.strip():
+        return _deny(trace, "ws", REASON_WS.format(t=repr(ws)[:80], why="адрес (`url`) не определить"))
+    if closed_host(url):
+        return _deny(trace, "ws", REASON_WS.format(t=url[:120], why="назван закрытый хост"))
+    return None
