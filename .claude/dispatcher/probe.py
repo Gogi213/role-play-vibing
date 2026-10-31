@@ -1,9 +1,11 @@
 """TK-069 (G-008): проба до долгого расчёта — ожидание дольше порога не принимается без записи пробы в тикете.
 
-Расчёт, поставленный в `wait` (host:/file:/job:) со сроком `--by` дальше `probe_threshold_min` (умолчание 15 мин), требует
+Расчёт, поставленный в `wait` вида из `probe_kinds` (умолчание host:, job: — расчёт на сервере; ожидание file: — не расчёт, проба
+ему не нужна, TK-081) со сроком `--by` дальше `probe_threshold_min` (умолчание 15 мин), требует
 `--probe <запись|файл>`: ≥ 2 способа (один «как есть») — у каждого в одной строке время и пик памяти на малом срезе, строка
 «тяжёлый: …» (самый тяжёлый элемент среза) и «оценка: N мин|ч» полного времени; срок не короче оценки. Проба — один раз на
-тикет: принятая пишется в шапку (`probe:`) и в лог, следующие `wait` идут по шапке. За флагом `require_probe` (умолчание
+тикет: принятая пишется в шапку (`probe:`) и в лог, следующие `wait` идут по шапке. Порог считается по сумме сроков `--by` одного
+расчёта: после `[итог: done|accept]` в логе счёт начинается заново. За флагом `require_probe` (умолчание
 выключен — `wait` как раньше). Слов конкретного проекта нет: код проверяет форму записи, а не содержание.
 """
 from __future__ import annotations
@@ -19,6 +21,10 @@ THRESHOLD_MIN = 15
 HEADER_KEY = "probe"
 LOAD_KEY = "probe_load"  # «пик 5.50 ГБ · N 15» — нагрузка из записи пробы (TK-070)
 WAITED_KEY = "probe_waited"  # минуты: сумма сроков `wait` тикета без пробы — порог считается по ним (TK-073)
+WAITED_AT_KEY = "probe_waited_at"  # когда сумма записана: итог done|accept в логе позже — расчёт кончился, сумма не в счёт (TK-081)
+ALLOWED_KINDS = ("host", "file", "job")  # виды `wait`, которым вообще нужен срок --by
+DEFAULT_KINDS = ("host", "job")  # проба — расчёту на сервере; file: ждёт чужой результат, а не считает
+_CLOSED_RE = re.compile(r"\[итог:\s*(?:done|accept)\]")
 FORM = ("способы — по строке на способ, в строке время (сек|мин|ч) и пик памяти (МБ|ГБ), один способ «как есть»; "
         "строка «тяжёлый: <элемент среза> · пик <МБ|ГБ> одного процесса»; строка «N: <число параллельных процессов полного "
         "расчёта>»; строка «оценка: N мин|ч» полного времени")
@@ -49,12 +55,31 @@ def threshold_min() -> int:
         return THRESHOLD_MIN  # в rpv.json вписано не число — умолчание, а не падение `wait`
 
 
+def kinds() -> tuple:
+    """Виды `wait`, которым нужна проба (`probe_kinds`: список или «host,job»); пусто или мусор — умолчание."""
+    raw = P.setting("probe_kinds", DEFAULT_KINDS)
+    raw = raw.split(",") if isinstance(raw, str) else raw
+    got = tuple(k.strip() for k in raw if isinstance(k, str) and k.strip() in ALLOWED_KINDS) if isinstance(raw, (list, tuple)) else ()
+    return got or DEFAULT_KINDS
+
+
+def needs_probe(spec: str) -> bool:
+    parsed = T.parse_wait_for(spec)
+    return bool(parsed) and parsed[0] in kinds()
+
+
 def waited_min(tkt) -> float:
-    """Сумма сроков прежних `wait` тикета без пробы, минуты (шапка `probe_waited:`); нет или не разобрать — 0."""
+    """Сумма сроков прежних `wait` расчёта без пробы, минуты (шапка `probe_waited:`); нет или не разобрать — 0; после записи
+    суммы в логе есть итог done|accept (расчёт кончился) — тоже 0."""
     try:
-        return max(0.0, float((tkt.header.get(WAITED_KEY) or "0").strip()))
+        total = max(0.0, float((tkt.header.get(WAITED_KEY) or "0").strip()))
     except ValueError:
         return 0.0
+    try:
+        since = T.parse_dt(tkt.header.get(WAITED_AT_KEY) or "")
+    except ValueError:
+        return total  # метки времени нет (запись до TK-081) — сумма как была
+    return 0.0 if any(e.ts > since and _CLOSED_RE.match(e.text.strip()) for e in getattr(tkt, "log", ())) else total
 
 
 def _clean(text: str) -> str:
@@ -155,9 +180,9 @@ def load(arg: str, root) -> tuple:
 
 def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple:
     """→ (отказ, поля шапки, запись для лога). Флаг выключен, ожидание не расчёта или срок в пределах порога — пусто."""
-    if not enabled():
-        return "", {}, (f"[проба] {load(arg, root)[0]}" if (arg or "").strip() else "")  # флаг выключен: запись — в лог, без проверки
-    if by_dt is None or not T.wait_needs_by(spec):
+    if not enabled() or not needs_probe(spec):  # флаг выключен или не расчёт на сервере (file:, at:…): запись — в лог, без проверки
+        return "", {}, (f"[проба] {load(arg, root)[0]}" if (arg or "").strip() else "")
+    if by_dt is None:
         return "", {}, ""
     now = now or datetime.now().astimezone()
     left = (by_dt - now).total_seconds() / 60
@@ -165,7 +190,8 @@ def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple
     before = 0.0 if have else waited_min(tkt)
     total = before + left
     if total <= threshold_min():
-        return "", ({} if have else {WAITED_KEY: f"{total:.1f}"}), ""  # короткие --by складываются: обхода порогом нарезкой нет
+        # короткие --by складываются: обхода порогом нарезкой нет
+        return "", ({} if have else {WAITED_KEY: f"{total:.1f}", WAITED_AT_KEY: now.isoformat(timespec="seconds")}), ""
     if not (arg or "").strip():
         if have:
             return "", {}, ""
@@ -179,7 +205,7 @@ def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple
     est = f"оценка {estimate_min(text):.0f} мин"
     ld = {LOAD_KEY: load_line(peak_gb(text), procs(text))}
     if before:
-        ld[WAITED_KEY] = ""  # проба принята — счёт прежних ожиданий больше не нужен
+        ld[WAITED_KEY] = ld[WAITED_AT_KEY] = ""  # проба принята — счёт прежних ожиданий больше не нужен
     if src:
         return "", {HEADER_KEY: f"файл {src} · {est}", **ld}, f"[проба] файл {src} · {est}"
     return "", {HEADER_KEY: f"в логе · {est}", **ld}, f"[проба] {text}"

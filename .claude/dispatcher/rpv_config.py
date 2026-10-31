@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import probe as probe_mod
 import project as P
 import registry as registry_mod
 
@@ -64,6 +65,7 @@ KEYS = {
     "critic_before_accept": (lambda v: isinstance(v, bool), "true или false"),
     "require_probe": (lambda v: isinstance(v, bool), "true или false"),
     "probe_threshold_min": (_int_min, "целое ≥ 1, минуты"),
+    "probe_kinds": (lambda v: _str_list(v) and set(v) <= set(probe_mod.ALLOWED_KINDS), "список из host, file, job (умолчание host, job)"),
     "host_free_cmd": (lambda v: _text(v) and "{ticket}" in v, "непустая строка с {ticket} (иначе считаются процессы самого тикета)"),
     "host_mem_reserve": (lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1, "число ≥ 1"),
     "ceo_context_warn": (_int_min, "целое ≥ 1, токены контекста; ниже ceo_context_stop"),
