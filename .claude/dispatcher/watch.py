@@ -227,7 +227,7 @@ def _to_judge(path, why: str, now, clear_wait: bool = True) -> None:
 
 def _wake_owner_job(path, tkt, ws: dict, spec: str, why: str, now, key: str = "job_wakes", oom_src: str = "") -> None:
     """Задание из `job:` упало/исчезло: владелец будится записью (хвост лога + причина), при повторе — Судья (`_to_judge`).
-    `oom_src` — причина падения самого задания (поле адаптера, хвост лога): отметка OOM только по ней, не по тексту пробуждения."""
+    `oom_src` — причина падения самого задания (поле адаптера): отметка OOM только по ней, не по хвосту лога и не по тексту пробуждения."""
     HL.note_oom(tkt, oom_src, now)  # TK-070: убито по памяти — следующий wait тикета требует новый замер
     acted = ws.setdefault(key, {})  # у каждой причины свой счётчик повторов: пробуждение по заданию не делает пустое ожидание «вторым разом»
     repeat = tkt.id in acted
@@ -383,7 +383,7 @@ def _triage_job(path, tkt, parsed, ws: dict, now, job_probe, states: dict, owner
         why = f"сторож: задание `{spec}` упало"
         why += f"\nХвост лога:\n{tail}" if tail else ""
         r = LW.reason(jid, tail)
-        _wake_owner_job(path, tkt, ws, spec, why + (f"\nПричина (Haiku): {r}" if r else ""), now, oom_src=f"{me.get('reason') or ''}\n{tail or ''}")
+        _wake_owner_job(path, tkt, ws, spec, why + (f"\nПричина (Haiku): {r}" if r else ""), now, oom_src=me.get("reason") or "")  # хвост лога не сканируем
         return False
     ent = dead.get(tkt.id) or {}  # missing: задание не найдено
     n = ent.get("n", 0) + 1 if ent.get("spec") == spec else 1

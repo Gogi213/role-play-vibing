@@ -213,8 +213,9 @@ class WaitLoadTests(unittest.TestCase):
         self.assertEqual(self.wait(record(n="2")), 0)
         T.write_header_updates(self.path, {"status": "in_progress", "wait_for": ""})
         HL.note_oom(self.tkt(), "упало: out of memory", NOW)
-        self.assertEqual(self.wait(record(peak="7 ГБ", n="2")), 0)
-        self.assertEqual(self.tkt().header["probe_load"], "пик 7.00 ГБ · N 2")
+        self.assertEqual(self.wait(record(peak="7 ГБ", n="2")), 1)  # пик вырос — это не замер «меньше», TK-073
+        self.assertEqual(self.wait(record(peak="3 ГБ", n="2")), 0)
+        self.assertEqual(self.tkt().header["probe_load"], "пик 3.00 ГБ · N 2")
 
     def test_oom_mark_only_for_oom_text_and_flag(self):
         self.assertFalse(HL.note_oom(self.tkt(), "сторож: задание упало [rc 1: ошибка данных]", NOW))
@@ -298,7 +299,7 @@ class ConfigTests(unittest.TestCase):
         ok, bad = rpv_config.KEYS["host_mem_reserve"][0], rpv_config.KEYS["host_mem_reserve"][0]
         self.assertTrue(ok(1.2) and ok(2))
         self.assertFalse(bad(0.5) or bad(True) or bad("1.2"))
-        self.assertTrue(rpv_config.KEYS["host_free_cmd"][0]("freecheck"))
+        self.assertTrue(rpv_config.KEYS["host_free_cmd"][0]("freecheck {ticket}"))
 
     def test_docs_describe_keys(self):
         doc = (Path(__file__).resolve().parents[2] / "docs" / "configuration.md").read_text(encoding="utf-8")

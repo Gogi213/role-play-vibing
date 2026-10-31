@@ -591,7 +591,8 @@ def cmd_wait(args) -> int:
         print(f"wait: {why}", file=sys.stderr)
         return 1
     by = (getattr(args, "by", None) or "").strip()
-    if T.wait_needs_by(spec) and not by:
+    check = bool(getattr(args, "check", False))  # TK-073: проверка нагрузки до запуска расчёта, без записи в тикет
+    if T.wait_needs_by(spec) and not by and not check:
         print("wait: нужен срок `--by ЧЧ:ММ|ISO` (GMT+4) — когда ждать конца самое позднее; прошёл срок (+15 мин) и цель "
               "не выполнена — сторож разбудит тебя (TK-117). Оцени по ходу (done/total, скорость), не «с запасом на всю ночь»", file=sys.stderr)
         return 1
@@ -604,7 +605,7 @@ def cmd_wait(args) -> int:
     parsed = T.parse_wait_for(spec)
     # TK-218 п.2: условие, уже выполненное при постановке, не ожидание — роль проснулась бы по старому файлу
     # (маркер прошлого прогона). Осознанно ждать готовое — `--allow-met`.
-    if parsed and parsed[0] in ("file", "host", "ticket") and not getattr(args, "allow_met", False):
+    if parsed and parsed[0] in ("file", "host", "ticket") and not getattr(args, "allow_met", False) and not check:
         try:
             met = W.check_wait_for(spec, W.project_where())
         except Exception:  # нет ssh/алиаса в окружении — проверка недоступна, не мешаем
@@ -629,6 +630,9 @@ def cmd_wait(args) -> int:
     if load_err:
         print(f"wait: {load_err}", file=sys.stderr)
         return 1
+    if check:
+        print(f"{args.id}: проверка пройдена, тикет не тронут" + (f"\n{load_log}" if load_log else ""))
+        return 0
     try:
         upd = {"status": "waiting", "wait_for": spec, "wait_by": by_dt.isoformat(timespec="seconds") if by else "", **probe_upd, **load_upd}
         if getattr(args, "on_met", None):
@@ -644,6 +648,26 @@ def cmd_wait(args) -> int:
     if load_upd:
         LOAD.clear_oom(args.id)  # новый замер принят — отметка OOM снята
     print(f"{args.id}: status: waiting, wait_for: {spec}" + (f", срок {upd['wait_by']}" if by else ""))
+    return 0
+
+
+def cmd_oom_clear(args) -> int:
+    """Судья/CEO: снять отметку OOM тикета (`oom-state.json`) без нового замера — `--why` (≥ 10 знаков) идёт в лог тикета."""
+    role = _caller_role()
+    if role and role not in ("judge", "ceo"):
+        print(f"oom-clear — только Судья или CEO; эта сессия — роль {role}. Новый замер снимает отметку сам (`wait --probe`)", file=sys.stderr)
+        return 1
+    path = TICKETS_DIR / f"{args.id}.md"
+    why = " ".join((args.why or "").split())
+    if not path.exists() or len(why) < 10:
+        print(f"нет тикета {args.id}" if not path.exists() else "oom-clear: --why — причина не короче 10 знаков", file=sys.stderr)
+        return 1
+    if LOAD.oom_mark(args.id) is None:
+        print(f"{args.id}: отметки OOM нет — снимать нечего")
+        return 0
+    LOAD.clear_oom(args.id)
+    T.append_log(path, role or "ceo", f"[oom] отметка OOM снята без нового замера: {why}")
+    print(f"{args.id}: отметка OOM снята")
     return 0
 
 
@@ -846,7 +870,7 @@ def cmd_status(args) -> int:
 def _handlers() -> dict:
     """Подкоманда → обработчик; собирается при вызове, чтобы тесты могли подменять обработчики на модуле."""
     return {"new": cmd_new, "comment": cmd_comment, "accept": cmd_accept, "result": cmd_result, "start": cmd_start,
-            "wait": cmd_wait, "due": cmd_due, "stop": cmd_stop, "allow": cmd_allow, "allow-delete": cmd_allow_delete,
+            "wait": cmd_wait, "oom-clear": cmd_oom_clear, "due": cmd_due, "stop": cmd_stop, "allow": cmd_allow, "allow-delete": cmd_allow_delete,
             "config": cmd_config, "charter": cmd_charter, "inbox": cmd_inbox, "status": cmd_status}
 
 

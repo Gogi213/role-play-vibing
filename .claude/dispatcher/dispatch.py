@@ -280,7 +280,14 @@ from cost import (  # noqa: E402,F401 — учёт стоимости вынес
     _add_cost, ticket_cost_spent, add_ticket_cost, _record_cost_event, resolve_run_cost)
 
 
-def _model_usage_warning(model_usage_diff: dict, expected: str = None) -> str:
+def _extra_models(info: dict, critic_on: bool, stats=None) -> tuple:
+    """Судья с критиком: Sonnet не чужая модель, только если `subagent_stats` запуска показывает агента critic (TK-073)."""
+    by_type = stats.get("by_type") if isinstance(stats, dict) else None
+    ran = isinstance(by_type, dict) and any(str(k).rsplit(":", 1)[-1] == "critic" and v for k, v in by_type.items())
+    return ("sonnet",) if critic_on and ran and info.get("role") == "judge" else ()
+
+
+def _model_usage_warning(model_usage_diff: dict, expected: str = None, also: tuple = ()) -> str:
     """п.1: «проверь, что в JSON modelUsage только opus» (с В-153 — только семейство модели запуска;
     в _finish_run `expected` = `_expected_model_family(info)` — семейство модели РОЛИ, v1.6.1;
     по умолчанию — model_family(CLAUDE_MODEL)) — автоматическая, не разовая проверка, и
@@ -291,7 +298,7 @@ def _model_usage_warning(model_usage_diff: dict, expected: str = None) -> str:
         return None
     if expected is None:
         expected = model_family(CLAUDE_MODEL)
-    bad = [m for m in model_usage_diff if expected not in str(m).lower()]
+    bad = [m for m in model_usage_diff if not any(f in str(m).lower() for f in (expected, *also))]
     if bad:
         return f"modelUsage этого запуска содержит модели без «{expected}» ({', '.join(bad)})"
     return None
@@ -515,9 +522,14 @@ def _finish_run(tid: str, info: dict, state: dict, now, timed_out: bool, stopped
                      stopped=stopped)
 
     expected_model = _expected_model_family(info)
-    model_warn = _model_usage_warning(model_usage_diff, expected_model)
+    model_warn = _model_usage_warning(model_usage_diff, expected_model,
+                                      _extra_models(info, bool(P.setting("critic_before_accept", False)),
+                                                    result.get("subagent_stats")))
     if model_warn:
         route_ceo_signal(tid, "model", model_warn, state, now)
+    if info.get("role") == "judge" and P.setting("critic_before_accept", False):  # TK-073: запуск критика — в журнал с ценой
+        import critic_gate
+        critic_gate.record_run(CFG.PROJECT_ROOT, tid, Path(info["run_file"]).name, model_usage_diff, result.get("subagent_stats"))
 
     if _limit_hit(result) and not stopped:
         try:

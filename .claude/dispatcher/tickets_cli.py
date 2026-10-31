@@ -100,8 +100,14 @@ def _add_control_parsers(sub) -> None:
     p_wait.add_argument("spec", help=T.WAIT_FOR_FORMATS)
     p_wait.add_argument("--by", default=None, help="срок ожидания ЧЧ:ММ|ISO (GMT+4), обязателен для host:/file:/job:")
     p_wait.add_argument("--probe", default=None, help="проба до долгого расчёта — запись или файл (с require_probe, срок дальше порога)")
+    p_wait.add_argument("--check", action="store_true",
+                        help="только проверка (форма, нагрузка машины, пик/N после OOM) до запуска расчёта; тикет не меняется, --by не нужен")
     p_wait.add_argument("--on-met", default=None,
                         help="команда по закрытии wait_for вместо пробуждения LLM: `python|bash <скрипт под tools/ или .claude/, в git> [арг]`")
+
+    p_oom = sub.add_parser("oom-clear", help="Судья/CEO: снять отметку OOM тикета без нового замера")
+    p_oom.add_argument("id")
+    p_oom.add_argument("--why", required=True, help="причина снятия (≥ 10 знаков), идёт в лог тикета")
 
     p_due = sub.add_parser("due", help="только CEO: срок, названный владельцу (первый остаётся в due_first)")
     p_due.add_argument("id")
