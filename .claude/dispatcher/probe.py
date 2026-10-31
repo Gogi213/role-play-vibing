@@ -18,6 +18,7 @@ import ticket as T
 THRESHOLD_MIN = 15
 HEADER_KEY = "probe"
 LOAD_KEY = "probe_load"  # «пик 5.50 ГБ · N 15» — нагрузка из записи пробы (TK-070)
+WAITED_KEY = "probe_waited"  # минуты: сумма сроков `wait` тикета без пробы — порог считается по ним (TK-073)
 FORM = ("способы — по строке на способ, в строке время (сек|мин|ч) и пик памяти (МБ|ГБ), один способ «как есть»; "
         "строка «тяжёлый: <элемент среза> · пик <МБ|ГБ> одного процесса»; строка «N: <число параллельных процессов полного "
         "расчёта>»; строка «оценка: N мин|ч» полного времени")
@@ -39,6 +40,14 @@ def enabled() -> bool:
 
 def threshold_min() -> int:
     return int(P.setting("probe_threshold_min", THRESHOLD_MIN))
+
+
+def waited_min(tkt) -> float:
+    """Сумма сроков прежних `wait` тикета без пробы, минуты (шапка `probe_waited:`); нет или не разобрать — 0."""
+    try:
+        return max(0.0, float((tkt.header.get(WAITED_KEY) or "0").strip()))
+    except ValueError:
+        return 0.0
 
 
 def estimate_min(text: str):
@@ -127,13 +136,16 @@ def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple
         return "", {}, ""
     now = now or datetime.now().astimezone()
     left = (by_dt - now).total_seconds() / 60
-    if left <= threshold_min():
-        return "", {}, ""
     have = (tkt.header.get(HEADER_KEY) or "").strip()
+    before = 0.0 if have else waited_min(tkt)
+    total = before + left
+    if total <= threshold_min():
+        return "", ({} if have else {WAITED_KEY: f"{total:.1f}"}), ""  # короткие --by складываются: обхода порогом нарезкой нет
     if not (arg or "").strip():
         if have:
             return "", {}, ""
-        return (f"срок {left:.0f} мин дальше порога {threshold_min()} мин — расчёт не принимается в ожидание без пробы. "
+        return (f"ожидание тикета {total:.0f} мин (этот срок {left:.0f} + прежние без пробы {before:.0f}) дальше порога "
+                f"{threshold_min()} мин — расчёт не принимается в ожидание без пробы. "
                 f"Добавь `--probe <запись|файл>`: {FORM} (G-008)"), {}, ""
     text, src = load(arg, root)
     why = problem(text, left)
@@ -141,6 +153,8 @@ def gate(tkt, spec: str, by_dt, arg, root, now: datetime | None = None) -> tuple
         return f"проба не принята: {why}. Нужно: {FORM}", {}, ""
     est = f"оценка {estimate_min(text):.0f} мин"
     ld = {LOAD_KEY: load_line(peak_gb(text), procs(text))}
+    if before:
+        ld[WAITED_KEY] = ""  # проба принята — счёт прежних ожиданий больше не нужен
     if src:
         return "", {HEADER_KEY: f"файл {src} · {est}", **ld}, f"[проба] файл {src} · {est}"
     return "", {HEADER_KEY: f"в логе · {est}", **ld}, f"[проба] {text}"

@@ -21,7 +21,8 @@ LOG_NAME = "critic-runs.log"
 REVIEWS = ("docs", "reviews")
 MIN_SKIP_WHY = 10
 # пункт отчёта критика (agents/critic.md): `N. «утверждение» — **держится** | **не держится** | **не хватает**`
-ITEM = re.compile(r"^\s*(?:[-*]\s+)?(\d+)\.\s.*?\*\*(не держится|держится|не хватает)\*\*", re.M)
+ITEM = re.compile(r"^\s*(?:[-*]\s+)?(\d+)\.\s.*?\*\*(не держится|держится|не хватает)\*\*", re.M | re.I)
+_SEVERITY = {"держится": 0, "не хватает": 1, "не держится": 2}
 ANSWER = re.compile(r"^\s*(?:[-*]\s+)?Ответ Судьи(?:\s+на(?:\s+пункт)?)?\s+(\d+)\s*[:—–-]\s*(\S.{4,})", re.M)
 HINT = ("Судья зовёт агента critic (Agent, subagent_type role-play-vibing:critic, обычный передний) с договором и результатом "
         "тикета и сохраняет ответ в docs/reviews/<тикет>-critic.md; «не держится» по пункту N — строка «Ответ Судьи на N: …» в "
@@ -50,7 +51,12 @@ def _find(root: Path, raw: str) -> Path | None:
 
 def parse_report(text: str) -> tuple[dict[str, str], set[str]]:
     """({номер пункта: вердикт критика}, номера пунктов, на которые Судья ответил)."""
-    return {m.group(1): m.group(2) for m in ITEM.finditer(text)}, {m.group(1) for m in ANSWER.finditer(text)}
+    items: dict[str, str] = {}
+    for m in ITEM.finditer(text):
+        n, verdict = m.group(1), " ".join(m.group(2).lower().split())
+        if n not in items or _SEVERITY[verdict] > _SEVERITY[items[n]]:
+            items[n] = verdict  # номер повторён — берётся худший вердикт: «не держится» не перекрыть вторым «держится»
+    return items, {m.group(1) for m in ANSWER.finditer(text)}
 
 
 def _record(root: Path, row: dict) -> None:
