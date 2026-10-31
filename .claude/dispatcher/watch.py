@@ -67,8 +67,7 @@ def configure_project(root) -> Path:
 
 WATCH_INTERVAL_S = 120.0
 WATCH_DEDUP_REPEAT_HOURS = 2.0
-# v2: виды находок, которые повторяются не чаще раза в сутки (или пока не изменятся по сути); blocked/needs_owner
-# диспетчер уже сообщил один раз (`ceo-inbox`), сторож лишь страхует — раз в сутки
+# v2: виды находок, что повторяются раз в сутки; blocked/needs_owner диспетчер уже сообщил (`ceo-inbox`), сторож лишь страхует
 WATCH_LONG_REPEAT_HOURS = 24.0
 WATCH_LONG_REPEAT_KINDS = {"orphan-ticket", "blocked", "needs_owner", "unreleased"}
 ORPHAN_TICKET_HOURS = 2.0
@@ -79,6 +78,7 @@ class Finding:
     kind: str
     key: str
     message: str
+    unknown: bool = False  # «не знаю» (проба не ответила): метку повтора не снимаем и ничего не пишем
 
 
 # --- сбор находок (чистые функции — без сети, кроме ssh-хелперов ниже) ------------------------
@@ -776,7 +776,7 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
 def check_unreleased(ws: dict, now, gh=None) -> list:
     """TK-062 (В-24): очередь пуста, а в main влито и не выпущено — ключ `watch_unreleased` (умолчание выключен)."""
     text = UNR.unreleased_message(ws, now, gh)
-    return [Finding("unreleased", "main", text)] if text else []
+    return [] if text == "" else [Finding("unreleased", "main", text or "", unknown=text is None)]
 
 
 def collect_findings(now, alive_waits=()) -> list:
@@ -790,8 +790,7 @@ def collect_findings(now, alive_waits=()) -> list:
 
 
 def _repeat_hours(kind: str) -> float:
-    """Через сколько часов та же находка напоминается: orphan/blocked/needs_owner — раз в сутки (v2), остальные —
-    WATCH_DEDUP_REPEAT_HOURS."""
+    """Через сколько часов находка напоминается: виды из WATCH_LONG_REPEAT_KINDS — раз в сутки, остальные — через WATCH_DEDUP_REPEAT_HOURS."""
     return WATCH_LONG_REPEAT_HOURS if kind in WATCH_LONG_REPEAT_KINDS else WATCH_DEDUP_REPEAT_HOURS
 
 
@@ -808,14 +807,15 @@ def save_watch_state(ws: dict) -> None:
 
 
 def notify_findings(findings: list, ws: dict, now) -> list:
-    """Возвращает находки, по которым реально написали (для тестов). Дедуп — (kind, key) с повтором раз в
-    _repeat_hours(kind)."""
+    """Находки, по которым реально написали (для тестов). Дедуп — (kind, key), повтор через _repeat_hours(kind)."""
     notified = ws.setdefault("notified", {})
     current_keys = set()
     posted = []
     for f in findings:
         marker = f"{f.kind}:{f.key}"
         current_keys.add(marker)
+        if f.unknown:
+            continue
         entry = notified.get(marker) or {}
         if isinstance(entry, str):  # прежний формат watch-state.json (v1.4): значение — только время
             entry = {"ts": entry}
@@ -863,7 +863,7 @@ def run_once(now=None, probes=True) -> list:
     findings = collect_findings(now, alive_waits=alive_waits) + probed
     posted = notify_findings(findings, ws, now)
     save_watch_state(ws)
-    write_heartbeat(now, len(findings))
+    write_heartbeat(now, sum(not f.unknown for f in findings))
     return posted
 
 
