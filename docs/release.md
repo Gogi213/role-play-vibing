@@ -5,7 +5,7 @@
 ## Как выпустить версию
 
 1. Допишите раздел в [`CHANGELOG.md`](../CHANGELOG.md) — самым верхним, формат Keep a Changelog: заголовок `## X.Y.Z — ГГГГ-ММ-ДД` (`release.py` ищет версию в начале заголовка) и подразделы `### Добавлено` / `### Изменено` / `### Исправлено`.
-2. `python .claude/dispatcher/release.py bump X.Y.Z` — версия в `plugin.json` и `marketplace.json`, проверка записи в `CHANGELOG.md`, коммит «Выпуск X.Y.Z» и тег `vX.Y.Z` (локально, ничего не отправляется).
+2. `python .claude/dispatcher/release.py bump X.Y.Z` — версия в `plugin.json` и `marketplace.json`, проверка записи в `CHANGELOG.md`, коммит «Выпуск X.Y.Z» и тег `vX.Y.Z` (локально, ничего не отправляется). Тег ставят на коммит слияния (merge-коммит PR) в основной ветке, не на ветку работы.
 3. Отправьте руками: `git push origin HEAD vX.Y.Z` (или в п. 2 добавьте `--push`). Это публикация — необратимая, поэтому только по решению владельца.
 
 `python .claude/dispatcher/release.py check` проверяет, что версии в `plugin.json`, `marketplace.json` и `CHANGELOG.md` совпадают; то же проверяет тест в [CI](../README.md#разработка-и-тесты).

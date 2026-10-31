@@ -110,7 +110,8 @@ class HostloadTests(unittest.TestCase):
 
     def test_oom_forms(self):
         for yes in ("Out of memory: Killed process 4242 (python)", "oom-kill: constraint=CONSTRAINT_NONE", "Result: oom-kill",
-                    "exit code 137", "rc=137", "упал: oom-kill", "процесс не ответил, oom-kill"):
+                    "exit code 137", "rc=137", "упал: oom-kill", "процесс не ответил, oom-kill",
+                    "не завершилось: oom-kill", "задание не дошло до конца: Out of memory", "не завершилось — oom-kill"):
             with self.subTest(yes=yes):
                 self.assertTrue(HL.is_oom(yes))
         for no in ("oom_kill 0", "oom_kill 0\n", "не было oom", "exit code 1370", "не было oom-kill", "не было ни одного oom-kill",

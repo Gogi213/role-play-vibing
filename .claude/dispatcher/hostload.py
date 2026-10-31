@@ -26,8 +26,8 @@ RESERVE = 1.2
 OOM_NAME = "oom-state.json"
 _OOM_RE = re.compile(r"oom[-_ ]?kill|out of memory|memoryerror|cannot allocate memory|(?:exit(?: code)?|rc|status|код)\W{0,3}137(?!\d)", re.I)
 _OOM_ZERO = re.compile(r"oom[-_ ]?kill\w*\s*[:=]?\s*0(?!\d)", re.I)  # счётчик «oom_kill 0» — убийств не было
-_NEG_RE = re.compile(r"(?:\bнет|\bне|\bnot|\bno|\bnever|\bwithout|\bбез)\b(?:\W+\w+){0,3}\W*$", re.I)  # «не oom-kill», «не было oom-kill», «нет …», «not out of memory»; запятая/точка отрезают оговорку
-_CLAUSE_END = re.compile(r"[.;,!?\n]")
+_NEG_RE = re.compile(r"(?:\bнет|\bне|\bnot|\bno|\bnever|\bwithout|\bбез)\b(?:\W+\w+){0,3}\W*$", re.I)  # «не oom-kill», «не было oom-kill», «нет …», «not out of memory»; запятая/точка/двоеточие/тире отрезают оговорку
+_CLAUSE_END = re.compile(r"[.;:,!?\n]|\s[—–-]\s")
 _NUMS = re.compile(r"\d+(?:[.,]\d+)?")
 
 
