@@ -6,7 +6,8 @@
 `installed_plugins.json`) `start.py`, `supervise.py --install`, `tickets.py charter sync --ref В-N` (слово владельца
 уже в реестре; без `--ref` шаг — FAIL, уставы не тронуты), `doctor.py`. Версия не изменилась — служб это не касается:
 start, присмотр и doctor всё равно идут, синк уставов пропущен. Итог — одна таблица `OK/FAIL/—`, любой FAIL doctor
-назван как есть. Сессия Claude Code остаётся на старой версии, пока её не перезапустят: об этом последняя строка.
+назван как есть. Сессия Claude Code остаётся на старой версии, пока её не перезапустят: об этом последняя строка (версия сессии — по
+`CLAUDE_PLUGIN_ROOT`; нет переменной или версия иная — просьба перезапустить, «уже на» — только при совпадении).
 Код возврата 0 — все шаги OK, 1 — есть FAIL, 2 — проект не найден."""
 from __future__ import annotations
 
@@ -24,10 +25,16 @@ import plugin_version as PV  # noqa: E402
 import project as P  # noqa: E402
 from doctor import FAIL, OFF, OK, render  # noqa: E402
 
-CODE_DIR = Path(__file__).resolve().parent
 MARKETPLACE = "role-play-vibing"
 PLUGIN = f"{MARKETPLACE}@{MARKETPLACE}"
 RESTART = "Перезапустите Claude Code — до перезапуска сессия на старой версии."
+
+
+def session_version(env=os.environ) -> str:
+    """Версия плагина открытой сессии — по `CLAUDE_PLUGIN_ROOT` (не по каталогу этого скрипта: из клона маркетплейса или нового
+    кэша он уже новый). Переменной нет или версии по ней не прочесть — "?"."""
+    root = env.get("CLAUDE_PLUGIN_ROOT")
+    return charter.plugin_version(Path(root)) if root else "?"
 
 
 def install_entry(project: Path) -> dict | None:
@@ -110,12 +117,12 @@ def main(argv=None) -> int:
     if not claude:
         print(render([("claude", FAIL, "`claude` не найден в PATH и CLAUDE_BIN не задан")]))
         return 1
-    running = charter.plugin_version(CODE_DIR.parents[1])
+    running = session_version()
     rows, new = update(project, ref=a.ref.strip(), claude=claude)
     print(render(rows))
     bad = [r[0] for r in rows if r[1] == FAIL]
     print(f"\nНЕ ГОТОВО — FAIL: {', '.join(bad)}." if bad else f"\nГотово: плагин {new}, службы и присмотр на нём.")
-    print(RESTART if new != running else f"Эта сессия уже на {new}.")
+    print(f"Эта сессия уже на {new}." if running != "?" and running == new else RESTART)
     return 1 if bad else 0
 
 

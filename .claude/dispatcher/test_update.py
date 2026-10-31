@@ -140,12 +140,14 @@ class UpdateOrder(unittest.TestCase):
 
 
 class MainLines(unittest.TestCase):
-    def _main(self, running, rows, new="2.1.0"):
+    """Последняя строка: «уже на» — только когда версия сессии (CLAUDE_PLUGIN_ROOT) совпала с установленной (TK-079)."""
+
+    def _main(self, session, rows, new="2.1.0"):
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as d, redirect_stdout(out), \
                 mock.patch.object(U.P, "resolve_project", return_value=d), \
                 mock.patch.object(U.shutil, "which", return_value="claude"), \
-                mock.patch.object(U.charter, "plugin_version", return_value=running), \
+                mock.patch.object(U, "session_version", return_value=session), \
                 mock.patch.object(U, "update", return_value=(rows, new)):
             rc = U.main(["--ref", "В-13"])
         return rc, out.getvalue()
@@ -156,12 +158,59 @@ class MainLines(unittest.TestCase):
         self.assertIn(U.RESTART, text)
         self.assertIn("Готово", text)
 
+    def test_session_on_old_version_restart_not_already(self):
+        _, text = self._main("2.0.9", [("плагин", D.OK, "2.0.9 → 2.1.0")])
+        self.assertIn(U.RESTART, text)
+        self.assertNotIn("уже на", text)
+
+    def test_no_session_version_restart_not_already(self):
+        _, text = self._main("?", [("плагин", D.OK, "уже последняя версия ?")], new="?")
+        self.assertIn(U.RESTART, text)
+        self.assertNotIn("уже на", text)
+
+    def test_same_version_is_already(self):
+        _, text = self._main("2.1.0", [("плагин", D.OK, "уже последняя версия 2.1.0")])
+        self.assertIn("Эта сессия уже на 2.1.0.", text)
+        self.assertNotIn(U.RESTART, text)
+
     def test_fail_row_is_not_green(self):
         rc, text = self._main("2.1.0", [("doctor", D.FAIL, "FAIL: сторож")])
         self.assertEqual(rc, 1)
         self.assertIn("НЕ ГОТОВО", text)
         self.assertNotIn("Готово:", text)
         self.assertNotIn(U.RESTART, text)
+
+
+class SessionVersion(unittest.TestCase):
+    """Версия сессии — по CLAUDE_PLUGIN_ROOT, а не по каталогу скрипта (TK-079)."""
+
+    def _root(self, d, version):
+        r = Path(d) / version
+        (r / ".claude-plugin").mkdir(parents=True)
+        (r / ".claude-plugin" / "plugin.json").write_text('{"name": "role-play-vibing", "version": "%s"}' % version)
+        return r
+
+    def test_version_from_env_root(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(U.session_version({"CLAUDE_PLUGIN_ROOT": str(self._root(d, "2.0.17"))}), "2.0.17")
+
+    def test_no_env_is_unknown(self):
+        self.assertEqual(U.session_version({}), "?")
+
+    def test_script_from_new_dir_session_on_old_says_restart(self):
+        """Скрипт лежит в каталоге новой версии (2.0.99 — не реальная), переменная указывает на старую → строка о перезапуске.
+        session_version не мокается; CODE_DIR — каталог новой версии (до правки версию сессии брали по нему)."""
+        with tempfile.TemporaryDirectory() as d:
+            old, new = self._root(d, "2.0.98"), self._root(d, "2.0.99")
+            out = io.StringIO()
+            with redirect_stdout(out), mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_ROOT": str(old)}), \
+                    mock.patch.object(U, "CODE_DIR", new / ".claude" / "dispatcher", create=True), \
+                    mock.patch.object(U.P, "resolve_project", return_value=d), \
+                    mock.patch.object(U.shutil, "which", return_value="claude"), \
+                    mock.patch.object(U, "update", return_value=([("плагин", D.OK, "2.0.98 → 2.0.99")], "2.0.99")):
+                U.main(["--ref", "В-32"])
+        self.assertIn(U.RESTART, out.getvalue())
+        self.assertNotIn("уже на", out.getvalue())
 
 
 class PlistPath(unittest.TestCase):
