@@ -18,7 +18,7 @@ UNRELEASED_IDLE_MIN = 10  # очередь пуста дольше этого �
 IDLE_SINCE_KEY = "unreleased_idle_since"  # watch-state.json: когда сторож впервые увидел пустую очередь
 _VERSION_TAG = re.compile(r"v(\d+(?:\.\d+)*)")
 NOT_RELEASE_DIRS = ("docs/", "tools/")  # правки только здесь выпуска не требуют
-FILES_PER_PAGE = 100  # compare отдаёт файлы страницами; полная страница без файлов кода — «не доказано, что только docs»
+FILES_CAP = 300  # потолок `files` в ответе GitHub compare (на 1-й странице; per_page листает коммиты): все 300 из docs/tools — «не доказано, что только docs»
 
 
 def queue_empty() -> bool:
@@ -56,9 +56,9 @@ def idle_minutes(ws: dict, now) -> float:
 
 
 def has_release_files(compare: dict) -> bool:
-    """В ответе GitHub `compare` есть файл вне docs/ и tools/; полная страница файлов без таких — тоже да (хвост не виден)."""
+    """В ответе GitHub `compare` есть файл вне docs/ и tools/; упёршийся в потолок список без таких — тоже да (хвост не виден)."""
     files = [str(f.get("filename", "")) for f in compare.get("files") or [] if isinstance(f, dict)]
-    return len(files) >= FILES_PER_PAGE or any(not name.startswith(NOT_RELEASE_DIRS) for name in files)
+    return len(files) >= FILES_CAP or any(not name.startswith(NOT_RELEASE_DIRS) for name in files)
 
 
 def unreleased_message(ws: dict, now, gh=None) -> "str | None":
@@ -78,7 +78,7 @@ def unreleased_message(ws: dict, now, gh=None) -> "str | None":
         if not tag:
             return ""
         branch = str(gh(f"repos/{repo}")["default_branch"])
-        compare = gh(f"repos/{repo}/compare/{tag}...{branch}?per_page={FILES_PER_PAGE}")
+        compare = gh(f"repos/{repo}/compare/{tag}...{branch}?per_page=1")
         ahead = int(compare.get("ahead_by", 0))
     except Exception:
         return None

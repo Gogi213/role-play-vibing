@@ -233,7 +233,7 @@ class UnreleasedGithubTests(UnreleasedSandbox):
     def test_compares_latest_version_tag_with_origin_main(self):
         out, _ = self.check(0, self.ws)
         self.assertEqual(self.calls, ["repos/owner/repo/tags?per_page=100", "repos/owner/repo",
-                                      "repos/owner/repo/compare/v2.0.14...main?per_page=100"])
+                                      "repos/owner/repo/compare/v2.0.14...main?per_page=1"])
         self.assertIn("2 коммит", out[0].message)
         self.assertIn("v2.0.14", out[0].message)
         self.assertIn("owner/repo", out[0].message)

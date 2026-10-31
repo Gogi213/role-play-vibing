@@ -26,7 +26,7 @@ class DefaultBranchTests(Base):
     def test_branch_comes_from_the_repository(self):
         self.branch = "trunk"
         out, _ = self.check(0, self.ws)
-        self.assertEqual(self.calls[-1], "repos/owner/repo/compare/v2.0.14...trunk?per_page=100")
+        self.assertEqual(self.calls[-1], "repos/owner/repo/compare/v2.0.14...trunk?per_page=1")
         self.assertIn("в trunk", out[0].message)
 
 
@@ -43,8 +43,12 @@ class ReleaseFilesTests(Base):
         self.files = []
         self.assertEqual(self.check(0, self.ws)[0], [])
 
-    def test_a_full_page_of_docs_is_not_proof(self):
-        self.files = [{"filename": f"docs/{i}.md"} for i in range(UNR.FILES_PER_PAGE)]
+    def test_150_docs_files_is_silent(self):
+        self.files = [{"filename": f"docs/{i}.md"} for i in range(150)]
+        self.assertEqual(self.check(0, self.ws)[0], [])
+
+    def test_files_at_github_cap_is_not_proof(self):
+        self.files = [{"filename": f"docs/{i}.md"} for i in range(UNR.FILES_CAP)]
         self.assertEqual(len(self.check(0, self.ws)[0]), 1)
 
     def test_path_prefix_not_substring(self):
