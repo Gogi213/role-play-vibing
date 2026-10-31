@@ -506,7 +506,7 @@ def _after_merge_note(args) -> str:
 
 def cmd_accept(args) -> int:
     """Судья: машиночитаемый вердикт «принято» на конкретной голове PR (TK-079 п.2). Вливает программа (merge_rule), когда
-    на этой голове CI зелёный и PR без конфликтов; сменится голова — вердикт не действует, нужен новый."""
+    на этой голове CI зелёный (при `has_ci: false` не требуется) и PR без конфликтов; сменится голова — вердикт не действует."""
     role = _caller_role()
     if role and role != "judge":
         print("accept: только Судья", file=sys.stderr)
@@ -557,7 +557,7 @@ def cmd_accept(args) -> int:
         return 0
     with T.ticket_lock(path):
         T.append_log(path, "judge", f"ПРИНЯТО PR #{args.pr} на голове {args.sha[:7]}.{ack} "
-                     + (args.text or "Влить, когда CI зелёный и нет конфликта — сделает merge_rule.") + _after_merge_note(args))
+                     + (args.text or merge_rule.accept_note()) + _after_merge_note(args))
         acc = merge_rule.parse_accepted(T.read_ticket(path).header.get("accepted"))
         acc[int(args.pr)] = args.sha  # вердикты по другим PR тикета не трогаем
         # ждём влития: после merged диспетчер разбудит владельца (done или следующий шаг); Судью повторно не будим

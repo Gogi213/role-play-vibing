@@ -112,6 +112,8 @@ def _proof_error(result: str, need: str, pr, sha: str, path: str, form: str, roo
         import ticket as T
         if T.parse_wait_for(form.strip()) is None:
             return f"wait: форма не понята. Допустимо: {T.WAIT_FOR_FORMATS}"
+        if why := T.ci_wait_problem(form.strip()):
+            return f"wait: {why}"
     return ""
 
 

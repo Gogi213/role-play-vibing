@@ -101,7 +101,8 @@ def run_once(repo: str, gh=gh_api) -> list:
 
 def ci_done(repo: str, number: int, gh=gh_api) -> bool:
     """wait_for `ci:<репо>#<PR>`: CI завершён на ТЕКУЩЕЙ голове PR (её спрашиваем у GitHub, не берём из состояния:
-    сразу после пуша состояние ещё хранит старую голову). Не удалось спросить — не готово."""
+    сразу после пуша состояние ещё хранит старую голову). Не удалось спросить — не готово. При `has_ci: false` клеток нет,
+    состояние вечно pending, ожидание не снимется: постановку `ci:` там отказывает `ticket.ci_wait_problem` (TK-084)."""
     ent = load_state().get(f"{repo}#{number}") or {}
     if ent.get("state") not in ("success", "failure"):
         return False
