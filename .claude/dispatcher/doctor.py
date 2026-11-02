@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import plistlib
@@ -162,7 +163,7 @@ def check_notify(opener=urllib.request.urlopen) -> tuple:
         if e.code in (401, 403, 404):
             return "Telegram", FAIL, f"HTTP {e.code}: токен бота не принят — сообщения владельцу не доходят"
         return "Telegram", WARN, f"HTTP {e.code} от api.telegram.org"
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:   # InvalidURL (токен с пробелом), IncompleteRead (обрыв)
         return "Telegram", WARN, f"не смог проверить ({type(e).__name__})"
     return ("Telegram", OK, "бот отвечает") if ok else ("Telegram", FAIL, "ответ без ok — токен бота не принят")
 

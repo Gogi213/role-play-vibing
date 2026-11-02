@@ -37,6 +37,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_telegram_401_is_fail_and_ok_when_bot_answers(self):
         """TK-092: Telegram отдавал 401 двое суток — никто не заметил. Токен проверяется `getMe` (сообщений не шлёт)."""
+        import http.client
         import io
         import urllib.error
 
@@ -47,20 +48,23 @@ class DoctorTests(unittest.TestCase):
             def __exit__(self, *a):
                 return False
 
-        def http(code):
+        def http_err(code):
             def opener(url, timeout):
                 raise urllib.error.HTTPError(url, code, "x", {}, None)
             return opener
 
         env = {"RPV_TG_TOKEN": "t", "RPV_TG_CHAT": "c"}
         with mock.patch.dict(os.environ, env):
-            self.assertEqual(self.real_check_notify(http(401))[1], D.FAIL)
-            self.assertEqual(self.real_check_notify(http(500))[1], D.WARN)
+            self.assertEqual(self.real_check_notify(http_err(401))[1], D.FAIL)
+            self.assertEqual(self.real_check_notify(http_err(500))[1], D.WARN)
             self.assertEqual(self.real_check_notify(lambda url, timeout: (_ for _ in ()).throw(OSError("net")))[1], D.WARN)
+            for exc in (http.client.InvalidURL("nonnumeric port"), http.client.IncompleteRead(b"x")):
+                self.assertEqual(self.real_check_notify(lambda url, timeout, e=exc: (_ for _ in ()).throw(e))[1], D.WARN,
+                                 f"{type(exc).__name__} не должен ронять doctor")
             self.assertEqual(self.real_check_notify(lambda url, timeout: Resp(b'{"ok": true}'))[1], D.OK)
             self.assertEqual(self.real_check_notify(lambda url, timeout: Resp(b'{"ok": false}'))[1], D.FAIL)
         with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith("RPV_TG_")}, clear=True):
-            self.assertEqual(self.real_check_notify(http(401))[1], D.WARN, "не настроен — запроса нет, WARN")
+            self.assertEqual(self.real_check_notify(http_err(401))[1], D.WARN, "не настроен — запроса нет, WARN")
 
     def test_telegram_fail_row_in_doctor_table(self):
         with mock.patch.object(D, "check_notify", return_value=("Telegram", D.FAIL, "HTTP 401")):
