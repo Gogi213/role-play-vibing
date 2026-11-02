@@ -1,13 +1,13 @@
 Тикет: TK-085
-Голова: 03b2bed
+Голова: 59c77d6
 
 Отчёт критика (Sonnet), сжато по пунктам:
-1. События → CW.wake — держится частично: needs_owner/blocked/auth/due/goal-done доходят; done — ноль. «следующий-не-определён» шлёт только TK-087 (PR #200), зависимость не записана. Путь Haiku-отказа (dispatch.py:716-719) ставит blocked и шлёт сигнал без отметки ceo_status_notified (ставит только finish.py:54) — следующий тик notify_status_for_ceo (signals.py:182) шлёт blocked второй раз → второй вызов claude.
-2. notify_goal_closed — держится: статусы как в registry.py:195,202; первый обход только запоминает; state сохраняется save_state (dispatch.py:775); вызов обёрнут (dispatch.py:664-667). Пробел: вызов из тика тестом не закрыт.
-3. Устав/команда/docs без Monitor — не держится: docs/signals.md:47 называет вид goal-step, которого в коде нет; таблица docs/signals.md:20-33 пишет «done — будит», next-ceo «будит» и т.д. — противоречит строке 47 и заказу п.2; docs/configuration.md:77 обещает, что watch-unreleased будит CEO — его нет в EVENT_OF; остатки «Monitor CEO» в dispatch.py:194, project_paths.py:33, docs/img/ceo-signals.svg (вставлена в docs/signals.md:16).
-4. Тесты — держится с пробелами: удаление вызова notify_goal_closed из тика тесты не заметят; связь needs_owner/block_ticket → событие не покрыта.
+1. Двойной blocked при Haiku-отказе — держится: dispatch.py:719 ставит `blocked@{now_iso(now)}`, маркер signals.py:183 `status@updated`, updated пишет write_header_updates (ticket.py:557-558) тем же now; test_tk085.py:131-141 без строки 719 падает.
+2. docs/signals.md по EVENT_OF — не держится: таблица docs/signals.md:21-33 и configuration.md:77 совпадают с ceo_wake.py:41-48, но схема docs/img/ceo-signals.svg (вставлена в docs/signals.md:16) в блоке «будит» держит done · blocked · needs_owner / next-ceo · ждёт-ceo · wait-for / watch-* · работа-стоит/идёт / хвост, стрелка «событие» ведёт к «CEO просыпается: ceo_wake.py»; auth, due, goal-done, следующий-не-определён не названы. Тест проверяет только отсутствие слова Monitor.
+3. Monitor из dispatch.py/project_paths.py/svg — держится (остатки — докстринги тестов, на поведение не влияют).
+4. Тест вызова notify_goal_closed — держится: test_tk085.py:147-158 падает при удалении вызова из _collect_candidates.
+5. Прежнее не сломано — держится: поведение меняет одна строка dispatch.py:719.
+Упущено: вид ceo-не-разбужен не в таблице docs/signals.md (есть в тексте:53); watch-unreleased (В-24) без побудки стал строкой очереди — следует из заказа, сказать CEO; watch-goal-idle (TK-086) нет в EVENT_OF — записано в лог.
 
-Ответ Судьи на 1 (двойной blocked при Haiku-отказе): принял — нарушает договор п.1 «один вызов на событие»; вернуть.
-Ответ Судьи на 3: принял — docs/signals.md в заказе п.3; документ, где done «будит», и несуществующий вид goal-step противоречат заказу п.2; вернуть. Остатки Monitor в комментариях dispatch.py/project_paths.py и svg — в том же возврате (дёшево).
-Ответ Судьи на «следующий-не-определён»: строка совпадает с TK-087 дословно (проверено); зависимость от PR #200 — замечанием, не возвратом.
-Ответ Судьи на 4: тест на вызов notify_goal_closed из tick — в возврат (без него гейт не держит место вызова).
+Ответ Судьи на 2: принял — проверил svg:59-62 сам; схема над таблицей повторяет то, за что вернули 03b2bed («done — будит»), и противоречит заказу п.2; вернуть: блок «будит» привести к видам EVENT_OF, остальные — «строка очереди».
+Ответ Судьи на «упущено»: ceo-не-разбужен строкой таблицы — в тот же возврат (дёшево). watch-unreleased — замечанием, по заказу. watch-goal-idle — связка с PR #198, не возврат.
