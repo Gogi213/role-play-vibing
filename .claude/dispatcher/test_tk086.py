@@ -236,6 +236,15 @@ class TailRealEntryTests(GoalSandbox):
         self.assertIn("«поставить настройку в rpv.json»", self.events(30)[0][0][2])
         self.assertEqual(GI._tail_text("[итог: accept] PR #1@abc хвост CEO: сделать А — и Б — принято"), "сделать А")
 
+    def test_legacy_entry_with_live_field_cut_by_field_and_dash_inside_stays(self):
+        """TK-098: запись до кавычек с полем приёмки после хвоста — режет по полю (путь TK-050, TK-068, TK-082), « — » внутри хвоста остаётся."""
+        tail = "сверить, что токен бота отозван (E-012; исследователь пишет — отозван)"
+        step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail=tail, legacy=True, after=" вживую: docs/x.md")
+        self.assertIn(f"«{tail}»", self.events(30)[0][0][2])
+        entry = T.read_ticket(self.tickets_dir / f"{step}.md").log[-1].text
+        self.assertEqual(GI._tail_text(entry), tail)
+        self.assertEqual(GI._tail_text("[итог: accept] PR #1@abc хвост CEO: сделать А критик: docs/c.md — принято"), "сделать А")
+
     def test_mention_of_the_ticket_is_not_a_tail_ticket(self):
         step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail="поставить настройку в rpv.json")
         self.ticket(ref="В-33", status="todo", title=f"Релиз по итогам {step}", desc=f"выпуск после {step}")  # упомянут, но не хвост
