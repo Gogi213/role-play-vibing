@@ -13,6 +13,7 @@ import notify
 import project as P
 import report as REPORT
 import ticket as T
+from signals import REVIEW_CAP_MARK
 
 CODE_DIR = Path(__file__).resolve().parent  # где лежат report.py и overseer.py
 
@@ -86,6 +87,13 @@ def daily_report(state: dict, now, popen) -> None:
 OWNER_ASK = re.compile(r"^\[итог:\s*ask-owner\]")
 
 
+def _is_owner_question(e) -> bool:
+    """Вопрос владельцу в логе: `[итог: ask-owner]` Судьи или запись диспетчера о потолке возвратов."""
+    text = e.text.strip()
+    return (T.author_is(e.author, "judge") and bool(OWNER_ASK.match(text))) or (
+        e.author.lower() == "dispatcher" and text.startswith(REVIEW_CAP_MARK))
+
+
 def owner_questions(state: dict, now) -> None:
     """Критерии 5 и 9: вопрос Судьи владельцу (тикет `needs_owner`) — сразу одним сообщением в Telegram, а не только строкой
     CEO: сессии CEO может не быть. Повод и сам вопрос; отвечают CEO. Один раз на вопрос (тикет и время записи вопроса)."""
@@ -97,17 +105,18 @@ def owner_questions(state: dict, now) -> None:
             continue
         if tkt.status != "needs_owner":
             continue
-        q = next((e for e in reversed(tkt.log) if T.author_is(e.author, "judge") and OWNER_ASK.match(e.text.strip())), None)
+        q = next((e for e in reversed(tkt.log) if _is_owner_question(e)), None)
         if q is None or sent.get(tkt.id) == q.ts_raw:
             continue
         tried = state.setdefault("owner_try", {})
         if tkt.id in tried and (now - T.parse_dt(tried[tkt.id])).total_seconds() < notify.RETRY_S:
             continue   # прошлая отправка не дошла — повтор не чаще RETRY_S
+        cap = q.text.strip().startswith(REVIEW_CAP_MARK)  # потолок возвратов (диспетчер): причины возвратов длиннее вопроса Судьи
         why = re.search(r"повод: ([\w-]+)", q.text)
         body = re.sub(r"^\[итог:\s*ask-owner\]\s*(?:повод: [\w-]+)?\s*[—-]?\s*", "", q.text.strip())
         title = " ".join((tkt.header.get("title") or tkt.id).split())[:80]
-        if notify.delivered(f"Вопрос вам ({why.group(1) if why else 'без повода'}): «{title}» — {' '.join(body.split())[:400]} "
-                            f"Ответьте CEO.", log_dir=CFG.DISPATCHER_DIR):
+        if notify.delivered(f"Вопрос вам ({'потолок-возвратов' if cap else why.group(1) if why else 'без повода'}): «{title}» — "
+                            f"{' '.join(body.split())[:1500 if cap else 400]} Ответьте CEO.", log_dir=CFG.DISPATCHER_DIR):
             sent[tkt.id] = q.ts_raw
             tried.pop(tkt.id, None)
         else:

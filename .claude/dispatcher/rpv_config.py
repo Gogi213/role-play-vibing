@@ -64,6 +64,7 @@ KEYS = {
     "watch_unreleased": (lambda v: isinstance(v, bool), "true или false"),
     "has_ci": (lambda v: isinstance(v, bool), "true или false"),
     "critic_before_accept": (lambda v: isinstance(v, bool), "true или false"),
+    "tail_fields_only": (lambda v: isinstance(v, bool), "true или false"),
     "require_probe": (lambda v: isinstance(v, bool), "true или false"),
     "probe_threshold_min": (_int_min, "целое ≥ 1, минуты"),
     "probe_kinds": (lambda v: _str_list(v) and set(v) <= set(probe_mod.ALLOWED_KINDS), "список из host, file, job (умолчание host, job)"),
