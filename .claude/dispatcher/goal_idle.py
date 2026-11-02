@@ -21,7 +21,8 @@ import report as RP  # noqa: E402 — GOAL_REF и last_verdict: та же мер
 import ticket as T  # noqa: E402
 
 GOAL_IDLE_MIN = 10  # умолчание, как у `unreleased.UNRELEASED_IDLE_MIN`; точное число — за Судьёй (В-4/В-10), меняется ключом `goal_idle_min`
-TAIL_MARK = "хвост CEO:"  # пометка приёмки в логе: `tickets._tail_ack` пишет « хвост CEO: <что>»
+TAIL_MARK = "хвост CEO:"  # пометка приёмки в логе: `tickets._tail_ack` пишет « хвост CEO: «<что>»»
+TAIL_QUOTED = re.compile(r"\s*«([^»]*)»")  # явная граница хвоста; записи до TK-098 без кавычек читаются по полям или « — »
 TAIL_FIELDS = re.compile(r"\s(?:вживую|критик|проверки договора): ")  # поля приёмки после текста хвоста (`tickets.cmd_accept`)
 TAIL_GOAL = "хвост"  # вместо номера цели в ключе события и в находке
 TAIL_CLEARED = re.compile(r"хвост\s+(?:снят|закрыт)", re.IGNORECASE)  # другие слова о хвосте (нет, остаётся) его не снимают
@@ -78,8 +79,12 @@ def _tail_handled(tkt, entry, tickets) -> bool:
 
 
 def _tail_text(entry_text: str) -> str:
-    """Текст хвоста из записи приёмки: от «хвост CEO:» до следующего поля приёмки, иначе до « — » перед выводом Судьи."""
+    """Текст хвоста из записи приёмки: между «…» после «хвост CEO:»; в старой записи без кавычек — до следующего поля
+    приёмки, иначе до « — » перед выводом Судьи."""
     rest = entry_text.split(TAIL_MARK, 1)[1]
+    quoted = TAIL_QUOTED.match(rest)
+    if quoted:
+        return quoted.group(1).strip()
     field = TAIL_FIELDS.search(rest)
     return (rest[:field.start()] if field else rest.split(" — ", 1)[0]).strip()
 
