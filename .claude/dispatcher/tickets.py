@@ -475,7 +475,7 @@ def _set_due(path: Path, due, said: str = "") -> None:
         if not (tkt.header.get("due_first") or "").strip():
             upd["due_first"] = iso
         T.write_header_updates(path, upd, stamp_updated=False)
-        T.append_log(path, "ceo", f"Срок владельцу: {iso}" + (f" — «{' '.join(said.split())}»" if said.strip() else ""))
+        T.append_log(path, T.service_author("ceo"), f"Срок владельцу: {iso}" + (f" — «{' '.join(said.split())}»" if said.strip() else ""))
 
 
 def cmd_due(args) -> int:
@@ -721,7 +721,7 @@ def cmd_allow(args) -> int:
                 print(f"{args.id}: согласия на публикацию не было — снимать нечего")
                 return 0
             T.write_header_updates(path, {"allow": ""}, stamp_updated=False)
-            T.append_log(path, "ceo", "согласие на публикацию снято")
+            T.append_log(path, T.service_author("ceo"), "согласие на публикацию снято")
         print(f"{args.id}: согласие на публикацию снято")
         return 0
     ref = (args.ref or "").strip()
@@ -734,7 +734,7 @@ def cmd_allow(args) -> int:
         return 1
     with T.ticket_lock(path):
         T.write_header_updates(path, {"allow": f"publish ({ref})"}, stamp_updated=False)
-        T.append_log(path, "ceo", f"согласие владельца на публикацию по этому тикету ({ref}): выпуск, слияние PR, пуш в "
+        T.append_log(path, T.service_author("ceo"), f"согласие владельца на публикацию по этому тикету ({ref}): выпуск, слияние PR, пуш в "
                      f"основную ветку и теги, публикация пакетов")
     print(f"{args.id}: allow: publish ({ref})")
     return 0

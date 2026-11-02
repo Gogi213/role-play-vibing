@@ -78,12 +78,12 @@ def quoted(entry_text: str, reply: str) -> bool:
 
 def late_entries(tkt, role: str, started: datetime, reply: str = "") -> list:
     """Записи `ceo`/`judge` позже старта сессии роли, на которые она не ответила цитатой: ни следующей своей записью в логе,
-    ни текстом итога (`reply`)."""
+    ни текстом итога (`reply`). Служебные записи кода (`T.is_service`: срок владельцу, согласие на публикацию) — не заказ."""
     cut = started.replace(microsecond=0)
     own = [e for e in tkt.log if T.author_is(e.author, role)]
     out = []
     for e in tkt.log:
-        if e.ts <= cut or not any(T.author_is(e.author, a) for a in ORDER_AUTHORS):
+        if e.ts <= cut or T.is_service(e.author) or not any(T.author_is(e.author, a) for a in ORDER_AUTHORS):
             continue
         answers = [o.text for o in own if o.ts >= e.ts and o is not e] + [reply]
         if not any(quoted(e.text, a) for a in answers):

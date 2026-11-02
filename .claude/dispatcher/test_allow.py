@@ -70,7 +70,7 @@ class AllowTests(unittest.TestCase):
         tkt = self.tkt()
         self.assertEqual(tkt.header["allow"], "publish (В-1)")
         self.assertEqual(tkt.header["updated"], before)         # метка «обновлён» не двигается: роли это не повод просыпаться
-        self.assertEqual(tkt.log[-1].author, "ceo")
+        self.assertEqual(tkt.log[-1].author, T.service_author("ceo"))  # служебная запись: precheck не считает её заказом
         self.assertIn("В-1", tkt.log[-1].text)
         self.assertIn("allow: publish (В-1)", self.path.read_text(encoding="utf-8").split("\n---\n", 1)[0])
 
@@ -123,7 +123,7 @@ class AllowTests(unittest.TestCase):
         self.assertIn("снято", out)
         tkt = self.tkt()
         self.assertEqual(tkt.header["allow"], "")
-        self.assertEqual((tkt.log[-1].author, tkt.log[-1].text), ("ceo", "согласие на публикацию снято"))
+        self.assertEqual((tkt.log[-1].author, tkt.log[-1].text), (T.service_author("ceo"), "согласие на публикацию снято"))
         n = len(tkt.log)
         code, out, _ = self.run_cli("allow", self.tid, "--revoke")                           # снимать нечего — записи нет
         self.assertEqual(code, 0)

@@ -116,6 +116,23 @@ class LateOrderTests(unittest.TestCase):
         self.assertIn("после старта сессии", self.refused("engineer", "pr", pr=7, sha=SHA))
         self.assertNotIn("[итог:", self.tkt().log[-1].text)
 
+    def test_service_entries_of_code_are_not_orders(self):
+        """Срок владельцу и согласие на публикацию пишет код от имени ceo (~9 из 177 сдач) — не заказ, сдача проходит."""
+        os.environ.pop("RPV_ROLE", None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(TR.TK.cmd_due(type("A", (), dict(id=self.tid, by="2099-01-02T18:00+04:00", said="к шести"))()), 0)
+        T.append_log(self.path, T.service_author("ceo"), "согласие владельца на публикацию по этому тикету (В-1): выпуск",
+                     now=NOW + timedelta(seconds=70))
+        due = self.tkt().log[-2]
+        self.assertTrue(T.is_service(due.author) and T.author_is(due.author, "ceo"))
+        self.assertGreater(due.ts, NOW)  # запись позже старта — именно её раньше считали заказом
+        self.assertEqual(self.res("engineer", "done", path="out.md"), 0)
+
+    def test_plain_ceo_entry_stays_an_order_next_to_service_one(self):
+        self.say("ceo (служебная)", "Срок владельцу: 2099-01-02T18:00+04:00", plus=30)
+        self.say("ceo", ORDER)
+        self.assertIn("сначала проверь второй путь", self.refused("engineer", "done", path="out.md"))
+
     def test_judge_entry_blocks_too(self):
         self.say("judge", "Возврат: не проверен второй писатель сигнала в watch.py")
         self.assertIn("judge", self.refused("engineer", "done", path="out.md"))
