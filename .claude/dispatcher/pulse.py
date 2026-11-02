@@ -31,8 +31,15 @@ RANK = {"none": 0, "owner": 1, "stuck": 2, "work": 3}  # худшее за кл�
 
 
 def limit(key: str) -> int:
-    v = P.setting(key, LIMITS[key], root=CFG.PROJECT_ROOT)
-    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else LIMITS[key]
+    """Порог из `.claude/rpv.json`; не число ≥ 0 — умолчание. Ключи записаны буквально: по ним сверяется docs/configuration.md."""
+    root = CFG.PROJECT_ROOT
+    got = {"pulse_dead_min": P.setting("pulse_dead_min", LIMITS["pulse_dead_min"], root=root),
+           "pulse_unserved_min": P.setting("pulse_unserved_min", LIMITS["pulse_unserved_min"], root=root),
+           "pulse_ci_red_min": P.setting("pulse_ci_red_min", LIMITS["pulse_ci_red_min"], root=root),
+           "pulse_loop_returns": P.setting("pulse_loop_returns", LIMITS["pulse_loop_returns"], root=root),
+           "pulse_loop_errors": P.setting("pulse_loop_errors", LIMITS["pulse_loop_errors"], root=root),
+           "pulse_loop_window_min": P.setting("pulse_loop_window_min", LIMITS["pulse_loop_window_min"], root=root)}[key]
+    return got if isinstance(got, int) and not isinstance(got, bool) and got >= 0 else LIMITS[key]
 
 
 def cell_index(now: datetime) -> int:
