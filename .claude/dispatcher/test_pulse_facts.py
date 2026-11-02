@@ -36,6 +36,13 @@ class GoalCardTests(FactsBase):
         card = F.goal_card(self.read(), [b, a])
         self.assertEqual((card["id"], card["step"], card["steps"]), ("G-002", 2, 3))
 
+    def test_steps_total_comes_from_the_line_of_the_highest_step(self):
+        self.goal("G-002")
+        a = self.ticket(ref="G-002", status="done", desc="Шаг 1 из 3 цели G-002.")
+        b = self.ticket(ref="G-002", status="in_progress", desc="Шаг 2 из 4 цели G-002.")
+        card = F.goal_card(self.read(), [a, b])
+        self.assertEqual((card["step"], card["steps"]), (2, 4), "«из M» берётся из строки шага 2, а не из первой найденной")
+
     def test_goal_without_plan_has_no_step(self):
         tid = self.ticket(status="in_progress")
         card = F.goal_card(self.read(), [tid])

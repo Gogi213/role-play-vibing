@@ -811,7 +811,7 @@ class DispatchRunTests(unittest.TestCase):
         t0 = dt("2026-10-06T12:00:00+04:00")
         D.tick(t0)
         data = json.loads(self.dispatcher_dir.joinpath("pulse.json").read_text(encoding="utf-8"))
-        self.assertEqual((data["version"], len(data["cells"]), data["state"]), (1, 96, "ok"))
+        self.assertEqual((data["version"], len(data["cells"]), data["state"]), (2, 96, "ok"))
 
     def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
         t0 = dt("2026-10-06T12:00:00+04:00")

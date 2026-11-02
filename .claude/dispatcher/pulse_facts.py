@@ -51,7 +51,7 @@ def goal_card(tickets, focus: list) -> dict | None:
         marks = [STEP_MARK.search(t.description) for t in tickets if t.status != "stopped"]
         marks = [(int(m.group(1)), int(m.group(2))) for m in marks if m and m.group(3) == gid]
         if marks:
-            card["step"], card["steps"] = max(n for n, _ in marks), marks[0][1]
+            card["step"], card["steps"] = max(marks)  # номер и «из M» — из одной строки (наибольший номер)
         return card
     return None
 
