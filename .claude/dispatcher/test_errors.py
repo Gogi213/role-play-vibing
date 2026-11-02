@@ -175,6 +175,70 @@ class ErrorsTests(unittest.TestCase):
             self.assertEqual(self.run_cli("list")[0], 0)
             self.assertIn(eid, self.run_cli("show", eid)[1])
 
+    # --- retire: решение владельца сняло то, что закрепляла проверка (вырез кода вместе с тестом)
+    def decided(self, *nums):
+        f = self.root / ".claude" / "decisions.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("".join(f"## В-{n} · 2026-11-02 23:05\n\nСуть: вырез\n\n" for n in nums), encoding="utf-8")
+
+    def test_retire_takes_the_error_out_of_the_gate_and_records_the_decision(self):
+        self.decided(47)
+        eid = self.fixed_fast("python tools/flag.py", "Страж ловит запись после cd")
+        (self.root / "flag.txt").write_text("x", encoding="utf-8")
+        self.assertIn("регрессия", E.gate(self.root, "TK-5"))                 # проверка красная — приёмка стоит
+        code, out, err = self.run_cli("retire", eid, "--decision", "В-47", "--why", "вырез снял слежение за cd")
+        self.assertEqual((code, err), (0, ""), err)
+        self.assertIn("retired решением В-47", out)
+        h = self.head(eid)
+        self.assertEqual((h["status"], h["decision"], h["retired_why"]), ("retired", "В-47", "вырез снял слежение за cd"))
+        self.assertRegex(h["retired"], r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
+        self.assertEqual(E.gate(self.root, "TK-5"), "")                         # приёмка больше не гоняет её
+        self.assertEqual(self.run_cli("run"), (0, "исправленных ошибок с проверками нет", ""))
+        self.assertIn(f"{eid} [retired] Страж ловит запись после cd", self.run_cli("list")[1])
+        self.assertEqual(self.run_cli("list", "--open")[1], "")
+
+    def test_retire_leaves_other_fixed_errors_checked(self):
+        self.decided(47)
+        a = self.fixed_fast("python tools/flag.py", "Снимаемая")
+        b = self.fixed_fast("python tools/flag.py", "Остаётся")
+        self.assertEqual(self.run_cli("retire", a, "--decision", "В-47", "--why", "вырез")[0], 0)
+        (self.root / "flag.txt").write_text("x", encoding="utf-8")
+        msg = E.gate(self.root, "TK-5")
+        self.assertIn(f"{b} «Остаётся»", msg)
+        self.assertNotIn(a, msg)
+
+    def test_retire_refuses_a_decision_that_is_not_in_the_registry_or_a_missing_reason(self):
+        self.decided(47)
+        eid = self.fixed_fast()
+        path = E.errors_dir(self.root) / f"{eid}.md"
+        before = path.read_text(encoding="utf-8")
+        for args, word in ((("--decision", "В-48", "--why", "x"), "В-48"), (("--decision", "47", "--why", "x"), "47"),
+                           (("--decision", "G-001", "--why", "x"), "G-001"), (("--decision", "B-47", "--why", "x"), "B-47"),
+                           (("--decision", "", "--why", "x"), "—"),
+                           (("--decision", "В-47", "--why", "  "), "--why")):
+            code, out, err = self.run_cli("retire", eid, *args)
+            self.assertEqual((code, out), (1, ""), args)
+            self.assertIn(word, err, args)
+            self.assertEqual(path.read_text(encoding="utf-8"), before, args)
+        self.assertEqual(self.run_cli("retire", "E-077", "--decision", "В-47", "--why", "x")[0], 1)
+
+    def test_retire_is_for_the_judge_or_a_session_without_role_and_only_once(self):
+        self.decided(47)
+        eid = self.fixed_fast()
+        path = E.errors_dir(self.root) / f"{eid}.md"
+        before = path.read_text(encoding="utf-8")
+        for role in ("researcher", "engineer", "ceo"):
+            with mock.patch.dict(os.environ, {"RPV_ROLE": role}):
+                code, out, err = self.run_cli("retire", eid, "--decision", "В-47", "--why", "x")
+            self.assertEqual((code, out), (1, ""), role)
+            self.assertIn("ошибку снимает Судья", err, role)
+            self.assertEqual(path.read_text(encoding="utf-8"), before, role)
+        with mock.patch.dict(os.environ, {"RPV_ROLE": "judge"}):
+            self.assertEqual(self.run_cli("retire", eid, "--decision", "В-47", "--why", "x")[0], 0)
+        code, _, err = self.run_cli("retire", eid, "--decision", "В-47", "--why", "x")
+        self.assertEqual(code, 1)
+        self.assertIn("уже снята", err)
+
     # --- fix: проверка запускается, и только красная до и зелёная после закрывает ошибку
     def test_fix_runs_check_and_records_it(self):
         eid = self.added("e")                                              # added_sha = C0, где ошибка есть
