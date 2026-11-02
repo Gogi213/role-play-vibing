@@ -63,6 +63,9 @@ class DoctorTests(unittest.TestCase):
                                  f"{type(exc).__name__} не должен ронять doctor")
             self.assertEqual(self.real_check_notify(lambda url, timeout: Resp(b'{"ok": true}'))[1], D.OK)
             self.assertEqual(self.real_check_notify(lambda url, timeout: Resp(b'{"ok": false}'))[1], D.FAIL)
+            for body in (b"null", b"[1]", b'"x"', b"1"):   # корректный JSON не-объект: .get падал AttributeError
+                self.assertEqual(self.real_check_notify(lambda url, timeout, b=body: Resp(b))[1], D.FAIL,
+                                 f"ответ {body!r} не должен ронять doctor")
         with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith("RPV_TG_")}, clear=True):
             self.assertEqual(self.real_check_notify(http_err(401))[1], D.WARN, "не настроен — запроса нет, WARN")
 

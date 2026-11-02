@@ -158,7 +158,8 @@ def check_notify(opener=urllib.request.urlopen) -> tuple:
         return "Telegram", WARN, "не настроен (RPV_TG_TOKEN/RPV_TG_CHAT) — владелец не получит тревоги и вопросы"
     try:
         with opener(notify.ME.format(token=token), timeout=10) as r:
-            ok = json.loads(r.read().decode("utf-8")).get("ok")
+            data = json.loads(r.read().decode("utf-8"))
+        ok = data.get("ok") if isinstance(data, dict) else None   # null, [1], "x" — тоже «ответ без ok», не трейсбек
     except urllib.error.HTTPError as e:
         if e.code in (401, 403, 404):
             return "Telegram", FAIL, f"HTTP {e.code}: токен бота не принят — сообщения владельцу не доходят"
