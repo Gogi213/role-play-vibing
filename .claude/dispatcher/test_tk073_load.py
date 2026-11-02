@@ -1,5 +1,4 @@
-"""TK-073 (В-31, п.4–5): `wait --check` (проверка нагрузки без записи), снятие отметки OOM с --why, хвост лога не даёт отметку,
-запуск критика в запуске Судьи — строка в critic-runs.log с ценой."""
+"""TK-073 (В-31, п.4–5): `wait --check` (проверка нагрузки без записи), снятие отметки OOM с --why, хвост лога не даёт отметку,"""
 from __future__ import annotations
 
 import atexit
@@ -18,7 +17,6 @@ os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import critic_gate as CG  # noqa: E402
 import hostload as HL  # noqa: E402
 import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
@@ -126,39 +124,6 @@ class LoadCommandTests(unittest.TestCase):
             watch._triage_job(self.path, self.tkt(), T.parse_wait_for("job:gpu1:7"), {}, NOW,
                               lambda alias, jid: ("failed", "Out of memory: Killed process 4242 (python)"), {}, {"gpu1": [job]})
         self.assertIsNone(HL.oom_mark(self.tid))
-
-
-class CriticRunTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        self.addCleanup(self.tmp.cleanup)
-
-    def rows(self):
-        path = CG.log_path(self.root)
-        return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
-
-    def test_sonnet_in_judge_run_is_logged_with_cost(self):
-        usage = {"claude-opus-5-5": {"costUSD": 1.0}, "claude-sonnet-5-5": {"costUSD": 0.25}}
-        self.assertTrue(CG.record_run(self.root, "TK-9", "run-1.json", usage, {"critic": 1}))
-        (row,) = self.rows()
-        self.assertEqual((row["kind"], row["tid"], row["cost_usd"]), ("run", "TK-9", 0.25))  # опус в цену критика не входит
-        self.assertEqual(row["subagent_stats"], {"critic": 1})
-
-    def test_no_sonnet_means_no_critic_run(self):
-        self.assertFalse(CG.record_run(self.root, "TK-9", "run-1.json", {"claude-opus-5-5": {"costUSD": 1.0}}))
-        self.assertEqual(self.rows(), [])
-
-    def test_same_run_not_duplicated(self):
-        usage = {"claude-sonnet-5-5": {"costUSD": 0.25}}
-        CG.record_run(self.root, "TK-9", "run-1.json", usage)
-        CG.record_run(self.root, "TK-9", "run-1.json", usage)
-        CG.record_run(self.root, "TK-9", "run-2.json", usage)
-        self.assertEqual(len(self.rows()), 2)
-
-    def test_run_rows_do_not_count_as_skips_or_reports(self):
-        CG.record_run(self.root, "TK-9", "run-1.json", {"claude-sonnet-5-5": {"costUSD": 0.25}})
-        self.assertEqual(CG.skips(self.root, NOW - timedelta(days=1), NOW + timedelta(days=1)), (0, 0))
 
 
 if __name__ == "__main__":

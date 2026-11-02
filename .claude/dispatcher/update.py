@@ -86,6 +86,7 @@ def update(project: Path, run=run_cmd, installed=install_entry, ref: str = "",
     proj = ["--project", str(project)]
     step("start", *run([python, str(code / "start.py"), *proj], 120), "диспетчер и сторож запущены из " + new)
     step("присмотр ОС", *run([python, str(code / "supervise.py"), "--install", *proj], 120), "перезаписан из " + new)
+    step("реестр", *run([python, str(code / "registry.py"), *proj, "link"], 60), "в контекст идёт decisions-active.md")
     if new == old:
         rows.append(("уставы", OFF, "версия не менялась — синк не нужен"))
     elif not ref:

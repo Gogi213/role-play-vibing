@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Реестр владельца: решения (В-N) и цели (G-NNN). Пишет только CEO — сам или помощником `secretary`, словами
-владельца дословно; запуски ролей (`RPV_ROLE`) только читают: команда им отказывает, страж закрывает файлы. Только stdlib.
+"""Реестр владельца: решения (В-N) и цели (G-NNN). Пишет только CEO, слова владельца — дословно; запуски ролей (`RPV_ROLE`) только читают: команда им отказывает, страж закрывает файлы. Только stdlib.
 
     registry.py [--project <путь>] decide --quote "<дословно>" --gist "<одна строка>" [--question "<вопрос CEO>"] [--replaces В-N] [--at <время>]
     registry.py decide --quote - --gist "..." <<'EOF'      # цитата с кавычками и переносами — из stdin как есть
@@ -12,15 +11,20 @@
     registry.py repeat В-N --quote -                 # владелец повторил уже принятое — отметка в блоке, нового В-N нет
     registry.py show В-N|G-NNN
     registry.py list [--open]
+    registry.py active                               # пересобрать .claude/decisions-active.md (только действующие решения)
+    registry.py link                                 # active + CLAUDE.md проекта подключает decisions-active.md вместо decisions.md
 
 Слово владельца короче 15 знаков («да», «1 - да») — ответ на вопрос CEO: без `--question` (вопрос дословно) решение не пишется,
-суть короткого ответа не проверить. Из сессии CEO `decide` пускает только помощник `secretary` (страж, TK-007).
+суть короткого ответа не проверить.
 
 `--step` (повторяемый, по порядку) — план шагов цели: CEO показывает его владельцу вместе с целью; тикет следующего шага после
 приёмки предыдущего диспетчер заводит сам (`goal_steps.py`, TK-087).
 
 Файлы: `<проект>/.claude/decisions.md` (блок на решение, новое — в конец) и `<проект>/.claude/goals/G-NNN.md` (шапка
 `id/status/set/accepted` + цитата, критерии, бюджет). Номер ставит команда: следующий после наибольшего в реестре.
+`decisions-active.md` — то, что уходит в контекст каждой сессии (CLAUDE.md подключает его): записи, которых никто не заменил
+(`Заменяет: В-N` у более поздних), «Повторено владельцем» опущено. Пересобирается при каждой записи и командами `active`/`link`;
+руками не править, полная история остаётся в `decisions.md`.
 Время — `ГГГГ-ММ-ДД ЧЧ:ММ` (по умолчанию сейчас, местное). Ссылка тикета `--ref` — номер отсюда или цитата владельца.
 """
 from __future__ import annotations
@@ -47,6 +51,17 @@ def decisions_file(root: Path) -> Path:
     return root / ".claude" / "decisions.md"
 
 
+ACTIVE_NAME = "decisions-active.md"
+ACTIVE_LINK = "@.claude/decisions-active.md"
+FULL_LINK = "@.claude/decisions.md"
+ACTIVE_HEAD = ("# Действующие решения владельца (собрано из .claude/decisions.md — там полный реестр с историей; "
+               "руками не править)")
+
+
+def active_file(root: Path) -> Path:
+    return root / ".claude" / ACTIVE_NAME
+
+
 def goals_dir(root: Path) -> Path:
     return root / ".claude" / "goals"
 
@@ -71,6 +86,74 @@ def decisions(root: Path) -> dict[str, str]:
     marks = list(DECISION.finditer(text))
     return {f"В-{m.group(1)}": text[m.start():(marks[i + 1].start() if i + 1 < len(marks) else len(text))].rstrip()
             for i, m in enumerate(marks)}
+
+
+def active_decisions(root: Path) -> list[str]:
+    """Номера решений, которых никто не заменил (`Заменяет: В-N, В-M` в любом блоке), в порядке файла."""
+    blocks = decisions(root)
+    gone = {f"В-{n}" for b in blocks.values() for ln in b.splitlines()
+            if ln.startswith("Заменяет:") for n in re.findall(r"В-(\d+)", ln)}
+    return [k for k in blocks if k not in gone]
+
+
+def _compact(block: str) -> str:
+    lines = block.splitlines()
+    m = DECISION.match(lines[0])
+    quote = " ⏎ ".join(ln[1:].strip() for ln in lines[1:] if ln.startswith(">") and ln[1:].strip())
+    gist = next((ln[6:].strip() for ln in lines if ln.startswith("Суть: ")), "")
+    ask = question_of(block)
+    return "\n".join([f"В-{m.group(1)} · {m.group(2)} · {gist}", *([f"> {quote}"] if quote else []),
+                      *([f"Вопрос CEO: {ask}"] if ask else [])])
+
+
+def rebuild_active(root: Path) -> bool:
+    """Пересобрать `.claude/decisions-active.md` из реестра; True — файл изменился. Реестра нет — файла нет."""
+    f = active_file(root)
+    if not decisions_file(root).exists():
+        return False
+    blocks = decisions(root)
+    text = "\n\n".join([ACTIVE_HEAD, *(_compact(blocks[k]) for k in active_decisions(root))]) + "\n"
+    if f.exists() and f.read_text(encoding="utf-8") == text:
+        return False
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text, encoding="utf-8")
+    return True
+
+
+def link_claude_md(root: Path) -> str:
+    """CLAUDE.md проекта подключает `decisions-active.md`, а не весь реестр: строку `@.claude/decisions.md` заменяет
+    (идемпотентно, чужие строки не трогает). Возвращает, что сделано: "" — ничего."""
+    f = root / "CLAUDE.md"
+    text = f.read_text(encoding="utf-8") if f.exists() else ""
+    lines = text.split("\n")
+    has_new = any(ln.strip() == ACTIVE_LINK for ln in lines)
+    if not any(ln.strip() == FULL_LINK for ln in lines):
+        if has_new:
+            return ""
+        sep = "" if not text.strip() else ("\n" if text.endswith("\n") else "\n\n")
+        f.write_text(text + sep + ACTIVE_LINK + "\n", encoding="utf-8")
+        return f"CLAUDE.md +{ACTIVE_LINK}"
+    out = []
+    for ln in lines:
+        if ln.strip() != FULL_LINK:
+            out.append(ln)
+        elif not has_new:
+            out.append(ACTIVE_LINK)
+            has_new = True
+    f.write_text("\n".join(out), encoding="utf-8")
+    return f"CLAUDE.md: {FULL_LINK} → {ACTIVE_LINK}"
+
+
+def cmd_active(a, root: Path) -> int:
+    print(f"{ACTIVE_NAME}: " + ("пересобран" if rebuild_active(root) else "без изменений")
+          + f", действующих {len(active_decisions(root))} из {len(decisions(root))}")
+    return 0
+
+
+def cmd_link(a, root: Path) -> int:
+    rebuild_active(root)
+    print(link_claude_md(root) or f"CLAUDE.md уже подключает {ACTIVE_NAME}")
+    return 0
 
 
 def goal_header(path: Path) -> dict:
@@ -176,6 +259,7 @@ def cmd_decide(a, root: Path) -> int:
             "" if prev.endswith("\n\n") else "\n" if prev.endswith("\n") else "\n\n")
     with f.open("a", encoding="utf-8") as w:
         w.write(lead + "\n".join(block) + "\n")
+    rebuild_active(root)
     print(f"В-{n}")
     return 0
 
@@ -276,6 +360,7 @@ def cmd_repeat(a, root: Path) -> int:
     line = f"{REPEAT} · {_now(a.at)}: «{' '.join(a.quote.split())}»"
     f.write_text(text[:marks[i].start()] + block + "\n" + line + "\n" + ("\n" + after.lstrip("\n") if after.strip() else ""),
                  encoding="utf-8")
+    rebuild_active(root)
     print(f"{a.ref}: повтор №{repeats(root).get(a.ref, 0)}")
     return 0
 
@@ -332,6 +417,8 @@ def main(argv=None) -> int:
     rp.add_argument("--quote", required=True, help="слова владельца дословно; «-» — из stdin")
     rp.add_argument("--at", default=None)
     rp.set_defaults(func=cmd_repeat)
+    sub.add_parser("active", help="пересобрать decisions-active.md").set_defaults(func=cmd_active)
+    sub.add_parser("link", help="active + CLAUDE.md подключает decisions-active.md").set_defaults(func=cmd_link)
     li = sub.add_parser("list")
     li.add_argument("--open", action="store_true", help="только открытые цели")
     li.set_defaults(func=cmd_list)

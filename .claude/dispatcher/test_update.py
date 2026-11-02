@@ -66,7 +66,7 @@ class UpdateOrder(unittest.TestCase):
         rows, new = _update(f, ref="В-13")
         self.assertEqual(new, "2.1.0")
         self.assertEqual(f.steps(), ["plugin marketplace update", "plugin update role-play-vibing@role-play-vibing",
-                                     "start.py", "supervise.py", "tickets.py charter", "doctor.py"])
+                                     "start.py", "supervise.py", "registry.py", "tickets.py charter", "doctor.py"])
         for c in f.cmds[2:]:
             self.assertTrue(c[1].replace("\\", "/").startswith("/cache/2.1.0/"), c)
         sup = next(c for c in f.cmds if c[1].endswith("supervise.py"))
@@ -87,7 +87,7 @@ class UpdateOrder(unittest.TestCase):
         f = Fake(old="2.0.9", new="2.0.9")
         rows, _ = _update(f, ref="В-13")
         self.assertEqual(f.steps(), ["plugin marketplace update", "plugin update role-play-vibing@role-play-vibing",
-                                     "start.py", "supervise.py", "doctor.py"])
+                                     "start.py", "supervise.py", "registry.py", "doctor.py"])
         self.assertIn("уже последняя версия", dict((r[0], r[2]) for r in rows)["плагин"])
         self.assertEqual(dict((r[0], r[1]) for r in rows)["уставы"], D.OFF)
 

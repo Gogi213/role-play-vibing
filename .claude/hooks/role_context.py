@@ -280,18 +280,16 @@ def full_context(role, title, source, hook_in, reserve=0):
             verbs, proofs = "|".join(routes.verbs_for(role)), f" (доказательство: {routes.proofs_for(role)}; --why — не длиннее 200 знаков)"
     except Exception:
         pass
-    head.append(f"Связь с командой — только лог тикета (готовая команда, путь абсолютный): итог шага — `{tcmd} "
-                f"result <ID> <{verbs}> --why \"...\"`{proofs} (кого будить дальше "
-                f"решает таблица маршрутов); промежуточная заметка — `{tcmd} comment <ID> --author {role} --text "
-                "\"...\"` (@упоминания никого не будят)."
-                + (" Остальные подкоманды (`new`, `start`, `stop`, `allow`, `allow-delete`, `status`) — после `--project \"...\"` той же командой."
-                   if role == "ceo" else ""))
+    wait = (" Долгая работа — `T wait <ID> <host:алиас:путь | file:путь | ticket:ID> --by ЧЧ:ММ` (срок обязателен), "
+            "сессию не держать." if role != "ceo" else " Остальные подкоманды (`new`, `start`, `stop`, `allow`, `status`) — тем же `T`.")
+    head.append(f"Команда тикетов `T` = `{tcmd}`. Связь с командой — лог тикета: итог шага — `T result <ID> "
+                f"<{verbs}> --why \"...\"`{proofs}; заметка без смены хода — `T comment <ID> --author {role} --text \"...\"`." + wait)
     if role == "ceo":
         head.append(f"Реестр владельца (решения В-N, цели G-NNN): `{tickets_command('registry.py')} "
-                    "decide|goal|repeat|accept-goal|show|list` — пишет помощник `secretary`; передай ему эту команду.")
-    head.append(f"Ошибки (исправленной ошибку объявляет Судья: проверка падала до исправления и зелёная сейчас; приёмка сама "
-                f"гоняет все): `{tickets_command('errors.py')} add --title \"...\" --ticket <ID>` · `fix E-N --check "
-                "\"python tools/x.py\" [--before <коммит>]` (только Судья) · `run` · `list`.")
+                    "decide|goal|repeat|accept-goal|show|list` — CEO пишет сам, слово владельца дословно.")
+    head.append(f"Ошибки (исправленной объявляет Судья: проверка падала до правки, зелёная после): "
+                f"`{tickets_command('errors.py')} add --title \"...\" --ticket <ID>`"
+                + (" · `fix E-N --check \"python tools/x.py\" [--before <коммит>]`" if role == "judge" else "") + ".")
     if role != "ceo":
         head.append("Общую память проекта (CLAUDE.md, решения и цели владельца, автопамять) пишет только `CEO`; ты "
                     "работаешь по своему тикету.")

@@ -1,4 +1,4 @@
-"""Общее для стендов замера служебных моделей: `tools/helper_eval.py` (помощники CEO) и `tools/overseer_eval.py` (Надзиратель).
+"""Общее для стенда замера служебных моделей `tools/overseer_eval.py` (Надзиратель).
 Печать в UTF-8, замок записи результатов, чтение/дозапись `*.jsonl`, разбор JSON-ответа `claude -p --output-format json`."""
 from __future__ import annotations
 

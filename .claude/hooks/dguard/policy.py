@@ -129,17 +129,6 @@ def charter_table_edit(tool, ti):
     return bool(rows) and all(ln.lstrip().startswith("|") for ln in rows)
 
 
-REGISTRY_DECIDE = re.compile(r"""registry\.py["']?(?:\s+--project(?:=|\s+)(?:"[^"]*"|'[^']*'|\S+))?\s+decide\b""")
-
-
-def decide_outside_secretary(tool, ti, data):
-    """`registry.py decide` из сессии CEO (не помощник `secretary`: в событии хука `agent_type`) — суть пишет секретарь по
-    слову владельца, а не CEO своими словами. Запуск роли реестр отказывает сам."""
-    if tool not in SHELL_TOOLS or not REGISTRY_DECIDE.search(str(ti.get("command") or "")):
-        return False
-    return str(data.get("agent_type") or "").rsplit(":", 1)[-1].strip().lower() != "secretary"
-
-
 def owner_record(t, ctx):
     """Цель — слово владельца (V2): `CLAUDE.md` в любом каталоге, реестр решений `.claude/decisions.md`, цели
     `.claude/goals/…` — и реестр ошибок `.claude/errors/…` (CP1: записи пишет только `errors.py`; прямая правка проверки

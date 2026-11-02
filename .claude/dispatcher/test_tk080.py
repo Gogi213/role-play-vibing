@@ -62,18 +62,20 @@ class ChartersAreConditional(unittest.TestCase):
         for name in CHARTERS:
             text = re.sub(r"\s+", " ", (PLUGIN / "templates" / "roles" / name).read_text(encoding="utf-8"))
             if name == "engineer.md":  # TK-091: одна строка «Прогон тестов (В-21)» вместо трёх повторов
-                self.assertIn("полный прогон делает зелёный CI PR (`has_ci`, умолчание `true`). При `has_ci: false` — ещё быстрый полный прогон", text)
+                self.assertIn("полный прогон делает зелёный CI PR. При `has_ci: false` — ещё быстрый полный прогон", text)
                 self.assertIn("результат в «Итог»", text)
                 continue
-            self.assertIn("если у проекта есть CI на PR (`has_ci` в `.claude/rpv.json`, умолчание `true`)", text, name)
-            self.assertIn("при `has_ci: false` полный прогон остаётся обязанностью роли и пишется в отчёт «Итог» (не в команду ярлыка)", text, name)
-            self.assertNotIn("не пишется — его подтверждает зелёный CI PR", text, name)
+            if name == "judge.md":  # В-46: Судья полный прогон не обсуждает
+                continue
+            self.assertIn("зелёный CI PR (`has_ci`", text, name)
+            self.assertIn("`has_ci: false`", text, name)
+            self.assertIn("«Итог»", text, name)
 
     def test_engineer_pre_submit_full_run_names_the_no_ci_case(self):
         text = (PLUGIN / "templates" / "roles" / "engineer.md").read_text(encoding="utf-8")
         line = next(ln for ln in text.splitlines() if ln.startswith("- **Прогон тестов (В-21):**"))
         self.assertNotIn("перед сдачей — полный прогон", line)
-        self.assertIn("перед каждым push и сдачей — тесты самой правки (`python -m pytest <файл правки>`) и `errors.py run`", line)
+        self.assertIn("перед push и сдачей — тесты самой правки (`python -m pytest <файл правки>`) и `errors.py run`", line)
         self.assertIn("При `has_ci: false` — ещё быстрый полный прогон проекта", line)
         self.assertIn("полный прогон делает зелёный CI PR", line)
 

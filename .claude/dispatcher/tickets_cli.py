@@ -51,8 +51,6 @@ def _add_ticket_parsers(sub) -> None:
     p_accept.add_argument("--numbers", default=None, help="файл с таблицей «| число | файл:строка |» или - (чисел нет)")
     p_accept.add_argument("--tail", default=None, help="хвосты: - (нет) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_accept.add_argument("--live", default=None, help="договор с [вживую]: файл живой проверки (что увидит владелец)")
-    p_accept.add_argument("--critic", default=None, help="critic_before_accept: отчёт критика — файл в docs/reviews/")
-    p_accept.add_argument("--critic-skip", dest="critic_skip", default=None, help="critic_before_accept: обход критика, причина ≥ 10 знаков")
     p_accept.add_argument("--dry-run", dest="dry_run", action="store_true", help="все отказы гейтов одним списком, ничего не пишется")
     p_accept.add_argument("--false-positive", dest="false_positive", default=None,
                           help="отказ эвристики хвостов/чисел ложный: E-NNN, заведённая на этот тикет (errors.py add)")
@@ -84,9 +82,6 @@ def _add_result_parser(sub) -> None:
                           help="accept: хвосты — - (нет; сверяется со сдачей исполнителя) | TK-M[,TK-N] | ceo:\"что сделать CEO\"")
     p_result.add_argument("--live", default=None,
                           help="accept: договор с [вживую] — файл живой проверки на настоящих данных (что увидит владелец)")
-    p_result.add_argument("--critic", default=None, help="accept (critic_before_accept): отчёт критика — файл в docs/reviews/")
-    p_result.add_argument("--critic-skip", dest="critic_skip", default=None,
-                          help="accept (critic_before_accept): обход критика, причина ≥ 10 знаков (считается в отчёт)")
     p_result.add_argument("--left", default=None,
                           help="done|pr: что осталось (- = ничего); при tail_fields_only хвосты ищутся только здесь, а не в --why")
     p_result.add_argument("--dry-run", dest="dry_run", action="store_true", help="accept: все отказы гейтов одним списком, ничего не пишется")

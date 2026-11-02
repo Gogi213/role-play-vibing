@@ -89,7 +89,8 @@ class SessionStart(unittest.TestCase):
             self.assertEqual(os.path.normpath(m.group(2)),
                              os.path.normpath(os.path.join(PLUGIN, ".claude", "dispatcher", "errors.py")))
             self.assertTrue(os.path.isfile(m.group(2)), m.group(2))
-            self.assertIn("fix E-N --check", text)
+            self.assertEqual("fix E-N --check" in text, role == "judge", role)   # `fix` — только Судье
+            self.assertNotIn("secretary", text)                                     # секретарь упразднён (В-44)
             self.assertLessEqual(len(text), rc.LIMIT, role)
 
     def test_startup_lists_only_results_the_role_may_hand_in(self):
@@ -426,8 +427,9 @@ class Prompts(unittest.TestCase):
         return path
 
     def test_context_watchdog_threshold_and_repeat(self):
-        self.assertEqual(rm.CONTEXT_WARN_TOKENS, 400_000)  # 40 % окна Opus 1 млн (владелец 15.10; было 450 000 — 03.10)
-        small = {"transcript_path": self.transcript(390_000)}
+        """Порог — общий с CEO (`ceo_context.limits`, 350 тыс.); повтор не чаще раза в REPEAT_EVERY сообщений."""
+        self.assertFalse(hasattr(rm, "CONTEXT_WARN_TOKENS"))
+        small = {"transcript_path": self.transcript(340_000)}
         big = {"transcript_path": self.transcript(410_000)}
         self.assertIsNone(rm.context_advice(small, {"n": 1}))
         state = {"n": 1}
@@ -566,7 +568,8 @@ class RoleInstructionsUseResult(unittest.TestCase):
     def test_prompt_and_retry_note_use_result(self):
         sys.path.insert(0, os.path.join(os.path.dirname(HERE), "dispatcher"))
         import dispatch as D
-        self.assertIn(" result TK-1 <", D.build_prompt("engineer", "TK-1"))
+        self.assertIn("командой result из вставки", D.build_prompt("engineer", "TK-1"))
+        self.assertIn("`T result <ID> <", start_text("engineer", "startup")[0])   # сама команда — во вставке старта
         src = open(os.path.join(os.path.dirname(D.__file__), "finish.py"), encoding="utf-8").read()
         self.assertIn("командой tickets.py result", src)
         self.assertNotIn("командой tickets.py comment и обнови", src)

@@ -31,7 +31,7 @@ Requires Python 3.11 (`python` on `PATH`), git, and the Claude Code CLI `claude`
    /plugin install role-play-vibing@role-play-vibing
    ```
 
-2. In your project, run `/rpv-init`. It creates `.claude/roles` (role charters from templates), `.claude/tickets`, the owner's registry (`.claude/decisions.md`, `.claude/goals/`) and `.gitignore` entries. Existing files are not overwritten.
+2. In your project, run `/rpv-init`. It creates `.claude/roles` (role charters from templates), `.claude/tickets`, the owner's registry (`.claude/decisions.md`, its active part `.claude/decisions-active.md` linked from `CLAUDE.md`, `.claude/goals/`) and `.gitignore` entries. Existing files are not overwritten.
 3. In the main session, run `/ceo`. The session becomes the CEO: it talks to you and files tickets.
 4. Run `/rpv-start`. The dispatcher and the watcher start in the background and keep running after you close the Claude window. Running again restarts them, which picks up an updated plugin.
 5. Give the CEO a task. `/rpv-doctor` shows whether everything is alive.
@@ -55,15 +55,14 @@ It runs `claude plugin marketplace update` and `claude plugin update`, then, fro
 | Role | Does | Session | Model |
 |---|---|---|---|
 | CEO | talks to the owner, files tickets, reads signals | long-lived | your session |
-| Secretary | the CEO hands it your words verbatim; it records them in the owner's registry as a decision (`В-N`), a goal (`G-NNN`), both, or nothing (a question, a status request, a one-off command) | one short run per call from the CEO | Haiku 5.5, effort xhigh |
 | Researcher | protocol, calculation, report | one short run per wake | Sonnet 5.5, effort high (can be set per ticket) |
 | Engineer | code, tests, machines | one short run per wake | Sonnet 5.5, effort xhigh |
 | Judge | review and verdict | one short run per wake | Opus 5.5, effort high |
 | Overseer | every 15 minutes, while tickets change: cost rules and a model reading the ticket logs; a finding goes to the Judge | a short process on a timer, no ticket | Haiku 5.5, effort xhigh |
 
-Other helper subagents are not roles: the CEO uses `inbox` (triages signals), `reporter` (status answers and daily-report lines) and `worker-light` (Haiku, routine without thought, writes only to the session scratchpad); roles use `coder` and `reader`.
+Other helper subagents are not roles: the CEO uses `reporter` (daily-report lines, called by `report.py`), `critic` (checks a recommendation before it goes to you) and `worker-light` (Haiku, routine without thought, writes only to the session scratchpad).
 
-1. You tell the CEO what you want. The CEO hands your words, verbatim, to the Secretary, which records them in the registry. Then the CEO files a ticket, `.claude/tickets/TK-NNN.md` (a header with `status` and `next`, and a log of every step); `tickets.py new` refuses a ticket without `--ref` to a registry entry, so no work starts that the owner did not order.
+1. You tell the CEO what you want. The CEO records your words, verbatim, in the registry itself (`registry.py`). Then the CEO files a ticket, `.claude/tickets/TK-NNN.md` (a header with `status` and `next`, and a log of every step); `tickets.py new` refuses a ticket without `--ref` to a registry entry, so no work starts that the owner did not order.
 2. Every 15 seconds the dispatcher (`dispatch.py`) reads the tickets and starts the role each one calls for (the owner of a new ticket, the role named in `next`, the Judge for finished work) as a short `claude -p` session.
 3. The role reports its step with `tickets.py result <ID> <result> --why "…"`. Results: `done`, `pr`, `accept`, `return`, `blocked`, `ask-owner`, `wait`, `continue`. A routing table (`routes.py`), not the text of the entry, decides who is woken next: an executor's `done` or `pr` goes to the Judge, who answers `accept` (the ticket is done) or `return` (back to the executor).
 4. When a ticket is done or stuck (`blocked`, `needs_owner`, `next: ceo`), the dispatcher writes a line to `ceo-inbox.md` and `ceo-wake.log`; a headless `claude -p` (Haiku, `SendMessage`) wakes the CEO session on four events only (owner decision needed, broken or missed deadline, goal step accepted with no next step, goal closed) — no timers, no Monitor. The watcher (`watch.py`) adds orphaned tickets and dead waits. Details: [docs/signals.md](docs/signals.md) (Russian).
@@ -103,7 +102,7 @@ Scripts run from the plugin folder with `--project <project>`:
 | Script | Does |
 |---|---|
 | `dispatcher/tickets.py` | tickets: `new`, `comment`, `result`, `start`, `stop` (CEO only), `allow`, `allow-delete`, `wait`, `status`; `inbox` prints new lines of `ceo-inbox.md` |
-| `dispatcher/registry.py` | the owner's registry of decisions and goals; written by the CEO only |
+| `dispatcher/registry.py` | the owner's registry of decisions and goals; written by the CEO only; `.claude/decisions-active.md` (decisions nobody replaced) is what CLAUDE.md pulls into every session, the full `decisions.md` stays as history |
 | `dispatcher/errors.py` | the error registry `.claude/errors/`: a bug is fixed only when its check failed before the fix and passes now |
 | `dispatcher/report.py` | the daily report to the owner; `--dry-run` only prints ([docs/daily-report.md](docs/daily-report.md), Russian) |
 | `dispatcher/notify.py` | a Telegram message to the owner: `send "text"`, `test` |
@@ -133,7 +132,7 @@ Without pytest: `python -m unittest discover -s .claude/dispatcher`, then the sa
 
 ```
 commands/            slash commands
-agents/              helpers: coder, reader, overseer; CEO helpers: secretary, inbox, reporter, critic, worker-light
+agents/              helpers: overseer, reporter, critic, worker-light
 hooks/               hooks.json and the hook launcher
 tools/               fastcheck.py, jobrun.sh, benchmarks
 templates/roles/     role charters copied into a project by /rpv-init

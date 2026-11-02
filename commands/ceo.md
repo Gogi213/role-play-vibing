@@ -14,20 +14,13 @@ disable-model-invocation: true
    ```
 
    Нет Bash или `sid` пуст — шаг пропусти: хук уже пометил сессию по самой команде `/ceo`.
-3. Прочитай `.claude/roles/ceo.md` (твой устав), `.claude/roles/README.md` (команда) и, если есть,
-   `.claude/roles/notes/ceo.md` (блокнот).
-4. Запомни команду тикетов (в проекте `tickets.py` нет — он в папке плагина):
-   `python "${CLAUDE_PLUGIN_ROOT}/.claude/dispatcher/tickets.py" --project "<корень проекта>"` + подкоманда (`new`,
-   `comment`, `start`, `stop`, `allow`, `status`). `${CLAUDE_PLUGIN_ROOT}` пуст — найди каталог плагина `role-play-vibing` под
-   `~/.claude/plugins`. Диспетчер и сторож запускает `/rpv-start`.
-5. Запиши, какая сессия CEO: диспетчер будит её событием (устав CEO, «Побудка»), таймеров и наблюдения нет:
+3. Запиши, какая сессия CEO: диспетчер будит её событием (устав CEO, «Побудка»), таймеров и наблюдения нет:
 
    ```
    python "${CLAUDE_PLUGIN_ROOT}/.claude/dispatcher/ceo_wake.py" --project "<корень проекта>" set --id "${CLAUDE_SESSION_ID}" --name "<имя сессии в списке агентов, если знаешь>"
    ```
 
-   Потом прочитай `tickets.py inbox`.
-6. Ответь владельцу одной строкой: «Сессия помечена как CEO». Дальше веди себя по уставу CEO.
+   Потом прочитай `tickets.py inbox`. Устав CEO и блокнот хук вставляет сам; владельцу об этой команде не пиши.
 
 Роль определяют хуки: `RPV_ROLE` → эта метка → название сессии Claude Desktop (последний
 запасной путь). После `/clear` в CLI метка теряется (новый id сессии) — повтори `/ceo`.
