@@ -36,7 +36,7 @@ class PageStates(TG.States):
 
     def test_ok_state_phrase_cells_classes(self):
         html = self.render(self.ok_data())
-        self.assertIn("Всё идёт. От вас ничего.", html)
+        self.assertIn(V.OK_TITLE, html)
         self.assertIn('<div class="phrase ">', html)
         wide, narrow = row_classes(html, "w"), row_classes(html, "k")
         self.assertEqual((len(wide), len(narrow)), (S.WINDOW, S.NARROW))
@@ -49,7 +49,7 @@ class PageStates(TG.States):
     def test_owner_state_is_yellow_only_for_owner_cells(self):
         data = self.owner_data()
         html = self.render(data)
-        self.assertIn(data["phrase"], html)
+        self.assertIn(V.OWNER_TITLE, html)
         self.assertIn('class="phrase you"', html)
         self.assertEqual(sum(1 for c in row_classes(html) if c and c[0] == "y"), 8)
         self.assertEqual(len(row_classes(html)), 32)
@@ -58,14 +58,15 @@ class PageStates(TG.States):
     def test_stuck_state_from_file(self):
         data = self.stuck_data()
         html = self.render(data)
-        self.assertIn(data["phrase"], html)
+        self.assertIn("Застряло: rpv", html)
         self.assertIn('class="phrase stuck"', html)
         self.assertEqual(row_classes(html)[-1][0], "o")
 
     def test_stuck_state_dead_dispatcher_from_stale_generated(self):
         data = self.ok_data()
         html = self.render(data, now=self.at + timedelta(minutes=38))  # файл с 13:00, сейчас 13:38 — клетки 53 и 54 никто не писал
-        self.assertIn("Застряло: rpv — диспетчер не отвечает 38 мин.", html)
+        self.assertIn("Застряло: rpv", html)
+        self.assertIn("диспетчер не отвечает 38 мин", html)
         self.assertIn('class="phrase stuck"', html)
         wide = row_classes(html)
         self.assertEqual([c[0] for c in wide[-2:] if c], ["o", "o"])
@@ -128,8 +129,8 @@ class PageStates(TG.States):
         self.assertEqual(view["idx"], 1)
 
     def test_no_projects_is_not_a_green_phrase(self):
-        self.assertEqual(V.summary([]), V.NO_PROJECTS)
-        self.assertNotIn(V.OK_PHRASE, V.summary([]))
+        self.assertEqual(V.header([])["title"], V.NO_PROJECTS)
+        self.assertNotIn(V.OK_TITLE, V.header([])["title"])
         html = S.body_html([], self.at)
         self.assertIn(V.NO_PROJECTS, html)
         self.assertIn('class="phrase stuck"', html)
@@ -151,7 +152,7 @@ class PageStates(TG.States):
     def test_unreadable_pulse_is_stuck(self):
         for raw in (None, {}, {"phrase": "x", "ts": self.at.isoformat(), "cells": []}):  # нет файла, пусто, чужой формат
             with self.subTest(raw=raw):
-                self.assertIn("Застряло: rpv — пульс не читается.", self.render(raw))
+                self.assertIn("Застряло: rpv", self.render(raw))
 
     def test_narrow_row_groups_two_hours_and_owner_wins(self):
         data = self.ok_data()
@@ -163,11 +164,11 @@ class PageStates(TG.States):
         self.assertEqual(narrow[0][0], "m")
         self.assertEqual(narrow[1][0], "y")
 
-    def test_summary_orders_stuck_before_owner(self):
+    def test_header_orders_stuck_before_owner(self):
         ok, owner, stuck = self.ok_data(), self.owner_data(), self.stuck_data()
         views = [self.view("a", owner), self.view("b", stuck), self.view("c", ok)]
-        self.assertEqual(V.summary(views), stuck["phrase"] + " (и ещё 1)")
-        self.assertEqual(V.summary(views[2:]), V.OK_PHRASE)
+        self.assertEqual(V.header(views)["title"], "Застряло: b")
+        self.assertEqual(V.header(views[2:])["title"], V.OK_TITLE)
 
     def test_names_are_escaped(self):
         self.assertNotIn("<script>", self.render(self.ok_data(), name="<script>"))
@@ -214,7 +215,7 @@ class ServerTests(TG.States):
     def test_page_and_body_by_token_in_path(self):
         code, page = self.get("/sekret/")
         self.assertEqual(code, 200)
-        self.assertIn(self.owner_phrase, page)
+        self.assertIn("Нужен ваш ответ", page)
         self.assertIn("<b>invoice</b>", page)  # удалённый проект — по URL
         self.assertIn("prefers-color-scheme:dark", page)
         self.assertIn("max-width:480px", page)
@@ -232,7 +233,7 @@ class ServerTests(TG.States):
         code, page = self.get("/sekret/")
         self.assertEqual(code, 200)
         self.assertIn(V.NO_PROJECTS, page)
-        self.assertNotIn(V.OK_PHRASE, page)
+        self.assertNotIn(V.OK_TITLE, page)
 
     def test_broken_project_url_does_not_break_other_projects(self):
         """Порт не число (InvalidURL) и обрыв ответа (IncompleteRead) — не OSError: «пульс не читается» только у этого проекта."""
@@ -259,7 +260,7 @@ class ServerTests(TG.States):
         self.addCleanup(httpd.shutdown)
         with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/sekret/", timeout=5) as r:
             page = r.read().decode("utf-8")
-        self.assertIn("Застряло: bad — пульс не читается.", page)
+        self.assertIn("Застряло: bad", page)
         self.assertIn("<b>fine</b>", page)
         self.assertEqual(page.count('<div class="meta stuck">пульс не читается</div>'), 2)  # bad и cut; fine — со своим «сейчас»
 

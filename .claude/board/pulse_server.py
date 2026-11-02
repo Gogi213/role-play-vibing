@@ -85,7 +85,7 @@ def body_html(views: list, now: datetime) -> str:
     idx = max((v["idx"] for v in views), default=0)
     zone = next((v["zone"] for v in views if v.get("zone")), None)  # часы — по поясу проектов, не сервера
     shown = now.astimezone(zone) if zone else now
-    return (f'<div class="head"><div class="phrase {cls}">{escape(V.summary(views))}</div>'
+    return (f'<div class="head"><div class="phrase {cls}">{escape(V.header(views)["title"])}</div>'
             f'<div class="meta">{shown:%H:%M} · сегодня</div></div>'
             + (hours(idx) if views else "") + "".join(row(v) for v in views) + LEGEND)
 

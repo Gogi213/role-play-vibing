@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project_paths as CFG  # noqa: E402
+from pulse_view import ago  # noqa: E402 — «3 дня», «2 ч 10 мин»: одна мера у писателя и читателя
 import registry  # noqa: E402
 import report as RP  # noqa: E402 — GOAL_REF, last_verdict, _plain, _goal_title: та же мера «принято», что в отчёте
 import ticket as T  # noqa: E402
@@ -20,23 +21,6 @@ FIX = {"dispatcher_dead": "перезапускает CEO", "unserved": "раз�
        "merged_unreleased": "решает CEO", "ci_red": "чинит Инженер"}
 ASK_MARK = re.compile(r"\[итог: ask-owner\]\s*(.*?)(?:\s+повод:.*)?$", re.S)
 LIST_MAX = 12
-
-
-def plural(n: int, one: str, few: str, many: str) -> str:
-    return one if n % 10 == 1 and n % 100 != 11 else few if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else many
-
-
-def ago(seconds: float) -> str:
-    """«меньше минуты» · «23 мин» · «2 ч 10 мин» · «3 дня»; отрицательное — как 0."""
-    minutes = max(0, int(seconds // 60))
-    if minutes < 1:
-        return "меньше минуты"
-    if minutes < 60:
-        return f"{minutes} мин"
-    if minutes < 1440:
-        return f"{minutes // 60} ч {minutes % 60} мин" if minutes % 60 else f"{minutes // 60} ч"
-    days = minutes // 1440
-    return f"{days} {plural(days, 'день', 'дня', 'дней')}"
 
 
 def _title(tkt) -> str:
@@ -72,15 +56,20 @@ def goal_card(tickets, focus: list) -> dict | None:
     return None
 
 
+def run_entry(tid: str, role: str, tickets) -> dict:
+    """Запуск роли для карточки и подсказки клетки: кто, глагол, тикет, заголовок (пусто, если тикета нет)."""
+    tkt = next((t for t in tickets or [] if t.id == tid), None)
+    role = role.strip().lower()
+    return {"who": ROLE_RU.get(role, ""), "verb": VERB.get(role, "делает"), "ticket": tid, "title": _title(tkt) if tkt else ""}
+
+
 def job_of(state: dict, tickets, now: datetime) -> dict | None:
     """Самый давний идущий запуск роли из `state["active_runs"]`: роль, глагол, тикет, заголовок, сколько идёт."""
     runs = sorted((r.get("started") or "", tid, r.get("role") or "") for tid, r in (state.get("active_runs") or {}).items())
     if not runs:
         return None
     started, tid, role = runs[0]
-    tkt = next((t for t in tickets if t.id == tid), None)
-    role = role.strip().lower()
-    out = {"role": role, "who": ROLE_RU.get(role, ""), "verb": VERB.get(role, "делает"), "ticket": tid, "title": _title(tkt) if tkt else ""}
+    out = {"role": role.strip().lower(), **run_entry(tid, role, tickets)}
     try:
         out["since"] = ago((now - T.parse_dt(started)).total_seconds())
     except ValueError:
