@@ -267,19 +267,21 @@ def _role_busy(role: str, judge_queue: int = 0) -> bool:
 _JUDGE_SCALE_MODE = ["idle"]  # последнее решение о втором Судье: idle | scale | cap — строка в лог только при смене
 
 
-def _judge_queue(candidates: list) -> int:
-    """Сдачи, ждущие Судью: готовые кандидаты роли judge без идущего запуска (TK-100)."""
-    return sum(1 for p, t, d in candidates if d.role == "judge" and t.id not in RUNNING and p.stem not in RUNNING)
+def _judge_queue(candidates: list, state: dict, now) -> int:
+    """Сдачи, ждущие Судью: кандидаты роли judge без идущего запуска, готовые к запуску — не придержанные троттлингом (TK-100)."""
+    return sum(1 for p, t, d in candidates if d.role == "judge" and t.id not in RUNNING and p.stem not in RUNNING
+               and not _rate_limited(state, t.id, now, d.role))
 
 
 def _note_judge_scale(queue: int, now) -> None:
     """TK-100 п.4: почему второй Судья разрешён или нет — одна строка в dispatch.run.log, только при смене решения."""
     need, cap = judge_scale_queue(), role_parallel().get("judge", 1)
+    running = sum(1 for info in RUNNING.values() if info["role"] == "judge")
     mode = "idle" if queue < need else "scale" if cap > 1 else "cap"
     if mode == _JUDGE_SCALE_MODE[0]:
         return
     _JUDGE_SCALE_MODE[0] = mode
-    why = {"idle": f"второй Судья не нужен: очередь на приёмку {queue} < порога {need}",
+    why = {"idle": f"второй Судья не нужен: очередь на приёмку {queue} < порога {need}, идущих Судей {running}",
            "scale": f"второй Судья разрешён: очередь на приёмку {queue} ≥ порога {need} (role_parallel.judge {cap})",
            "cap": f"второй Судья не запущен: очередь на приёмку {queue} ≥ порога {need}, но role_parallel.judge = {cap}"}
     print(f"[dispatch] {T.now_iso(now)} {why[mode]}", flush=True)
@@ -757,8 +759,9 @@ def _launch_candidates(candidates: list, state: dict, now, paused) -> tuple:
     """Запуск кандидатов по очереди приоритета с пределами (параллельность, роль, часовой троттлинг); (запущено, придержано)."""
     launched = 0
     throttled = 0
-    judge_queue = _judge_queue(candidates)
-    _note_judge_scale(judge_queue, now)
+    judge_queue = _judge_queue(candidates, state, now)
+    if not paused:  # на паузе запусков нет — решение о втором Судье не пишем
+        _note_judge_scale(judge_queue, now)
     for path, tkt, decision in sorted(candidates, key=lambda c: _candidate_sort_key(state, c[1], c[2])):
         tid = tkt.id
         if paused or len(RUNNING) >= max_parallel():

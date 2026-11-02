@@ -37,13 +37,13 @@ class JudgeScale(unittest.TestCase):
             self.addCleanup(p.stop)
         self.addCleanup(D.RUNNING.clear)
 
-    def run_tick(self, waiting, running=()):
+    def run_tick(self, waiting, running=(), paused=False):
         """Сколько новых запусков Судьи за тик при `waiting` ждущих сдачах и уже идущих `running` Судьях; (запущено, лог)."""
         D.RUNNING.clear()
         D.RUNNING.update({tid: {"role": "judge"} for tid in running})
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            launched, _ = D._launch_candidates([cand(t, "judge") for t in waiting], {}, NOW, False)
+            launched, _ = D._launch_candidates([cand(t, "judge") for t in waiting], {}, NOW, paused)
         return launched, out.getvalue()
 
     def test_queue_below_threshold_one_judge(self):
@@ -92,6 +92,22 @@ class JudgeScale(unittest.TestCase):
         _, log = self.run_tick([], running=["TK-1"])
         self.assertEqual(log.count("второй Судья не нужен: очередь на приёмку 0 < порога 2"), 1, log)
         self.assertEqual(self.run_tick([])[1], "")
+
+    def test_throttled_submissions_not_in_queue(self):
+        held = {"TK-3"}
+        with mock.patch.object(D, "_rate_limited", side_effect=lambda state, tid, now, role="": tid in held):
+            self.assertEqual(self.run_tick(["TK-2", "TK-3"], running=["TK-1"])[0], 0,
+                             "одна готовая сдача, вторая придержана троттлингом — очередь 1 < 2")
+            self.assertEqual(self.run_tick(["TK-2", "TK-3", "TK-4"], running=["TK-1"])[0], 1, "готовых две — второй Судья")
+
+    def test_no_decision_logged_while_paused(self):
+        launched, log = self.run_tick(["TK-2", "TK-3"], running=["TK-1"], paused=True)
+        self.assertEqual((launched, log, D._JUDGE_SCALE_MODE[0]), (0, "", "idle"), "пауза лимита — строки нет")
+
+    def test_idle_line_names_running_judges(self):
+        self.run_tick(["TK-3", "TK-4"], running=["TK-1"])
+        _, log = self.run_tick(["TK-5"], running=["TK-1", "TK-2"])
+        self.assertIn("очередь на приёмку 1 < порога 2, идущих Судей 2", log)
 
     def test_cap_one_reason_logged(self):
         self.cfg["role_parallel"] = {"judge": 1}
