@@ -1,10 +1,11 @@
 """/rpv-doctor — здоровье команды одной таблицей (TK-076 п.3): диспетчер, сторож, присмотр ОС, очередь, ошибки за сутки.
 
     python doctor.py [--project P] [--json]      код возврата 0 — нет FAIL, 1 — есть FAIL, 2 — проект не найден
-Только читает: ничего не запускает и не пишет."""
+Только читает: ничего не запускает и не пишет (Telegram — запрос `getMe`, сообщений не шлёт)."""
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import plistlib
@@ -12,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import start as S  # noqa: E402
 import hide  # noqa: E402
+import notify  # noqa: E402
 import plugin_version as PV  # noqa: E402
 import supervise as SV  # noqa: E402
 import ticket as T  # noqa: E402
@@ -134,14 +138,35 @@ def check_worktrees(project: Path) -> tuple:
             continue
     try:
         closed, foreign = WH.findings(project, status)
+        orphans = WH.orphans(project, status)
     except (OSError, subprocess.SubprocessError):
         return "рабочие копии", OFF, "git недоступен"
-    if closed or foreign:
+    if closed or foreign or orphans:
         msg = "; ".join(x for x in (
             closed and "закрытых тикетов: " + ", ".join(p.name for p in closed),
-            foreign and "вне .claude/worktrees: " + ", ".join(str(p) for p in foreign)) if x)
+            foreign and "вне .claude/worktrees: " + ", ".join(str(p) for p in foreign),
+            orphans and "без тикета: " + ", ".join(p.name for p in orphans)) if x)
         return "рабочие копии", WARN, msg
     return "рабочие копии", OK, "лишних нет"
+
+
+def check_notify(opener=urllib.request.urlopen) -> tuple:
+    """Telegram владельца (TK-092): токен принимается ботом (`getMe`, сообщения не шлёт). 401/403 — FAIL: тревоги и вопросы
+    владельцу уходят в никуда (двое суток 401 никто не заметил); не настроен или сеть недоступна — WARN."""
+    token, chat = P.env("TG_TOKEN"), P.env("TG_CHAT")
+    if not (token and chat):
+        return "Telegram", WARN, "не настроен (RPV_TG_TOKEN/RPV_TG_CHAT) — владелец не получит тревоги и вопросы"
+    try:
+        with opener(notify.ME.format(token=token), timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        ok = data.get("ok") if isinstance(data, dict) else None   # null, [1], "x" — тоже «ответ без ok», не трейсбек
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404):
+            return "Telegram", FAIL, f"HTTP {e.code}: токен бота не принят — сообщения владельцу не доходят"
+        return "Telegram", WARN, f"HTTP {e.code} от api.telegram.org"
+    except (OSError, ValueError, http.client.HTTPException) as e:   # InvalidURL (токен с пробелом), IncompleteRead (обрыв)
+        return "Telegram", WARN, f"не смог проверить ({type(e).__name__})"
+    return ("Telegram", OK, "бот отвечает") if ok else ("Telegram", FAIL, "ответ без ok — токен бота не принят")
 
 
 def check_errors(state_dir: Path, now: float) -> tuple:
@@ -214,7 +239,7 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
     if sys.platform == "darwin" and (row := check_launchd_path(SV.plist_path(SV.launchd_label(project)))):
         rows.append(row)
     rows.append(check_idle(sd, now))
-    rows += [*check_queue(project, sd), check_worktrees(project), check_errors(sd, now)]
+    rows += [*check_queue(project, sd), check_worktrees(project), check_notify(), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]
 
 
