@@ -561,7 +561,7 @@ class RoleInstructionsUseResult(unittest.TestCase):
 
     def test_no_instruction_sends_role_to_comment_for_result(self):
         from dguard import messages as msg
-        for text in (rm.SILENT_TEXT, msg.REASON_IRREVERSIBLE, msg.REASON_CEO_SIGNAL):
+        for text in (rm.SILENT_TEXT, msg.REASON_IRREVERSIBLE):
             self.assertNotIn("tickets.py comment", text)
             self.assertIn("tickets.py result", text)
 
@@ -626,39 +626,6 @@ class StopResultTest(unittest.TestCase):
         self.assertIsNone(self._stop())
 
 
-class CeoSignalGuardTest(unittest.TestCase):
-    def test_denied(self):
-        import delete_guard as g
-        d = g.ceo_signal_write
-        self.assertTrue(d("Write", {"file_path": "C:/x/.claude/dispatcher/ceo-inbox.md"}))
-        self.assertTrue(d("Edit", {"file_path": r"C:\x\ceo-wake.log"}))
-        self.assertTrue(d("Bash", {"command": "echo hi >> .claude/dispatcher/ceo-wake.log"}))
-        self.assertTrue(d("Bash", {"command": "cd x && rm .claude/dispatcher/ceo-inbox.md"}))
-        self.assertFalse(d("Bash", {"command": "tail -20 .claude/dispatcher/ceo-wake.log"}))
-        self.assertFalse(d("Bash", {"command": "grep urgent ceo-inbox.md | head"}))
-        self.assertFalse(d("Write", {"file_path": "C:/x/other.md"}))
-        self.assertFalse(d("Bash", {"command": 'python tickets.py comment TK-1 --author judge --text "проба >> ceo-inbox.md; rm ceo-wake.log"'}))
-        self.assertTrue(d("Bash", {"command": 'python tickets.py comment TK-1 --text "x" >> ceo-inbox.md'}))
-        self.assertFalse(d("Bash", {"command": 'python tickets.py result TK-1 done --why "читал ceo-inbox.md через open( и > "'}))  # TK-110 Ж-3
-        self.assertTrue(d("Bash", {"command": 'python tickets.py result TK-1 done --why "x" > ceo-inbox.md'}))
-
-    def test_python_read_is_not_a_write(self):
-        """alpha 16.10: подсчёт сигналов `python -c "...open(p, encoding=…)... >= ..."` отклонялся как запись."""
-        import delete_guard as g
-        d = g.ceo_signal_write
-        log = ".claude/dispatcher/ceo-wake.log"
-        for cmd in (f"""python -c "import collections,datetime as d;c=collections.Counter(l.split()[2] for l in open('{log}',encoding='utf-8') if len(l.split())>2 and l.split()[0]>=(d.datetime.now().astimezone()-d.timedelta(days=1)).isoformat());print(c)" """,
-                    f"""python -c "print(open('{log}').read())" """, f"""python -c "print(open('{log}', 'rb').read())" """,
-                    f"""python -c "import os;os.open('{log}', os.O_RDONLY)" """, f"cat {log} 2>/dev/null",
-                    f"Get-Content {log} | Select-Object -Last 5"):
-            self.assertFalse(d("Bash", {"command": cmd}), cmd)
-        for cmd in (f"""python -c "open('{log}','a').write('x')" """, f"""python -c "open('{log}', mode='w')" """,
-                    f"""python -c "open('{log}', m)" """, f"""python -c "import pathlib;pathlib.Path('{log}').open('a')" """,
-                    f"""python -c "import pathlib;pathlib.Path('{log}').write_text('x')" """,
-                    f"""python -c "import os;os.open('{log}', os.O_WRONLY)" """, f"echo x 2>{log}", f"bash -c 'echo x > {log}'",
-                    f"""powershell -c "[IO.File]::AppendAllText('{log}','x')" """, f"""powershell -c "[IO.File]::Open('{log}', 'Append')" """):
-            self.assertTrue(d("Bash", {"command": cmd}), cmd)
-
 
 class GuardJournalTest(unittest.TestCase):
     def test_journal_lines_and_silent_failure(self):
@@ -675,7 +642,7 @@ class GuardJournalTest(unittest.TestCase):
             g.journal_guard(None, "Bash", [("rm", "deny")], "x")           # нет проекта — тихо
 
 
-class HaikuAbstractTest(unittest.TestCase):
+class TicketsCommandTest(unittest.TestCase):
     def test_tickets_command_python_or_executable(self):  # TK-110 В-1: python есть в PATH — он; нет — sys.executable
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import role_context as rc
@@ -683,57 +650,6 @@ class HaikuAbstractTest(unittest.TestCase):
             self.assertTrue(rc.tickets_command().startswith('python "'))
         with mock.patch("shutil.which", return_value=None):
             self.assertTrue(rc.tickets_command().startswith('"' + sys.executable.replace(os.sep, "/") + '" "'))
-
-    def test_digest_written_before_haiku_and_env_clean(self):  # TK-110 В-2 + Ж-1
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
-        import haiku_aux
-        seen = {}
-
-        def runner(cmd, **kw):
-            seen["env"] = kw["env"]
-            return type("R", (), {"returncode": 0, "stdout": b"X"})()
-        old = {k: os.environ.get(k) for k in ("RPV_ROLE", "CLAUDE_PROJECT_DIR")}
-        os.environ["RPV_ROLE"], os.environ["CLAUDE_PROJECT_DIR"] = "judge", "/p"
-        try:
-            self.assertEqual(haiku_aux.ask("s", "t", runner=runner, claude="claude"), "X")
-        finally:
-            for k, v in old.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
-        self.assertFalse([k for k in seen["env"] if k.startswith("RPV_")] or "CLAUDE_PROJECT_DIR" in seen["env"])
-        orig = haiku_aux.compact
-        with tempfile.TemporaryDirectory() as d:
-            tr = os.path.join(d, "t.jsonl")
-            with open(tr, "w", encoding="utf-8") as f:
-                f.write(json.dumps({"type": "user", "message": {"content": "привет"}, "timestamp": ""}) + "\n")
-            out = os.path.join(d, "dg.md")
-            orig_dp = rm.digest_path
-            rm.digest_path = lambda role, cli: out
-
-            def boom(t, **kw):
-                self.assertIn("привет", open(out, encoding="utf-8").read())      # файл уже на диске до Haiku
-                self.assertEqual(kw.get("timeout"), rm.HAIKU_HOOK_S)
-                raise KeyboardInterrupt
-            haiku_aux.compact = boom
-            try:
-                with self.assertRaises(KeyboardInterrupt):
-                    rm.write_digest(tr, "judge", "t", "abcdef123", "why", dispatcher=True)
-            finally:
-                haiku_aux.compact, rm.digest_path = orig, orig_dp
-
-    def test_abstract_and_failure(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
-        import haiku_aux
-        orig = haiku_aux.compact
-        try:
-            haiku_aux.compact = lambda t, **kw: "KONSPEKT"
-            self.assertIn("KONSPEKT", rm.haiku_abstract(["a"]))
-            haiku_aux.compact = lambda t, **kw: None
-            self.assertEqual(rm.haiku_abstract(["a"]), "")
-        finally:
-            haiku_aux.compact = orig
 
 
 if __name__ == "__main__":

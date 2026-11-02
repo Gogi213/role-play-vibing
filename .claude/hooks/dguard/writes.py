@@ -1,10 +1,9 @@
-"""Удаление и запись в файл: `rm`, `cp`/`mv`, `tee`, PowerShell-командлеты, `truncate`, `dd`, `rsync`."""
+"""Удаление и запись в файл: `rm`, `cp`/`mv`, `tee`, PowerShell-командлеты, `truncate`, `dd`."""
 import os
 import posixpath
 import re
 from dguard.messages import HARMLESS_SINK, Over
-from dguard.paths import closed_host, Ctx
-from dguard.words import CMD_FLAG, expand_vars, host_of, PS_VALUE_PARAMS, RSYNC_VAL, split_remote
+from dguard.words import CMD_FLAG, expand_vars, PS_VALUE_PARAMS
 
 
 def del_targets(name, args, xargs, piped):
@@ -46,38 +45,6 @@ def del_targets(name, args, xargs, piped):
     return targets
 
 
-def rsync_scan(args, ctx):
-    delete = any(a.startswith("--delete") or a == "--del" for a in args)
-    remove_src = "--remove-source-files" in args
-    if not (delete or remove_src):
-        return
-    pos = []
-    k = 0
-    while k < len(args):
-        a = args[k]
-        k += 1
-        if a in RSYNC_VAL or (a.startswith("-") and not a.startswith("--") and len(a) > 2 and a.endswith("e")):
-            k += 1                                   # значение опции (`-e CMD`, `--exclude PAT`, кластер `-avze CMD`)
-        elif not a.startswith("-"):
-            pos.append(a)
-    if not pos:
-        yield ("<rsync без цели>", ctx.copy())
-        return
-    chosen = []
-    if delete:
-        chosen.append(pos[-1])
-    if remove_src:
-        chosen.extend(pos[:-1] if len(pos) > 1 else pos)
-    for arg in chosen:
-        host, path = split_remote(arg)
-        if host and closed_host(host):
-            yield (f"<rsync: {arg} — закрытый узел>", ctx.copy())
-        elif host:
-            yield (path, Ctx(None, True, host=host_of(arg)))
-        else:
-            yield (path, ctx.copy())
-
-
 def fs_path(t, ctx):
     """Путь для проверки существования на этой машине или None (неизвестная переменная, glob, подстановка, `{}`,
     относительный путь без известного cwd — не определить)."""
@@ -99,9 +66,7 @@ def fs_path(t, ctx):
 
 
 def may_exist(t, ctx):
-    """Цель перезаписи, возможно, существует: удалённый узел и непроверяемый путь — да; локальный буквальный — по ФС."""
-    if getattr(ctx, "remote", False):
-        return True
+    """Цель перезаписи, возможно, существует: непроверяемый путь — да; буквальный — по ФС."""
     fp = fs_path(t, ctx)
     if fp is None or fp.startswith("/dev/"):              # устройство (`of=/dev/sda`) — всегда «существует»
         return True
@@ -177,9 +142,9 @@ def cp_scan(args, ctx, vars_, move=False, xargs=False):
     if xargs and dest_opt is not None:                            # `xargs cp -t КАТАЛОГ`: члены неизвестны — сам каталог
         yield from over(dest, {}, ctx)
         return
-    fp = None if ctx.remote else fs_path(dest, ctx)
+    fp = fs_path(dest, ctx)
     is_dir = dest_opt is not None or dest.endswith(("/", "\\")) or (fp is not None and os.path.isdir(fp))
-    if is_dir and not ctx.remote and fp is not None:      # известный каталог: затрагиваются только его члены
+    if is_dir and fp is not None:      # известный каталог: затрагиваются только его члены
         for src in srcs:
             name = posixpath.basename(expand_vars(src, vars_).replace("\\", "/").rstrip("/"))
             yield from over(dest.rstrip("/\\") + "/" + name, {}, ctx)

@@ -1,15 +1,9 @@
-"""Слова простой команды: переменные, обёртки (sudo/env/xargs/…), хост и путь, код `bash -c` / `powershell -Command`."""
+"""Слова простой команды: переменные, обёртки (sudo/env/xargs/…), код `bash -c` / `powershell -Command`."""
 import base64
 import posixpath
 import re
 from dguard.config import norm
 from dguard.paths import temp_rest, under_cwd
-
-
-def host_of(arg):
-    """`root@203.0.113.3` / `host:path` → `203.0.113.3` (строчными) или None."""
-    h = re.sub(r"^[^@\s]*@", "", arg or "").split(":", 1)[0].strip().strip("[]").lower()
-    return h if h and "$" not in h else None
 
 
 ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -29,13 +23,6 @@ OTHER_INTERP = {"perl", "ruby", "node", "nodejs", "php", "deno", "bun"}
 OTHER_DEL_RE = re.compile(r"\b(?:unlink|rmtree|remove_tree|rmSync|rmdirSync|unlinkSync|rm_rf|rm_r|remove_entry|"
                           r"FileUtils\.rm\w*|File\.delete|Deno\.remove)\b")
 
-HOST_RE = re.compile(r"[\w.-]+@[\w.-]+|\d{1,3}(?:\.\d{1,3}){3}")
-FUNC_DEF = re.compile(r"(?m)^[ 	]*(?:function[ 	]+)?([A-Za-z_][\w-]*)[ 	]*(?:\([ 	]*\))?[ 	]*\{")
-TEXT_CMDS = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "ag", "sed", "awk", "gawk", "cat", "head", "tail",
-             "tee", "ls", "stat", "wc", "sort", "uniq", "cut", "tr", "diff", "cmp", "jq", "date", "sleep", "read",
-             "test", "[", "[[", "true", "false", "cp", "mv", "mkdir", "touch", "chmod", "chown", "ln", "tar", "gzip",
-             "zip", "unzip", "curl", "wget", "gh", "claude", "npm", "pip", "cargo", "make", "sha256sum", "md5sum",
-             "b3sum", "du", "df", "file", "which", "type", "man", "scp", "ping", "write-output", "write-host"}
 PS_VALUE_PARAMS = {"-include", "-exclude", "-filter", "-credential", "-stream", "-erroraction", "-ea", "-warningaction",
                    "-wa", "-informationaction", "-ia", "-errorvariable", "-ev", "-outvariable", "-ov", "-outbuffer",
                    "-ob", "-pipelinevariable", "-pv"}
@@ -54,13 +41,6 @@ WRAPPERS = {
     "stdbuf": {"-i", "-o", "-e"}, "unbuffer": set(), "sshpass": {"-p", "-f", "-d", "-P"}, "chronic": set(),
     "wsl": {"-d", "--distribution", "-u", "--user", "--cd"}, "busybox": set(),
 }
-SSH_VAL = {"-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S",
-           "-W", "-w"}
-RSYNC_VAL = {"-e", "--rsh", "--exclude", "--include", "--exclude-from", "--include-from", "-f", "--filter",
-             "--files-from", "--log-file", "--partial-dir", "-T", "--temp-dir", "--backup-dir", "--compare-dest",
-             "--copy-dest", "--link-dest", "--port", "--timeout", "--bwlimit", "--chmod", "--chown", "--max-size",
-             "--min-size", "--rsync-path", "--address", "--out-format", "--info", "--debug", "--sockopts", "-M",
-             "--remote-option", "--suffix", "--usermap", "--groupmap", "--read-batch", "--write-batch"}
 
 
 def cmd_name(w):
@@ -88,14 +68,6 @@ def expand_args(words, vars_):
         else:
             out.append(expand_vars(a, vars_))
     return out
-
-
-def split_remote(arg):
-    """`host:path` → (host, path); локальный путь (в т.ч. `C:/…`) → (None, arg)."""
-    if re.match(r"^[A-Za-z]:[\\/]", arg) or arg.startswith(("/", "./", "../", "~")):
-        return None, arg
-    m = re.match(r"^(?:[^/@\s:]+@)?([^/@\s:]+):(.*)$", arg, re.S)
-    return (m.group(1), m.group(2)) if m else (None, arg)
 
 
 def pipe_src(cmd):

@@ -20,11 +20,6 @@ def literal_part(p):
     return re.split(r"\$(?!home\b|\{home\})", p, maxsplit=1)[0] if "$" in p else p
 
 
-def closed_host(text):
-    """В тексте (путь, имя хоста, аргументы ssh) назван закрытый хост из `guard_forbidden_hosts`."""
-    return bool(config.CLOSED_RE and config.CLOSED_RE.search(text or ""))
-
-
 TEMP_VARS = ("$tmp", "$temp", "$tmpdir", "${tmp}", "${temp}", "${tmpdir}", "${tmpdir:-/tmp}", "${tmp:-/tmp}",
              "${temp:-/tmp}", "$env:tmp", "$env:temp", "%tmp%", "%temp%")
 TEMP_DIR_MARK = "/appdata/local/temp/"             # %TEMP% Windows (`C:/Users/<имя>/AppData/Local/Temp/…`, в т.ч. короткое имя 8.3)
@@ -72,10 +67,9 @@ def temp_rest(p):
 
 
 def temp_ok(p, ctx):
-    """Путь внутри временного каталога (запись/перезапись/удаление разрешены) — кроме корня каталога, `*`, `..`;
-    на закрытом узле — нет."""
+    """Путь внутри временного каталога (запись/перезапись/удаление разрешены) — кроме корня каталога, `*`, `..`."""
     tr = temp_rest(p)
-    if tr is None or getattr(ctx, "host", None) == CLOSED_HOST:
+    if tr is None:
         return False
     rest, from_mktemp = tr
     segs = [x for x in rest.split("/") if x]
@@ -89,27 +83,23 @@ def allowed(t, ctx=None):
     p = norm(t)
     if placeholder(p):
         return False
-    if closed_host(p):
-        return False
     if temp_rest(p) is not None:                          # временные файлы — не данные владельца
         return temp_ok(p, ctx)
     literal = literal_part(p)
     if not literal or ".." in literal.split("/"):
         return False
-    if config.STAGE and (literal == config.STAGE or literal.startswith(config.STAGE + "/")):
-        return True
-    for root in config.LOCAL_ROOTS + config.REMOTE_ROOTS:
+    for root in config.LOCAL_ROOTS:
         if literal.startswith(root):
             return bool(literal[len(root):].strip("/*"))  # не саму корневую папку
     if SCRATCH in literal:
         return True
     if literal.startswith(("/", "~", "$", "c:", "%")) or re.match(r"[a-z]:", literal):
         return False
-    # относительный путь: от известного рабочего каталога (локально — cwd проекта, на ssh — после `cd ~/проект/…`)
+    # относительный путь: от известного рабочего каталога (от cwd проекта или каталога после `cd`)
     cwd = getattr(ctx, "cwd", None)
     if not cwd:
         return False
-    return allowed(under_cwd(cwd, literal), Ctx(None, getattr(ctx, "remote", False), host=getattr(ctx, "host", None)))
+    return allowed(under_cwd(cwd, literal))
 
 
 def home_relative(literal):
@@ -122,15 +112,12 @@ def home_relative(literal):
 
 
 def write_only_ok(t, ctx=None):
-    """Перезапись/усечение (не удаление!) разрешены в автопамяти проекта: `~/.claude/projects/<проект>/memory/`
-    (только локально: на удалённой машине `~` — другой домашний каталог)."""
-    if getattr(ctx, "remote", False):
-        return False
+    """Перезапись/усечение (не удаление!) разрешены в автопамяти проекта: `~/.claude/projects/<проект>/memory/`."""
     p = norm(t)
     if placeholder(p):
         return False
     literal = literal_part(p)
-    if not literal or ".." in literal.split("/") or closed_host(p):
+    if not literal or ".." in literal.split("/"):
         return False
     rel = home_relative(literal)
     if rel is not None:
@@ -146,17 +133,11 @@ def write_only_ok(t, ctx=None):
 # ------------------------------------------------------------------------------------------------------------
 
 class Ctx:
-    __slots__ = ("cwd", "remote", "funcs", "host", "via")
+    __slots__ = ("cwd", "via")
 
-    def __init__(self, cwd=None, remote=False, funcs=frozenset(), host=None, via=None):
+    def __init__(self, cwd=None, via=None):
         self.cwd = cwd          # нормализованный каталог или None (неизвестен)
-        self.remote = remote
-        self.funcs = funcs      # имена функций оболочки, объявленных в этой же команде (`rsh() { ssh …; }`)
-        self.host = host        # хост ssh без `user@`, строчными, или None
         self.via = via          # метка группы журнала для целей из кода Python/PowerShell ("py-ast", "ps"); иначе None
 
     def copy(self):
-        return Ctx(self.cwd, self.remote, self.funcs, self.host, self.via)
-
-
-CLOSED_HOST = "<закрытый узел>"    # Ctx.host закрытого узла (хост из `guard_forbidden_hosts` или не определён)
+        return Ctx(self.cwd, self.via)

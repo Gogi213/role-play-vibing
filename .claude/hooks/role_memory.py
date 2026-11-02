@@ -3,11 +3,10 @@
 - UserPromptSubmit: подсказки минимальные и без повторов. Команда `/ceo` в сообщении ставит метку CEO текущей
   сессии (запасной путь к метке, которую ставит сама команда).
   Роль (не CEO): строка «молчание» — итог в лог тикета, не текстом в ход.
-  CEO: одна строка «[диспетчер] N новых в ceo-inbox.md» — только когда пришли новые; сторож и разрешения —
-  по разу на 10 сообщений; порог контекста (`ceo_context.py`, TK-052, единственный источник порогов): CEO — от 350 тыс. токенов
+  CEO: одна строка «[диспетчер] N новых в ceo-inbox.md» — только когда пришли новые; сторож — по разу на 10 сообщений; порог контекста (`ceo_context.py`, TK-052, единственный источник порогов): CEO — от 350 тыс. токенов
   вставка раз в 10 сообщений, от 400 тыс. — хардстоп (сообщение в модель не уходит); другие роли с владельцем — строка от 350 тыс., так же раз в 10.
-- SessionEnd (клир, выход, остановка): конспект разговора — сообщения владельца/диспетчера и сессий, ответы
-  (без инструментов и рассуждений) — в `.claude/roles/log/<роль>/`. Не сработал — `role_context.py` на следующем
+- SessionEnd (клир, выход, остановка): конспект разговора — сообщения владельца/диспетчера и сессий дословно, ответы
+  (без инструментов и рассуждений; без пересказа моделью) — в `.claude/roles/log/<роль>/`. Не сработал — `role_context.py` на следующем
   старте догоняет конспект по записанному пути.
 - Ключ состояния сессии: для запуска диспетчера — `RPV_ROLE[-<RPV_TICKET>]` (раньше все роли писали в
   `unknown.json` и конспекты путались), для Desktop — id сессии приложения. Переменные — `RPV_*`.
@@ -116,20 +115,6 @@ def digest_path(role, cli_id):
     return os.path.join(digest_dir(role), name)
 
 
-HAIKU_HOOK_S = 20  # SessionEnd: таймаут хука 30 с — Haiku укладывается раньше (TK-110 В-2)
-
-
-def haiku_abstract(turns):
-    """TK-087 п.2: краткий конспект сверху (Haiku, не источник — ниже дословные сообщения); сбой — ''."""
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dispatcher"))
-        import haiku_aux
-        text = haiku_aux.compact("\n".join(turns), timeout=HAIKU_HOOK_S)
-    except Exception:
-        return ""
-    return f"## Краткий конспект (Haiku, не источник — дословно ниже)\n{text}\n\n" if text else ""
-
-
 def _atomic_write(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -137,10 +122,10 @@ def _atomic_write(path, text):
     os.replace(tmp, path)
 
 
-def write_digest(transcript, role, title, cli_id, why, dispatcher=None, abstract=True):
+def write_digest(transcript, role, title, cli_id, why, dispatcher=None):
     """Конспект разговора из транскрипта; возвращает путь или None (пустой разговор).
     Запуск диспетчера: сообщения пользователя в транскрипте — промпты диспетчера, не владельца.
-    abstract=False — без Haiku: `claude -p` выходит сразу после ответа и отменяет SessionEnd-хук («Hook cancelled»)."""
+    Без вызова модели: `claude -p` выходит сразу после ответа и отменяет SessionEnd-хук («Hook cancelled»)."""
     if not transcript or not cli_id or not os.path.isfile(transcript):
         return None
     if dispatcher is None:
@@ -175,10 +160,7 @@ def write_digest(transcript, role, title, cli_id, why, dispatcher=None, abstract
             f"Сессия CLI `{cli_id}`, полный транскрипт: `{transcript}`. Только сообщения и ответы — "
             f"без инструментов и рассуждений. Читать секциями/грепом, не целиком.\n\n")
     body = "\n".join(turns)
-    _atomic_write(path, head + body)                      # сначала без Haiku: убитый по таймауту хук не теряет конспект
-    summary = haiku_abstract(turns) if abstract else ""
-    if summary:
-        _atomic_write(path, head + summary + body)
+    _atomic_write(path, head + body)
     return path
 
 
@@ -269,46 +251,6 @@ def ceo_inbox_alert():
     return f"[диспетчер] {len(new)} новых в .claude/dispatcher/ceo-inbox.md"
 
 
-# вызов роли может часами ждать подтверждения в её сессии, куда никто не смотрит. Уведомление роли «нужно
-# разрешение» пишется меткой; CEO видит её на своём сообщении.
-PENDING = os.path.join(STATE_DIR, "pending-permission.json")
-
-
-def on_notification(hook_in, role):
-    if role == "ceo":
-        return
-    msg = hook_in.get("message") or ""
-    if "permission" not in (msg + " " + (hook_in.get("notification_type") or "")).lower():
-        return
-    try:
-        with open(PENDING, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        data = {}
-    os.makedirs(STATE_DIR, exist_ok=True)
-    data[role] = {"ts": time.time(), "message": msg[:200]}
-    with open(PENDING, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-
-
-def pending_permissions():
-    """(суть, текст) или None."""
-    try:
-        with open(PENDING, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    fresh = {r: v for r, v in data.items() if time.time() - v.get("ts", 0) < 3 * 3600}
-    if not fresh:
-        return None
-    items = "; ".join(f"{r} с {datetime.datetime.fromtimestamp(v['ts']).strftime('%H:%M')} — {v.get('message', '')}"
-                      for r, v in fresh.items())
-    sig = ",".join(f"{r}@{int(v['ts'])}" for r, v in sorted(fresh.items()))
-    return sig, (f"[разрешения] роль ждёт подтверждения в своей сессии: {items}. Если ещё стоит — сразу сказать "
-                 "владельцу, какая сессия и что подтвердить. Разобрано — удалить запись роли из "
-                 ".claude/roles/.state/pending-permission.json.")
-
-
 # Контекст: пороги — одни, `ceo_context.limits` (350/400 тыс., В-15). CEO — вставка WARN и хардстоп (`ceo_gate`); остальные роли
 # с владельцем — короткая строка от порога WARN (у запуска диспетчера просить клир некого). Повтор — не чаще раза в REPEAT_EVERY сообщений.
 def context_tokens(path):
@@ -348,13 +290,12 @@ def on_prompt_all(hook_in, role, gate=...):
     if role != "ceo":
         parts.append(SILENT_TEXT)
     else:
-        for getter in (pending_permissions, watch_alert):
-            try:
-                got = getter()
-            except Exception:
-                got = None
-            if got:
-                parts.append(throttled(state, getter.__name__, got[0], got[1]))
+        try:
+            got = watch_alert()
+        except Exception:
+            got = None
+        if got:
+            parts.append(throttled(state, "watch_alert", got[0], got[1]))
         try:
             parts.append(ceo_inbox_alert())
         except Exception:
@@ -406,11 +347,9 @@ def main():
             if text:
                 sys.stdout.write(json.dumps({"hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit", "additionalContext": text}}, ensure_ascii=True))
-        elif event == "Notification":
-            on_notification(hook_in, role)
         elif event == "SessionEnd":
             write_digest(hook_in.get("transcript_path"), role, title, hook_in.get("session_id"),
-                         f"закрытие: {hook_in.get('reason', '?')}", abstract=env_role() is None)
+                         f"закрытие: {hook_in.get('reason', '?')}")
     except Exception:
         pass
     return 0
