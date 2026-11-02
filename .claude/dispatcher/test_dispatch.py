@@ -807,6 +807,12 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("не отправлено (нет RPV_TG_TOKEN/RPV_TG_CHAT): Работа стоит",
                       (CFG.DISPATCHER_DIR / "notify.log").read_text(encoding="utf-8"))
 
+    def test_tick_writes_pulse_json(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        D.tick(t0)
+        data = json.loads(self.dispatcher_dir.joinpath("pulse.json").read_text(encoding="utf-8"))
+        self.assertEqual((data["version"], len(data["cells"]), data["state"]), (1, 96, "ok"))
+
     def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         T.create_ticket(self.tickets_dir, owner="engineer", title="Тормоз", now=t0 - timedelta(hours=1))

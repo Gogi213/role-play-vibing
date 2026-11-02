@@ -31,6 +31,7 @@ import plugin_version as PV  # noqa: E402
 import ticket as T  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 import downtime  # noqa: E402
+import pulse as PULSE  # noqa: E402 — pulse.json раз в тик (TK-095)
 import on_met as ON_MET  # noqa: E402
 import waits as W  # noqa: E402
 import alarms as AL  # noqa: E402
@@ -765,10 +766,12 @@ def tick(now=None) -> int:
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
+    _guarded("пульс", PULSE.update, state, now, datetime.now().astimezone())  # после счётчика простоя: берёт его флаги dt_flags и прежний last_tick
     _guarded("отчёт", _daily_report, state, now)
     _guarded("надзиратель", _overseer, state, now)
     _guarded("вопрос владельцу", _owner_questions, state, now)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
+    state["last_tick_end"] = T.now_iso()  # конец тика: Пульс меряет тишину от него, долгий тик — не «диспетчер мёртв» (TK-095)
     save_state(state)
     return launched
 
