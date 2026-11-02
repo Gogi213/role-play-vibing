@@ -137,7 +137,31 @@ class PulseTelegram(States):
         self.api.fail.clear()
         self.api.calls.clear()
         self.assertEqual(self.sync(self.ok, 6), "sent")
-        self.assertEqual(self.api.methods(), ["sendMessage"])  # закреплено уже было — второй раз не закрепляем
+        self.assertEqual(self.api.methods(), ["sendMessage", "pinChatMessage"])  # пересозданное сообщение закрепляется заново
+        self.assertTrue(self.state["pulse_tg"]["pinned"])
+        self.api.calls.clear()
+        self.assertEqual(self.sync(self.ok, 8), "same")
+        self.assertEqual(self.api.calls, [])  # закреплено — больше не трогаем
+
+    def test_pin_failure_is_retried_a_few_times_then_stops(self):
+        self.api.fail["pinChatMessage"] = "Bad Request: not enough rights"
+        self.assertEqual(self.sync(self.ok), "sent")
+        self.assertFalse(self.state["pulse_tg"]["pinned"])
+        for minute in (2, 4):
+            self.assertEqual(self.sync(self.ok, minute), "same")
+        self.assertEqual(self.api.methods().count("pinChatMessage"), G.PIN_TRIES)
+        self.api.calls.clear()
+        self.assertEqual(self.sync(self.ok, 6), "same")
+        self.assertEqual(self.api.calls, [])  # попытки вышли — молчим
+        self.assertIn("не закреплено (Bad Request: not enough rights), попытка 3 из 3", self.log())
+
+    def test_pin_retry_succeeds_after_failure(self):
+        self.api.fail["pinChatMessage"] = "Bad Request: not enough rights"
+        self.sync(self.ok)
+        self.api.fail.clear()
+        self.assertEqual(self.sync(self.ok, 2), "same")
+        self.assertTrue(self.state["pulse_tg"]["pinned"])
+        self.assertEqual(self.api.methods()[-1], "pinChatMessage")
 
     def test_create_failure_sends_nothing_and_remembers_nothing(self):
         self.api.fail["sendMessage"] = "Bad Request: chat not found"

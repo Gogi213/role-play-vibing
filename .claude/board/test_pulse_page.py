@@ -2,15 +2,17 @@
 Фикстуры — настоящий вывод `pulse.build` (формат шага 1, TK-095): States из dispatcher/test_pulse_tg.py."""
 import io
 import json
+import os
 import re
 import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -84,6 +86,62 @@ class PageStates(TG.States):
         self.assertEqual(view["state"], "stuck")
         self.assertEqual({c[0] for c in view["cells"][:view["idx"] + 1]}, {"stuck"})
         self.assertEqual({c[0] for c in view["cells"][view["idx"] + 1:]}, {"none"})
+
+    def test_stale_threshold_is_the_one_of_pulse_read(self):
+        """Один порог с pulse.read (heartbeat.STALE_S = 10 мин): 5 мин — ещё идёт, 11 мин — не отвечает."""
+        self.assertEqual(V.STALE_S, V.HB.STALE_S)
+        fresh = self.view("rpv", self.ok_data(), self.at + timedelta(minutes=5))
+        self.assertEqual(fresh["state"], "ok")
+        self.assertNotIn("не отвечает", fresh["phrase"])
+        late = self.view("rpv", self.ok_data(), self.at + timedelta(minutes=11))
+        self.assertEqual(late["state"], "stuck")
+        self.assertIn("диспетчер не отвечает 11 мин", late["phrase"])
+
+    def test_stale_view_does_not_show_old_now_and_pause(self):
+        data = dict(self.ok_data(), pause="12:00–12:45 · 45 минут · тишина")
+        self.assertIn("judge · TK-7", self.render(data))
+        html = self.render(data, now=self.at + timedelta(minutes=11))
+        self.assertNotIn("judge · TK-7", html)
+        self.assertNotIn("12:00–12:45", html)
+        self.assertIn("диспетчер не отвечает", html)
+
+    def test_cell_and_clock_follow_the_zone_of_the_file_not_of_the_server(self):
+        """Файл проекта в +04:00 (13:00 — клетка 52), сервер в UTC (09:03): клетка и часы — проектные."""
+        project_zone = self.at.tzinfo
+        self.assertEqual(self.at.utcoffset(), timedelta(hours=4))
+        server_now = (self.at + timedelta(minutes=3)).astimezone(timezone.utc)
+        view = V.normalise("rpv", self.ok_data(), server_now)
+        self.assertEqual((view["idx"], view["zone"]), (self.cur, project_zone))
+        html = S.body_html([view], server_now)
+        self.assertIn("cur", row_classes(html)[-1])
+        self.assertIn("13:03 · сегодня", html)
+        self.assertNotIn("09:03", html)
+
+    def test_stale_day_is_judged_in_the_zone_of_the_file(self):
+        """Файл 23:50 (+04:00), сервер в UTC 20:20 того же UTC-дня, у проекта уже 00:20 следующих суток: клетки прошлых суток стёрты."""
+        data = self.ok_data()
+        data["generated"] = self.at.replace(hour=23, minute=50).isoformat()
+        server_now = (self.at + timedelta(days=1)).replace(hour=0, minute=20).astimezone(timezone.utc)
+        self.assertEqual(server_now.date(), (self.at.replace(hour=23, minute=50)).astimezone(timezone.utc).date())
+        view = V.normalise("rpv", data, server_now)
+        self.assertEqual({c[0] for c in view["cells"][:view["idx"] + 1]}, {"stuck"})
+        self.assertEqual(view["idx"], 1)
+
+    def test_no_projects_is_not_a_green_phrase(self):
+        self.assertEqual(V.summary([]), V.NO_PROJECTS)
+        self.assertNotIn(V.OK_PHRASE, V.summary([]))
+        html = S.body_html([], self.at)
+        self.assertIn(V.NO_PROJECTS, html)
+        self.assertIn('class="phrase stuck"', html)
+
+    def test_broken_cells_and_garbage_do_not_crash(self):
+        for cells in ({"a": 1}, "x", 5, None):
+            with self.subTest(cells=cells):
+                self.assertIn("пульс не читается", self.render(dict(self.ok_data(), cells=cells)))
+        self.assertIn("пульс не читается", self.render(dict(self.ok_data(), generated=12345)))
+        junk = dict(self.ok_data(), cells=[1, "a", None, {"i": "x"}, {"i": 5, "n": "z", "c": []}, {"i": 7, "n": 2, "c": "work"}])
+        self.assertEqual(self.view("rpv", junk)["cells"][7], ("work", 2))
+        self.assertNotIn("пульс не читается", self.render(junk))
 
     def test_no_work_is_not_stuck(self):
         html = self.render(self.pulse())
@@ -160,10 +218,21 @@ class ServerTests(TG.States):
         self.assertIn("<b>invoice</b>", page)  # удалённый проект — по URL
         self.assertIn("prefers-color-scheme:dark", page)
         self.assertIn("max-width:480px", page)
+        self.assertIn("setInterval(tick,30000)", page)  # автообновление раз в 30 с
+        self.assertIn("Не удалось обновить", page)  # ошибка обновления показывается, а не глотается
         code, body = self.get("/sekret/body")
         self.assertEqual(code, 200)
         self.assertNotIn("<style", body)
         self.assertIn('<div class="head">', body)
+
+    def test_unreadable_rpv_json_is_not_all_clear(self):
+        rpv = self.proj / ".claude" / "rpv.json"
+        rpv.write_text("{не json", encoding="utf-8")
+        os.utime(rpv, (time.time() + 5, time.time() + 5))  # кэш настроек — по времени изменения
+        code, page = self.get("/sekret/")
+        self.assertEqual(code, 200)
+        self.assertIn(V.NO_PROJECTS, page)
+        self.assertNotIn(V.OK_PHRASE, page)
 
     def test_wrong_token_or_path_is_404(self):
         self.assertEqual(self.get("/wrong/")[0], 404)

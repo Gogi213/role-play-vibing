@@ -12,12 +12,14 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import heartbeat as HB  # noqa: E402
 import project as P  # noqa: E402
 
-STALE_S = 120  # pulse.json старше — диспетчер не отвечает (порог dispatcher_dead шага 1)
+STALE_S = HB.STALE_S  # pulse.json старше — диспетчер не отвечает; тот же порог, что в pulse.read (шаг 1)
 FETCH_TIMEOUT_S = 5.0
 CELLS = 96  # 15-минутных клеток в сутках
 OK_PHRASE = "Всё идёт. От вас ничего."
+NO_PROJECTS = "Проектов нет: ключ pulse_projects в rpv.json пуст или rpv.json не читается."
 STATES = ("ok", "owner", "stuck")
 CLASSES = ("work", "none", "owner", "stuck")
 
@@ -44,7 +46,7 @@ def projects_of(root) -> dict:
 def _cells_of(raw: dict) -> list:
     """96 клеток (класс, запусков) из `cells` шага 1: `{i, n, c, why?}`; нет клетки или класс неизвестен — ('none', 0)."""
     out = [("none", 0)] * CELLS
-    for item in raw.get("cells") or []:
+    for item in raw["cells"]:
         i = item.get("i") if isinstance(item, dict) else None
         if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < CELLS:
             n = item.get("n")
@@ -58,26 +60,28 @@ def _slot(moment: datetime) -> int:
 
 def _unreadable(name: str, now: datetime) -> dict:
     return {"name": name, "state": "stuck", "phrase": f"Застряло: {name} — пульс не читается.", "now": "", "pause": "",
-            "cells": [("none", 0)] * CELLS, "idx": _slot(now), "age_s": None}
+            "cells": [("none", 0)] * CELLS, "idx": _slot(now), "age_s": None, "zone": None}
 
 
 def normalise(name: str, raw, now: datetime) -> dict:
     """Один вид проекта: name, state, phrase, now, pause, cells [(класс, запусков)] ×96, idx (текущая клетка), age_s.
-    Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated). Нет файла, `state` не из списка или `generated` не
-    время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после записи — stuck."""
-    stamp = P.parse_time(raw.get("generated"), strict=False) if isinstance(raw, dict) and raw.get("generated") else None
-    if stamp is None or stamp.tzinfo is None or raw.get("state") not in STATES:
+    Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated). Нет файла, `state` не из списка, `cells` не список или
+    `generated` не время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после
+    записи — stuck, прежние «сейчас» и пауза убраны. Сутки и клетка — по поясу `generated` (поясу проекта), не сервера."""
+    stamp = P.parse_time(raw.get("generated"), strict=False) if isinstance(raw, dict) and isinstance(raw.get("generated"), str) else None
+    if stamp is None or stamp.tzinfo is None or raw.get("state") not in STATES or not isinstance(raw.get("cells"), list):
         return _unreadable(name, now)
-    stamp = stamp.astimezone(now.tzinfo)
+    here = now.astimezone(stamp.tzinfo)
     age = max(0, int((now - stamp).total_seconds()))
     view = {"name": name, "state": raw["state"], "phrase": str(raw.get("phrase") or OK_PHRASE), "now": str(raw.get("now") or ""),
-            "pause": str(raw.get("pause") or ""), "cells": _cells_of(raw), "idx": _slot(stamp), "age_s": age}
+            "pause": str(raw.get("pause") or ""), "cells": _cells_of(raw), "idx": _slot(stamp), "age_s": age, "zone": stamp.tzinfo}
     if age > STALE_S:
-        same_day = stamp.date() == now.date()
+        same_day = stamp.date() == here.date()
         first = view["idx"] + 1 if same_day else 0
         if not same_day:
             view["cells"] = [("none", 0)] * CELLS
-        view.update(state="stuck", phrase=f"Застряло: {name} — диспетчер не отвечает {max(1, age // 60)} мин.", idx=_slot(now))
+        view.update(state="stuck", phrase=f"Застряло: {name} — диспетчер не отвечает {max(1, age // 60)} мин.", now="", pause="",
+                    idx=_slot(here))
         for i in range(first, view["idx"] + 1):
             view["cells"][i] = ("stuck", 0)
     return view
@@ -89,7 +93,9 @@ def load_all(root, now: datetime | None = None, fetch=urllib.request.urlopen) ->
 
 
 def summary(views: list) -> str:
-    """Фраза-итог: застряло важнее «нужны вы», иначе «Всё идёт»; несколько — первая и счёт остальных."""
+    """Фраза-итог: застряло важнее «нужны вы», иначе «Всё идёт»; несколько — первая и счёт остальных. Проектов нет — не «Всё идёт»."""
+    if not views:
+        return NO_PROJECTS
     bad = [v for v in views if v["state"] == "stuck"] + [v for v in views if v["state"] == "owner"]
     if not bad:
         return OK_PHRASE
