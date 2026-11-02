@@ -259,7 +259,7 @@ class UnreleasedDocsTests(unittest.TestCase):
     def test_signals_doc_lists_the_kind(self):
         text = SIGNALS_DOC.read_text(encoding="utf-8")
         row = next(ln for ln in text.splitlines() if ln.startswith("| `watch-unreleased`"))
-        for must in ("10 мин", "`watch_unreleased`", "по умолчанию выключен", "раз в сутки", "будит"):
+        for must in ("10 мин", "`watch_unreleased`", "по умолчанию выключен", "раз в сутки", "строка очереди"):
             self.assertIn(must, row)
 
 if __name__ == "__main__":
