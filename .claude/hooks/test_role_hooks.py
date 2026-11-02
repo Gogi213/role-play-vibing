@@ -130,6 +130,10 @@ class SessionStart(unittest.TestCase):
         text, _ = start_text("judge", "startup", ticket="TK-093")
         self.assertNotIn("Устав роли не влез", text)
         self.assertIn("--- .claude/roles/judge.md ---", text)
+        # пути проекта и плагина в вставке зависят от ОС (macOS-CI: tmp длиннее — 7712 против 7694): приводим к 60 знакам
+        for path in (PROJECT, PLUGIN):
+            for form in (path.replace("\\", "/"), path):
+                text = text.replace(form, "x" * 60)
         self.assertLessEqual(len(text), rc.LIMIT - 300)
 
     def test_resume_and_compact_are_short(self):
