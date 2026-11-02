@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Пульс (В-38), шаг 2: страница «Пульс» — крошечный сервер на stdlib, один файл.
+"""Пульс (В-38), шаг 2; v2 — TK-105 (В-50, В-51): страница «Пульс» — крошечный сервер на stdlib, один файл.
 
     pulse_server.py --project <проект> [--host 127.0.0.1] [--port 8787] [--token <ключ>]
 
 Проекты и откуда читать их `pulse.json` (путь или URL) — ключ `pulse_projects` в `<проект>/.claude/rpv.json`. Страница живёт по
 адресу `/<ключ>/` (ключ — `--token` или переменная PULSE_TOKEN; без ключа сервер не стартует), `/<ключ>/body` — только
-содержимое для автообновления раз в 30 с. Клетки и фраза — из pulse.json как есть (`dispatcher/pulse_view.py`); ничего сверх макета.
+содержимое для автообновления раз в 30 с. Шапка, итоги дня, карточки и подсказки клеток — из pulse.json как есть
+(`dispatcher/pulse_view.py`); макет — docs/pulse-mockup-v2.html. Фильтр и раскрытые карточки живут в браузере (pulse.html).
 """
 from __future__ import annotations
 
 import argparse
 import hmac
+import json
 import os
 import sys
 from datetime import datetime
@@ -22,72 +24,150 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "dispatcher"))
 import pulse_view as V  # noqa: E402
 
-WINDOW = 32  # клеток на широком экране: 8 часов, правый край — текущая клетка
-NARROW = 12  # на телефоне (< 480 px): сутки по 2 часа в клетке
-GROUP = 8    # 15-минутных клеток в 2 часах
-LEGEND = ('<div class="leg"><span><i style="background:var(--card);border:0.5px solid var(--line)"></i>'
-          '<i style="background:#C0DD97"></i><i style="background:#639922"></i> тихо → работа за 15 мин</span>'
-          '<span><i style="background:#FAC775"></i> ждали вас</span><span><i style="background:#F09595"></i> застряло</span></div>')
+WINDOW = 32      # клеток на широком экране: 8 часов, правый край — текущая клетка
+NARROW = 16      # на телефоне (< 760 px): 4 часа
+PER_HOUR = 4     # 15-минутных клеток в часе
+CELL_MIN = 60 // PER_HOUR
+TIP_RUNS = 3     # строк запусков в подсказке клетки (остальные — «и ещё N»)
+KIND = {"ok": "", "owner": "owner", "stuck": "stuck"}  # класс шапки и строки «сейчас»
+SEG = (("all", "Все"), ("ok", "Идёт"), ("owner", "Нужен ответ"), ("stuck", "Застряло"))
+SUM = (("accepted", ("принято сегодня",) * 3), ("returns", ("возврат", "возврата", "возвратов")), ("working", ("в работе",) * 3),
+       ("queued", ("в очереди",) * 3))
+LEGEND = ('<div class="legend"><span><i style="background:var(--c0)"></i>тихо</span>'
+          '<span><i style="background:var(--c1)"></i><i style="background:var(--c3)"></i>работа, темнее — больше</span>'
+          '<span><i style="background:var(--owner)"></i>ждали ответа</span><span><i style="background:var(--stuck)"></i>застряло</span>'
+          '<span>клетка — 15 минут</span></div>')
 
 
-def level(cls: str, runs: int, step: int = 1) -> str:
-    """Класс клетки страницы: n/m/h — работа (темнее = больше запусков), y — ждали владельца, o — застряло, '' — пусто."""
+def level(cls: str, runs: int) -> str:
+    """Класс клетки страницы: a/b/c — работа (темнее = больше запусков), o — ждали владельца, s — застряло, '' — тихо."""
     if cls == "owner":
-        return "y"
-    if cls == "stuck":
         return "o"
-    if cls == "work" or runs:
-        return "h" if runs >= 4 * step else "m" if runs >= 2 * step else "n"
-    return ""
+    if cls == "stuck":
+        return "s"
+    return ("c" if runs >= 4 else "b" if runs >= 2 else "a") if cls == "work" or runs else ""
 
 
-def _spans(classes: list, cur: int) -> str:
-    return "".join(f'<span class="{(c + (" cur" if i == cur else "")).strip()}"></span>' for i, c in enumerate(classes))
+def hhmm(slot: int) -> str:
+    minutes = slot * CELL_MIN % 1440
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-def wide_cells(view: dict) -> str:
-    idx = view["idx"]
-    cells = [view["cells"][i] if 0 <= i < len(view["cells"]) else ("none", 0) for i in range(idx - WINDOW + 1, idx + 1)]
-    return f'<div class="c w">{_spans([level(*c) for c in cells], WINDOW - 1)}</div>'
+def run_line(run: dict) -> str:
+    """«Роль · заголовок тикета (TK-N)»; роли нет или заголовка нет — без них."""
+    ticket = f"({run['ticket']})" if run["title"] else run["ticket"]
+    return " · ".join(x for x in (run["who"], " ".join(x for x in (run["title"], ticket) if x)) if x)
 
 
-def narrow_cells(view: dict) -> str:
-    out = []
-    for g in range(NARROW):
-        part = view["cells"][g * GROUP:(g + 1) * GROUP]
-        kinds = {c[0] for c in part}
-        runs = sum(c[1] for c in part)
-        out.append("o" if "stuck" in kinds else "y" if "owner" in kinds else level("work", runs, GROUP // 2) if runs or "work" in kinds else "")
-    return f'<div class="c k">{_spans(out, view["idx"] // GROUP)}</div>'
+def cell_info(view: dict, slot: int, current: int) -> dict:
+    """Подсказка клетки: время, метка статуса с цветом, до TIP_RUNS строк. Нет источника — строки нет (ничего не выдумываем)."""
+    cls, n = view["cells"][slot] if 0 <= slot < V.CELLS else ("none", 0)
+    runs = view["runs"][slot] if 0 <= slot < V.CELLS else []
+    when = f"{hhmm(slot)}–{hhmm(slot + 1)}" + (" · сейчас" if slot == current else "")
+    stuck_now, fix = view["state"] == "stuck", view["fix"]
+    if cls == "owner":
+        lines = [V.ask_text(view)] if view["state"] == "owner" else []
+        return {"t": when, "st": ["Ждали ответа", "var(--owner)"], "l": lines}
+    if cls == "stuck":
+        return {"t": when, "st": ["Застряло", "var(--stuck)"], "l": [fix["text"], fix["who"]] if stuck_now else []}
+    if cls == "work" or n:
+        lines = [run_line(r) for r in runs[:TIP_RUNS]]
+        if runs and n > len(runs):
+            lines.append(f"и ещё {n - len(runs)}")
+        return {"t": when, "st": [f"{n} {V.plural(n, 'запуск', 'запуска', 'запусков')}" if n else "Работа", "var(--c2)"], "l": lines}
+    return {"t": when, "st": ["Тихо", "var(--c0)"], "l": ["запусков не было"]}
 
 
-def meta_of(view: dict) -> str:
-    first = view["now"] or (V.tg_line(view).split(": ", 1)[-1] if view["state"] != "ok" else "")
-    lines = [x for x in (first, view["pause"]) if x]
-    return f'<div class="meta {"you" if view["state"] == "owner" else view["state"] if view["state"] == "stuck" else ""}">' \
-           f'{"<br>".join(escape(x) for x in lines)}</div>'
+def cell_html(view: dict, slot: int, current: int) -> str:
+    cls, n = view["cells"][slot] if 0 <= slot < V.CELLS else ("none", 0)
+    info = escape(json.dumps(cell_info(view, slot, current), ensure_ascii=False), quote=True)
+    mark = (level(cls, n) + (" now" if slot == current else "")).strip()
+    return f'<i class="{mark}" data-k="{slot}" data-info="{info}"></i>'
 
 
-def row(view: dict) -> str:
-    return f'<div class="r"><b>{escape(view["name"])}</b>{wide_cells(view)}{narrow_cells(view)}{meta_of(view)}</div>'
+def hours_html(first: int, count: int) -> str:
+    """Часы над своими клетками: метка часа занимает его клетки в окне (неполные края — сколько влезло, одна клетка — без метки)."""
+    out, k = [], 0
+    while k < count:
+        slot = first + k
+        span = min(PER_HOUR - slot % PER_HOUR, count - k)
+        label = f"{slot // PER_HOUR % 24:02d}" if span > 1 else ""
+        out.append(f'<span style="grid-column:{k + 1} / span {span}">{label}</span>')
+        k += span
+    return "".join(out)
 
 
-def hours(idx: int) -> str:
-    first = (idx - WINDOW + 1) // 4
-    return ('<div class="r" style="padding-top:18px;padding-bottom:2px"><span></span><div class="hl">'
-            + "".join(f"<span>{(first + k) % 24:02d}</span>" for k in range(WINDOW // 4)) + "</div><span></span></div>")
+def timeline(view: dict, end: int, count: int, kind: str) -> str:
+    first = end - count + 1
+    cells = "".join(cell_html(view, slot, end) for slot in range(first, end + 1))
+    return f'<div class="tl {kind}"><div class="hours">{hours_html(first, count)}</div><div class="cells">{cells}</div></div>'
+
+
+def goal_html(view: dict) -> str:
+    goal = view["goal"]
+    if not goal:
+        return ""
+    step = f'<br>шаг {goal["step"]} из {goal["steps"]}' if "step" in goal else ""
+    bar = f'<div class="bar"><i style="width:{goal["step"] / goal["steps"] * 100:.0f}%"></i></div>' if "step" in goal else ""
+    return f'<div class="goal">{escape(goal["title"])}{step}</div>{bar}'
+
+
+def safe_link(url: str) -> str:
+    return url if url.startswith(("http://", "https://")) else ""
+
+
+def now_line(view: dict) -> str:
+    """Справа в карточке: что делается / вопрос / причина и кто чинит; ниже «TK-N · длительность»."""
+    state, job, ask, fix = view["state"], view["job"], view["ask"] or {}, view["fix"]
+    link = ""
+    if state == "owner":
+        main, who = ask.get("question", ""), ask.get("ticket", "")
+        link = safe_link(ask.get("link", ""))
+    elif state == "stuck":
+        main, who = fix["text"], fix["who"]
+    elif job:
+        role = job["who"]
+        main = " ".join(x for x in (role, job["verb"] if role else "", job["title"] or job["ticket"]) if x)
+        who = " · ".join(x for x in (job["ticket"], job["since"]) if x)
+    else:
+        main, who = view["now"] or "Сейчас тихо", ""
+    button = f'<a class="act" href="{escape(link, quote=True)}">Ответить</a>' if link else ""
+    return (f'<div class="now-line {KIND[state]}">{escape(main)}' + (f'<span class="who">{escape(who)}</span>' if who else "") + button + "</div>")
+
+
+def items_html(items: list, empty: str, with_time: bool) -> str:
+    if not items:
+        return f'<li><span class="mute">{empty}</span></li>'
+    return "".join(f'<li>{"<em>" + escape(i["time"]) + "</em>" if with_time else ""}'
+                   f'<span>{escape(i["title"])} <span class="tag">{escape(i["ticket"])}</span></span></li>' for i in items)
+
+
+def card(view: dict, end: int) -> str:
+    return (f'<details class="proj" data-n="{escape(view["name"], quote=True)}" data-s="{view["state"]}"><summary>'
+            f'<div><div class="name">{escape(view["name"])}</div>{goal_html(view)}</div>'
+            f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}</summary>'
+            f'<div class="body"><div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
+            f'<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто", False)}</ul></div></div></details>')
+
+
+def summary_html(views: list) -> str:
+    counts, totals = V.counts(views), V.totals(views)
+    seg = "".join(f'<button data-s="{key}"{" class=on" if key == "all" else ""}>{label} <sup>{counts[key]}</sup></button>' for key, label in SEG)
+    day = "".join(f"<div><b>{totals[key]}</b>{V.plural(totals[key], *words)}</div>" for key, words in SUM)
+    return f'<div class="seg" id="seg">{seg}</div><div class="sum">{day}</div>'
 
 
 def body_html(views: list, now: datetime) -> str:
-    """Содержимое рамки: фраза и часы, часы окна, по строке на проект, легенда."""
-    states = {v["state"] for v in views}
-    cls = "stuck" if "stuck" in states or not views else "you" if "owner" in states else ""
-    idx = max((v["idx"] for v in views), default=0)
+    """Содержимое страницы: шапка, переключатель, итоги дня, карточки проектов, легенда."""
+    head = V.header(views)
+    end = max((v["idx"] for v in views), default=0)
     zone = next((v["zone"] for v in views if v.get("zone")), None)  # часы — по поясу проектов, не сервера
     shown = now.astimezone(zone) if zone else now
-    return (f'<div class="head"><div class="phrase {cls}">{escape(V.header(views)["title"])}</div>'
-            f'<div class="meta">{shown:%H:%M} · сегодня</div></div>'
-            + (hours(idx) if views else "") + "".join(row(v) for v in views) + LEGEND)
+    sub = f"<small>{escape(head['sub'])}</small>" if head["sub"] else ""
+    return (f'<div class="top"><div class="state {KIND[head["kind"]]}">{escape(head["title"])}{sub}</div>'
+            f'<div class="meta">обновлено {shown:%H:%M}</div></div>'
+            + (summary_html(views) if views else "") + "".join(card(v, end) for v in views)
+            + '<p class="empty" id="empty" hidden>Таких проектов нет</p>' + LEGEND)
 
 
 def page_html(views: list, now: datetime) -> str:
