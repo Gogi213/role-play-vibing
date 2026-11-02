@@ -69,6 +69,7 @@ import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
 import critic_gate  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
+import tickets_gates as gates_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
 # Проект и тикеты берутся у диспетчера (CFG.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
@@ -171,6 +172,9 @@ def cmd_comment(args) -> int:
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
     nxt, auto_next, kept = args.next, False, ""
+    if bad := proof_mod.label_problem(args.text, T.read_ticket(path), args.author):  # TK-089: ярлыки — при записи, не на приёмке
+        print(f"comment: {bad}; запись не сделана", file=sys.stderr)
+        return 1
     with T.ticket_lock(path):  # запись, `next` и сжатие лога — одним куском (диспетчер правит шапку тем же замком)
         T.append_log(path, args.author, args.text)
         if not nxt and T.author_is(args.author, "judge"):
@@ -234,16 +238,9 @@ def _result_proof(args, role: str, tkt) -> str:
 
 
 def _accept_checks(args) -> tuple[str, str, str]:
-    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка. → (отказ, пометки для лога, хвост для CEO)."""
-    err, ack = _decisions_ack(args)
-    nerr, nack = _numbers_ack(args, args.id)
-    terr, tack, tail_ceo = _tail_ack(args, args.id)
-    lerr, lack = _live_ack(args, args.id)
-    err = err or nerr or terr or lerr
-    cerr, cack = ("", "") if err else _critic_ack(args, args.id)
-    err = err or cerr
-    perr, pack = ("", "") if err or args.pr else _proof_ack(args.id)  # с PR команды гонит cmd_accept: дважды не гоняем
-    return err or perr, ack + nack + tack + lack + cack + pack, tail_ceo
+    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка, критик, ярлыки. → (отказ, пометки для лога, хвост для CEO)."""
+    errs, ack, tail_ceo = gates_mod.run(args, sys.modules[__name__], proof=not args.pr)  # с PR команды гонит cmd_accept
+    return (errs or [""])[0], ack, tail_ceo
 
 
 def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
@@ -257,6 +254,7 @@ def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
                                   "live": getattr(args, "live", None),
                                   "critic": getattr(args, "critic", None),
                                   "critic_skip": getattr(args, "critic_skip", None),
+                                  "false_positive": getattr(args, "false_positive", None),
                                   "after_merge": getattr(args, "after_merge", None)})())
     if rc == 0:
         with T.ticket_lock(path):
@@ -298,6 +296,8 @@ def cmd_result(args) -> int:
         return 1
     role = _caller_role()
     tkt = T.read_ticket(path)
+    if getattr(args, "dry_run", False):  # TK-089: все отказы приёмки одним списком, ничего не пишется
+        return gates_mod.dry_run_result(args, sys.modules[__name__], role, tkt)
     err = _result_refusal(args, role, tkt)
     if err:
         print(f"result: {err}", file=sys.stderr)
@@ -418,9 +418,9 @@ def _live_ack(args, tid: str) -> tuple[str, str]:
     return "", f" вживую: {rel}"
 
 
-def _critic_ack(args, tid: str) -> tuple[str, str]:
+def _critic_ack(args, tid: str, record=None) -> tuple[str, str]:
     """Ворота критика (TK-071): за ключом `critic_before_accept`; свежесть отчёта — от головы PR (`--sha`)."""
-    return critic_gate.critic_ack(args, tid, PROJECT_ROOT, getattr(args, "sha", None) or "")
+    return critic_gate.critic_ack(args, tid, PROJECT_ROOT, getattr(args, "sha", None) or "", record=record)
 
 
 def _proof_ack(tid: str) -> tuple[str, str]:
@@ -524,20 +524,16 @@ def cmd_accept(args) -> int:
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
+    if getattr(args, "dry_run", False):
+        return gates_mod.dry_run(args, sys.modules[__name__], slug)
     err = merge_rule.check_pr(slug, int(args.pr), args.sha)
     if err:
         print(f"accept: {err}", file=sys.stderr)
         return 1
-    derr, ack = _decisions_ack(args)
-    nerr, nack = _numbers_ack(args, args.id)
-    terr, tack, tail_ceo = _tail_ack(args, args.id)
-    lerr, lack = _live_ack(args, args.id)
-    cerr, cack = ("", "") if derr or nerr or terr or lerr else _critic_ack(args, args.id)
-    perr, pack = ("", "") if derr or nerr or terr or lerr or cerr else _proof_ack(args.id)
-    if derr or nerr or terr or lerr or cerr or perr:
-        print(f"accept: {derr or nerr or terr or lerr or cerr or perr}", file=sys.stderr)
+    errs, ack, tail_ceo = gates_mod.run(args, sys.modules[__name__])
+    if errs:
+        print(f"accept: {errs[0]}", file=sys.stderr)
         return 1
-    ack += nack + tack + lack + cack + pack
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:
