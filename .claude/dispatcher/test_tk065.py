@@ -31,7 +31,7 @@ class ShortStyleRuleTests(unittest.TestCase):
         self.rule = " ".join(rule(self.text, "С владельцем").split())
 
     def test_up_to_three_lines_change_plus_need(self):
-        for must in ("до трёх строк", "что изменилось", "что нужно от владельца", "«Ничего не нужно»"):
+        for must in ("до трёх строк", "что изменилось", "«Что от вас: …»"):
             self.assertIn(must, self.rule)
 
     def test_ticket_number_is_kept(self):

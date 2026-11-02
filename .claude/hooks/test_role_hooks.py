@@ -106,6 +106,22 @@ class SessionStart(unittest.TestCase):
         ceo, _ = start_text("ceo", "startup")
         self.assertIn("<done|pr|accept|return|blocked|ask-owner|wait>", ceo)
 
+    def test_shipped_charters_fit_into_insert(self):
+        """xray C8: поставляемые уставы из `templates/roles` во вставке запуска диспетчера (с тикетом, как у боевых запусков).
+        Инженер и исследователь влезают целиком; судья (больше бюджета с 2.0.17) и CEO (его читает `/ceo`) не влезают —
+        вставка остаётся в пределе и называет файл устава."""
+        with open(os.path.join(PROJECT, ".claude", "tickets", "TK-088.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nid: TK-088\n---\n")
+        for role in ("engineer", "researcher"):
+            text, _ = start_text(role, "startup", ticket="TK-088")
+            self.assertNotIn("Устав роли не влез", text, role)
+            self.assertIn(f"--- .claude/roles/{role}.md ---", text, role)
+            self.assertLessEqual(len(text), rc.LIMIT, role)
+        for role in ("judge", "ceo"):
+            text, _ = start_text(role, "startup", ticket="TK-088")
+            self.assertIn(f"прочитай .claude/roles/{role}.md", text, role)
+            self.assertLessEqual(len(text), rc.LIMIT, role)
+
     def test_resume_and_compact_are_short(self):
         for role in ("researcher", "judge"):
             for source in ("resume", "compact"):

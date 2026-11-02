@@ -16,7 +16,7 @@ class DirectAnswerRuleTests(unittest.TestCase):
         self.direct = " ".join(rule(self.text, "Ответ на прямой вопрос владельца").split())
 
     def test_three_lines_only_for_own_initiative(self):
-        self.assertIn("в сообщении по своей инициативе (свой статус, сигнал, «готово — выпустить?»;", self.short)
+        self.assertIn("в сообщении по своей инициативе (сигнал, «готово — выпустить?»;", self.short)
         self.assertIn("запрос владельца «статус?» — `reporter`", self.short)
         self.assertIn("до трёх строк", self.short)
 
