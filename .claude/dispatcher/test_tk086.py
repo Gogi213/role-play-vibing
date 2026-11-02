@@ -18,7 +18,7 @@ import signals as SIG  # noqa: E402
 PLUGIN = Path(__file__).resolve().parents[2]
 
 
-class GoalIdleTests(WatchSandbox):
+class GoalSandbox(WatchSandbox):
     def setUp(self):
         super().setUp()
         self.root = tempfile.TemporaryDirectory()
@@ -36,17 +36,20 @@ class GoalIdleTests(WatchSandbox):
         (Path(self.root.name) / ".claude" / "goals" / f"{gid}.md").write_text(
             f"---\nid: {gid}\nstatus: {status}\nset: 2026-11-01 10:00\naccepted:\n---\n# Цель {gid}\n", encoding="utf-8")
 
-    def ticket(self, ref="G-001", status="in_progress", accepted_at=None, owner="engineer"):
+    def ticket(self, ref="G-001", status="in_progress", accepted_at=None, owner="engineer", tail="", desc=""):
         path = T.create_ticket(self.tickets_dir, owner, "шаг", reviewer="judge", status=status,
-                               description=f"Ссылка на задачу владельца: {ref}" if ref else "", now=self.now)
+                               description=(f"Ссылка на задачу владельца: {ref}\n\n" if ref else "") + desc, now=self.now)
         if accepted_at is not None:
-            T.append_log(path, "judge", "[итог: accept] PR #1@abcdef0 — принято", now=accepted_at)
+            note = f" хвост CEO: {tail}" if tail else " хвосты: нет"  # как пишет `tickets._tail_ack`
+            T.append_log(path, "judge", f"[итог: accept] PR #1@abcdef0{note} — принято", now=accepted_at)
         return T.read_ticket(path).id
 
     def events(self, minutes=0, ws=None):
         ws = {} if ws is None else ws
         return GI.goal_idle_events(ws, self.now + timedelta(minutes=minutes)), ws
 
+
+class GoalIdleTests(GoalSandbox):
     def test_accepted_step_without_next_ticket_signals_despite_foreign_live_ticket(self):
         step = self.ticket(status="done", accepted_at=self.now)
         self.ticket(ref="", status="in_progress")  # посторонний живой тикет без цели
@@ -118,6 +121,68 @@ class GoalIdleTests(WatchSandbox):
         self.assertTrue(CFG.CEO_WAKE_LOG.read_text(encoding="utf-8").rstrip().endswith("TK-1 done"))
 
 
+class TailIdleTests(GoalSandbox):
+    """Хвост `--tail ceo:` без цели: принято, а тикета на хвост нет — событие (запрос Судьи к TK-086)."""
+    TAIL = "поставить настройку в rpv.json"
+
+    def setUp(self):
+        super().setUp()
+        self.step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail=self.TAIL)
+
+    def test_tail_without_ticket_signals_without_goal(self):
+        out, _ = self.events(30)
+        self.assertEqual([(g, t) for g, t, _ in out], [(GI.TAIL_GOAL, self.step)])
+        self.assertIn("тикета на хвост нет", out[0][2])
+        self.assertIn(self.TAIL, out[0][2])
+
+    def test_tail_signals_despite_foreign_live_ticket(self):
+        self.ticket(ref="", status="in_progress", desc="посторонний тикет")
+        self.assertEqual(len(self.events(30)[0]), 1)
+
+    def test_tail_below_threshold_silent_then_fires(self):
+        self.assertEqual(self.events(GI.GOAL_IDLE_MIN - 1)[0], [])
+        self.assertEqual(len(self.events(GI.GOAL_IDLE_MIN)[0]), 1)
+
+    def test_tail_covered_by_ticket_naming_it(self):
+        self.ticket(ref="В-33", status="todo", desc=f"Хвост {self.step}: {self.TAIL}")
+        self.assertEqual(self.events(30)[0], [])
+
+    def test_tail_not_covered_by_ticket_naming_another(self):
+        self.ticket(ref="В-33", status="todo", desc=f"Хвост {self.step}0: другое")  # TK-N0 — не TK-N
+        self.assertEqual(len(self.events(30)[0]), 1)
+
+    def test_tail_cleared_by_ceo_entry_after_accept(self):
+        path = self.tickets_dir / f"{self.step}.md"
+        T.append_log(path, "ceo", "хвост снят: владелец отказался", now=self.now + timedelta(minutes=5))
+        self.assertEqual(self.events(30)[0], [])
+
+    def test_ceo_entry_without_word_does_not_clear(self):
+        T.append_log(self.tickets_dir / f"{self.step}.md", "ceo", "смотрю", now=self.now + timedelta(minutes=5))
+        self.assertEqual(len(self.events(30)[0]), 1)
+
+    def test_tail_dash_is_not_a_tail(self):
+        self.ticket(ref="В-33", status="done", accepted_at=self.now)  # `--tail -`: хвостов нет
+        out, _ = self.events(30)
+        self.assertEqual([t for _, t, _ in out], [self.step])
+
+    def test_tail_once_per_event_and_forgotten_when_covered(self):
+        out, ws = self.events(30)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(self.events(31, ws)[0], [])
+        self.assertEqual(self.events(60 * 30, ws)[0], [])
+        self.ticket(ref="В-33", status="todo", desc=f"Хвост {self.step}")
+        self.assertEqual(self.events(60 * 31, ws)[0], [])
+        self.assertEqual(ws[GI.SEEN_KEY], {})
+
+    def test_tail_reason_in_wake_log(self):
+        posted = W.run_once(self.now + timedelta(minutes=30), probes=False)
+        self.assertEqual([f.kind for f in posted], ["goal-idle"])
+        line = next(ln for ln in CFG.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines() if "watch-goal-idle" in ln)
+        for must in (self.step, "хвостом CEO", self.TAIL, "тикета на хвост нет"):
+            self.assertIn(must, line)
+        self.assertEqual(W.run_once(self.now + timedelta(minutes=31), probes=False), [])
+
+
 class GoalIdleDocsTests(WatchSandbox):
     def test_key_is_valid_and_documented(self):
         check, _ = rpv_config.KEYS["goal_idle_min"]
@@ -129,5 +194,5 @@ class GoalIdleDocsTests(WatchSandbox):
     def test_signals_doc_row(self):
         text = (PLUGIN / "docs" / "signals.md").read_text(encoding="utf-8")
         row = next(ln for ln in text.splitlines() if ln.startswith("| `watch-goal-idle`"))
-        for must in ("`goal_idle_min`", "один раз на событие", "ceo-wake.log", "будит"):
+        for must in ("`goal_idle_min`", "один раз на событие", "ceo-wake.log", "будит", "`--tail ceo:`", "тикета на хвост"):
             self.assertIn(must, row)

@@ -3,9 +3,13 @@
 цели стоял 6,7 ч, потому что in_progress был у побочного). Вид `watch-goal-idle` будит CEO один раз на событие
 (цель + принятый тикет), по таймеру не повторяется. Тикет без цели и цель без принятых шагов сигнала не дают.
 Находку собирает `watch.check_goal_idle`; здесь только проверка. Шаг — тикет, чьё описание ссылается на цель
-(`Ссылка на задачу владельца: G-NNN`), закрытый приёмкой Судьи."""
+(`Ссылка на задачу владельца: G-NNN`), закрытый приёмкой Судьи.
+Второй вид события — хвост без цели: тикет принят с `--tail ceo:"…"`, а за `goal_idle_min` минут не заведён тикет, в чьём
+названии или описании назван этот тикет (`new --desc "Хвост TK-N: …"`; `--ref` у `new` — только номер реестра), и CEO не
+снял хвост записью `ceo` в логе принятого тикета со словом «хвост» (`comment TK-N --author ceo --text "хвост снят: …"`)."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +21,8 @@ import report as RP  # noqa: E402 — GOAL_REF и last_verdict: та же мер
 import ticket as T  # noqa: E402
 
 GOAL_IDLE_MIN = 10  # умолчание, как у `unreleased.UNRELEASED_IDLE_MIN`; точное число — за Судьёй (В-4/В-10), меняется ключом `goal_idle_min`
+TAIL_MARK = "хвост CEO:"  # пометка приёмки в логе: `tickets._tail_ack` пишет « хвост CEO: <что>»
+TAIL_GOAL = "хвост"  # вместо номера цели в ключе события и в находке
 SEEN_KEY = "goal_idle_seen"  # watch-state.json: события, о которых CEO уже сказали
 
 
@@ -25,27 +31,58 @@ def threshold_min() -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else GOAL_IDLE_MIN
 
 
-def _goal_state() -> tuple:
-    """({цель: (время принятия, тикет)}) по последнему принятому шагу и {цели, у которых есть открытый тикет}; None —
-    тикет не читается (неизвестно, что в нём: молчим, как `unreleased.queue_empty`)."""
+def _read_all():
+    """Все тикеты проекта; None — какой-то не читается (неизвестно, что в нём: молчим, как `unreleased.queue_empty`)."""
+    out = []
+    for path in T.list_tickets(CFG.TICKETS_DIR):
+        try:
+            out.append(T.read_ticket(path))
+        except Exception:
+            return None
+    return out
+
+
+def _accepted(tkt):
+    """Запись приёмки Судьи по сданному тикету (закрыт, не тикет Судьи) или None."""
+    verdict = RP.last_verdict(tkt) if tkt.status == "done" and tkt.owner != "judge" else None
+    return verdict[1] if verdict and verdict[0] == "accept" else None
+
+
+def _goal_state(tickets) -> tuple:
+    """({цель: (время принятия, тикет)}) по последнему принятому шагу и {цели, у которых есть открытый тикет}."""
     goals = registry.goals(CFG.PROJECT_ROOT)
     open_goals = {g for g, p in goals.items() if registry.goal_header(p).get("status") == "open"}
     accepted, covered = {}, set()
-    for path in T.list_tickets(CFG.TICKETS_DIR):
-        try:
-            tkt = T.read_ticket(path)
-        except Exception:
-            return None
+    for tkt in tickets:
         m = RP.GOAL_REF.search(tkt.description)
         gid = m.group(1) if m else ""
         if gid not in open_goals:
             continue
         if tkt.status in T.OPEN_STATUSES:
             covered.add(gid)
-        verdict = RP.last_verdict(tkt) if tkt.status == "done" and tkt.owner != "judge" else None
-        if verdict and verdict[0] == "accept" and (gid not in accepted or verdict[1].ts > accepted[gid][0]):
-            accepted[gid] = (verdict[1].ts, tkt.id)
+        entry = _accepted(tkt)
+        if entry and (gid not in accepted or entry.ts > accepted[gid][0]):
+            accepted[gid] = (entry.ts, tkt.id)
     return accepted, covered
+
+
+def _tail_handled(tkt, entry, tickets) -> bool:
+    """Хвост принятого тикета занят: назван в другом тикете (название или описание) или снят записью `ceo` после приёмки."""
+    named = re.compile(r"\b" + re.escape(tkt.id) + r"\b")
+    if any(o.id != tkt.id and named.search(f"{o.header.get('title') or ''} {o.description}") for o in tickets):
+        return True
+    return any(T.author_is(e.author, "ceo") and e.ts > entry.ts and "хвост" in e.text.lower() for e in tkt.log)
+
+
+def _tail_state(tickets) -> dict:
+    """{тикет: (время принятия, что сделать CEO)} — принят с `--tail ceo:` и хвост ещё никто не занял."""
+    out = {}
+    for tkt in tickets:
+        entry = _accepted(tkt)
+        if entry and TAIL_MARK in entry.text and not _tail_handled(tkt, entry, tickets):
+            what = entry.text.split(TAIL_MARK, 1)[1].split(" — ", 1)[0].strip()
+            out[tkt.id] = (entry.ts, what)
+    return out
 
 
 def goal_idle_events(ws: dict, now) -> list:
@@ -57,24 +94,36 @@ def goal_idle_events(ws: dict, now) -> list:
         return []
 
 
-def _new_events(ws: dict, now) -> list:
-    """[(цель, тикет, текст)] новых событий: шаг цели принят ≥ `goal_idle_min` мин назад, открытого тикета цели нет.
-    Событие, о котором уже сказали (метка в ws), не повторяется; ушло (следующий тикет заведён) — метка забывается."""
-    state = _goal_state()
-    if state is None:
-        return []
-    accepted, covered = state
-    seen = ws.setdefault(SEEN_KEY, {})
-    due = {}
+def _due(tickets, now) -> dict:
+    """{ключ события: (метка, тикет, текст)} — всё, о чём CEO пора сказать сейчас."""
+    accepted, covered = _goal_state(tickets)
+    limit, due = threshold_min(), {}
     for gid, (ts, tid) in accepted.items():
         age = (now - ts).total_seconds() / 60
-        if gid not in covered and age >= threshold_min():
-            due[f"{gid}@{tid}"] = (gid, tid, age)
+        if gid not in covered and age >= limit:
+            due[f"{gid}@{tid}"] = (gid, tid, f"цель {gid}: принят {tid} {age:.0f} мин назад, следующего шага нет — завести тикет или закрыть цель")
+    for tid, (ts, what) in _tail_state(tickets).items():
+        age = (now - ts).total_seconds() / 60
+        if age >= limit:
+            due[f"{TAIL_GOAL}@{tid}"] = (TAIL_GOAL, tid, f"{tid} принят с хвостом CEO «{what}» {age:.0f} мин назад, тикета на хвост нет — "
+                                                         f"завести тикет с «{tid}» в описании или снять хвост записью ceo в {tid}")
+    return due
+
+
+def _new_events(ws: dict, now) -> list:
+    """[(цель или «хвост», тикет, текст)] новых событий: шаг цели принят ≥ `goal_idle_min` мин назад, открытого тикета цели нет;
+    или принятый с `--tail ceo:` тикет без тикета на хвост. Событие, о котором уже сказали (метка в ws), не повторяется;
+    ушло (следующий тикет заведён, хвост занят) — метка забывается."""
+    tickets = _read_all()
+    if tickets is None:
+        return []
+    seen = ws.setdefault(SEEN_KEY, {})
+    due = _due(tickets, now)
     for key in [k for k in seen if k not in due]:
         seen.pop(key)
     out = []
-    for key, (gid, tid, age) in due.items():
+    for key, event in due.items():
         if key not in seen:
             seen[key] = T.now_iso(now)
-            out.append((gid, tid, f"цель {gid}: принят {tid} {age:.0f} мин назад, следующего шага нет — завести тикет или закрыть цель"))
+            out.append(event)
     return out
