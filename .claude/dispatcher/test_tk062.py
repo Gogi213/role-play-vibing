@@ -72,6 +72,17 @@ class CeoCharterTests(unittest.TestCase):
         self.assertIn("**Работа команды — без самодеятельности:**", self.text)
         self.assertIn("«Новые задачи»", rule(self.text, "Покрыто решением"))
 
+    def test_sync_carries_covered_rule_into_project_charter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roles = Path(tmp) / ".claude" / "roles"
+            roles.mkdir(parents=True)
+            (roles / "ceo.md").write_text("# CEO\nстарый устав\n", encoding="utf-8")
+            _, _, err = charter.sync(Path(tmp), ["ceo.md"], now=W.datetime.now().astimezone())
+            self.assertIsNone(err)
+            synced = (roles / "ceo.md").read_text(encoding="utf-8")
+            self.assertIn("**Покрыто решением — делай, не спрашивай:**", synced)
+
+
 class UnreleasedSandbox(WatchSandbox):
     def setUp(self):
         super().setUp()
