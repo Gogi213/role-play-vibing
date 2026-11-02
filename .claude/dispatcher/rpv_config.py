@@ -50,6 +50,7 @@ KEYS = {
     "max_parallel": (_int_min, "целое ≥ 1"),
     "max_runs_per_ticket_hour": (_int_min, "целое ≥ 1"),
     "role_parallel": (_role_parallel, "объект {роль: целое ≥ 1}, роли researcher|engineer|judge"),
+    "judge_scale_queue": (_int_min, "целое ≥ 1, очередь на приёмку, с которой разрешён второй Судья (умолчание 2)"),
     "role_mcp": (_role_mcp, "all, none или список имён серверов"),
     "ci_repo": (lambda v: isinstance(v, str) and re.fullmatch(r"[\w.-]+/[\w.-]+", v) is not None, "владелец/репо"),
     "watched_aliases": (_str_list, "список ssh-алиасов"),
