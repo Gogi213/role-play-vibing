@@ -31,7 +31,7 @@ class ShortStyleRuleTests(unittest.TestCase):
         self.rule = " ".join(rule(self.text, "С владельцем").split())
 
     def test_up_to_three_lines_change_plus_need(self):
-        for must in ("до трёх строк", "что изменилось", "«Что от вас: …»"):
+        for must in ("до трёх строк", "что изменилось", "что нужно от владельца", "«Ничего не нужно»"):
             self.assertIn(must, self.rule)
 
     def test_ticket_number_is_kept(self):
@@ -47,7 +47,7 @@ class ShortStyleRuleTests(unittest.TestCase):
         self.assertIn("Сообщение без события (ничего не изменилось, спросить нечего) не шли", self.rule)
 
     def test_before_after_example(self):
-        self.assertIn("Было: абзац про PR, файлы и наблюдение; стало: «TK-064 готов. Что от вас: решить, выпускать ли новую версию»", self.rule)
+        self.assertIn("Было: абзац про PR, файлы и наблюдение; стало: «TK-064 готов. Выпустить новую версию?»", self.rule)
 
     def test_style_does_not_override_neighbouring_format_rules(self):
         # строки о формате, с которыми стиль согласован, на месте и названы в правиле
@@ -58,8 +58,7 @@ class ShortStyleRuleTests(unittest.TestCase):
         self.assertIn("«Стою: жду вашего …»", self.rule)
         waiting = " ".join(rule(self.text, "Утверждённое не переспрашиваешь").split())
         self.assertIn("первой строкой ответа «Стою: жду вашего …»", waiting)
-        self.assertIn("в сообщении по своей инициативе это строка «Что от вас: …»", waiting)
-        self.assertNotIn("что нужно от владельца", waiting)
+        self.assertIn("это и есть строка «что нужно от владельца»", waiting)
 
     def test_old_one_liner_is_replaced_not_duplicated(self):
         self.assertEqual(sum(ln.startswith("- **С владельцем") for ln in self.text.splitlines()), 1)

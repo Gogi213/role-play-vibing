@@ -125,10 +125,8 @@ def record_run(root: Path, tid: str, run_id: str, usage: dict, stats=None) -> bo
     return True
 
 
-def critic_ack(args, tid: str, root: Path, sha: str = "", head_ts=head_time, record=None) -> tuple[str, str]:
-    """Ворота критика на `accept`. → (отказ, пометка для лога). Ключ выключен — ("", ""). `record` — запись в
-    critic-runs.log (умолчание `_record`); пробный прогон приёмки (`--dry-run`) передаёт пустую."""
-    record = record or _record
+def critic_ack(args, tid: str, root: Path, sha: str = "", head_ts=head_time) -> tuple[str, str]:
+    """Ворота критика на `accept`. → (отказ, пометка для лога). Ключ выключен — ("", "")."""
     if not P.setting("critic_before_accept", False, root=root):
         return "", ""
     raw = (getattr(args, "critic", None) or "").strip()
@@ -138,7 +136,7 @@ def critic_ack(args, tid: str, root: Path, sha: str = "", head_ts=head_time, rec
     if skip:
         if len(skip) < MIN_SKIP_WHY:
             return f"--critic-skip: причина обхода — не короче {MIN_SKIP_WHY} знаков", ""
-        record(root, {"tid": tid, "kind": "skip", "file": "", "sha": sha[:12], "why": skip[:200]})
+        _record(root, {"tid": tid, "kind": "skip", "file": "", "sha": sha[:12], "why": skip[:200]})
         return "", f" критик: обход ({skip[:80]})"
     if not raw:
         return f"включён ключ {KEY}: приёмка — с отчётом критика --critic <файл в docs/reviews/>: {HINT}", ""
@@ -186,7 +184,7 @@ def critic_ack(args, tid: str, root: Path, sha: str = "", head_ts=head_time, rec
         return (f"--critic {raw}: Судья принял замечание критика по пунктам {', '.join(agreed)} — значит правка нужна: "
                 f"верни тикет (`result return`), а не accept"), ""
     held = parsed
-    record(root, {"tid": tid, "kind": "report", "file": rel.as_posix(), "sha": sha[:12], "why": "",
+    _record(root, {"tid": tid, "kind": "report", "file": rel.as_posix(), "sha": sha[:12], "why": "",
                    "items": len(items), "not_held": held, "answered": len(answered & set(items))})
     return "", f" критик: {rel.as_posix()} (пунктов {len(items)}, не держится {held})"
 

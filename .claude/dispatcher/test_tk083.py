@@ -56,6 +56,7 @@ class FullRunHint(unittest.TestCase):
                 self.assertNotIn(deny, err)
             finally:
                 case.tearDown()
+                case.doCleanups()  # setUp кейса снимает патчи через addCleanup: вручную они не сработают, и `P.settings` остаётся подменённым для всех следующих тестов
 
 
 class MergeWithoutCi(MergeRuleBase):

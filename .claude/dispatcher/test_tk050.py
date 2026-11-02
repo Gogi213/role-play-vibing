@@ -28,7 +28,8 @@ class ProofTests(unittest.TestCase):
         self._git("commit", "-qm", "chk")
 
     def _contract(self, text, author="engineer"):
-        T.append_log(self.path, author, text)  # мимо cmd_comment: плохой договор при записи он отказывает (TK-089), приёмка — тоже
+        with contextlib.redirect_stdout(io.StringIO()):
+            TK.cmd_comment(type("A", (), dict(id=self.tid, author=author, text=text, next=None))())
 
     def _ready(self, contract):
         """git-репо с tools/chk.py, договор исполнителя, его done и файл приёмки."""
