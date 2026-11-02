@@ -5,7 +5,9 @@
 владельцу вместе с целью. Диспетчер каждый тик смотрит открытые цели с планом: первый шаг без тикета заводит, когда все
 предыдущие приняты (тикет шага — статус `done`), тем же путём, что `tickets.py new` (ссылка на цель, Судья на тикете). В описании
 тикета шага — строка «Шаг N из M цели G-NNN.»: по ней шаг узнаётся. Все шаги приняты, а цель не принята владельцем — одна строка
-CEO `следующий-не-определён` (на цель один раз). Тикет шага не `done` — ждём, ничего не заводим.
+CEO `следующий-не-определён` (на цель один раз). Тикет шага не `done` — ждём, ничего не заводим. Все тикеты шага `stopped` —
+план встал: одна строка CEO `шаг-остановлен` на тикет. Хоть один тикет проекта не читается — проход ничего не заводит (шаг мог
+стоять в нём, и дубль был бы лишним).
 """
 from __future__ import annotations
 
@@ -19,16 +21,17 @@ import ticket as T
 
 MARK = re.compile(r"^Шаг (\d+) из (\d+) цели (G-\d{3,})\.", re.M)
 NOTIFIED = "goal_steps_notified"
+STOPPED = "goal_steps_stopped"
 
 
-def _marked(tickets_dir: Path) -> dict:
-    """{G-NNN: {номер шага: [тикеты]}} по строке «Шаг N из M цели G-NNN.» в описании."""
+def _marked(tickets_dir: Path) -> dict | None:
+    """{G-NNN: {номер шага: [тикеты]}} по строке «Шаг N из M цели G-NNN.» в описании; None — какой-то тикет не прочитался."""
     found: dict = {}
     for path in T.list_tickets(tickets_dir):
         try:
             tkt = T.read_ticket(path)
         except Exception:
-            continue
+            return None
         if m := MARK.search(tkt.description or ""):
             found.setdefault(m.group(3), {}).setdefault(int(m.group(1)), []).append(tkt)
     return found
@@ -51,6 +54,8 @@ def advance(root: Path, tickets_dir: Path, state: dict, now) -> list[str]:
         if not steps:
             continue
         marked = _marked(tickets_dir) if marked is None else marked
+        if marked is None:
+            return done
         by_step, prev, notified = marked.get(gid, {}), "", state.setdefault(NOTIFIED, [])
         for step in steps:
             tickets = by_step.get(step["n"], [])
@@ -60,6 +65,12 @@ def advance(root: Path, tickets_dir: Path, state: dict, now) -> list[str]:
                 break
             accepted = [t for t in tickets if t.status == "done"]
             if not accepted:
+                if stopped := [t.id for t in tickets if t.status == "stopped"]:
+                    if len(stopped) == len(tickets) and stopped[-1] not in (seen := state.setdefault(STOPPED, [])):
+                        seen.append(stopped[-1])
+                        SIG.append_ceo_inbox(stopped[-1], "шаг-остановлен",
+                                             f"цель {gid}: шаг {step['n']} остановлен, план стоит — реши с владельцем, как продолжить", now)
+                        done.append(f"{stopped[-1]}: шаг {step['n']} цели {gid} остановлен")
                 break  # шаг в работе — следующий ждёт приёмки
             prev = accepted[-1].id
         else:

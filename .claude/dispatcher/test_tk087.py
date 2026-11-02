@@ -99,6 +99,26 @@ class Advance(Sandbox):
         self.assertEqual(sig.call_args.args[:2], ("TK-002", "следующий-не-определён"))
         self.assertEqual(self.advance()[1].call_count, 0)  # одна строка на цель
 
+    def test_stopped_step_signals_ceo_once_and_files_nothing(self):
+        gid = self.goal(*STEPS)
+        self.advance()
+        first = self.step_tickets()[0]
+        T.write_header_updates(first.path, {"status": "stopped"}, now=NOW)
+        done, sig = self.advance()
+        self.assertEqual(done, [f"TK-001: шаг 1 цели {gid} остановлен"])
+        self.assertEqual(sig.call_args.args[:2], ("TK-001", "шаг-остановлен"))
+        done, sig = self.advance()
+        self.assertEqual((done, sig.call_count, len(self.step_tickets())), ([], 0, 1))  # одна строка на тикет, второй шаг не заведён
+
+    def test_unreadable_ticket_blocks_the_pass(self):
+        self.goal(*STEPS)
+        (self.tickets / "TK-900.md").write_bytes(b"\xff\xfe not a ticket")
+        with mock.patch.object(T, "read_ticket", side_effect=ValueError("битый тикет")):
+            done, sig = self.advance()
+        self.assertEqual(done, [])
+        sig.assert_not_called()
+        self.assertEqual([p.name for p in T.list_tickets(self.tickets)], ["TK-900.md"])  # шаг 1 не заведён: он мог стоять в битом тикете
+
     def test_goal_without_plan_or_not_open_is_left_alone(self):
         self.goal()
         gid = self.goal(*STEPS)
@@ -133,6 +153,18 @@ class CeoTail(unittest.TestCase):
                 self.assertIn("ролям по силам", err)
                 self.assertIn(f"Хвост {self.tid}", err)
                 self.assertEqual((mark, ceo), ("", ""))
+
+    def test_missed_code_verbs_refused(self):
+        for text in ("поправить проверку в диспетчере", "смержить ветку после CI", "запушить ветку", "починить диспетчер",
+                     "согласие нужно на PR 5"):
+            with self.subTest(text=text):
+                self.assertIn("ролям по силам", self.ack(f'ceo:"{text}"')[0])
+
+    def test_charter_sync_tail_of_tk050_passes(self):
+        for text in ("charter sync --ref В-14 после влива PR #162", "charter sync с правкой устава CEO", "синхронизировать устав проекта после влива"):
+            with self.subTest(text=text):
+                err, _, ceo = self.ack(f'ceo:"{text}"')
+                self.assertEqual((err, ceo), ("", text))
 
     def test_owner_zone_text_passes_even_with_code_words(self):
         for text in ("вписать хук в settings.json", "поставить настройку critic_before_accept", "слово владельца про код выпуска"):
