@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import sys
+import time
 
 # (подстрока названия в нижнем регистре, файл устава) — первое совпадение
 ROLES = [
@@ -45,6 +46,7 @@ STATE_DIR = os.path.join(ROLES_DIR, ".state")  # метки сессий и со
 
 LIMIT = 8000          # знаков вставки; больше — Claude Code покажет роли только превью ~2 КБ
 NOTEBOOK_TAIL = 4000  # знаков конца блокнота роли
+NOTEBOOK_MAX = 4096   # байт блокнота роли: лимит устава «≤ 4 КБ»; старше — в notes/archive/<роль>.md
 SHORT_SOURCES = ("resume", "compact")
 
 MANUAL = (
@@ -199,6 +201,34 @@ def tail_chars(text, limit):
     return cut[nl + 1:] if 0 <= nl < len(cut) - 1 else cut
 
 
+def rotate_notebook(role, limit=NOTEBOOK_MAX):
+    """Блокнот роли больше `limit` байт: старые записи (строки) дописываются в notes/archive/<роль>.md, в блокноте
+    остаются последние целые записи в пределах лимита (последняя запись одна не режется). Ответ — сколько байт ушло в архив."""
+    path = os.path.join(ROLES_DIR, "notes", f"{role}.md")
+    with open(path, encoding="utf-8", newline="") as fh:
+        lines = fh.read().splitlines(keepends=True)
+    kept, size = [], 0
+    for line in reversed(lines):
+        n = len(line.encode("utf-8"))
+        if kept and size + n > limit:
+            break
+        kept.append(line)
+        size += n
+    old = lines[:len(lines) - len(kept)]
+    if not old or not any(l.strip() for l in old):
+        return 0
+    archive_dir = os.path.join(ROLES_DIR, "notes", "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    moved = "".join(old)
+    with open(os.path.join(archive_dir, f"{role}.md"), "a", encoding="utf-8", newline="") as fh:
+        fh.write(f"\n## Ротация {time.strftime('%Y-%m-%d')}\n{moved}")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
+        fh.write("".join(reversed(kept)))
+    os.replace(tmp, path)
+    return len(moved.encode("utf-8"))
+
+
 def short_context(role, title, source):
     """resume/compact: 1–2 строки — роль и путь устава."""
     lines = [f"=== РОЛЬ СЕССИИ: ты — «{ROLE_NAMES[role]}» команды ролей проекта (хук role_context.py, событие: {source}) ===",
@@ -306,6 +336,10 @@ def full_context(role, title, source, hook_in, reserve=0):
     except OSError:
         pass
     try:
+        try:
+            rotate_notebook(role)
+        except OSError:
+            pass
         notebook = read_file(os.path.join(ROLES_DIR, "notes", f"{role}.md"))
         take = min(NOTEBOOK_TAIL, budget)
         if take >= 400:

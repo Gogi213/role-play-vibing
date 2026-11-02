@@ -71,6 +71,31 @@ class WorktreeHygieneTests(unittest.TestCase):
         self.assertTrue(b.exists())
         self.assertIn("data/", out[0])
 
+    def test_ticket_token_real_names(self):
+        """TK-092: имена из .claude/worktrees проекта — TK-030, tk-030-x, tk049-rs, rpv-tk104 — привязываются к тикету."""
+        for name, tid in (("TK-030", "TK-030"), ("tk-030-x", "TK-030"), ("tk049-rs", "TK-049"), ("rpv-tk104", "TK-104"),
+                          ("TK-002", "TK-002"), ("tk-0", "TK-000")):
+            self.assertEqual(WH.ticket_of(Path(name)), tid, name)
+        self.assertEqual(WH.ticket_of_branch("eng/tk-092-hygiene"), "TK-092")
+        for name in ("agent-a01297ca4550f6996", "cp5", "bunk-5", "TK-ls-remote"):
+            self.assertIsNone(WH.ticket_of(Path(name)), name)
+
+    def test_closed_copy_with_dash_name_swept(self):
+        a = self.add("TK-030", "eng/tk-030-x")
+        live = self.add("tk-031-y", "eng/tk-031-y")
+        out = WH.sweep(self.p, {"TK-030": "done", "TK-031": "in_progress"})
+        self.assertEqual(len(out), 1)
+        self.assertFalse(a.exists())
+        self.assertTrue(live.exists())
+
+    def test_orphans_copies_without_ticket(self):
+        known = self.add("TK-030", "b-known")
+        agent = self.add("agent-a01297ca", "b-agent")
+        gone = self.add("tk-777-z", "b-gone")
+        orphans = WH.orphans(self.p, {"TK-030": "in_progress"})
+        self.assertEqual(sorted(p.name for p in orphans), ["agent-a01297ca", "tk-777-z"])
+        self.assertTrue(known.exists() and agent.exists() and gone.exists(), "ничего не трогает")
+
     def test_foreign_copy_reported_not_removed(self):
         out = self.add("tk104-f", "br-f", base=self.root / "proj-tk104")
         closed, foreign = WH.findings(self.p, {"TK-104": "done"})
