@@ -13,6 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ceo_wake as CW  # noqa: E402
+import dispatch as D  # noqa: E402
 import project_paths as CFG  # noqa: E402
 import signals as SIG  # noqa: E402
 import ticket as T  # noqa: E402
@@ -126,6 +127,35 @@ class WakeTests(unittest.TestCase):
         self.assertEqual(len(self.stub.calls), 2)
         self.assertIn("[цель закрыта] G-002", self.stub.calls[0][1])
         self.assertIn("[цель закрыта] G-003", self.stub.calls[1][1])
+
+    def test_haiku_refusal_blocks_once_over_two_ticks(self):
+        tickets = Path(self.tmp.name) / ".claude" / "tickets"
+        tickets.mkdir(parents=True, exist_ok=True)
+        head = ["---", "id: TK-900", "title: t", "owner: engineer", "status: todo", "executor: haiku", "kind: something-else",
+                "updated: 2026-11-02T13:00:00+04:00", "---", "", "## Лог", ""]
+        (tickets / "TK-900.md").write_text("\n".join(head), encoding="utf-8")
+        state: dict = {}
+        D._collect_candidates(state, NOW)
+        D._collect_candidates(state, NOW + timedelta(minutes=1))
+        self.assertEqual(len(self.stub.calls), 1, "Haiku-отказ — одно событие «сломалось», не два")
+        self.assertIn("[сломалось] TK-900", self.stub.calls[0][1])
+
+    def test_collect_candidates_wakes_on_goal_closed(self):
+        goals = Path(self.tmp.name) / ".claude" / "goals"
+        goals.mkdir(parents=True)
+        (Path(self.tmp.name) / ".claude" / "tickets").mkdir(parents=True, exist_ok=True)
+
+        def goal(status):
+            text = "\n".join(["---", "id: G-001", f"status: {status}", "set: 2026-11-02 10:00", "accepted:", "---", "# цель", ""])
+            (goals / "G-001.md").write_text(text, encoding="utf-8")
+        goal("open")
+        state: dict = {}
+        D._collect_candidates(state, NOW)
+        goal("accepted")
+        D._collect_candidates(state, NOW + timedelta(minutes=1))
+        D._collect_candidates(state, NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.stub.calls), 1, "обход тикетов: закрытая цель — одно событие")
+        self.assertIn("[цель закрыта] G-001", self.stub.calls[0][1])
 
     def test_next_undefined_kind_is_the_one_goal_steps_sends(self):
         self.signal("следующий-не-определён", tid="TK-002", note="цель G-001: все шаги плана приняты")

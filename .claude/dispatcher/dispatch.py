@@ -191,7 +191,7 @@ def _blind_tick() -> None:
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
 
-# Сигнал CEO — строка в ceo-inbox.md (детали; читает `tickets.py inbox`) и короткая копия в ceo-wake.log (на нём Monitor CEO).
+# Сигнал CEO — строка в ceo-inbox.md (детали; читает `tickets.py inbox`) и короткая копия в ceo-wake.log (журнал; побудка CEO — ceo_wake.py).
 REASON_PRIORITY = {"next": 0, "in_progress-resume": 2}
 
 
@@ -716,6 +716,7 @@ def _collect_candidates(state: dict, now) -> tuple:
                 T.write_header_updates(path, {"status": "blocked"}, now=now)
                 T.append_log(path, "dispatcher", f"{haiku_reason} — задача заблокирована, нужен CEO.", now=now)
                 route_ceo_signal(tid, "blocked", haiku_reason, state, now)
+                state.setdefault("ceo_status_notified", {})[tid] = f"blocked@{T.now_iso(now)}"  # notify_status_for_ceo не шлёт второй раз
                 continue
             candidates.append((path, tkt, decision))
         except Exception as e:
