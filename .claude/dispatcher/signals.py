@@ -7,6 +7,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
+import ceo_wake as CW
 import project_paths as CFG
 import project as P
 import ticket as T
@@ -47,6 +48,7 @@ def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
         _mech_log(tid, kind, note, now)
         return
     _ceo_file_write(tid, kind, note, now)
+    CW.wake(tid, kind, note, _ceo_file_write, now)  # событие (CW.EVENT_OF) — одна строка в сессию CEO; прочие виды не будят
 
 
 # --- таблица правил «вид сигнала → будить / сводка» (судья TK-002 п.3, взамен привратника TypeSafe) --
@@ -183,6 +185,24 @@ def notify_status_for_ceo(tkt: T.Ticket, state: dict, now) -> None:
     reason = (tkt.log[-1].text.splitlines()[0][:200] if tkt.log else "")
     append_ceo_inbox(tkt.id, tkt.status, reason, now)
     notified[tkt.id] = marker
+
+
+def notify_due_missed(tkt: T.Ticket, state: dict, now) -> None:
+    """Срок, названный владельцу (`tickets.py due`), сорван: тикет не закрыт, а срок прошёл — одно событие CEO на срок
+    (дедуп по (тикет, срок): перенос срока даёт новое)."""
+    due = (tkt.header.get("due") or "").strip()
+    if not due or tkt.status in ("done", "stopped"):
+        return
+    try:
+        if now < T.parse_dt(due):
+            return
+    except ValueError:
+        return
+    notified = state.setdefault("ceo_due_notified", {})
+    if notified.get(tkt.id) == due:
+        return
+    append_ceo_inbox(tkt.id, "due", f"срок {due} сорван, тикет в статусе {tkt.status}", now)
+    notified[tkt.id] = due
 
 
 def notify_parse_error(tid: str, err_text: str, state: dict, now) -> None:

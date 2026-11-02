@@ -111,7 +111,7 @@ MAX_IDLE_RUNS = 2
 
 from signals import (  # noqa: E402,F401 — сигналы CEO вынесены в signals.py; имена для вызовов из dispatch и tickets
     _mech_log, append_ceo_inbox, route_ceo_signal, handle_next_ceo, escalate_review_limit, notify_status_for_ceo,
-    notify_parse_error, baseline_done_notified, notify_done, haiku_refused_reason)
+    notify_parse_error, notify_due_missed, baseline_done_notified, notify_done, haiku_refused_reason)
 
 
 def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
@@ -679,6 +679,7 @@ def _collect_candidates(state: dict, now) -> tuple:
                 tkt = close_after_merge(path, tkt, now, state) or tkt
             _expire_ceo_handoff(tkt, state)
             notify_status_for_ceo(tkt, state, now)
+            notify_due_missed(tkt, state, now)
             notify_done(tkt, state, now)
             notify_wait_for_problem(tkt, state, now)
 

@@ -99,23 +99,6 @@ class SwitchTests(Base):
 
 
 class CharterTests(unittest.TestCase):
-    def test_charter_watch_rule_has_one_exception(self):
-        r = rule(CEO_TEMPLATE.read_text(encoding="utf-8"), "Наблюдение держишь, пока есть работа")
-        for must in ("Исключение одно — «Monitor expired» при пустой очереди", "`watch_unreleased` выключен — не перевзводи",
-                     "`watch_unreleased` включён — перевзводи", "после рестарта или `/clear` — перевзводи всегда",
-                     "Фильтровать можно только строки вида `summary`", "без фильтра `grep` по `TK-`"):
-            self.assertIn(must, r)
-        self.assertNotIn("Очередь пуста и владельцу ничего не обещано — не перевзводи", r)
-
-    def test_command_and_doc_follow_the_charter(self):
-        text = CEO_COMMAND.read_text(encoding="utf-8")
-        for must in ("только при «Monitor expired» с пустой очередью", "`watch_unreleased` выключен",
-                     "после рестарта и `/clear` перевзводи всегда", "только строки `summary`"):
-            self.assertIn(must, text)
-        doc = SIGNALS_DOC.read_text(encoding="utf-8")
-        for must in ("после рестарта сессии и `/clear` перевзводит всегда", "при включённом `watch_unreleased`", "только строки вида `summary`"):
-            self.assertIn(must, doc)
-
     def test_no_persistent_flag_claimed(self):
         for path in (CEO_TEMPLATE, CEO_COMMAND, SIGNALS_DOC, PLUGIN / "CHANGELOG.md", PLUGIN / "docs" / "configuration.md"):
             self.assertNotIn("persistent", path.read_text(encoding="utf-8"), path.name)

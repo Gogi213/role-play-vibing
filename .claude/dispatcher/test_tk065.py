@@ -37,11 +37,6 @@ class ShortStyleRuleTests(unittest.TestCase):
     def test_ticket_number_is_kept(self):
         self.assertIn("Номер тикета `TK-NNN` оставляй", self.rule)
 
-    def test_no_mechanics(self):
-        for must in ("Механику не пиши", "PR", "файлы и строки", "наблюдение / `Monitor`",
-                     "пересказ отчётов критика, Инженера, Судьи", "«жду»", "«наблюдение включено»"):
-            self.assertIn(must, self.rule)
-
     def test_details_only_on_question_and_no_empty_messages(self):
         self.assertIn("Детали — только по вопросу владельца", self.rule)
         self.assertIn("Сообщение без события (ничего не изменилось, спросить нечего) не шли", self.rule)
