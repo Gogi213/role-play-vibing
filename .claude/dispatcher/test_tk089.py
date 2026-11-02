@@ -15,16 +15,18 @@ import tickets as TK
 BAD_TAIL = "Готово. Не сделано: метрики у 431 строки"
 
 
-class GatesTests(unittest.TestCase):
+class _Base(unittest.TestCase):
+    """Общие помощники двух наборов: песочница `test_result`, сдача, приёмка, ошибка в реестре, ключ `tail_fields_only`."""
     setUp, tearDown, res, tkt, refused, _registry_with_decision = (
         TR.ResultTests.setUp, TR.ResultTests.tearDown, TR.ResultTests.res, TR.ResultTests.tkt, TR.ResultTests.refused,
         TR.ResultTests._registry_with_decision)
 
-    def _done(self, why=BAD_TAIL):
+    def _done(self, why=BAD_TAIL, **kw):
         self._registry_with_decision()
         (self.base / "out.md").write_text("готово", encoding="utf-8")
         (self.base / "review.md").write_text("вердикт", encoding="utf-8")
-        self.assertEqual(self.res("engineer", "done", path="out.md", why=why), 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.res("engineer", "done", path="out.md", why=why, **kw), 0)
 
     def _accept(self, **kw):
         out, err = io.StringIO(), io.StringIO()
@@ -32,6 +34,15 @@ class GatesTests(unittest.TestCase):
             rc = self.res("judge", "accept", path="review.md", **kw)
         return rc, out.getvalue(), err.getvalue()
 
+    def _error(self, ticket=None, title="ложное срабатывание: хвост"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            ER.cmd_add(type("A", (), dict(title=title, ticket=ticket or self.tid, what=""))(), TK.PROJECT_ROOT)
+
+    def _fields_only(self):
+        return mock.patch.object(TK.P, "settings", return_value={"tail_fields_only": True})
+
+
+class GatesTests(_Base):
     def test_dry_run_lists_all_refusals_at_once_and_writes_nothing(self):
         self._done()
         before = self.path.read_text(encoding="utf-8")
@@ -65,10 +76,6 @@ class GatesTests(unittest.TestCase):
         self.assertIn("--decisions", err)
         self.assertNotIn("это хвост", err)
         self.assertEqual(self.path.read_text(encoding="utf-8"), before)
-
-    def _error(self, ticket=None):
-        with contextlib.redirect_stdout(io.StringIO()):
-            ER.cmd_add(type("A", (), dict(title="ложный хвост", ticket=ticket or self.tid, what=""))(), TK.PROJECT_ROOT)
 
     def test_false_positive_accepts_with_error_record_and_no_return(self):
         self._done()
@@ -118,26 +125,16 @@ class GatesTests(unittest.TestCase):
         self.assertEqual(self._comment("[итог: pr] PR #7 — цитата [тест]")[0], 0)
 
 
-    def _fields_only(self):
-        return mock.patch.object(TK.P, "settings", return_value={"tail_fields_only": True})
-
-    def _done_left(self, left, why=BAD_TAIL):
-        self._registry_with_decision()
-        (self.base / "out.md").write_text("готово", encoding="utf-8")
-        (self.base / "review.md").write_text("вердикт", encoding="utf-8")
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(self.res("engineer", "done", path="out.md", why=why, left=left), 0)
-
     def test_tail_fields_only_ignores_free_why_and_scans_left_field(self):
         with self._fields_only():
-            self._done_left("-")  # хвостовые слова только в --why, поле «ничего»
+            self._done(left="-")  # хвостовые слова только в --why, поле «ничего»
             rc, _, err = self._accept(tail="-", decisions="-", numbers="-")
             self.assertEqual(rc, 0, err)
             self.assertIn("хвосты: нет", self.tkt().log[-1].text)
 
     def test_tail_fields_only_left_field_with_tail_is_refused(self):
         with self._fields_only():
-            self._done_left("не сделан п.3", why="Готово, тесты зелёные")
+            self._done("Готово, тесты зелёные", left="не сделан п.3")
             rc, _, err = self._accept(tail="-", decisions="-", numbers="-")
             self.assertEqual(rc, 1)
             self.assertIn("это хвост", err)
@@ -145,7 +142,7 @@ class GatesTests(unittest.TestCase):
     def test_tail_fields_only_empty_remainders_are_not_tails(self):
         for left in ("ничего", "нет", "приёмка Судьи"):
             with self.subTest(left=left), self._fields_only():
-                self._done_left(left, why="Готово")
+                self._done("Готово", left=left)
                 rc, _, err = self._accept(tail="-", decisions="-", numbers="-", dry_run=True)
                 self.assertEqual(rc, 0, err)
 
@@ -159,13 +156,9 @@ class GatesTests(unittest.TestCase):
         self.assertEqual((rc, "это хвост" in err2), (1, True))
 
 
-class ReturnFixesTests(unittest.TestCase):
+class ReturnFixesTests(_Base):
     """Возврат Судьи по PR #203@e6dea84 (docs/reviews/TK-089-critic.md): dry-run не падает и не путает «не запустилось» с
     регрессией; `--false-positive` снимает только эвристику; сдача без поля «остаток» при tail_fields_only — отказ."""
-    setUp, tearDown, res, tkt, refused, _registry_with_decision = (
-        TR.ResultTests.setUp, TR.ResultTests.tearDown, TR.ResultTests.res, TR.ResultTests.tkt, TR.ResultTests.refused,
-        TR.ResultTests._registry_with_decision)
-    _done, _accept, _error, _fields_only = GatesTests._done, GatesTests._accept, GatesTests._error, GatesTests._fields_only
 
     def _ok(self):
         self._done("Готово, тесты зелёные")
@@ -243,6 +236,64 @@ class ReturnFixesTests(unittest.TestCase):
             rc, _, err = self._accept(tail="-", decisions="-", numbers="-", dry_run=True)
             self.assertEqual(rc, 1)
             self.assertIn("нет поля «остаток»", err)
+
+
+class TailFixesTests(_Base):
+    """TK-094, хвост TK-089: подсказка про `--false-positive` — только на эвристику; `--sha` без учёта регистра и в dry-run, и в
+    accept; dry-run без репозитория — полный список; `--false-positive` — только по ошибке «ложное срабатывание: …»."""
+
+    def test_hint_only_when_a_heuristic_refusal_remains(self):
+        self._done("Готово, тесты зелёные")
+        rc, _, err = self._accept(dry_run=True, tail="TK-999", decisions="-", numbers="-")  # структурный отказ про хвост
+        self.assertEqual(rc, 1)
+        self.assertIn("нужен номер", err)
+        self.assertNotIn("отказ эвристики", err)
+        self._done(BAD_TAIL)
+        rc, _, err = self._accept(dry_run=True, tail="-", decisions="-", numbers="-")  # настоящая эвристика
+        self.assertIn("отказ эвристики", err)
+
+    def test_sha_case_is_the_same_in_dry_run_and_accept(self):
+        import merge_rule
+        self._done("Готово, тесты зелёные")
+        seen = []
+        merge_rule.check_pr = lambda repo, n, sha, gh=None: seen.append(sha) or ""
+        with mock.patch.object(merge_rule, "merged_done", return_value=False):
+            for dry in (True, False):
+                with self.subTest(dry_run=dry):
+                    rc, _, err = self._accept(pr=7, sha="ABCDEF1", dry_run=dry, tail="-", decisions="-", numbers="-")
+                    self.assertEqual(rc, 0, err)
+                    self.assertNotIn("хеш головы", err)
+        self.assertEqual(seen, ["abcdef1", "abcdef1"])  # accept отдаёт слиянию нижний регистр, как dry-run
+
+    def test_dry_run_without_repo_lists_everything(self):
+        self._done()
+        self.settings = {}
+        rc, _, err = self._accept(pr=7, sha="a" * 40, dry_run=True, tail="-", decisions=None, numbers=None)
+        self.assertEqual(rc, 1)
+        for part in ("репозиторий не задан", "--decisions", "таблицей ключевых чисел", "это хвост"):
+            self.assertIn(part, err)
+
+    def test_dry_run_with_bad_sha_lists_everything(self):
+        self._done()
+        rc, _, err = self._accept(pr=7, sha="не-хеш", dry_run=True, tail="-", decisions=None, numbers="-")  # `result accept`
+        self.assertEqual(rc, 1)
+        for part in ("--sha <голова PR", "--decisions", "это хвост"):
+            self.assertIn(part, err)
+        args = dict(id=self.tid, pr=7, sha="не-хеш", repo=None, dry_run=True, text="", decisions=None, tail="-", numbers="-")
+        with contextlib.redirect_stderr(io.StringIO()) as e:  # `tickets.py accept` (роль judge осталась от res): свой разбор --sha
+            self.assertEqual(TK.cmd_accept(type("A", (), args)()), 1)
+        for part in ("--sha — хеш головы PR", "--decisions", "это хвост"):
+            self.assertIn(part, e.getvalue())
+
+    def test_false_positive_needs_the_false_positive_title(self):
+        self._done()
+        self._error(title="тесты не писали")  # ошибка на этом тикете, но не про ложное срабатывание
+        rc, _, err = self._accept(tail="-", decisions="-", numbers="-", false_positive="E-001")
+        self.assertEqual(rc, 1)
+        self.assertIn("без «ложное срабатывание»", err)
+        self._error()  # E-002: заголовок по FP_HINT
+        rc, _, err = self._accept(tail="-", decisions="-", numbers="-", false_positive="E-002")
+        self.assertEqual(rc, 0, err)
 
 
 GATES_LINE = re.compile(r"Отказ гейта — сначала `--dry-run`.*?\(([^)]*)\)")

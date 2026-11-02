@@ -556,17 +556,18 @@ def cmd_accept(args) -> int:
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
+    args.sha = (args.sha or "").lower()  # регистр не важен: `result` и dry-run принимают ВЕРХНИЙ, accept — так же
+    slug = gates_mod.repo_slug(args)
+    if getattr(args, "dry_run", False):  # весь список, в том числе «--sha не хеш» и «репозиторий не задан» строками
+        return gates_mod.dry_run(args, sys.modules[__name__], slug)
     if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
         return 1
     import merge_rule
     import routes
-    slug = (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
-    if getattr(args, "dry_run", False):
-        return gates_mod.dry_run(args, sys.modules[__name__], slug)
     err = merge_rule.check_pr(slug, int(args.pr), args.sha)
     if err:
         print(f"accept: {err}", file=sys.stderr)
