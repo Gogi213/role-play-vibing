@@ -213,7 +213,8 @@ class ErrorsTests(unittest.TestCase):
         path = E.errors_dir(self.root) / f"{eid}.md"
         before = path.read_text(encoding="utf-8")
         for args, word in ((("--decision", "В-48", "--why", "x"), "В-48"), (("--decision", "47", "--why", "x"), "47"),
-                           (("--decision", "G-001", "--why", "x"), "G-001"), (("--decision", "", "--why", "x"), "—"),
+                           (("--decision", "G-001", "--why", "x"), "G-001"), (("--decision", "B-47", "--why", "x"), "B-47"),
+                           (("--decision", "", "--why", "x"), "—"),
                            (("--decision", "В-47", "--why", "  "), "--why")):
             code, out, err = self.run_cli("retire", eid, *args)
             self.assertEqual((code, out), (1, ""), args)
