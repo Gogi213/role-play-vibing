@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 730" width="1100" height="730" role="img" aria-labelledby="t-w d-w">
 <title id="t-w">How Role Play Vibing works</title>
-<desc id="d-w">The owner tells the CEO what they want. The CEO hands the words to the Secretary, who records them in the owner's registry as a decision or a goal, and then files a ticket that must reference that record. The dispatcher reads tickets every 15 seconds and starts the role each ticket calls for as a short claude -p session. Roles report with tickets.py result, which sets status and next. Executors hand results to the Judge, who accepts or returns them. Done and stuck tickets, plus watcher findings, are written to ceo-inbox.md and ceo-wake.log, and a Monitor wakes the CEO. The Overseer sends findings to the Judge. Telegram carries the daily report, owner questions and the work-stalled alarm.</desc>
+<desc id="d-w">The owner tells the CEO what they want. The CEO hands the words to the Secretary, who records them in the owner's registry as a decision or a goal, and then files a ticket that must reference that record. The dispatcher reads tickets every 15 seconds and starts the role each ticket calls for as a short claude -p session. Roles report with tickets.py result, which sets status and next. Executors hand results to the Judge, who accepts or returns them. Done and stuck tickets, plus watcher findings, are written to ceo-inbox.md and ceo-wake.log, and ceo_wake.py wakes the CEO with a SendMessage on four events only: an owner decision is needed, something broke or a deadline passed, a goal step was accepted with no next step, a goal is closed. The Overseer sends findings to the Judge. Telegram carries the daily report, owner questions and the work-stalled alarm.</desc>
 <style>
   :root{--bg:#F6F8FA;--surface:#FFFFFF;--fg:#1F2933;--muted:#586471;--line:#AEB9C4;--model-bg:#E1EDFB;--model-line:#3A6EA5;--wake:#B83A08;--wake-bg:#FCEBE2}
   @media (prefers-color-scheme: dark){:root{--bg:#0E141A;--surface:#161E26;--fg:#E4EAF0;--muted:#98A5B1;--line:#4A5A68;--model-bg:#14283B;--model-line:#6FA8E0;--wake:#FF9A66;--wake-bg:#3B2216}}
@@ -76,8 +76,8 @@
 <text x="605" y="400" class="l-w" text-anchor="end">done · blocked ·</text>
 <text x="605" y="414" class="l-w" text-anchor="end">needs_owner · next: ceo</text>
 <polyline class="e-w" points="325,450 325,124" marker-end="url(#mk-w-w)"/>
-<text x="333" y="300" class="l-w">Monitor on ceo-wake.log</text>
-<text x="333" y="314" class="l-w">wakes the CEO</text>
+<text x="333" y="300" class="l-w">ceo_wake.py: SendMessage</text>
+<text x="333" y="314" class="l-w">on 4 events wakes the CEO</text>
 <rect class="n-code" x="230" y="530" width="190" height="52" rx="6"/>
 <text x="240" y="550" class="t">Watcher</text>
 <text x="240" y="568" class="s">watch.py: orphan tickets, dead waits</text>

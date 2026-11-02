@@ -267,7 +267,7 @@ def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, o
         if (st.get(key) or {}).get("conflict") != sha:
             _note(tkt, f"PR #{n} принят на {sha[:7]}, но конфликтует с {default}: слей {default} в ветку и запушь "
                        f"(CI и вердикт на новой голове — заново).", wake_owner=True)
-            st[key] = {"conflict": sha}
+            st[key] = {"conflict": sha, "base": default}
             out.append((n, "конфликт → владельцу"))
         return
     if not ci_ok or detail.get("mergeable") is None:

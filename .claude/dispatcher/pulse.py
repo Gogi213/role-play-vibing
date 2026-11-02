@@ -114,11 +114,13 @@ def _found(state: dict, tickets, now: datetime, runs: list) -> dict:
     for t in tickets:
         for pr in (re.findall(r"\d+", str(t.header.get("pr") or "")) if repo and t.status in T.OPEN_STATUSES else []):  # `pr: 149, 153` — каждый
             entry = ci.get(f"{repo}#{pr}") or {}
-            conflict = (merge.get(f"{repo}#{pr}") or {}).get("conflict")
+            if entry.get("closed"):  # закрыт или влит: список pr: тикета только растёт, красная запись не гаснет (ci_watch._mark_closed)
+                continue
+            conflict, base = (merge.get(f"{repo}#{pr}") or {}).get("conflict"), (merge.get(f"{repo}#{pr}") or {}).get("base")
             if entry.get("state") in ("failure", "error") or entry.get("red"):
                 found[f"ci_red:{t.id}:{pr}"] = ("ci_red", f"{t.id}: CI красный на PR #{pr}")
             elif conflict and conflict == entry.get("sha"):  # метка конфликта не снимается после пуша: только на текущей голове
-                found[f"ci_red:{t.id}:{pr}"] = ("ci_red", f"{t.id}: PR #{pr} в конфликте с main")
+                found[f"ci_red:{t.id}:{pr}"] = ("ci_red", f"{t.id}: PR #{pr} в конфликте с {base or 'веткой по умолчанию'}")
     return found
 
 

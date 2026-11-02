@@ -38,8 +38,8 @@ class ShortStyleRuleTests(unittest.TestCase):
         self.assertIn("Номер тикета `TK-NNN` оставляй", self.rule)
 
     def test_no_mechanics(self):
-        for must in ("Механику не пиши", "PR", "файлы и строки", "наблюдение / `Monitor`",
-                     "пересказ отчётов критика, Инженера, Судьи", "«жду»", "«наблюдение включено»"):
+        for must in ("Механику не пиши", "PR", "файлы и строки",
+                     "пересказ отчётов критика, Инженера, Судьи", "«жду»"):
             self.assertIn(must, self.rule)
 
     def test_details_only_on_question_and_no_empty_messages(self):

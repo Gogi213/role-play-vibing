@@ -158,6 +158,27 @@ class CiWatchTests(unittest.TestCase):
             raise RuntimeError("gh")
         self.assertFalse(C.ci_done(REPO, 7, gh=boom))
 
+    def test_pr_gone_from_open_is_marked_closed_and_reopen_clears(self):  # TK-102
+        self.runs = [{"name": "t", "status": "completed", "conclusion": "failure"}]
+        self.run_ci()
+        gh_open = self.gh
+        self.gh = lambda p: [] if "pulls?state=open" in p else gh_open(p)
+        self.run_ci()
+        st = C.load_state()
+        self.assertTrue(st[f"{REPO}#7"]["closed"])
+        self.assertEqual((st[f"{REPO}#7"]["state"], st[f"{REPO}#7"]["sha"]), ("failure", self.sha))   # запись для ci_done цела
+        self.gh = gh_open
+        self.run_ci()
+        self.assertNotIn("closed", C.load_state()[f"{REPO}#7"])
+
+    def test_full_page_of_open_prs_marks_nothing_closed(self):  # TK-102: отсутствие на неполной выдаче ничего не доказывает
+        self.run_ci()
+        C.save_state({**C.load_state(), f"{REPO}#99": {"sha": "b", "state": "failure", "red": ["x"]}})
+        full = [{"number": n, "title": f"PR {n}", "head": {"sha": "c" * 40, "ref": f"b{n}"}} for n in range(1000, 1100)]
+        self.gh = lambda p: full if "pulls?state=open" in p else {"check_runs": []}
+        self.run_ci()
+        self.assertNotIn("closed", C.load_state()[f"{REPO}#99"])
+
     def test_pr_header_field_binds_ticket(self):
         T.write_header_updates(self.path, {"pr": "7"}, now=NOW)
         pr = {"number": 7, "title": "без номера", "head": {"ref": "x", "sha": self.sha}}

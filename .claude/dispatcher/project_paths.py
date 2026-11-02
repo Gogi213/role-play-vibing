@@ -30,7 +30,7 @@ def configure_project(root) -> Path:
     RUNS_DIR = DISPATCHER_DIR / "runs"
     RUNS_LOG = DISPATCHER_DIR / "runs.log"
     CEO_INBOX = DISPATCHER_DIR / "ceo-inbox.md"
-    CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # короткая копия каждой строки ceo-inbox — CEO держит на ней Monitor
+    CEO_WAKE_LOG = DISPATCHER_DIR / "ceo-wake.log"  # журнал: короткая копия каждой строки ceo-inbox
     STOP_DIR = DISPATCHER_DIR / "stop"  # заявки `tickets.py stop` (<ID>.json): диспетчер разбирает их на ближайшем тике
     return PROJECT_ROOT
 
