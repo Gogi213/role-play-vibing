@@ -67,13 +67,16 @@ Description=Пульс (rpv)
 After=network-online.target
 
 [Service]
-Environment=PULSE_TOKEN=<длинный-ключ>
+EnvironmentFile=/etc/rpv/pulse.env
 ExecStart=/usr/bin/python3 /opt/rpv/.claude/board/pulse_server.py --project /srv/hub --host 127.0.0.1 --port 8787
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+Ключ — в `/etc/rpv/pulse.env` (`PULSE_TOKEN=<длинный-ключ>`, права 0600, владелец root): в `Environment=` он виден всем через
+`systemctl show`.
 
 Замена старого табло: `systemctl disable --now rpv-board`, положить юнит в `/etc/systemd/system/rpv-pulse.service`,
 `systemctl enable --now rpv-pulse`; снаружи — прежний обратный прокси (с TLS) на порт 8787.

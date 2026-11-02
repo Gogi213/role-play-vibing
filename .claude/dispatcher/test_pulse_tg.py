@@ -182,6 +182,21 @@ class PulseTelegram(States):
         self.assertEqual(G.tick(self.proj, self.state, self.at, self.api), "sent")
         self.assertEqual(self.api.calls[0][1]["text"], f"{V.OK_PHRASE}\nrpv — идёт")
 
+    def test_tick_is_off_without_token_and_does_not_read_projects(self):
+        (self.proj / ".claude").mkdir(exist_ok=True)
+        (self.proj / ".claude" / "rpv.json").write_text(json.dumps({"pulse_projects": {"rpv": "http://x/"}, "pulse_telegram": True}), encoding="utf-8")
+        fetched = []
+        for env in ({"RPV_TG_TOKEN": ""}, {"RPV_TG_CHAT": ""}):
+            with self.subTest(env=env), mock.patch.dict(os.environ, env):
+                self.assertEqual(G.tick(self.proj, self.state, self.at, self.api, lambda *a, **k: fetched.append(a)), "off")
+        self.assertEqual((fetched, self.api.calls), ([], []))
+
+    def test_tick_without_projects_sends_no_projects_text(self):
+        (self.proj / ".claude").mkdir(exist_ok=True)
+        (self.proj / ".claude" / "rpv.json").write_text(json.dumps({"pulse_projects": {}, "pulse_telegram": True}), encoding="utf-8")
+        self.assertEqual(G.tick(self.proj, self.state, self.at, self.api), "sent")
+        self.assertEqual(self.api.calls[0][1]["text"], V.NO_PROJECTS)
+
 
 class TextTests(States):
     def test_text_first_line_phrase_then_project_lines(self):

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import http.client
 import json
 import sys
 import urllib.request
@@ -32,7 +33,7 @@ def read(spec: str, fetch=urllib.request.urlopen):
                 data = json.loads(r.read().decode("utf-8-sig"))
         else:
             data = json.loads(Path(spec).read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):  # InvalidURL (порт не число), IncompleteRead — не OSError
         return None
     return data if isinstance(data, dict) else None
 

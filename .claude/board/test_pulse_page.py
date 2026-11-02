@@ -234,6 +234,35 @@ class ServerTests(TG.States):
         self.assertIn(V.NO_PROJECTS, page)
         self.assertNotIn(V.OK_PHRASE, page)
 
+    def test_broken_project_url_does_not_break_other_projects(self):
+        """Порт не число (InvalidURL) и обрыв ответа (IncompleteRead) — не OSError: «пульс не читается» только у этого проекта."""
+        import http.client
+        good = json.dumps(dict(self.ok_data(), generated=datetime.now().astimezone().isoformat())).encode("utf-8")
+
+        def fetch(url, timeout=0):
+            if "bad-port" in url:
+                return urllib.request.urlopen(url, timeout=timeout)  # InvalidURL: nonnumeric port, до сети не доходит
+            if "cut" in url:
+                raise http.client.IncompleteRead(b"{", 10)
+            return FakeResponse(good)
+
+        for url in ("http://host:port/bad-port", "http://host/cut"):
+            with self.subTest(url=url):
+                self.assertIsNone(V.read(url, fetch))
+        rpv = self.proj / ".claude" / "rpv.json"
+        rpv.write_text(json.dumps({"pulse_projects": {"bad": "http://host:port/bad-port", "cut": "http://host/cut", "fine": "http://host/ok"}}),
+                       encoding="utf-8")
+        os.utime(rpv, (time.time() + 5, time.time() + 5))  # кэш настроек — по времени изменения
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), S.make_handler(self.proj, "sekret", fetch))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/sekret/", timeout=5) as r:
+            page = r.read().decode("utf-8")
+        self.assertIn("Застряло: bad — пульс не читается.", page)
+        self.assertIn("<b>fine</b>", page)
+        self.assertEqual(page.count('<div class="meta stuck">пульс не читается</div>'), 2)  # bad и cut; fine — со своим «сейчас»
+
     def test_wrong_token_or_path_is_404(self):
         self.assertEqual(self.get("/wrong/")[0], 404)
         self.assertEqual(self.get("/")[0], 404)

@@ -94,11 +94,11 @@ def sync(project, state: dict, views: list, now: datetime, opener=urllib.request
 
 
 def tick(project, state: dict, now: datetime, opener=urllib.request.urlopen, fetch=urllib.request.urlopen) -> str:
-    """Вызов из тика диспетчера: ключ `pulse_telegram: true` и непустой `pulse_projects` — иначе 'off' и ничего не читается."""
-    if P.setting("pulse_telegram", False, root=project) is not True:
+    """Вызов из тика диспетчера: ключ `pulse_telegram: true` и заданные RPV_TG_TOKEN/RPV_TG_CHAT — иначе 'off' и ничего не читается.
+    Проектов нет — в сообщении «Проектов нет…», как на странице."""
+    if P.setting("pulse_telegram", False, root=project) is not True or not N.configured():
         return "off"
     last = P.parse_time((state.get("pulse_tg") or {}).get("tried"))
     if last and (now - last).total_seconds() < MIN_GAP_S:
         return "wait"  # рано — проекты (в т. ч. удалённые по URL) не читаем
-    views = V.load_all(project, now, fetch)
-    return sync(project, state, views, now, opener) if views else "off"
+    return sync(project, state, V.load_all(project, now, fetch), now, opener)
