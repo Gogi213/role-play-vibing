@@ -13,12 +13,12 @@ from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_result as TR  # noqa: E402,I001  первым: он задаёт песочницу проекта до импорта остальных модулей
+from test_result import NOW, SHA  # noqa: E402
 import precheck as PC  # noqa: E402
 import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
 import ticket as T  # noqa: E402
-import test_result as TR  # noqa: E402
-from test_result import NOW, SHA  # noqa: E402
 
 ORDER = "Заказ изменён: сначала проверь второй путь записи в watch.py, потом сдавай"
 
