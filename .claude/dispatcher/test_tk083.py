@@ -98,9 +98,9 @@ class ChartersAndRound(unittest.TestCase):
     def test_engineer_push_line_is_tests_of_the_change(self):
         text = self.text("engineer.md")
         self.assertNotIn("быстрый прогон тестов проекта зелёный", text)
-        line = next(ln for ln in text.split("- ") if ln.startswith("**Перед каждым push в PR"))
-        self.assertIn("тесты самой правки (`python -m pytest <файл правки>`), не весь проект", line)
-        self.assertIn("при `has_ci: false` — быстрый прогон тестов проекта", line)
+        line = next(ln for ln in text.split("- ") if ln.startswith("**Прогон тестов (В-21)"))
+        self.assertIn("тесты самой правки (`python -m pytest <файл правки>`) и `errors.py run`, не весь проект", line)
+        self.assertIn("При `has_ci: false` — ещё быстрый полный прогон проекта", line)
 
     def test_round_batch_is_not_an_unconditional_full_run(self):
         text = self.text("review-round.md")

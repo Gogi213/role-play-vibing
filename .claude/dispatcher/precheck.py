@@ -9,6 +9,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+import hide
 import project as P
 import ticket as T
 
@@ -21,8 +22,7 @@ CHECKED = ("pr", "done")
 
 def _git(root: Path, *argv: str, timeout: int = GIT_TIMEOUT):
     try:
-        return subprocess.run(["git", "-C", str(root), *argv], capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=timeout, check=False)
+        return hide.git(root, *argv, timeout=timeout, text=True)
     except (OSError, subprocess.SubprocessError):
         return None
 
