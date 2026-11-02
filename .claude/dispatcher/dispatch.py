@@ -113,7 +113,7 @@ MAX_IDLE_RUNS = 2
 
 from signals import (  # noqa: E402,F401 — сигналы CEO вынесены в signals.py; имена для вызовов из dispatch и tickets
     _mech_log, append_ceo_inbox, route_ceo_signal, handle_next_ceo, escalate_review_limit, notify_status_for_ceo,
-    notify_parse_error, baseline_done_notified, notify_done, haiku_refused_reason)
+    notify_parse_error, notify_due_missed, notify_goal_closed, baseline_done_notified, notify_done, haiku_refused_reason)
 
 
 def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
@@ -193,7 +193,7 @@ def _blind_tick() -> None:
 
 # --- ceo-inbox ---------------------------------------------------------------------------------
 
-# Сигнал CEO — строка в ceo-inbox.md (детали; читает `tickets.py inbox`) и короткая копия в ceo-wake.log (на нём Monitor CEO).
+# Сигнал CEO — строка в ceo-inbox.md (детали; читает `tickets.py inbox`) и короткая копия в ceo-wake.log (журнал; побудка CEO — ceo_wake.py).
 REASON_PRIORITY = {"next": 0, "in_progress-resume": 2}
 
 
@@ -663,6 +663,10 @@ def _collect_candidates(state: dict, now) -> tuple:
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — в _launch_candidates
     STALLED.clear()
     waiting_nocond = False  # TK-076 п.4: роль ждёт без условия (ни wait_for, ни next) дольше IDLE_GRACE_S
+    try:
+        notify_goal_closed(state, now)
+    except Exception as e:  # noqa: BLE001 — сигнал о цели не роняет тик
+        print(f"[dispatch] goal_closed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
@@ -681,6 +685,7 @@ def _collect_candidates(state: dict, now) -> tuple:
                 tkt = close_after_merge(path, tkt, now, state) or tkt
             _expire_ceo_handoff(tkt, state)
             notify_status_for_ceo(tkt, state, now)
+            notify_due_missed(tkt, state, now)
             notify_done(tkt, state, now)
             notify_wait_for_problem(tkt, state, now)
 
@@ -713,6 +718,7 @@ def _collect_candidates(state: dict, now) -> tuple:
                 T.write_header_updates(path, {"status": "blocked"}, now=now)
                 T.append_log(path, "dispatcher", f"{haiku_reason} — задача заблокирована, нужен CEO.", now=now)
                 route_ceo_signal(tid, "blocked", haiku_reason, state, now)
+                state.setdefault("ceo_status_notified", {})[tid] = f"blocked@{T.now_iso(now)}"  # notify_status_for_ceo не шлёт второй раз
                 continue
             candidates.append((path, tkt, decision))
         except Exception as e:
@@ -766,7 +772,7 @@ def tick(now=None) -> int:
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
-    _guarded("пульс", PULSE.update, state, now, datetime.now().astimezone())  # после счётчика простоя: берёт его флаги dt_flags и прежний last_tick
+    _guarded("пульс", PULSE.update, state, now, datetime.now().astimezone())  # после счётчика простоя: берёт его флаги dt_flags и last_tick_end прошлого тика (метку этого тика ставим ниже)
     _guarded("отчёт", _daily_report, state, now)
     _guarded("надзиратель", _overseer, state, now)
     _guarded("вопрос владельцу", _owner_questions, state, now)
