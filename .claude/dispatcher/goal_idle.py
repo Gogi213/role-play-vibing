@@ -21,7 +21,7 @@ SEEN_KEY = "goal_idle_seen"  # watch-state.json: события, о которы
 
 
 def threshold_min() -> int:
-    v = P.setting("goal_idle_min", GOAL_IDLE_MIN)
+    v = P.setting("goal_idle_min", GOAL_IDLE_MIN, root=CFG.PROJECT_ROOT)  # корень явно: общий `P._ROOT` в полном прогоне другой (CI красный на 98169f5)
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else GOAL_IDLE_MIN
 
 
