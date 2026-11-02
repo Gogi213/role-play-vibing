@@ -172,6 +172,24 @@ class CeoTail(unittest.TestCase):
                 err, mark, ceo = self.ack(f'ceo:"{text}"')
                 self.assertEqual((err, ceo), ("", text))
 
+    def test_tail_of_tk027_passes(self):
+        """TK-027.md:36 — путь устава роли и флаг `--after-merge` (TK-099)."""
+        text = "обновить .claude/roles/judge.md проекта из templates/roles/judge.md (пункт --after-merge)"
+        err, _, ceo = self.ack(f'ceo:"{text}"')
+        self.assertEqual((err, ceo), ("", text))
+
+    def test_roles_path_is_owner_zone(self):
+        text = "слить правки в .claude/roles/engineer.md"
+        err, _, ceo = self.ack(f'ceo:"{text}"')
+        self.assertEqual((err, ceo), ("", text))
+
+    def test_flag_name_is_not_code_but_bare_merge_is(self):
+        err, _, ceo = self.ack('ceo:"описать пункт --after-merge"')
+        self.assertEqual((err, ceo), ("", "описать пункт --after-merge"))
+        for text in ("сделать merge ветки", "влить PR --after-merge"):
+            with self.subTest(text=text):
+                self.assertIn("ролям по силам", self.ack(f'ceo:"{text}"')[0])
+
     def test_ticket_tail_still_accepted(self):
         other = T.create_ticket(TK.TICKETS_DIR, owner="engineer", title="Хвост: код").stem
         self.assertEqual(self.ack(other), ("", f" хвосты: {other}", ""))

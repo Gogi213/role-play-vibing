@@ -378,7 +378,9 @@ TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикет�
 TAIL_CODE = re.compile(r"\bкод\w*|\bтест\w*|\bpr\b|\bpull\b|\w*мерж\w*|\bmerge\b|слить|слит\w*|слия\w*|влить|влив\w*|коммит\w*|скрипт\w*|"
                        r"прав[ик]\w*|\bпочин\w*|\bчини\w*|\w*пуш\w*|рефактор\w*|\bбаг\w*|исправ\w*|ошибк\w*|\bмодул\w*|функци\w*", re.I)
 TAIL_OWNER_ZONE = re.compile(r"настройк\w*|settings|rpv\.json|claude\.md|устав\w*|charter|реестр\w*|"
-                             r"(?:слов\w*|решени\w*|согласи\w*)\s+владельц\w*|\ballow\b|токен\w*", re.I)
+                             r"(?:слов\w*|решени\w*|согласи\w*)\s+владельц\w*|\ballow\b|токен\w*|\.claude/roles/[\w-]+\.md", re.I)
+# TK-099: имя флага (`--after-merge`) — не код: слово внутри него не считается.
+TAIL_FLAG = re.compile(r"(?<![\w-])--[\w-]+")
 
 
 def _owner_submission(tkt) -> str:
@@ -456,7 +458,7 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         what = " ".join(raw[4:].split()).strip("\"' ")
         if len(what) < 5:
             return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
-        if (hit := TAIL_CODE.search(what)) and not TAIL_OWNER_ZONE.search(what):
+        if (hit := TAIL_CODE.search(TAIL_FLAG.sub(" ", what))) and not TAIL_OWNER_ZONE.search(what):
             return (f"--tail ceo: «{what[:80]}» — про «{hit.group()}»: код, тесты, слияние и т. п. ролям по силам. Заведи тикет "
                     f"(`tickets.py new --owner <роль> --ref <ref тикета> --title \"Хвост {tid}: …\"`) и принимай с `--tail TK-N`; "
                     f"CEO — только то, что ролям не сделать (настройки, CLAUDE.md, устав проекта, слово владельца)"), "", ""
