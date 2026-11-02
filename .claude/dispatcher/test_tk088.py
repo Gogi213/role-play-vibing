@@ -32,10 +32,12 @@ class FourEventsRuleTests(unittest.TestCase):
     def test_what_from_you_line(self):
         for must in ("«Что от вас: …»", "«Что от вас: ничего, к сведению»"):
             self.assertIn(must, self.rule)
-        self.assertIn("«Стою: жду вашего …» и есть эта строка", self.rule)
+        self.assertIn("«Стою» в таком сообщении не добавляй", self.rule)
+        self.assertNotIn("что нужно от владельца", self.text)
 
     def test_owner_question_goes_by_style_rules(self):
-        self.assertIn("На вопрос владельца отвечай по В-26", self.rule)
+        self.assertIn("На вопрос владельца отвечай по строкам", self.rule)
+        self.assertNotRegex(self.text, r"В-\d")
         for head in ("С владельцем", "Ответ на прямой вопрос владельца"):
             self.assertIn(f"«{head.split(' — ')[0]}»", self.rule)
             self.assertEqual(sum(ln.startswith(f"- **{head}") for ln in self.text.splitlines()), 1)
@@ -63,6 +65,8 @@ class SignalsDocExampleTests(unittest.TestCase):
 
     def test_done_still_wakes_ceo_but_not_owner(self):
         self.assertIn("`done`, статусы тикетов и проценты владельцу не уходят", self.section)
+        self.assertIn("исключение — `работа-стоит` и `работа-идёт`", self.section)
+        self.assertIn("владельцу только по четырём событиям", self.section)
 
 
 class CharterSyncCarriesRuleTests(unittest.TestCase):
