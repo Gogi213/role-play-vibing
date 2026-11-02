@@ -35,6 +35,7 @@ import pulse as PULSE  # noqa: E402 — pulse.json раз в тик (TK-095)
 import on_met as ON_MET  # noqa: E402
 import waits as W  # noqa: E402
 import alarms as AL  # noqa: E402
+import pulse_tg as PULSE_TG  # noqa: E402
 import goal_steps as GS  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
@@ -801,6 +802,7 @@ def tick(now=None) -> int:
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
     _guarded("пульс", PULSE.update, state, now, datetime.now().astimezone())  # после счётчика простоя: берёт его флаги dt_flags и last_tick_end прошлого тика (метку этого тика ставим ниже)
     _guarded("отчёт", _daily_report, state, now)
+    _guarded("пульс Telegram", lambda: PULSE_TG.tick(CFG.PROJECT_ROOT, state, now))  # В-38: закреплённое сообщение; ключ pulse_telegram
     _guarded("надзиратель", _overseer, state, now)
     _guarded("вопрос владельцу", _owner_questions, state, now)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому

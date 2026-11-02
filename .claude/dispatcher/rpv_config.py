@@ -75,6 +75,8 @@ KEYS = {
     "probe_kinds": (lambda v: _str_list(v) and set(v) <= set(probe_mod.ALLOWED_KINDS), "список из host, file, job (умолчание host, job)"),
     "host_free_cmd": (lambda v: _text(v) and "{ticket}" in v, "непустая строка с {ticket} (иначе считаются процессы самого тикета)"),
     "host_mem_reserve": (lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1, "число ≥ 1"),
+    "pulse_projects": (lambda v: isinstance(v, dict) and bool(v) and all(_text(k) and _text(x) for k, x in v.items()), "объект {имя проекта: путь к pulse.json или URL}"),
+    "pulse_telegram": (lambda v: isinstance(v, bool), "true или false"),
     "ceo_context_warn": (_int_min, "целое ≥ 1, токены контекста; ниже ceo_context_stop"),
     "ceo_context_stop": (_int_min, "целое ≥ 1, токены контекста; выше ceo_context_warn"),
 }
