@@ -167,7 +167,7 @@ class CeoTail(unittest.TestCase):
                 self.assertEqual((err, ceo), ("", text))
 
     def test_owner_zone_text_passes_even_with_code_words(self):
-        for text in ("вписать хук в settings.json", "поставить настройку critic_before_accept", "слово владельца про код выпуска"):
+        for text in ("вписать хук в settings.json", "поставить настройку tail_fields_only", "слово владельца про код выпуска"):
             with self.subTest(text=text):
                 err, mark, ceo = self.ack(f'ceo:"{text}"')
                 self.assertEqual((err, ceo), ("", text))

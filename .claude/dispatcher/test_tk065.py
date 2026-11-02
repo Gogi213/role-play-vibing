@@ -31,35 +31,26 @@ class ShortStyleRuleTests(unittest.TestCase):
         self.rule = " ".join(rule(self.text, "С владельцем").split())
 
     def test_up_to_three_lines_change_plus_need(self):
-        for must in ("до трёх строк", "что изменилось", "«Что от вас: …»"):
+        for must in ("до трёх строк", "итог", "«Что от вас: …»"):
             self.assertIn(must, self.rule)
 
     def test_ticket_number_is_kept(self):
         self.assertIn("Номер тикета `TK-NNN` оставляй", self.rule)
 
     def test_no_mechanics(self):
-        for must in ("Механику не пиши", "PR", "файлы и строки",
-                     "пересказ отчётов критика, Инженера, Судьи", "«жду»"):
+        for must in ("Механику не пиши", "PR", "файлы", "пересказ отчётов ролей", "«жду»"):
             self.assertIn(must, self.rule)
 
     def test_details_only_on_question_and_no_empty_messages(self):
         self.assertIn("Детали — только по вопросу владельца", self.rule)
-        self.assertIn("Сообщение без события (ничего не изменилось, спросить нечего) не шли", self.rule)
-
-    def test_before_after_example(self):
-        self.assertIn("Было: абзац про PR, файлы и наблюдение; стало: «TK-064 готов. Что от вас: решить, выпускать ли новую версию»", self.rule)
+        self.assertIn("Сообщение без события не шли", self.rule)
 
     def test_style_does_not_override_neighbouring_format_rules(self):
         # строки о формате, с которыми стиль согласован, на месте и названы в правиле
         self.assertIn("«Числа владельцу — после Судьи»", self.rule)
         self.assertTrue(any(ln.startswith("- **Числа владельцу — после Судьи**") for ln in self.text.splitlines()))
-        self.assertIn("«Критик: проверил …»", self.rule)
-        self.assertIn("Критик: проверил … — изменилось …", rule(self.text, "Рекомендация или починка владельцу"))
-        self.assertIn("«Стою: жду вашего …»", self.rule)
-        waiting = " ".join(rule(self.text, "Утверждённое не переспрашиваешь").split())
-        self.assertIn("первой строкой ответа «Стою: жду вашего …»", waiting)
-        self.assertIn("в сообщении по своей инициативе это строка «Что от вас: …»", waiting)
-        self.assertNotIn("что нужно от владельца", waiting)
+        self.assertNotIn("Критик: проверил", self.text)
+        self.assertIn("первой строкой «Стою: жду вашего …»", " ".join(rule(self.text, "Ответ на прямой вопрос владельца").split()))
 
     def test_old_one_liner_is_replaced_not_duplicated(self):
         self.assertEqual(sum(ln.startswith("- **С владельцем") for ln in self.text.splitlines()), 1)

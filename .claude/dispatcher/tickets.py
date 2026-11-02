@@ -67,7 +67,6 @@ import routes as routes_mod  # noqa: E402
 import ticket as T  # noqa: E402
 import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
-import critic_gate  # noqa: E402
 import precheck  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
 import tickets_gates as gates_mod  # noqa: E402
@@ -84,12 +83,20 @@ _text_numbers, _artifact_numbers, _has_number = numbers_mod.text_numbers, number
 
 
 def cmd_inbox(args) -> int:
-    """Очередь CEO: новые строки ceo-inbox.md с прошлого чтения (отметка `.ceo-inbox-seen` — общая с хуком сессии);
-    `--peek` отметку не двигает."""
+    """Очередь CEO: новые строки ceo-inbox.md с прошлого чтения, по статусу тикета сейчас — «требует действия» / «к сведению»
+    (отметка `.ceo-inbox-seen` — общая с хуком сессии); `--peek` отметку не двигает."""
     seen_f = CFG.CEO_INBOX.parent / CI.SEEN_NAME
     lines, seen = CI.read(CFG.CEO_INBOX, seen_f)
+    act, info = [], []
     for ln in lines[seen:]:
-        print(ln)
+        m = re.search(r"(TK-\d+)", ln)
+        status = ""
+        if m and (f := TICKETS_DIR / f"{m.group(1)}.md").exists():
+            status = T.read_ticket(f).status           # решает статус сейчас, а не текст сигнала
+        (act if status in ("blocked", "needs_owner") else info).append(f"{ln}  (сейчас: {status})" if status else ln)
+    for title, rows in (("Требует действия:", act), ("К сведению:", info)):
+        if rows:
+            print(title, *rows, sep="\n")
     if len(lines) == seen:
         print("очередь CEO пуста (новых строк в ceo-inbox.md нет)")
     elif not args.peek:
@@ -105,10 +112,10 @@ def cmd_new(args) -> int:
               f"Работы, которую владелец не заказывал, не заводим", file=sys.stderr)
         return 1
     # CP2 (критерий 1): реестр владельца есть — ссылка только на его номер, цель G-NNN или решение В-N; слова владельца
-    # сначала записывает `secretary`. Без реестра (`.claude/decisions.md` нет) — цитата или В-## как раньше
+    # сначала пишет в реестр CEO. Без реестра (`.claude/decisions.md` нет) — цитата или В-## как раньше
     if registry_mod.decisions_file(PROJECT_ROOT).exists() and not REF_REGISTRY.match(ref):
         print("new: --ref — только номер реестра владельца: цель G-NNN или решение В-N (`registry.py list`). Слова "
-              "владельца сначала в реестр — помощник `secretary` (`registry.py decide|goal`)", file=sys.stderr)
+              "владельца сначала в реестр (`registry.py decide|goal`)", file=sys.stderr)
         return 1
     # V2-2: номер реестра владельца (В-N, G-NNN) — только существующий; цель — только открытая. Решения без
     # реестра (.claude/decisions.md нет — номера ведутся в другом месте проекта) проходят как раньше
@@ -242,7 +249,7 @@ def _result_proof(args, role: str, tkt) -> str:
 
 
 def _accept_checks(args) -> tuple[str, str, str]:
-    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка, критик, ярлыки. → (отказ, пометки для лога, хвост для CEO)."""
+    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка, ярлыки. → (отказ, пометки для лога, хвост для CEO)."""
     errs, ack, tail_ceo = gates_mod.run(args, sys.modules[__name__], proof=not args.pr)  # с PR команды гонит cmd_accept
     return (errs or [""])[0], ack, tail_ceo
 
@@ -256,8 +263,6 @@ def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
                                   "numbers": getattr(args, "numbers", None),
                                   "tail": getattr(args, "tail", None),
                                   "live": getattr(args, "live", None),
-                                  "critic": getattr(args, "critic", None),
-                                  "critic_skip": getattr(args, "critic_skip", None),
                                   "false_positive": getattr(args, "false_positive", None),
                                   "after_merge": getattr(args, "after_merge", None)})())
     if rc == 0:
@@ -467,11 +472,6 @@ def _live_ack(args, tid: str) -> tuple[str, str]:
     if len(f.read_text(encoding="utf-8", errors="replace").strip()) < LIVE_MIN_CHARS:
         return f"--live {raw}: пусто — {LIVE_HINT}", ""
     return "", f" вживую: {rel}"
-
-
-def _critic_ack(args, tid: str, record=None) -> tuple[str, str]:
-    """Ворота критика (TK-071): за ключом `critic_before_accept`; свежесть отчёта — от головы PR (`--sha`)."""
-    return critic_gate.critic_ack(args, tid, PROJECT_ROOT, getattr(args, "sha", None) or "", record=record)
 
 
 def _proof_ack(tid: str) -> tuple[str, str]:

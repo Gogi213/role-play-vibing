@@ -4,9 +4,8 @@
   сессии (запасной путь к метке, которую ставит сама команда).
   Роль (не CEO): строка «молчание» — итог в лог тикета, не текстом в ход.
   CEO: одна строка «[диспетчер] N новых в ceo-inbox.md» — только когда пришли новые; сторож и разрешения —
-  по разу на 10 сообщений; порог контекста CEO (`ceo_context.py`, TK-052): от 350 тыс. токенов вставка на каждое сообщение,
-  от 400 тыс. — хардстоп (сообщение в модель не уходит). Сторож контекста других ролей с владельцем — от 400 тыс.
-  токенов (40 % окна), не чаще раза в 10 сообщений.
+  по разу на 10 сообщений; порог контекста (`ceo_context.py`, TK-052, единственный источник порогов): CEO — от 350 тыс. токенов
+  вставка раз в 10 сообщений, от 400 тыс. — хардстоп (сообщение в модель не уходит); другие роли с владельцем — строка от 350 тыс., так же раз в 10.
 - SessionEnd (клир, выход, остановка): конспект разговора — сообщения владельца/диспетчера и сессий, ответы
   (без инструментов и рассуждений) — в `.claude/roles/log/<роль>/`. Не сработал — `role_context.py` на следующем
   старте догоняет конспект по записанному пути.
@@ -310,27 +309,20 @@ def pending_permissions():
                  ".claude/roles/.state/pending-permission.json.")
 
 
-# Сторож контекста: порог по умолчанию — 40 % окна 1 млн токенов (слово владельца 15.10; до этого было 450 тыс.). Только для сессий, где есть владелец, — у запуска
-# диспетчера просить клир некого.
-CONTEXT_WARN_TOKENS = 400000
-
-
+# Контекст: пороги — одни, `ceo_context.limits` (350/400 тыс., В-15). CEO — вставка WARN и хардстоп (`ceo_gate`); остальные роли
+# с владельцем — короткая строка от порога WARN (у запуска диспетчера просить клир некого). Повтор — не чаще раза в REPEAT_EVERY сообщений.
 def context_tokens(path):
     """Размер контекста по последнему ходу модели в транскрипте — то же определение, что у диспетчера (transcript.py)."""
     return _dispatcher_module("transcript").last_turn_tokens(path) if path else 0
 
 
 def context_advice(hook_in, state):
-    """≥ 400 тыс. токенов (40 % окна 1 млн): одна строка, не чаще раза в REPEAT_EVERY сообщений."""
+    """Роль (не CEO) с владельцем: контекст ≥ порога предупреждения — одна строка, раз в REPEAT_EVERY сообщений."""
     tokens = context_tokens(hook_in.get("transcript_path"))
-    if tokens < CONTEXT_WARN_TOKENS:
+    if tokens < ceo_context.limits(ROOT)[0]:
         return None
-    n = state.get("n", 0)
-    last = state.get("ctx_n")
-    if last is not None and n - last < REPEAT_EVERY:
-        return None
-    state["ctx_n"] = n
-    return f"контекст ≈ {tokens // 1000} тыс. — закончи шаг, обнови блокнот и попроси владельца сделать клир"
+    return throttled(state, "context", "advice",
+                     f"контекст ≈ {tokens // 1000} тыс. — закончи шаг, обнови блокнот и попроси владельца сделать клир")
 
 
 def ceo_gate(hook_in):
@@ -371,7 +363,7 @@ def on_prompt_all(hook_in, role, gate=...):
         try:
             if role == "ceo":
                 gate = ceo_gate(hook_in) if gate is ... else gate
-                parts.append(gate[1] if gate else None)
+                parts.append(throttled(state, "ceo_context", "warn", gate[1]) if gate else None)
             else:
                 parts.append(context_advice(hook_in, state))
         except Exception:

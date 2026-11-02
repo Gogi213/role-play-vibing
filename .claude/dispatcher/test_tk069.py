@@ -176,18 +176,6 @@ class CharterTests(unittest.TestCase):
     def text(self, name):
         return " ".join((ROLES / name).read_text(encoding="utf-8").split())
 
-    def test_judge_protocol_and_actual_vs_estimate(self):
-        t = self.text("judge.md")
-        for must in ("проба и оценка", "≥ 2 способа (один «как есть»)", "пик памяти", "оценка полного времени",
-                     "«оценка / факт»", "Факт больше 2× оценки без объяснения"):
-            self.assertIn(must, t)
-
-    def test_researcher_and_engineer_have_probe_line(self):
-        for name in ("researcher.md", "engineer.md"):
-            t = self.text(name)
-            for must in ("Проба до долгого", "probe_threshold_min", "≥ 2 способа (один «как есть»)", "`wait --probe <запись|файл>`"):
-                self.assertIn(must, t, name)
-
     def test_no_project_words(self):
         for name in ("judge.md", "researcher.md", "engineer.md"):
             t = self.text(name).lower()

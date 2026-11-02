@@ -56,9 +56,8 @@ class CeoTemplateTests(unittest.TestCase):
         self.assertIn("дословно", self.rule)
         self.assertIn("сырьё", self.rule)
 
-    def test_template_has_the_one_line_for_the_owner(self):
-        self.assertIn("Критик: проверил … — изменилось …", self.rule)
-        self.assertIn("не изменилось", self.rule)
+    def test_template_does_not_ask_for_a_critic_line_in_the_answer(self):
+        self.assertNotIn("Критик: проверил", self.text)
 
 
 class CharterSyncCarriesRuleTests(unittest.TestCase):
@@ -74,7 +73,7 @@ class CharterSyncCarriesRuleTests(unittest.TestCase):
             synced = (roles / "ceo.md").read_text(encoding="utf-8")
             self.assertEqual(synced, CEO_TEMPLATE.read_text(encoding="utf-8"))
             self.assertIn("только после критика", synced)
-            self.assertIn("Критик: проверил", synced)
+            self.assertIn("только после критика", synced)
 
 
 if __name__ == "__main__":

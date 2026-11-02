@@ -182,3 +182,78 @@ class RegistryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ActiveRegistryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        env = {k: v for k, v in os.environ.items() if k != "RPV_ROLE"}
+        self.env = mock.patch.dict(os.environ, env, clear=True)
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def run_cli(self, *args):
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
+            code = R.main(["--project", str(self.root), *args])
+        return code, out.getvalue().strip()
+
+    def active(self):
+        return R.active_file(self.root).read_text(encoding="utf-8")
+
+    def test_replaced_entry_is_dropped_and_chain_collapses(self):
+        self.run_cli("decide", "--quote", "первое слово владельца", "--gist", "ПЕРВОЕ", "--at", "2026-10-01 10:00")
+        self.run_cli("decide", "--quote", "второе слово владельца", "--gist", "ВТОРОЕ", "--replaces", "В-1", "--at", "2026-10-02 10:00")
+        self.run_cli("decide", "--quote", "третье слово владельца", "--gist", "ТРЕТЬЕ", "--replaces", "В-2", "--at", "2026-10-03 10:00")
+        self.run_cli("decide", "--quote", "независимое слово", "--gist", "НЕЗАВИСИМОЕ", "--at", "2026-10-04 10:00")
+        text = self.active()
+        self.assertEqual(R.active_decisions(self.root), ["В-3", "В-4"])
+        self.assertNotIn("ПЕРВОЕ", text)
+        self.assertNotIn("ВТОРОЕ", text)
+        self.assertIn("В-3 · 2026-10-03 10:00 · ТРЕТЬЕ\n> третье слово владельца", text)
+        self.assertEqual(text.splitlines()[0], R.ACTIVE_HEAD)
+
+    def test_repeat_not_duplicated_and_question_kept(self):
+        self.run_cli("decide", "--quote", "да", "--question", "Заводить тикет?", "--gist", "заводить", "--at", "2026-10-01 10:00")
+        self.run_cli("repeat", "В-1", "--quote", "ну да же", "--at", "2026-10-02 10:00")
+        text = self.active()
+        self.assertEqual(text.count("В-1 ·"), 1)
+        self.assertNotIn("Повторено", text)
+        self.assertIn("Вопрос CEO: Заводить тикет?", text)
+
+    def test_active_command_rebuilds_and_reports(self):
+        R.decisions_file(self.root).parent.mkdir(parents=True)
+        R.decisions_file(self.root).write_text(
+            "# Решения владельца\n\n## В-1 · 2026-10-01 09:00\n> a b\nСуть: x\nЗаменяет: —\n\n"
+            "## В-2 · 2026-10-02 09:00\n> c d\nСуть: y\nЗаменяет: В-1\n", encoding="utf-8")
+        code, out = self.run_cli("active")
+        self.assertEqual(code, 0)
+        self.assertIn("пересобран, действующих 1 из 2", out)
+        self.assertIn("без изменений", self.run_cli("active")[1])
+        self.assertNotIn("В-1 ·", self.active())
+
+    def test_claude_md_line_is_replaced_idempotently(self):
+        (self.root / "CLAUDE.md").write_text("# P\n\nправила\n\n@.claude/decisions.md\n\n@other.md\n", encoding="utf-8")
+        R.decisions_file(self.root).parent.mkdir(parents=True, exist_ok=True)
+        R.decisions_file(self.root).write_text("# Решения владельца\n", encoding="utf-8")
+        for _ in range(2):
+            self.run_cli("link")
+        text = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertEqual(text, "# P\n\nправила\n\n@.claude/decisions-active.md\n\n@other.md\n")
+        self.assertTrue(R.active_file(self.root).exists())
+
+    def test_claude_md_missing_or_without_line_gets_active_line_once(self):
+        R.link_claude_md(self.root)
+        R.link_claude_md(self.root)
+        self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "@.claude/decisions-active.md\n")
+        (self.root / "CLAUDE.md").write_text("текст", encoding="utf-8")
+        R.link_claude_md(self.root)
+        self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "текст\n\n@.claude/decisions-active.md\n")
+
+    def test_both_lines_present_keeps_one(self):
+        (self.root / "CLAUDE.md").write_text("@.claude/decisions-active.md\n@.claude/decisions.md\n", encoding="utf-8")
+        R.link_claude_md(self.root)
+        self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "@.claude/decisions-active.md\n")

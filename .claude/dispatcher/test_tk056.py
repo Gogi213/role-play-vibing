@@ -76,7 +76,7 @@ class TemplatesTests(unittest.TestCase):
     def test_templates_carry_narrow_command_rule(self):
         for name in self.NAMES:
             text = " ".join((ROOT / "templates" / "roles" / name).read_text(encoding="utf-8").split())
-            self.assertIn("только на тесты самой правки", text, name)
+            self.assertIn("тесты самой правки", text, name)
             self.assertIn("зелёный CI PR", text, name)
             self.assertIn("полный прогон", text, name)
 

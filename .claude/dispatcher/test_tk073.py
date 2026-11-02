@@ -1,5 +1,4 @@
-"""TK-073 (В-31, разбор критика): порог пробы по сумме ожиданий тикета (нарезка коротким --by не обходит); ворота критика —
-вердикт без учёта регистра, повторный номер берёт худший вердикт."""
+"""TK-073 (В-31): порог пробы по сумме ожиданий тикета (нарезка коротким --by не обходит)."""
 from __future__ import annotations
 
 import sys
@@ -10,7 +9,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import critic_gate as CG  # noqa: E402
 import probe as PR  # noqa: E402
 import project as P  # noqa: E402
 from test_tk069 import GOOD  # noqa: E402

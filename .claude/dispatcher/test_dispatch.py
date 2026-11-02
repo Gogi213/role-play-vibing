@@ -1295,7 +1295,6 @@ class DispatchRunTests(unittest.TestCase):
         call = json.loads((self.tickets_dir.parent / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
         self.assertIsNone(call["resumed"])
         self.assertIn("Начинаем новую сессию", call["prompt"])
-        self.assertIn(".claude/roles/notes/engineer.md", call["prompt"])
 
     def test_stuck_todo_after_log_retries_then_blocks(self):
         """TK-070 п.6: роль оставила запись и не трогала status — диспетчер уже поставил in_progress при старте: ни повтора, ни blocked."""
@@ -2228,15 +2227,13 @@ class DispatchRunTests(unittest.TestCase):
             D.RUNNING.clear()
             path.unlink()
 
-    def test_prompt_lists_only_the_results_the_role_may_hand_in(self):
-        """Замер 14.10: Инженер в 3 запусках из 25 вызывал `accept`, Судья в половине запусков сдавал `accept --sha` без --pr."""
-        judge = D.build_prompt("judge", "TK-9")
-        self.assertIn(" result TK-9 <accept|return|blocked|ask-owner|wait> --why", judge)
-        self.assertIn("accept — --path <артефакт проверки> (работа без PR) либо --pr <номер> --sha <голова PR>", judge)
-        self.assertNotIn("continue", judge.split("итог обязателен")[0])
-        engineer = D.build_prompt("engineer", "TK-9")
-        self.assertIn(" result TK-9 <done|pr|blocked|ask-owner|wait|continue> --why", engineer)
-        self.assertNotIn("accept|return", engineer)
+    def test_prompt_is_short_and_points_to_session_insert(self):
+        """Команды итога и доказательства — во вставке хука (test_role_hooks), не в промпте; промпт ≤ 600 знаков."""
+        for role in ("judge", "engineer", "researcher"):
+            prompt = D.build_prompt(role, "TK-9")
+            self.assertLess(len(prompt), 600, role)
+            self.assertIn("result из вставки", prompt)
+            self.assertNotIn("accept|return", prompt)
 
     def test_next_launches_role_once_and_clears_field(self):
         self.set_fake_bin(FAKE_BIN_RECORD)
@@ -2355,21 +2352,12 @@ class DispatchRunTests(unittest.TestCase):
         self.assertNotIn("соразмерность", inbox)
         self.assertNotIn("budget-check", inbox)
 
-    def test_prompt_has_next_rules_and_no_mention_encouragement(self):
+    def test_prompt_has_ticket_log_and_wait_hint(self):
         prompt = D.build_prompt("researcher", "TK-005")
-        self.assertIn(" result TK-005 <done|pr|blocked|ask-owner|wait|continue> --why", prompt)  # итоги — по роли
-        self.assertNotIn("accept", prompt.split("result TK-005")[1].split("итог обязателен")[0])  # Исследователю accept не показываем
-        self.assertIn("не длиннее 200 знаков", prompt)
-        self.assertIn("--next и шапку руками не правь", prompt)
-        self.assertIn("только промежуточная заметка", prompt)
-        self.assertIn("@упоминания в тексте никого не будят", prompt)
-        self.assertNotIn("Упоминай @", prompt)
-        self.assertIn("blocked (задача встала)", prompt)
-        self.assertIn(".claude/tickets/archive/TK-005-log.md", prompt)
+        self.assertIn(".claude/tickets/TK-005.md", prompt)
         self.assertIn("последние записи", prompt)
-        self.assertIn("фоновых помощников", prompt)
-        self.assertIn("systemd-run", prompt)
-        self.assertIn("status: waiting + wait_for", prompt)
+        self.assertIn("командой wait из вставки", prompt)
+        self.assertNotIn("systemd", prompt)
 
     def test_v2_constants(self):
         self.assertEqual((D.MAX_PARALLEL, D.RUN_TIMEOUT), (3, 1200.0))
@@ -2418,11 +2406,15 @@ class DispatchRunTests(unittest.TestCase):
             for needle in ("RUN_CAP", "max-budget", "IDLE_RUN_CAP", "потолок на один запуск", "Потолок одного запуска"):
                 self.assertNotIn(needle, text, f"{doc.name}: {needle}")
 
-    def test_prompt_tells_role_to_use_tickets_comment(self):
-        prompt = D.build_prompt("engineer", "TK-005")
-        self.assertIn("comment TK-005 --author engineer", prompt)
+    def test_prompt_template_has_no_project_words(self):
         self.assertNotIn("alpha", RA.PROMPT_TEMPLATE.lower())  # плагин общий: слова проекта в шаблоне нет
-        self.assertIn((D.CODE_DIR / "tickets.py").as_posix(), prompt)  # запуск прямо из папки плагина
+
+    def test_notebook_in_prompt_only_when_file_exists(self):
+        notes = CFG.PROJECT_ROOT / ".claude" / "roles" / "notes"
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / "engineer.md").write_text("x", encoding="utf-8")
+        self.assertIn(".claude/roles/notes/engineer.md", D.build_prompt("engineer", "TK-5"))
+        self.assertNotIn("notes/", D.build_prompt("judge", "TK-5"))
 
     # --- A5: тормоз цикла «запись есть, статус не меняется»
     def same_status_step(self, path, n, status_at_launch, reason="in_progress-resume"):
@@ -4274,13 +4266,6 @@ class ProjectRootTests(unittest.TestCase):
         self.assertIn("--project", str(cm.exception))
         self.assertIn("/rpv-init", str(cm.exception))
         self.assertEqual([p.name for p in self.proj.rglob(".claude")], [])
-
-    def test_cli_hints_use_sys_executable(self):  # TK-110 В-1
-        with mock.patch("shutil.which", return_value="/usr/bin/python"):
-            self.assertTrue(RA.tickets_cli().startswith("python "))
-        with mock.patch("shutil.which", return_value=None):
-            cli = RA.tickets_cli()
-            self.assertTrue(cli.startswith(shlex.quote(Path(sys.executable).as_posix()) + " "), cli)
 
     def test_tickets_cli_from_subfolder_creates_ticket_in_project_root(self):
         proj = self.make_project(self.proj / "work")

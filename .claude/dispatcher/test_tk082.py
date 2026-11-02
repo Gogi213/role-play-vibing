@@ -15,34 +15,20 @@ class DirectAnswerRuleTests(unittest.TestCase):
         self.short = " ".join(rule(self.text, "С владельцем").split())
         self.direct = " ".join(rule(self.text, "Ответ на прямой вопрос владельца").split())
 
-    def test_three_lines_only_for_own_initiative(self):
-        self.assertIn("в сообщении по своей инициативе (сигнал, «готово — выпустить?»;", self.short)
-        self.assertIn("запрос владельца «статус?» — `reporter`", self.short)
+    def test_short_rule_for_own_messages(self):
         self.assertIn("до трёх строк", self.short)
+        self.assertIn("Детали — только по вопросу владельца", self.short)
+        self.assertIn("`TK-NNN` оставляй", self.short)
 
     def test_direct_answer_has_no_line_limit(self):
         self.assertIn("без лимита строк", self.direct)
-        self.assertIn("«до трёх строк» его не держит", self.direct)
-
-    def test_both_quality_rules_present(self):
         self.assertIn("вывод первым, без воды", self.direct)
-        self.assertIn("каждый термин выброшен или объяснён рядом полфразой", self.direct)
+        self.assertIn("термин объяснён рядом полфразой", self.direct)
+        self.assertIn("`TK-NNN` оставляй", self.direct)
+        self.assertIn("«Стою: жду вашего …»", self.direct)
 
-    def test_mechanics_allowed_when_owner_asked(self):
-        self.assertIn("механику не пиши — кроме той, о которой владелец спросил", self.direct)
-        self.assertIn("Детали — только по вопросу владельца", self.short)
-
-    def test_details_only_on_question_and_ticket_number_kept(self):
-        self.assertIn("Детали — только по вопросу владельца", self.short)
-        self.assertIn("Номер тикета `TK-NNN` оставляй", self.short)
-        self.assertIn("Номер тикета `TK-NNN` оставляй", self.direct)
-
-    def test_consistent_with_neighbouring_rules(self):
-        self.assertIn("«Стою: жду вашего …» остаётся первой строкой", self.direct)
-        self.assertIn("«Критик: проверил …»", self.direct)
-        self.assertIn("«Числа владельцу — после Судьи»", self.direct)
-        self.assertIn("Критик: проверил … — изменилось …", rule(self.text, "Рекомендация или починка владельцу"))
-        self.assertTrue(any(ln.startswith("- **Числа владельцу — после Судьи**") for ln in self.text.splitlines()))
+    def test_no_critic_line_in_answer(self):
+        self.assertNotIn("Критик: проверил", self.short + self.direct)
 
     def test_one_rule_per_head(self):
         for head in ("С владельцем", "Ответ на прямой вопрос владельца"):

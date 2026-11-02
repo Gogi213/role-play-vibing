@@ -92,14 +92,6 @@ class SettingAndPathTests(unittest.TestCase):
             self.assertIn("не короче", err)
 
 
-class TemplateTests(unittest.TestCase):
-    def test_probe_lines_in_role_templates_are_conditional(self):
-        for role in ("engineer", "researcher", "judge"):
-            text = (PLUGIN / "templates" / "roles" / f"{role}.md").read_text(encoding="utf-8")
-            with self.subTest(role=role):
-                self.assertIn("require_probe", text)
-
-
 class HostloadTests(unittest.TestCase):
     def test_new_peak_must_be_smaller_not_just_different(self):
         mark = {"peak": 5.0, "n": 8}
@@ -122,24 +114,6 @@ class HostloadTests(unittest.TestCase):
     def test_host_free_cmd_must_contain_ticket(self):
         self.assertFalse(rpv_config.KEYS["host_free_cmd"][0]("ssh x free"))
         self.assertTrue(rpv_config.KEYS["host_free_cmd"][0]("ssh x 'cat /tmp/{ticket}.free'"))
-
-
-class DispatchTests(unittest.TestCase):
-    def test_sonnet_critic_in_judge_run_is_not_a_model_alarm(self):
-        usage = {"claude-opus-5-5": {}, "claude-sonnet-5-5": {}}
-        self.assertIsNotNone(D._model_usage_warning(usage, "opus"))
-        self.assertIsNone(D._model_usage_warning(usage, "opus", also=("sonnet",)))
-        self.assertIsNotNone(D._model_usage_warning({"claude-haiku-5-5": {}}, "opus", also=("sonnet",)))
-        crit = {"by_type": {"role-play-vibing:critic": 1}}
-        self.assertEqual(D._extra_models({"role": "judge"}, True, crit), ("sonnet",))
-        self.assertEqual(D._extra_models({"role": "judge"}, False, crit), ())
-        self.assertEqual(D._extra_models({"role": "engineer"}, True, crit), ())
-
-    def test_sonnet_alarm_stays_without_critic_in_subagent_stats(self):
-        for stats in (None, {}, {"by_type": {}}, {"by_type": {"role-play-vibing:reader": 4}},
-                      {"by_type": {"role-play-vibing:critic": 0}}, "critic"):
-            with self.subTest(stats=stats):
-                self.assertEqual(D._extra_models({"role": "judge"}, True, stats), ())
 
 
 if __name__ == "__main__":

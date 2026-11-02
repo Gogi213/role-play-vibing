@@ -107,7 +107,8 @@ class BoundsTests(Sandbox):
     def test_bounds_hook_warn_inserts_notebook_and_clear(self):
         self.label("ceo", "s1")
         for tokens in (350_000, 399_999):
-            code, out = self.prompt(self.at(tokens))
+            self.label("ceo", f"s{tokens}")      # у каждого порога своя сессия: повтор в одной — раз в REPEAT_EVERY
+            code, out = self.prompt(self.at(tokens), session=f"s{tokens}")
             self.assertEqual(code, 0)
             self.assertNotIn("decision", out)                              # сообщение уходит в модель
             text = out["hookSpecificOutput"]["additionalContext"]
@@ -116,12 +117,13 @@ class BoundsTests(Sandbox):
             self.assertIn("/clear", text)
             self.assertIn("первой строкой", text)
 
-    def test_bounds_hook_warn_on_every_message(self):
-        """Не раз в 10 сообщений, а на каждое сообщение владельца."""
+    def test_bounds_hook_warn_repeats_every_repeat_every_messages(self):
+        """Вставка WARN — не на каждое сообщение, а раз в REPEAT_EVERY (10) сообщений."""
         self.label("ceo", "s1")
         path = self.at(360_000)
-        for _ in range(3):
-            self.assertIn("допиши блокнот", self.prompt(path)[1]["hookSpecificOutput"]["additionalContext"])
+        shown = ["допиши блокнот" in (((self.prompt(path)[1] or {}).get("hookSpecificOutput") or {}).get("additionalContext", ""))
+                 for _ in range(11)]
+        self.assertEqual([i for i, x in enumerate(shown) if x], [0, 10])
 
     def test_bounds_hook_stop_blocks_with_reason_and_clear(self):
         self.label("ceo", "s1")
@@ -143,7 +145,7 @@ class BoundsTests(Sandbox):
         self.label("ceo", "s1")
         for text in ("/clear", "  /compact сожми", "/CLEAR"):
             out = self.prompt(self.at(500_000), text=text)[1]
-            self.assertNotIn("decision", out, text)
+            self.assertNotIn("decision", out or {}, text)
         self.assertEqual(self.prompt(self.at(500_000), text="/clearly not")[1]["decision"], "block")
 
 

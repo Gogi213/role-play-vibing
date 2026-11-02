@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
-import shutil
 import sys
 from pathlib import Path
 
 import project_paths as CFG
 import plugin_version as PV
 import project as P
-import routes as ROUTES
 
 CODE_DIR = Path(__file__).resolve().parent  # где лежит сам диспетчер (папка плагина) — к проекту отношения не имеет
 
@@ -26,27 +23,19 @@ ROLE_EFFORT = {"judge": "high", "engineer": "xhigh", "researcher": "high"}
 FIXED_EFFORT_ROLES = ("judge", "engineer")  # усилие этих ролей не зависит от поля `effort:` тикета
 
 
-# v2 (02.10): промпт без призыва @-упоминать роли — будит только явный `--next`; читать шапку, описание и
-# последние записи лога (старое — в archive/<ID>-log.md); никаких фоновых помощников/задач внутри сессии.
+# Короткий промпт: команды итога (`result`, доказательства, `comment`) роль берёт из вставки хука role_context.py при старте сессии.
 PROMPT_TEMPLATE = (
-    "Ты — {role} команды. Устав: .claude/roles/{role}.md, блокнот: .claude/roles/notes/{role}.md. "
-    "Задача: .claude/tickets/{tid}.md — прочитай шапку, описание и последние записи «## Лог» (старые записи "
-    "лежат в .claude/tickets/archive/{tid}-log.md — grep только при необходимости). Лимит этого запуска — "
-    "{timeout_min} мин. Не запускай в сессии фоновых помощников и фоновых задач; долгая работа — фоновый процесс "
-    "на машине (systemd-run) + status: waiting + wait_for (`{tickets_cli} wait {tid} "
-    "host:<ssh-алиас>:<путь к файлу итога задания> --by ЧЧ:ММ` (срок обязателен, GMT+4); формы: host:<ssh-алиас>:<путь | unit:имя>, file:<путь>, ticket:<ID>), и выйди, "
-    "не жди в сессии. Трать минимум: "
-    "самый короткий путь к результату задачи; траты каждого запуска записываются и сравниваются с "
-    "результатом. Сделай следующий шаг и сдай итог командой "
-    "`{tickets_cli} result {tid} <{verbs}> --why \"что сделал, что дальше\"` (--why — не длиннее 200 знаков) "
-    "ДО истечения лимита (доказательство: {proofs}; неполная команда — отказ с подсказкой): итог обязателен, "
-    "частичный прогресс не провал. "
-    "Кого будить дальше и status/wait_for ставит таблица маршрутов — --next и шапку руками не правь; "
-    "blocked (задача встала) и ask-owner (развилка, вопрос) уходят Судье; владельцу вопрос о содержании "
-    "исследования (какие гипотезы, гиперпараметры, метрики, что хотим увидеть) переадресует Судья; CEO не будят. "
-    "`{tickets_cli} comment {tid} --author {role} --text \"...\"` — только промежуточная заметка без смены "
-    "хода. @упоминания в тексте никого не будят."
+    "Ты — {role} команды. Устав — .claude/roles/{role}.md, тикет — .claude/tickets/{tid}.md (шапка, описание, "
+    "последние записи лога). Лимит запуска — {timeout_min} мин. Сделай следующий шаг и сдай итог командой result "
+    "из вставки при старте сессии — до истечения лимита; частичный прогресс не провал. Долгую работу — status "
+    "waiting командой wait из вставки, сессию не держи."
 )
+
+
+def notebook_ref(role: str) -> str:
+    """Путь блокнота роли, если файл есть в проекте (у Судьи и Исследователя его нет), иначе пусто."""
+    rel = f".claude/roles/notes/{role}.md"
+    return rel if (CFG.PROJECT_ROOT / rel).is_file() else ""
 
 
 def _read_mcp_servers(path: Path, project_key: str | None = None) -> dict:
@@ -106,20 +95,10 @@ def effort_for(role: str, tkt=None) -> str:
     return ROLE_EFFORT.get(role, "high")
 
 
-def _py() -> str:
-    """Интерпретатор для команд, которые диспетчер выдаёт ролям: на Mac/Linux слова `python` может не быть (TK-110 В-1); есть в PATH — прежнее `python` (кавычки вокруг пути ломают PowerShell)."""
-    return "python " if shutil.which("python") else shlex.quote(Path(sys.executable).as_posix()) + " "
-
-
-def tickets_cli() -> str:
-    """Команда tickets.py из папки плагина: проект роль берёт из RPV_PROJECT (его ставит launch_run) и своего cwd."""
-    return _py() + shlex.quote((CODE_DIR / "tickets.py").as_posix())
-
-
 def build_prompt(role: str, tid: str, run_timeout_s: float, extra_note: str = None) -> str:
-    prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(run_timeout_s // 60),
-                                    tickets_cli=tickets_cli(), verbs="|".join(ROUTES.verbs_for(role)),
-                                    proofs=ROUTES.proofs_for(role))
+    prompt = PROMPT_TEMPLATE.format(role=role, tid=tid, timeout_min=int(run_timeout_s // 60))
+    if notebook_ref(role):
+        prompt += f" Блокнот — {notebook_ref(role)}."
     if extra_note:
         prompt += " " + extra_note
     return prompt
@@ -131,8 +110,9 @@ def launch_notes(extra_note, role: str, reason: str, stopped: bool, rotated: boo
     if stopped:  # прошлый запуск оборван CEO (`tickets.py stop`): сессия новая, в промпте — пометка
         notes.append(stop_note)
     if rotated:  # каждое пробуждение — новая сессия; --resume только у повтора после таймаута (attempt > 0)
-        notes.append(f"Начинаем новую сессию: прочитай блокнот .claude/roles/notes/{role}.md и прежние решения "
-                     f"docs/research/reviews/ по нужной задаче.")
+        book = notebook_ref(role)
+        notes.append("Начинаем новую сессию: прочитай " + (f"блокнот {book} и " if book else "") +
+                     "прежние решения docs/research/reviews/ по нужной задаче.")
     if reason == "next":
         notes.append("Запуск по явной передаче (`--next`): прочитай последнюю запись лога, сделай "
                      "запрошенное и запиши итог.")

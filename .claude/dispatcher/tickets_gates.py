@@ -1,11 +1,11 @@
 """Гейты приёмки Судьи одним списком: пробный прогон `--dry-run` и исход «ложное срабатывание» (TK-089, В-36).
 
-Гейты (решения, числа, хвосты, живая проверка, критик, ярлыки договора) открывались по одному: исправил один отказ — вылез
+Гейты (решения, числа, хвосты, живая проверка, ярлыки договора) открывались по одному: исправил один отказ — вылез
 следующий, и часть возвратов Инженеру была формальной. `run` гоняет их в прежнем порядке; `dry_run` — все сразу, ничего не
-пишет (ни лога тикета, ни шапки, ни входящих CEO, ни regressions.log, ни critic-runs.log) и печатает весь список.
+пишет (ни лога тикета, ни шапки, ни входящих CEO, ни regressions.log) и печатает весь список.
 Эвристики хвостов и чисел могут ошибиться: Судья заводит ошибку (`errors.py add --title … --ticket TK-N`) и принимает с
 `--false-positive E-NNN` — отказы этих двух гейтов снимаются, в запись приёмки идёт «ложное срабатывание: E-NNN». Остальные
-гейты (решения, живая проверка, критик, ярлыки, регрессия, PR) так не снимаются. Только stdlib; `tk` — модуль `tickets`.
+гейты (решения, живая проверка, ярлыки, регрессия, PR) так не снимаются. Только stdlib; `tk` — модуль `tickets`.
 """
 from __future__ import annotations
 
@@ -46,9 +46,8 @@ def _false_positive(args, tk) -> tuple[str, str]:
     return "", eid
 
 
-def run(args, tk, collect_all: bool = False, proof: bool = True, record=None, heur: list | None = None) -> tuple[list[str], str, str]:
-    """Гейты приёмки по порядку. → (отказы, пометки для лога, хвост для CEO). Без `collect_all` дорогие гейты (критик,
-    ярлыки) после отказа не гоняются — как было; с ним идут все. `proof=False` — ярлыки гонит вызывающий (cmd_accept).
+def run(args, tk, collect_all: bool = False, proof: bool = True, heur: list | None = None) -> tuple[list[str], str, str]:
+    """Гейты приёмки по порядку. → (отказы, пометки для лога, хвост для CEO). Без `collect_all` дорогие гейты (ярлыки) после отказа не гоняются — как было; с ним идут все. `proof=False` — ярлыки гонит вызывающий (cmd_accept).
     `--false-positive` снимает только отказ эвристики: `--tail -` со словом-хвостом в сдаче и `--numbers -` с числами в
     артефакте; нет файла, чужой номер тикета, число не сходится с источником — структурные отказы, остаются. В `heur`
     (если дан) — имена эвристик, чей отказ остался: по ним `dry_run` решает, нужна ли подсказка про `--false-positive`."""
@@ -65,10 +64,9 @@ def run(args, tk, collect_all: bool = False, proof: bool = True, record=None, he
     nerr = "" if "числа" in skipped else nerr
     terr = "" if "хвосты" in skipped else terr
     errs = [fperr, derr, nerr, terr, tk._left_ack(args.id), lerr]
-    cerr, cack = ("", "") if any(errs) and not collect_all else tk._critic_ack(args, args.id, record=record)
-    perr, pack = ("", "") if (any(errs) or cerr) and not collect_all or not proof else tk._proof_ack(args.id)
+    perr, pack = ("", "") if any(errs) and not collect_all or not proof else tk._proof_ack(args.id)
     marks = f" ложное срабатывание: {fp} ({', '.join(skipped)})" if skipped else ""
-    return [e for e in errs + [cerr, perr] if e], ack + nack + tack + lack + cack + pack + marks, tail_ceo
+    return [e for e in errs + [perr] if e], ack + nack + tack + lack + pack + marks, tail_ceo
 
 
 def _pr_refusal(args, slug: str, head_err: str) -> str:
@@ -90,7 +88,7 @@ def dry_run(args, tk, slug: str = "", head_err: str = "") -> int:
     строка «не проверено, не return» (как у настоящей приёмки), а не регресс. 0 — приёмка пройдёт, 1 — список отказов."""
     found = [head_err, _pr_refusal(args, slug, head_err)]
     heur: list[str] = []
-    errs, _, _ = run(args, tk, collect_all=True, record=lambda *a, **k: None, heur=heur)
+    errs, _, _ = run(args, tk, collect_all=True, heur=heur)
     found += errs
     wt = tk.PROJECT_ROOT / ".claude" / "worktrees" / args.id
     infra = []
