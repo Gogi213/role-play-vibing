@@ -1,16 +1,15 @@
-"""Команды git: необратимые (`reset --hard`, `clean`, `push --force`), удаление веток, публикация пушем."""
-import json
+"""Команды git: необратимые (`reset --hard`, `clean -f`, откат всего дерева, `push --force`, удаление main/master и веток
+на удалённом) и публикация пушем. Откат одного файла и удаление локальной ветки — свободно."""
 import os
 import posixpath
 import re
 from dguard import config
 from dguard.config import norm
-from dguard.messages import BranchDelete, Forbid, Publish
-from dguard.paths import allowed, CLOSED_HOST, closed_host, Ctx
+from dguard.messages import Forbid, Publish
+from dguard.paths import allowed, Ctx
 from dguard.policy import protected_match
 from dguard.words import join_cwd
 from dguard.writes import fs_path
-
 
 def linked_worktree(p):
     """Каталог внутри связанного git-worktree в папке проекта (`.claude/worktrees/agent-*`): ближайший `.git` вверх по
@@ -35,15 +34,12 @@ def linked_worktree(p):
 
 
 def scratch_repo_ok(d, ctx):
-    """`git reset --hard` / `git clean -f` не трогают основное дерево: каталог репозитория известен явным путём (не
-    переменная, не относительный без cwd) и лежит вне папки проекта — scratch (scratchpad сессии, свои удалённые корни
-    вроде <подкаталог из guard_remote_roots>), `/tmp/<подкаталог>` либо связанный worktree внутри папки проекта
-    (`.git` — файл). Защищённый путь проекта (или настройка защиты не прочитана) — нет."""
+    """`git reset --hard` / `git clean -f` / откат всего дерева не трогают основную копию: каталог репозитория известен явным
+    путём (не переменная, не относительный без cwd) и лежит вне папки проекта — scratch (scratchpad сессии, `/tmp/<подкаталог>`)
+    либо связанный worktree внутри папки проекта (`.git` — файл). Защищённый путь проекта (или настройка защиты не
+    прочитана) — нет."""
     p = norm(d) if d else ""
-    if not p or "$" in p or ".." in p.split("/") or closed_host(p):
-        return False
-    host = getattr(ctx, "host", None)
-    if host == CLOSED_HOST or closed_host(host):                     # git на закрытом узле — как и удаление там
+    if not p or "$" in p or ".." in p.split("/"):
         return False
     if not (p.startswith(("/", "~")) or re.match(r"[a-z]:", p)):
         return False
@@ -51,133 +47,70 @@ def scratch_repo_ok(d, ctx):
         return False
     probe = p.rstrip("/") + "/"
     if any(probe.startswith(r) for r in config.LOCAL_ROOTS):                # папка проекта: только связанный worktree
-        return not getattr(ctx, "remote", False) and linked_worktree(p)
+        return linked_worktree(p)
     if re.match(r"^/tmp/[^/*]+", p):
         return True
-    return allowed(p, Ctx(None, getattr(ctx, "remote", False), host=host))
+    return allowed(p, Ctx(None))
 
 
-def git_discard(sub, rest, ctx, repo):
-    """Метка подкоманды git, которая затирает рабочее дерево, ветки или stash (checkout -- путь|., restore, switch -f,
-    branch -D|-M|-f, stash clear|drop), либо None — команда безопасна."""
+DEFAULT_BRANCHES = ("main", "master")
+WHOLE_TREE = ("", ".", "./", "..", ":/", ":(top)", ":/.")
+
+
+def whole_tree(paths):
+    """Путь отката — всё дерево (`.`, `:/`) или маска (`*.py`, `src/*`): откат больше одного файла."""
+    return any(p in WHOLE_TREE or any(c in p for c in "*?[") for p in paths)
+
+
+def branch_deletes_default(rest):
+    """`git branch -D|-d --force <ветка>…` называет main/master."""
+    short = [a[1:] for a in rest if a.startswith("-") and not a.startswith("--") and len(a) > 1]
+    force = "--force" in rest or any("f" in c for c in short)
+    if not (any("D" in c for c in short) or (force and any("d" in c for c in short)) or "--delete" in rest):
+        return False
+    return any(a.removeprefix("refs/heads/") in DEFAULT_BRANCHES for a in rest if not a.startswith("-"))
+
+
+def discard_label(sub, rest):
+    """Метка подкоманды git, которая затирает всё рабочее дерево или удаляет main/master, либо None. Откат одного файла
+    (`checkout -- файл`, `restore файл`) и удаление локальной ветки — не метка."""
     if any(a in ("--help", "-h") for a in rest):
         return None
     short = [a[1:] for a in rest if a.startswith("-") and not a.startswith("--") and len(a) > 1]
     long_ = {a.split("=", 1)[0] for a in rest if a.startswith("--")}
-    if sub == "stash":
-        pos = [a for a in rest if not a.startswith("-")]
-        return f"git stash {pos[0]}" if pos and pos[0] in ("clear", "drop") else None
-    if sub == "checkout":
-        return checkout_discard(rest, short, long_, ctx, repo)
-    return {"branch": branch_discard, "restore": restore_discard, "switch": switch_discard}[sub](short, long_)
-
-
-def branch_discard(short, long_):
-    if "--force" in long_ or any(c for c in short if any(ch in c for ch in "DMCf")):
-        return "git branch -D/-M/-C/-f (удаление или перезапись ветки)"
-    return None
-
-
-def restore_discard(short, long_):
-    staged = "--staged" in long_ or any("S" in c for c in short)
-    worktree = "--worktree" in long_ or any("W" in c for c in short)
-    return None if staged and not worktree else "git restore (затирает файлы рабочего дерева)"
-
-
-def switch_discard(short, long_):
-    if "--discard-changes" in long_ or "--force" in long_ or any("f" in c for c in short):
-        return "git switch -f (затирает правки рабочего дерева)"
-    return None
-
-
-def checkout_pathspecs(rest):
-    """Позиционные слова `git checkout` без значений `-b/-B/--orphan/--conflict`."""
     pos = []
     k = 0
     while k < len(rest):
         a = rest[k]
         k += 1
-        if a in ("-b", "-B", "--orphan", "--conflict"):
-            k += 1                                       # значение: имя новой ветки
+        if a in ("-b", "-B", "--orphan", "--conflict", "-s", "--source"):
+            k += 1                                       # значение: ветка или ревизия
+        elif a == "--":
+            pos += rest[k:]
+            break
         elif not a.startswith("-"):
             pos.append(a)
-    return pos
-
-
-def checkout_discard(rest, short, long_, ctx, repo):
-    if "--" in rest:
-        return "git checkout -- <путь> (затирает файлы рабочего дерева)"
-    if long_ & {"--force", "--patch", "--ours", "--theirs", "--pathspec-from-file"} or any(
-            "f" in c or "p" in c for c in short):
-        return "git checkout -f/-p/--ours/--theirs (затирает файлы рабочего дерева)"
-    pos = checkout_pathspecs(rest)
-    if len(pos) >= 2 or any(a == "." or any(ch in a for ch in "*?[") for a in pos):
-        return "git checkout <ревизия> <путь>|. (затирает файлы рабочего дерева)"
-    if len(pos) == 1 and not getattr(ctx, "remote", False):
-        try:
-            fp = fs_path(pos[0], Ctx(repo or ctx.cwd, False))
-            if fp is not None and os.path.lexists(fp):   # `git checkout файл` без `--`: существующий путь — восстановление
-                return "git checkout <путь> (затирает файл рабочего дерева)"
-        except (OSError, ValueError):
-            pass
+    if sub == "checkout" and (long_ & {"--force"} or any("f" in c for c in short)):
+        return "git checkout -f (затирает правки рабочего дерева)"
+    if sub == "switch" and (long_ & {"--force", "--discard-changes"} or any("f" in c for c in short)):
+        return "git switch -f (затирает правки рабочего дерева)"
+    if sub == "checkout":
+        paths = rest[rest.index("--") + 1:] if "--" in rest else (pos if len(pos) == 1 else pos[1:])
+        return "git checkout <ревизия> . (затирает всё рабочее дерево)" if whole_tree(paths) else None
+    if sub == "restore":
+        staged_only = ("--staged" in long_ or any("S" in c for c in short)) and not ("--worktree" in long_ or any("W" in c for c in short))
+        return None if staged_only or not whole_tree(pos) else "git restore . (затирает всё рабочее дерево)"
     return None
 
 
-DEFAULT_BRANCHES = ("main", "master")
-
-
-def delete_branch_names(rest, pos):
-    """Ветки, которые удаляет `git push <удалённый> --delete <ветка>…` или `<удалённый> :<ветка>…`. Не определить (маска,
-    переменная, пустое имя, обычный пуш рядом с удалением, удалённый не назван) — None: команда остаётся запрещённой."""
-    flagged = any(a == "--delete" or (a.startswith("-") and not a.startswith("--") and "d" in a[1:]) for a in rest)
-    names = []
-    for a in pos[1:]:                                   # pos[0] — удалённый репозиторий
-        if not flagged and not a.startswith(":"):
-            return None
-        name = (a[1:] if a.startswith(":") else a).removeprefix("refs/heads/")
-        if not name or name.startswith(("-", "refs/")) or ".." in name or any(c in name for c in "*?[]{}\\$`'\" \t"):
-            return None
-        names.append(name)
-    return tuple(names) or None
-
-
-CONFIG_LOG_NAMES = ("config-log.json", "charter-log.json")  # журналы правок настроек (TK-007) и уставов (TK-029): пишут только `tickets.py config|charter`
-BRANCH_CONSENT_NAMES = ("branch-delete.json",)       # согласия на удаление веток: пишет только `tickets.py allow-delete`
-
-
-def branch_delete_consent(branches):
-    """Согласие владельца на удаление веток → (есть, пояснение для отказа). Файл `<проект>/.claude/dispatcher/branch-delete.json`:
-    {ветка: {"ref": "В-N", "until": время}} (ставит `tickets.py allow-delete`, только CEO). Нужно на КАЖДУЮ ветку; main/master —
-    никогда; срок вышел, файла нет, не читается — согласия нет (fail-closed)."""
-    from datetime import datetime
-    try:
-        with open(os.path.join(config.PROJECT_DIR, ".claude", "dispatcher", "branch-delete.json"), encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return False, "файл согласий не читается (не объект JSON)"
-        now = datetime.now().astimezone()
-        bad = []
-        for b in branches:
-            e = data.get(b)
-            until = datetime.fromisoformat(str(e.get("until", ""))).astimezone() if isinstance(e, dict) and e.get("until") else None
-            if b in DEFAULT_BRANCHES or not (isinstance(e, dict) and re.fullmatch(r"В-\d+", str(e.get("ref", ""))) and until and until > now):
-                bad.append(b)
-        if bad:
-            return False, "нет действующего согласия владельца на ветки: " + ", ".join(bad) + (
-                " (main/master удалять нельзя)" if any(b in DEFAULT_BRANCHES for b in bad) else "")
-        return True, ""
-    except (OSError, ValueError) as e:                  # ValueError — и битый JSON, и время
-        return False, f"согласия не прочитаны ({type(e).__name__})"
-PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 TAG_NAME = re.compile(r"^v?\d+\.\d+(?:\.\d+)*[-+.\w]*$")        # `v1.8.48`, `2.0.0-rc1`: без точки (`v2`) — ветка
+PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 
 
-def head_branch(repo, ctx):
+def head_branch(repo):
     """Ветка, на которой стоит репозиторий каталога `repo`, по `.git/HEAD` (у связанного worktree `.git` — файл со ссылкой
-    на gitdir); None — не определить: удалённая машина, неизвестный каталог, отсоединённая HEAD."""
+    на gitdir); None — не определить: неизвестный каталог, отсоединённая HEAD."""
     cur = (repo or "").rstrip("/")
-    if getattr(ctx, "remote", False):
-        return None
     for _ in range(40):
         fp = fs_path(cur + "/.git", None) if cur else None
         if fp is None:
@@ -202,17 +135,6 @@ def head_branch(repo, ctx):
     return None
 
 
-class PushRefs:
-    """Пуш в main/master: каталог репозитория, удалённый и пары (источник, ветка назначения, необязательная) — по ним
-    `push_scope` сверяет коммиты. Необязательная пара (`--all`, шаблон) пропускается, если ветки нет."""
-
-    def __init__(self, repo, remote, pairs):
-        self.repo, self.remote, self.pairs = repo, remote, tuple(pairs)
-
-
-ALL_BRANCHES = tuple((f"refs/heads/{b}", b, True) for b in DEFAULT_BRANCHES)
-
-
 def push_words(rest):
     """Позиционные слова `git push` без значений опций и значение `--repo`: (слова, удалённый из `--repo` или None)."""
     pos, repo_opt, k = [], None, 0
@@ -231,53 +153,37 @@ def push_words(rest):
 
 
 def refspec_publication(spec):
-    """Одна запись refspec (`src`, `src:dst`): (метка, пары) — метка None, если запись ничего не публикует."""
+    """Одна запись refspec (`src`, `src:dst`) → метка публикации (тег, main/master, шаблон) либо None."""
     src, sep, dst = spec.partition(":")
     ref = dst if sep and dst else src
     name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
     if ref.startswith("refs/tags/") or TAG_NAME.match(ref):
-        return f"git push {spec}: тег", []
+        return f"git push {spec}: тег"
     if name in DEFAULT_BRANCHES:
-        return f"git push {spec}: основная ветка", [(src, name, False)]
-    if "*" in ref:
-        return f"git push {spec}: все ветки по шаблону", list(ALL_BRANCHES)
-    return None, []
+        return f"git push {spec}: основная ветка"
+    return f"git push {spec}: все ветки по шаблону" if "*" in ref else None
 
 
-def current_branch_publication(repo, ctx):
-    """`git push` без названной ветки: уйдёт текущая — (метка, пары) либо (None, [])."""
-    cur = head_branch(repo, ctx)
-    if cur in DEFAULT_BRANCHES:
-        return f"git push без ветки: текущая — {cur}", [("HEAD", cur, False)]
-    return ("git push без ветки: текущую не определить", []) if cur is None else (None, [])
-
-
-def push_publication(rest, repo, ctx):
-    """Публикация `git push` (`Publish`) либо None. Публикация — основная ветка (main/master) в любой записи refspec
-    (`HEAD:main`, `refs/heads/main`, `x:main`), тег (`--tags`, `--follow-tags`, `refs/tags/…`, `tag <имя>`, `v1.2.3`), все
-    ветки (`--all`, шаблон `*`); пуш без ветки (`git push`, `origin HEAD`) — по текущей ветке репозитория, не определена —
-    тоже публикация. Рабочая ветка и `--dry-run` — None. Если уходит main/master, у `Publish` есть `main` (`PushRefs`)."""
+def push_publication(rest, repo):
+    """Публикация `git push` (`Publish`) либо None: main/master в любой записи refspec, тег (`--tags`, `--follow-tags`,
+    `refs/tags/…`, `tag <имя>`, `v1.2.3`), все ветки (`--all`, шаблон `*`); пуш без ветки (`git push`, `origin HEAD`) — по текущей
+    ветке репозитория, не определена — тоже публикация. Рабочая ветка и `--dry-run` — None."""
     if any(a in ("--dry-run", "-n") for a in rest):
         return None
     pos, repo_opt = push_words(rest)
-    remote = repo_opt or (pos[0] if pos else "origin")
     specs = pos if repo_opt is not None else pos[1:]                                  # первое слово — удалённый репозиторий
     flag = next((a for a in rest if a in ("--tags", "--all", "--branches") or a.startswith("--follow-tags")), None)
-    label, pairs = (f"git push {flag}" if flag else None), ([] if flag not in ("--all", "--branches") else list(ALL_BRANCHES))
+    label = f"git push {flag}" if flag else None
     if specs[:1] == ["tag"]:
         label = label or "git push tag: тег"
         specs = []
     for spec in specs:
-        spec_label, spec_pairs = refspec_publication(spec)
-        label = label or spec_label
-        pairs.extend(spec_pairs)
+        label = label or refspec_publication(spec)
     if not label and (not specs or "HEAD" in specs or "@" in specs):     # ветка не названа: уйдёт текущая
-        label, pairs = current_branch_publication(repo, ctx)
-    return Publish(label, PushRefs(repo, remote, pairs) if pairs else None) if label else None
-
-
-def scratch_ok(exotic, repo, ctx):
-    return not exotic and scratch_repo_ok(repo, ctx)
+        cur = head_branch(repo)
+        label = f"git push без ветки: текущая — {cur}" if cur in DEFAULT_BRANCHES else (
+            "git push без ветки: текущую не определить" if cur is None else None)
+    return Publish(label) if label else None
 
 
 def git_options(args, vars_, redirected):
@@ -313,19 +219,17 @@ def push_scan(rest, repo, ctx):
         yield (Forbid("git push +ветка (принудительное обновление)"), ctx.copy())
     elif (any(a in ("--delete", "--mirror", "--prune") for a in rest) or any(a.startswith(":") for a in pos)
           or any(a.startswith("-") and not a.startswith("--") and "d" in a[1:] for a in rest)):
-        label = "git push --delete/--mirror/:ветка (удаление веток на удалённом)"
-        names = None if any(a in ("--mirror", "--prune") for a in rest) else delete_branch_names(rest, pos)
-        yield (BranchDelete(label, names) if names else Forbid(label), ctx.copy())
-    elif publication := push_publication(rest, repo, ctx):
+        yield (Forbid("git push --delete/--mirror/:ветка (удаление веток на удалённом)"), ctx.copy())
+    elif publication := push_publication(rest, repo):
         yield (publication, ctx.copy())
 
 
-def clean_scan(rest, base, exotic, repo, ctx):
-    """`git clean`: с `-f` — запрет вне черновых копий; без `-f` — чистит указанные пути (или каталог `-C`)."""
+def clean_scan(rest, base, scratch, ctx):
+    """`git clean`: с `-f` — запрет в основной копии; без `-f` — чистит указанные пути (или каталог `-C`)."""
     if any(a == "--dry-run" or (a.startswith("-") and not a.startswith("--") and "n" in a) for a in rest):
         return
     if any(a == "--force" or (a.startswith("-") and not a.startswith("--") and "f" in a[1:]) for a in rest):
-        if not scratch_ok(exotic, repo, ctx):
+        if not scratch:
             yield (Forbid("git clean -f"), ctx.copy())
         return
     after = rest[rest.index("--") + 1:] if "--" in rest else []
@@ -344,14 +248,18 @@ def git_scan(args, ctx, vars_, redirected=False):
     repo = None if exotic else ctx.cwd                    # каталог репозитория: cwd, сдвинутый цепочкой `-C`
     for b in bases:                                       # абсолютный `-C` задаёт каталог и при неизвестном cwd
         repo = None if exotic else join_cwd(repo, b, vars_)
+    scratch = not exotic and scratch_repo_ok(repo, ctx)
     if sub == "reset":
-        if "--hard" in rest and not scratch_ok(exotic, repo, ctx):
+        if "--hard" in rest and not scratch:
             yield (Forbid("git reset --hard"), ctx.copy())
     elif sub == "push":
         yield from push_scan(rest, repo, ctx)
-    elif sub in ("checkout", "switch", "restore", "branch", "stash"):
-        label = git_discard(sub, rest, ctx, repo)
-        if label and not scratch_ok(exotic, repo, ctx):
+    elif sub == "branch":
+        if branch_deletes_default(rest):
+            yield (Forbid("git branch -D main|master"), ctx.copy())
+    elif sub in ("checkout", "switch", "restore"):
+        label = discard_label(sub, rest)
+        if label and not scratch:
             yield (Forbid(label), ctx.copy())
     elif sub == "clean":
-        yield from clean_scan(rest, base, exotic, repo, ctx)
+        yield from clean_scan(rest, base, scratch, ctx)

@@ -1,62 +1,28 @@
-"""Тексты отказов и классы причин (`Over`, `Forbid`, `Publish`, `BranchDelete`)."""
+"""Тексты отказов и классы причин (`Over`, `Forbid`, `Publish`)."""
 import re
 
 
-REASON = ("Удаление запрещено вне своей папки. Можно только явным путём внутри папки проекта или scratchpad сессии; на "
-          "удалённых машинах — только каталоги guard_remote_roots. Закрытые хосты (guard_forbidden_hosts) и "
-          "защищённые пути (protected_paths) из .claude/rpv.json — никогда (только владелец через CEO). "
-          "Непроверяемая цель: {t}")
-REASON_OVERWRITE = ("Перезапись/усечение файла (`> файл`, truncate, dd of=, cp/mv поверх существующего) вне своей папки "
-                    "запрещены, как и удаление: внутри папки проекта или scratchpad сессии; на удалённых машинах — "
-                    "только каталоги guard_remote_roots (.claude/rpv.json); автопамять проекта (~/.claude/projects/<проект>/memory/) "
-                    "— можно. Новый локальный файл вне папки можно создать (его ещё нет). Закрытые хосты и защищённые "
-                    "пути проекта — никогда. Цель: {t}")
-REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO итогом "
-                       "шага (`tickets.py result <ID> blocked --why \"...\"`). `git reset --hard`, "
-                       "`git clean -f`, `git checkout -- <путь>|.`, `git restore`, `git switch -f`, `git branch -D|-M|-f`, "
-                       "`git stash clear|drop` разрешены только в каталоге вне основного дерева, заданном явным путём "
-                       "(`cd <путь>` или `git -C <путь>`): scratchpad сессии, удалённые корни guard_remote_roots, "
-                       "/tmp/<подкаталог>, корни хоста, связанный worktree (.claude/worktrees/…); `git push --force`, "
-                       "`+ветка`, `--delete`, `:ветка`, `--mirror` — всегда только через CEO.")
-REASON_BRANCH_DELETE = ("Удаление веток на удалённом ({t}) без слова владельца закрыто и для CEO: {why}. Слово владельца — "
-                        "в реестр (`registry.py decide`), затем `tickets.py allow-delete <ветка>… --ref В-N`: согласие на "
-                        "названные ветки действует час; main/master удалять нельзя. Запуску роли — только через CEO.")
-REASON_CONFIG_LOG = ("Журналы правок настроек и уставов (config-log.json, charter-log.json) пишут только команды `tickets.py config` "
-                     "и `tickets.py charter` (ни роль, ни CEO руками).")
+REASON = ("Удаление запрещено вне своей папки (проект, его worktree, scratchpad сессии, временный каталог). Защищённые пути "
+          "(protected_paths из .claude/rpv.json) — никогда. Непроверяемая цель: {t}")
+REASON_OVERWRITE = ("Перезапись/усечение существующего файла (`> файл`, truncate, dd of=, cp/mv поверх) вне своей папки запрещены, "
+                    "как и удаление; автопамять проекта (~/.claude/projects/<проект>/memory/) и новый файл — можно. Цель: {t}")
+REASON_IRREVERSIBLE = ("Необратимая команда git ({t}): только через CEO — не выполнять самому, передать CEO итогом шага "
+                       "(`tickets.py result <ID> blocked --why \"...\"`). Закрыты: `git reset --hard` и `git clean -f` в основной копии "
+                       "(в worktree проекта и в scratchpad можно), откат всего дерева (`checkout .`, `restore .`), `git push --force`, "
+                       "`+ветка`, `--delete`, `:ветка`, `--mirror`, `git branch -D main|master`. Откат одного файла и удаление "
+                       "локальной ветки можно.")
 REASON_CEO_CONFIG = ("Настройки плагина и уставы ролей ({t}) CEO напрямую не правит (слово владельца В-7: менять можно, но без "
-                     "самодеятельности). Настройки — `tickets.py config set <ключ> <значение> --why \"...\"` (закрытый список "
-                     "ключей, Судья проверяет, без его приёмки правка через 2 ч откатывается); уставы `.claude/roles/*.md` не "
-                     "правятся, кроме строк таблицы зон в README; новые строки уставов из шаблонов плагина — "
-                     "`tickets.py charter sync [--file <имя>.md] --ref В-N`; правила проекта для роли — добавка "
-                     "`tickets.py charter addon <роль> --text \"...\" --ref В-N` (файл `.claude/roles/project/<роль>.md`). Блокнот `notes/ceo.md` — свободно.")
-REASON_CEO_CHARTER = ("Устав ({t}) CEO записью через оболочку не правит: cp, mv, tee, перенаправление, python, sed, install, rsync — "
-                      "всё закрыто (слово владельца В-7). Перенос из шаблонов плагина — `tickets.py charter sync "
-                      "[--file <имя>.md] --ref В-N` (текст как есть, строки таблицы зон README остаются проектными, правка в журнале и в "
-                      "отчёте); правила проекта — `tickets.py charter addon <роль> --text \"...\" --ref В-N` (файл "
-                      "`.claude/roles/project/<роль>.md`, синк его не трогает). Чтение, блокнот `notes/ceo.md` и новый файл (первый `/rpv-init`) — свободно.")
-REASON_BRANCH_CONSENT_FILE = ("Согласия на удаление веток пишет только команда `tickets.py allow-delete` после слова владельца: файл "
-                              "branch-delete.json руками не правится (ни ролью, ни CEO).")
+                     "самодеятельности). Настройки — `tickets.py config set <ключ> <значение> --why \"...\"`; уставы "
+                     "`.claude/roles/*.md` не правятся, кроме строк таблицы зон в README; новые строки из шаблонов плагина — "
+                     "`tickets.py charter sync [--file <имя>.md] --ref В-N`; правила проекта — `tickets.py charter addon <роль> "
+                     "--text \"...\" --ref В-N`. Блокнот `notes/ceo.md` — свободно.")
 REASON_PUBLISH = ("Публикация ({t}) запуску роли закрыта без согласия владельца по тикету {who}: выпуск, слияние PR, пуш в "
-                  "основную ветку (main/master) и теги, публикация пакетов и образов необратимы. Нужна — `tickets.py result <ID> "
-                  "ask-owner --why \"...\" --why-owner необратимое`; слово владельца CEO заносит в реестр (`registry.py decide`) и "
-                  "ставит согласие `tickets.py allow <ID> publish --ref В-N`. Пуш рабочей ветки разрешён (ветку назови явно: "
-                  "`git push origin <ветка>`); PR вливает программа (merge_rule) после приёмки Судьи.")
-REASON_PUSH_SCOPE = ("Пуш в основную ветку ({t}) уносит {n} коммит(ов) вне принятого тикета (приёмка Судьи, `accepted:` в шапке: {who}): "
-                     "{shown}. Завести этим коммитам тикет (Судья принимает — sha в `accepted`) или пушить отдельно: рабочая "
-                     "ветка и PR (`git push origin <ветка>`), PR вливает программа (merge_rule). Настройка `guard_push_scope` "
-                     "(.claude/rpv.json).")
-REASON_PUSH_SCOPE_UNKNOWN = ("Пуш в основную ветку ({t}): коммиты не сверить с принятым тикетом — {why} (`guard_push_scope`, "
-                             "fail-closed). Пуш рабочей ветки разрешён; пуш в main/master — из репозитория проекта, после "
-                             "`git fetch`, с явной веткой (`git push origin main`).")
-REASON_CONSENT = ("Согласие на публикацию запуск диспетчера в шапку тикета не пишет: строку `allow:` ставит только CEO командой "
-                  "`tickets.py allow <ID> publish --ref В-N` после слова владельца. Нужна публикация — `tickets.py result <ID> "
-                  "ask-owner --why \"...\" --why-owner необратимое`.")
-REASON_FILE = ("Запись в файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit/MultiEdit/NotebookEdit "
-               "меняют существующие файлы только внутри папки проекта, scratchpad сессии, временного каталога и автопамяти "
-               "проекта (~/.claude/projects/<проект>/memory/). Новый файл вне папки создать можно (его ещё нет). "
-               "Защищённые пути проекта и закрытые хосты — никогда. Нужна правка вне папки — через владельца/CEO.")
-REASON_WS = ("Источник `ws` инструмента Monitor ({t}): {why}. Закрытые хосты (guard_forbidden_hosts, .claude/rpv.json) закрыты и для "
-             "потока событий — нужен другой источник или слово владельца через CEO.")
+                  "main/master и теги необратимы. Нужна — `tickets.py result <ID> ask-owner --why \"...\" --why-owner "
+                  "необратимое`; CEO заносит слово владельца в реестр (`registry.py decide`) и ставит `tickets.py allow <ID> publish --ref В-N`. Пуш "
+                  "рабочей ветки разрешён (`git push origin <ветка>`); PR вливает программа (merge_rule) после приёмки Судьи.")
+REASON_FILE = ("Запись в существующий файл вне своей папки ({t}) запрещена, как и перезапись через Bash: Write/Edit меняют "
+               "существующие файлы только внутри проекта и его worktree, scratchpad, временного каталога и автопамяти проекта. "
+               "Новый файл создать можно. Защищённые пути — никогда. Нужна правка вне папки — через владельца/CEO.")
 REASON_CRASH = ("Страж удаления упал ({e}) — отказ по умолчанию (fail-closed), а не пропуск. Исправьте "
                 ".claude/hooks/delete_guard.py плагина вручную (вне этой сессии) или отключите плагин; не получилось — "
                 "сообщите владельцу/CEO.")
@@ -82,25 +48,10 @@ class Forbid(str):
 
 
 class Publish(Forbid):
-    """Публикация (выпуск, слияние PR, пуш в main/master или тега, публикация пакета): запуску роли — только с согласием
-    владельца по тикету (`allow: publish` в шапке), сессиям CEO и владельца можно. Подкласс Forbid: те же ветки find/ssh.
-    `main` — для пуша в main/master: куда и какие ветки уходят (`PushRefs`), чтобы сверить коммиты (`guard_push_scope`)."""
-
-    def __new__(cls, label, main=None):
-        self = super().__new__(cls, label)
-        self.main = main
-        return self
+    """Публикация (выпуск, слияние PR, пуш в main/master или тега): запуску роли — только с согласием владельца по тикету
+    (`allow: publish` в шапке), сессиям CEO и владельца можно."""
 
 
-class BranchDelete(Forbid):
-    """Удаление веток на удалённом с названными ветками (`git push --delete <ветка>…` / `:<ветка>`): запуску роли — никогда;
-    сессии CEO/владельца — с согласием владельца на каждую ветку (`tickets.py allow-delete`, файл dispatcher/branch-delete.json,
-    на час). Ветки не названы (`--mirror`, `--prune`, маска, переменная) — обычный Forbid для всех."""
-
-    def __new__(cls, label, branches=()):
-        self = super().__new__(cls, label)
-        self.branches = tuple(branches)
-        return self
 REASON_GIT_DIR = ("Каталог .git ({t}) — история репозитория: удалять или переносить его и файлы внутри нельзя никому "
                   "(`rm -rf .git`, `rm -rf .*`, `mv .git …`); можно только снять зависший замок `*.lock`. Чистка "
                   "истории — только владелец через CEO.")
@@ -113,8 +64,3 @@ REASON_OWNER_RECORD = ("Слово владельца и реестр ошибо
                        "только CEO командой `registry.py` (дословно), CLAUDE.md — только CEO, записи `.claude/errors/` — только "
                        "скрипт `errors.py` (`add` — любая роль, `fix` — Судья после красной проверки на коммите до исправления). "
                        "Нужно изменить — `tickets.py result <ID> ask-owner --why \"...\"`.")
-REASON_IDENTITY = ("Запуск роли не меняет и не стирает свою роль и тикет (RPV_ROLE, RPV_TICKET, `env -i`): притвориться CEO "
-                   "нельзя (слово владельца 14.10). Нужно действие CEO — `tickets.py result <ID> blocked --why \"...\"` "
-                   "или ask-owner через Судью.")
-REASON_CEO_SIGNAL = ("Сигналы команды пишет только диспетчер: ceo-inbox.md/ceo-wake.log — это dispatch.append_ceo_inbox. "
-                     "Нужно CEO — `tickets.py result <ID> blocked|ask-owner --why \"...\"`; новые строки читает `tickets.py inbox` (docs/signals.md).")

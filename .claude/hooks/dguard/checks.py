@@ -1,14 +1,11 @@
 """Проверка команды и файла целиком: `check` (Bash/PowerShell), `check_file` (Write/Edit/…)."""
 from dguard.cmd_scan import scan_text
 from dguard.config import norm
-from dguard.git_scan import branch_delete_consent
 from dguard.legacy import legacy_found
 from dguard.lexer import ParseError
-from dguard.messages import BranchDelete, Forbid, Over, Publish, REASON, REASON_BRANCH_DELETE, REASON_CRASH, REASON_FILE, REASON_IRREVERSIBLE, REASON_OVERWRITE, REASON_PUBLISH, REASON_WS
-from dguard.paths import allowed, closed_host, Ctx, temp_rest, write_only_ok
+from dguard.messages import Forbid, Over, Publish, REASON, REASON_CRASH, REASON_FILE, REASON_IRREVERSIBLE, REASON_OVERWRITE, REASON_PUBLISH
+from dguard.paths import allowed, Ctx, temp_rest, write_only_ok
 from dguard.policy import dispatcher_role, protected, publish_consent
-from dguard.push_scope import push_scope_reason
-from dguard.words import FUNC_DEF
 from dguard.writes import may_exist
 
 
@@ -31,30 +28,21 @@ def check(cmd, cwd, trace=None):
     legacy = False
     try:
         role = dispatcher_role()
-        start = Ctx(norm(cwd).rstrip("/") if cwd else None, False, frozenset(FUNC_DEF.findall(cmd)))
+        start = Ctx(norm(cwd).rstrip("/") if cwd else None)
         try:
             found = list(scan_text(cmd, start))
         except ParseError:                          # незакрытая кавычка и т. п. — прежний регэксп как страховка
             found = legacy_found(cmd, cwd)
             legacy = True
         for target, ctx in found:
-            group = "legacy" if legacy else ctx.via or ("ssh" if ctx.remote else None)
+            group = "legacy" if legacy else ctx.via
             if isinstance(target, Publish):
                 if role:                                    # CEO и владелец публикуют свободно; роль — с согласием по тикету
                     granted, who = publish_consent()
                     if not granted:
                         return _deny(trace, "publish", REASON_PUBLISH.format(t=target, who=who))
                     trace.append(("publish", "allow"))
-                why = push_scope_reason(target, ctx.remote, role)       # пуш в main/master: только коммиты принятого тикета
-                if why:
-                    return _deny(trace, "publish", why)
                 continue
-            if isinstance(target, BranchDelete) and not role:       # CEO/владелец: только с согласием на каждую ветку
-                granted, why = branch_delete_consent(target.branches)
-                if granted:
-                    trace.append(("branch-delete", "allow"))
-                    continue
-                return _deny(trace, "git", REASON_BRANCH_DELETE.format(t=target, why=why))
             if isinstance(target, Forbid):
                 return _deny(trace, "git", REASON_IRREVERSIBLE.format(t=target))
             why = protected(target, ctx, role, deleting=not isinstance(target, Over))
@@ -76,13 +64,13 @@ def check(cmd, cwd, trace=None):
 
 
 def check_file(path, cwd, trace=None):
-    """Запись файловым инструментом. Запуск диспетчера (`RPV_ROLE`) — как перезапись через Bash: путь вне корней (папка
-    проекта, scratchpad, temp, автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно.
-    Сессия CEO/владельца (аудит-3) правит файлы вне проекта свободно (настройки, соседние репозитории, планы). Для всех:
-    внутрь .git, в настройки Claude Code и плагина, в защищённые пути проекта существующий файл — см. protected."""
+    """Запись файловым инструментом. Запуск диспетчера (`RPV_ROLE`) — как перезапись через Bash: путь вне корней (проект и его
+    worktree, scratchpad, temp, автопамять) и файл уже есть (или не проверить) — отказ; новый файл вне корней создать можно.
+    Сессия CEO/владельца правит файлы вне проекта свободно (настройки, соседние репозитории, планы). Для всех: внутрь .git,
+    в настройки Claude Code и плагина, в защищённые пути проекта существующий файл — см. protected."""
     try:
         trace = [] if trace is None else trace
-        ctx = Ctx(norm(cwd).rstrip("/") if cwd else None, False)
+        ctx = Ctx(norm(cwd).rstrip("/") if cwd else None)
         target = Over(path)
         role = dispatcher_role()
         why = protected(target, ctx, role, deleting=False)
@@ -97,15 +85,3 @@ def check_file(path, cwd, trace=None):
         return _deny(trace, "file", REASON_FILE.format(t=path))
     except Exception as e:
         return _deny(trace, "crash", REASON_CRASH.format(e=f"{type(e).__name__}: {e}"[:200]))
-
-
-def check_ws(ws, trace=None):
-    """Источник `ws` инструмента Monitor (`{url, protocols}`, без `command`): адрес не строка или назван закрытый хост из
-    `guard_forbidden_hosts` — отказ (fail-closed: схема могла измениться); прочие адреса поток только читает — разрешены."""
-    trace = [] if trace is None else trace
-    url = ws.get("url") if isinstance(ws, dict) else None
-    if not isinstance(url, str) or not url.strip():
-        return _deny(trace, "ws", REASON_WS.format(t=repr(ws)[:80], why="адрес (`url`) не определить"))
-    if closed_host(url):
-        return _deny(trace, "ws", REASON_WS.format(t=url[:120], why="назван закрытый хост"))
-    return None

@@ -177,7 +177,7 @@ class AllowTests(unittest.TestCase):
 
 class AllowDeleteTests(unittest.TestCase):
     """`tickets.py allow-delete` — согласие владельца на удаление веток на удалённом: только CEO, основание — решение В-N из реестра,
-    на названные ветки и на час, main/master никогда; страж читает то, что пишет команда."""
+    на названные ветки и на час, main/master никогда. Страж удаление веток на удалённом больше не разбирает по согласиям — простой запрет."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -255,28 +255,6 @@ class AllowDeleteTests(unittest.TestCase):
         self.file.write_text(json.dumps(data), encoding="utf-8")
         self.run_cli("allow-delete", "feat/z", "--ref", "В-1")
         self.assertEqual(sorted(self.consents()), ["feat/y", "feat/z"], "просроченное убрано при следующей записи")
-
-    def test_guard_reads_what_allow_delete_writes(self):
-        """Страж — отдельным процессом: CEO без согласия отказ, с согласием — можно, другая ветка и роль — отказ."""
-        self.decide()
-
-        def verdict(cmd, role=None):
-            code = ("import delete_guard as d, json, sys; d.configure(sys.argv[1]); print(json.dumps(d.check(sys.argv[2], sys.argv[1]) is None))")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("RPV_")}
-            if role:
-                env["RPV_ROLE"] = role
-            r = subprocess.run([sys.executable, "-c", code, str(self.root), cmd], cwd=HOOKS, env=env, capture_output=True, text=True)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            return json.loads(r.stdout)
-
-        delete = "git push origin --delete feat/x"
-        self.assertFalse(verdict(delete))
-        self.run_cli("allow-delete", "feat/x", "--ref", "В-1")
-        self.assertTrue(verdict(delete))
-        self.assertFalse(verdict("git push origin --delete feat/other"))
-        self.assertFalse(verdict(delete, role="engineer"))
-        self.run_cli("allow-delete", "feat/x", "--revoke")
-        self.assertFalse(verdict(delete))
 
 
 if __name__ == "__main__":

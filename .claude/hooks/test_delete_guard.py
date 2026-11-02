@@ -9,18 +9,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-# проверки написаны на примере условного проекта proj: корень задаём окружением ДО импорта, удалённые каталоги — как после
-# чтения его `.claude/rpv.json` (умолчаний нет); защищённых путей у этого проекта нет — их проверяют тесты ProtectedPaths,
-# подставляя шаблоны на время теста
+# проверки написаны на примере условного проекта proj: корень задаём окружением ДО импорта; защищённых путей у этого проекта
+# нет — их проверяют тесты ProtectedPaths, подставляя шаблоны на время теста
 os.environ["CLAUDE_PROJECT_DIR"] = r"C:\visual projects\proj"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import delete_guard as dg  # noqa: E402
 from dguard import checks, config as cfg, lexer, messages as msg, paths, policy  # noqa: E402
 
-PROJ_RPV = {"guard_remote_roots": ["~/proj/", "$home/proj/", "${home}/proj/", "/home/srv/proj/", "/opt/proj-compute/"],
-            "guard_stage": "/dev/shm/proj-stage", "guard_forbidden_hosts": ["203.0.113.1"]}
-cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = cfg.machine_rules(PROJ_RPV)
 
 CWD = r"C:\visual projects\proj"
 SCRATCH = "C:/Users/3D6B~1/AppData/Local/Temp/claude/C--visual-projects-proj/abc/scratchpad"
@@ -83,27 +80,6 @@ class Allowed(unittest.TestCase):
     def test_rm_in_scratchpad(self):
         self.ok(f'rm -rf "{SCRATCH}/sim"')
 
-    def test_ssh_srv_proj_subdir(self):
-        self.ok("ssh srv@192.0.2.49 'rm -rf ~/proj/tk026/stage'")
-
-    def test_ssh_srv_ram_stage(self):
-        self.ok("ssh srv@192.0.2.49 'rm -rf /dev/shm/proj-stage'")
-
-    def test_ssh_srv_ram_stage_inner(self):
-        self.ok("ssh srv@192.0.2.49 'rm -rf /dev/shm/proj-stage/2026-01-03/run'")
-
-    def test_ssh_srv_ram_stage_glob(self):
-        self.ok("ssh -i ~/.ssh/id_rsa -o BatchMode=yes srv@192.0.2.49 'rm -rf /dev/shm/proj-stage/*'")
-
-    def test_ssh_vps_compute_subdir(self):
-        self.ok('ssh ubuntu@203.0.113.2 "rm -rf /opt/proj-compute/tk025/tmp"')
-
-    def test_ssh_cd_then_relative(self):
-        self.ok("ssh srv@192.0.2.49 'cd ~/proj/tk026 && rm -rf stage'")
-
-    def test_systemd_run_wrapper(self):
-        self.ok("ssh srv@192.0.2.49 \"systemd-run --user --unit=x bash -c 'rm -rf ~/proj/tk026/stage'\"")
-
     # --- слова удаления не в позиции команды
     def test_echo_rm(self):
         self.ok('echo "rm -rf /c/Windows"')
@@ -144,9 +120,6 @@ class Allowed(unittest.TestCase):
     def test_git_status_and_clean_dry_run(self):
         self.ok("git status --short && git clean -nd")
 
-    def test_rsync_without_delete(self):
-        self.ok("rsync -a /c/Windows/x srv@192.0.2.49:~/proj/y/")
-
     def test_cd_then_rm_in_project_subdir(self):
         self.ok('cd "/c/visual projects/proj/data" && rm -rf tmp')
 
@@ -165,16 +138,6 @@ class Allowed(unittest.TestCase):
     def test_rm_variable_known_literal(self):
         self.ok('T="/c/visual projects/proj/data/tmp"; rm -rf "$T"')
 
-    def test_ssh_options_array(self):
-        self.ok("K=(-i /c/Users/x/.ssh/id_rsa -o BatchMode=yes); H=srv@192.0.2.49\n"
-                "ssh \"${K[@]}\" $H 'cd ~/proj; rm -f tmp-p07/t9.finished; ls queue'")
-
-    def test_ssh_command_variable_with_options(self):
-        self.ok("S=\"ssh -o BatchMode=yes -i /c/Users/x/.ssh/id_rsa srv@192.0.2.49\"; $S 'rm -rf ~/proj/tk026/stage'")
-
-    def test_local_rm_with_ssh_elsewhere_in_command(self):
-        self.ok('cd "/c/visual projects/proj" && rm "tools/compute/old.sh" && S="ssh -i k srv@192.0.2.49"; $S ls')
-
     def test_git_rm_tracked_file(self):
         self.ok("git rm --cached tools/old.sh")
 
@@ -187,32 +150,11 @@ class Allowed(unittest.TestCase):
     def test_perl_without_delete(self):
         self.ok("perl -e 'print 1'")
 
-    def test_ssh_unknown_options_array_before_host(self):
-        self.ok("ssh \"${KEY[@]}\" srv@192.0.2.49 'rm -f ~/proj/tmp-t38/bench14.DONE'")
-
-    def test_rsync_remove_source_files_destination_is_not_checked(self):
-        self.ok("rsync -a --remove-source-files -e 'ssh -i k' /opt/proj-compute/x/ backup@backup.example:proj/x/")
-
     def test_powershell_assignment_of_here_string(self):
         self.ok("$script = @'\nrm -rf /tmp/x\n'@")
 
-    def test_wrapper_script_with_host_arg_inside_policy(self):
-        self.ok("/tmp/sshx srv@192.0.2.49 'cd ~/proj && rm -f tmp-p07/read-a.log && ls'")
-
-    def test_wrapper_script_closed_host_without_deletion(self):
-        self.ok("/tmp/sshx ubuntu@203.0.113.1 'ls /opt/proj/data | head'")
-
-    def test_shell_function_wrapper_inside_policy(self):
-        self.ok("rsh() { ssh -i k srv@192.0.2.49 \"$@\"; }\nrsh 'rm -rf ~/proj/tk026/stage'")
-
     def test_echo_with_email_and_rm_text(self):
         self.ok("echo srv@192.0.2.49 'rm foo'")
-
-    def test_script_creation_heredoc_over_ssh_is_data(self):
-        self.ok("ssh srv@192.0.2.49 'cat > ~/proj/x.sh <<\"EOF\"\nrm -rf /home/srv/other\nEOF\nchmod +x ~/proj/x.sh'")
-
-    def test_powershell_script_string_to_srv_inside_policy(self):
-        self.ok("$script = @'\nrm -f ~/proj/tmp-p07/x.log\n'@\nssh -i k srv@192.0.2.49 $script")
 
     def test_help_flag(self):
         self.ok("rm --help")
@@ -237,9 +179,6 @@ class Denied(unittest.TestCase):
     def test_rm_users(self):
         self.no("rm -rf /c/Users/x")
 
-    def test_ssh_closed_host(self):
-        self.no("ssh ubuntu@203.0.113.1 'rm /opt/proj/data/x.bin'")
-
     def test_find_root_delete(self):
         self.no("find / -name x -delete")
 
@@ -253,21 +192,6 @@ class Denied(unittest.TestCase):
         self.no("Remove-Item C:\\\\Windows\\\\x -Recurse")
 
     # --- закрытые хосты (guard_forbidden_hosts)
-    def test_closed_host_overrides_remote_roots(self):
-        self.no("ssh ubuntu@203.0.113.1 'rm -rf /opt/proj-compute/x'")
-        self.no("ssh ubuntu@203.0.113.1 'rm -rf ~/proj/x'")
-
-    def test_closed_host_via_variable(self):
-        self.no('SSHC="ssh -i ~/.ssh/id_rsa"; $SSHC ubuntu@203.0.113.1 "rm -f ~/proj/x"')
-
-    def test_closed_host_heredoc_shell(self):
-        self.no("ssh ubuntu@203.0.113.1 <<'EOF'\nrm -rf ~/proj/epochs\nEOF")
-
-    def test_closed_host_by_identity_file_name(self):
-        self.no("ssh -i ~/.ssh/id_203.0.113.1 ubuntu@alias 'rm -f ~/proj/x'")
-
-    def test_rsync_delete_to_closed_host(self):
-        self.no("rsync -a --delete data/x/ ubuntu@203.0.113.1:~/proj/x/")
 
     # --- обёртки и вложенность
     def test_sudo_rm(self):
@@ -287,9 +211,6 @@ class Denied(unittest.TestCase):
 
     def test_sh_lc(self):
         self.no('sh -lc "rm -rf /home/other/x"')
-
-    def test_ssh_bash_c_nested(self):
-        self.no("ssh srv@192.0.2.49 \"bash -c 'rm -rf /home/srv/other'\"")
 
     def test_powershell_command(self):
         self.no('powershell -NoProfile -Command "Remove-Item C:\\Windows\\x -Recurse"')
@@ -342,9 +263,6 @@ class Denied(unittest.TestCase):
     def test_python_os_system_rm(self):
         self.no("python -c \"import os; os.system('rm -rf /c/Users/x')\"")
 
-    def test_ssh_python_heredoc(self):
-        self.no("ssh srv@192.0.2.49 python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/home/srv/other')\nEOF")
-
     def test_python_syntax_error_fallback(self):
         self.no("python -c \"import shutil; shutil.rmtree(\"")
 
@@ -373,9 +291,6 @@ class Denied(unittest.TestCase):
     def test_rm_relative_after_cd_out(self):
         self.no("cd /c/Users/x && rm -rf data")
 
-    def test_rm_relative_in_ssh(self):
-        self.no("ssh srv@192.0.2.49 'rm -rf tk026/stage'")
-
     def test_rm_substitution_target(self):
         self.no("rm -rf $(cat list.txt)")
 
@@ -384,9 +299,6 @@ class Denied(unittest.TestCase):
 
     def test_remove_item_parenthesized(self):
         self.no("Remove-Item (Join-Path $env:TEMP 'x') -Recurse")
-
-    def test_ssh_unknown_host_variable(self):
-        self.no("ssh $BOX 'rm -f ~/proj/x'")
 
     def test_find_exec_rm_outside(self):
         self.no("find /c/Users -name '*.tmp' -exec rm -f {} \\;")
@@ -399,12 +311,6 @@ class Denied(unittest.TestCase):
 
     def test_git_clean_c_root_subdir_ok_but_dot_not(self):
         self.no("git -C . clean -fd")
-
-    def test_rsync_delete_outside(self):
-        self.no("rsync -a --delete src/ /c/Users/x/dst/")
-
-    def test_rsync_remove_source_files_outside(self):
-        self.no("rsync -a --remove-source-files /c/Users/x/ srv@192.0.2.49:~/proj/y/")
 
     def test_shred(self):
         self.no("shred -u /c/Users/x/secret.txt")
@@ -424,19 +330,6 @@ class Denied(unittest.TestCase):
     def test_wsl_rm(self):
         self.no("wsl rm -rf /mnt/c/Windows/x")
 
-    def test_stage_lookalike(self):
-        self.no("ssh srv@192.0.2.49 'rm -rf /dev/shm/proj-stage-other'")
-
-    def test_stage_dotdot(self):
-        self.no("ssh srv@192.0.2.49 'rm -rf /dev/shm/proj-stage/../x'")
-
-    def test_ssh_options_array_closed_host(self):
-        self.no("K=(-i /c/Users/x/.ssh/id_rsa -o BatchMode=yes)\n"
-                "ssh \"${K[@]}\" ubuntu@203.0.113.1 'cd ~/t && rm -rf work'")
-
-    def test_ssh_options_array_outside_policy(self):
-        self.no("K=(-i k); ssh \"${K[@]}\" root@203.0.113.2 'rm -rf /root/tk021/gate'")
-
     def test_uv_run_python_rmtree(self):
         self.no("uv run python -c \"import shutil; shutil.rmtree('/c/Users/x')\"")
 
@@ -449,33 +342,6 @@ class Denied(unittest.TestCase):
     def test_robocopy_mirror(self):
         self.no(r"robocopy empty C:\Users\x /MIR")
 
-    def test_ssh_unknown_options_array_before_closed_host(self):
-        self.no("ssh \"${KEY[@]}\" ubuntu@203.0.113.1 'rm -f ~/proj/x'")
-
-    def test_ssh_host_is_unknown_variable(self):
-        self.no("ssh $H 'rm -f ~/proj/x'")
-
-    def test_wrapper_script_with_host_arg_outside_policy(self):
-        self.no("/tmp/sshx srv@192.0.2.49 'rm -rf /home/srv/other'")
-
-    def test_wrapper_script_closed_host_with_deletion(self):
-        self.no("/tmp/sshx ubuntu@203.0.113.1 'rm -f /opt/proj-compute/x'")
-
-    def test_shell_function_wrapper_outside_policy(self):
-        self.no("rsh() { ssh -i k srv@192.0.2.49 \"$@\"; }\nrsh 'rm -rf /home/srv/other'")
-
-    def test_sftp_batch_on_closed_host(self):
-        self.no("sftp -b - ubuntu@203.0.113.1 <<'EOF'\nrm ~/proj/x\nEOF")
-
-    def test_powershell_script_string_to_closed_host(self):
-        self.no("$script = @'\ncd /opt/proj/src && rm -f tools/b5_grid.py\n'@\nssh -i k ubuntu@203.0.113.1 $script")
-
-    def test_powershell_script_piped_to_remote_bash(self):
-        self.no("$script = @'\nrm -rf /home/srv/other\n'@\n$script | ssh -i k srv@192.0.2.49 bash -s")
-
-    def test_variable_command_word(self):
-        self.no("$SSH srv@192.0.2.49 'rm -rf /home/srv/other'")
-
 
 class NoNameExemption(unittest.TestCase):
     """A3(а), аудит 03.10: строка `tk020-dedupe-apply.sh` в команде отключала проверку целиком —
@@ -485,8 +351,6 @@ class NoNameExemption(unittest.TestCase):
         for name in ("tk020-dedupe-apply.sh", "tk020-dedupe-apply.py"):
             self.assertIsNotNone(dg.check(f"echo {name}; rm -rf /c/Users/x", CWD), name)
             self.assertIsNotNone(dg.check(f"rm -rf /c/Users/x # {name}", CWD), name)
-            self.assertIsNotNone(
-                dg.check(f"ssh srv@192.0.2.49 'python3 {name} && rm -rf /home/srv/other'", CWD), name)
 
     def test_exemption_machinery_is_gone(self):
         for attr in ("DEDUPE_APPLY", "DEDUPE_UNTIL"):
@@ -559,11 +423,6 @@ class Overwrite(unittest.TestCase):
         self.ok("echo x > data/out.txt")
         self.ok('echo x > "/c/visual projects/proj/data/out.txt"')
         self.ok(f'echo x > "{SCRATCH}/note.txt"')
-        self.ok("ssh srv@192.0.2.49 'echo x > ~/proj/tk026/out.log'")
-
-    def test_redirect_remote_outside_roots(self):
-        self.no("ssh srv@192.0.2.49 'echo x > /home/srv/other/f'")
-        self.no("ssh ubuntu@203.0.113.2 'ls > /root/out.txt'")
 
     def test_redirect_unknown_variable_target(self):
         self.no('echo x > "$OUT"')
@@ -581,24 +440,18 @@ class Overwrite(unittest.TestCase):
     def test_redirect_known_variable_target(self):
         self.ok('OUT="/c/visual projects/proj/data/o.txt"; echo x > "$OUT"')
 
-    def test_redirect_to_closed_host_over_ssh(self):
-        self.no("ssh ubuntu@203.0.113.1 'cat > ~/proj/x <<EOF\nx\nEOF'")
-
     # --- truncate
     def test_truncate(self):
         self.no(f'truncate -s 0 "{self.f}"')
         self.no(f'truncate --size=0 "{self.f}"')
-        self.no("ssh srv@192.0.2.49 'truncate -s 0 /var/log/x.log'")
 
     def test_truncate_inside_roots(self):
         self.ok("truncate -s 0 data/x.log")
-        self.ok("ssh srv@192.0.2.49 'truncate -s0 ~/proj/x.log'")
 
     # --- dd
     def test_dd_of(self):
         self.no(f'dd if=/dev/zero of="{self.f}" bs=1 count=1')
         self.no("dd if=/dev/zero of=/dev/sda bs=1M")
-        self.no("ssh srv@192.0.2.49 'dd if=a of=/home/srv/other/b'")
 
     def test_dd_harmless_and_inside(self):
         self.ok("dd if=/dev/zero of=/dev/null bs=1M count=1")
@@ -632,11 +485,6 @@ class Overwrite(unittest.TestCase):
         self.ok("cp a.txt data/b.txt")
         self.ok("mv data/a.txt data/b.txt")
         self.ok(f'cp a.txt "{SCRATCH}/b.txt"')
-        self.ok("ssh srv@192.0.2.49 'cp a ~/proj/b'")
-
-    def test_cp_remote_outside_roots(self):
-        self.no("ssh srv@192.0.2.49 'cp a /home/srv/other/b'")
-        self.no("ssh ubuntu@203.0.113.2 'mv a /root/b'")
 
     def test_cp_unknown_destination(self):
         self.no('cp a "$DEST"')
@@ -714,7 +562,6 @@ class GitIrreversible(unittest.TestCase):
     def test_through_wrappers_and_remote(self):
         self.no("sudo git push -f")
         self.no("bash -c 'git reset --hard'")
-        self.no("ssh srv@192.0.2.49 'cd ~/proj && git clean -fd'")
         self.no("echo ok && git push --force")
         self.no('echo "$(git reset --hard)"')
 
@@ -739,11 +586,6 @@ class CeoResources0310(unittest.TestCase):
         self.assertIsNotNone(dg.check(cmd, cwd), f"пропущено: {cmd!r}")
 
     # --- (1) закрытые хосты и хост, который не определить, закрыты и для временных каталогов
-    def test_closed_and_unknown_hosts_stay_closed(self):
-        self.no("ssh root@203.0.113.1 'rm -rf /tmp/x'")                 # закрытый хост: и /tmp/ нельзя
-        self.no("ssh $H 'rm -rf /tmp/x'")                                # хост не определён
-        self.no("ssh root@203.0.113.2 'ssh root@203.0.113.1 rm -rf /tmp/x'")   # вложенный ssh — уже другой хост
-        self.no("rm -rf /root/tk031/x")                                  # локально чужой каталог
 
     # --- (2) git reset --hard / clean -f вне основного дерева
     def test_git_in_scratch_dir_by_cd_variable_and_git_c(self):
@@ -756,9 +598,6 @@ class CeoResources0310(unittest.TestCase):
         self.ok("git clean -fd", cwd=self.WT)
 
     def test_git_in_remote_and_tmp_dirs(self):
-        self.ok("ssh root@203.0.113.2 'cd /opt/proj-compute/wt1 && git reset --hard X && git clean -fdx'")
-        self.ok("ssh root@203.0.113.2 'git -C /opt/proj-compute/wt1 reset --hard X'")
-        self.ok("ssh root@203.0.113.2 'cd /tmp/wt && git clean -fd'")
         self.ok("cd /tmp/wt && git clean -fd")
 
     def test_git_main_tree_still_refused(self):
@@ -781,19 +620,9 @@ class CeoResources0310(unittest.TestCase):
         self.no('git --work-tree="C:/visual projects/proj" reset --hard', cwd=self.WT)
         self.no('cd wt && git reset --hard', cwd=None)                    # относительный путь без известного cwd
 
-    def test_git_remote_roots_themselves_and_other_places_refused(self):
-        self.no("ssh srv@192.0.2.49 'cd ~/proj && git clean -fd'")
-        self.no("ssh root@203.0.113.2 'cd /opt/proj-compute && git reset --hard'")
-        self.no("ssh root@203.0.113.2 'cd /root/x && git reset --hard'")
-        self.no("ssh root@203.0.113.2 'cd /tmp && git reset --hard'")
-        self.no("cd /tmp && git reset --hard")
-        self.no("ssh root@203.0.113.1 'cd /tmp/wt && git reset --hard'")      # закрытый хост
-        self.no("ssh root@203.0.113.2 'cd /tmp/wt/../../root/x && git clean -fd'")
-
     def test_git_push_force_always_refused(self):
         self.no(f'cd "{self.WT}" && git push --force')
         self.no("git push -f", cwd=self.WT)
-        self.no("ssh root@203.0.113.2 'cd /opt/proj-compute/wt1 && git push --force-with-lease'")
 
     def test_git_linked_worktree_inside_project_allowed_nested_repo_and_main_not(self):
         from unittest import mock
@@ -816,12 +645,11 @@ class CeoResources0310(unittest.TestCase):
                 self.no(f'cd "{base}/nested" && git reset --hard X')
                 self.no(f'cd "{base}/ghost" && git reset --hard X')                               # нет такого каталога
                 self.no(f'cd "{base}/wt" && git push --force')
-                self.no(f"ssh root@203.0.113.2 'cd {base}/wt && git reset --hard X'")           # не локальная ФС
 
     def test_git_refusal_message_explains_the_rule(self):
         reason = dg.check("git reset --hard", CWD)
         self.assertIn("через CEO", reason)
-        self.assertIn("явным путём", reason)
+        self.assertIn("в основной копии", reason)
 
     # --- (3) автопамять: запись/перезапись, не удаление
     def test_memory_overwrite_allowed(self):
@@ -842,7 +670,6 @@ class CeoResources0310(unittest.TestCase):
         home = "~/.claude/projects/" + self.MEM
         self.no(f"rm {home}/x.md")                                        # только запись, удаление — нет
         self.no(f"rm -rf {home}")
-        self.no("ssh srv@192.0.2.49 'echo x > ~/.claude/projects/" + self.MEM + "/x.md'")   # удалённый ~ — другой
         with tempfile.TemporaryDirectory(prefix="dg-mem-", dir=str(Path.home())) as d:
             base = Path(d) / ".claude" / "projects"
             for proj in ("c--other-project", "c--visual-projects-proj"):
@@ -853,7 +680,6 @@ class CeoResources0310(unittest.TestCase):
             self.no(f"echo x > {(base / 'c--visual-projects-proj' / 'memory' / 'x.md').as_posix()}")
         self.assertFalse(paths.write_only_ok("~/.claude/projects/C--visual-projects-proj/memory/../../../settings.json"))
         self.assertFalse(paths.write_only_ok("~/.claude/projects/C--visual-projects-proj/memory"))   # сам каталог — нет
-        self.no("ssh root@203.0.113.2 'echo x > ~/.claude/settings.json'")
 
 
 class SecondAudit(unittest.TestCase):
@@ -899,7 +725,6 @@ class SecondAudit(unittest.TestCase):
             self.no('mv "/c/visual projects/proj/data/raw/x.bin" ./trash && rm -rf ./trash')
             self.no("mv data/raw/x.bin ./trash && rm -rf ./trash")
             self.no("mv data/raw data/old && ls")
-            self.no("ssh srv@192.0.2.49 'mv ~/proj/e1/keep/x ~/proj/trash'")
             self.ok("mv data/other.bin data/old.bin")
 
     def test_mv_source_outside_roots(self):
@@ -909,7 +734,6 @@ class SecondAudit(unittest.TestCase):
         self.no("mv data/a /c/Users/x/b data/old/")                   # хотя бы один источник вне папки
         self.no("sudo mv /c/Users/x/a data/")
         self.no("bash -c 'mv /c/Users/x/a data/'")
-        self.no("ssh srv@192.0.2.49 'mv /home/srv/other/a ~/proj/x'")
 
     def test_mv_unknown_or_stdin_sources(self):
         self.no('mv "$f" data/')
@@ -923,7 +747,6 @@ class SecondAudit(unittest.TestCase):
         self.ok("mv data/tmp/*.csv data/old/")
         self.ok('mv "/c/visual projects/proj/data/a" "/c/visual projects/proj/data/b"')
         self.ok(f'mv data/a "{SCRATCH}/b"')
-        self.ok("ssh srv@192.0.2.49 'mv ~/proj/tk026/a ~/proj/tk026/b'")
         self.ok("mv --help")
 
     def test_cp_source_is_only_read(self):
@@ -1006,7 +829,6 @@ class SecondAudit(unittest.TestCase):
         self.no(f'echo x | sudo tee "{self.f}"')
         self.no(f'echo x | tee "{self.f}" data/o.txt')
         self.no('echo x | tee "$OUT"')
-        self.no("ssh srv@192.0.2.49 'echo x | tee /home/srv/other/f'")
         self.no(f"bash -c 'echo x | tee \"{self.f}\"'")
 
     def test_tee_append_new_inside_harmless_are_fine(self):
@@ -1017,7 +839,6 @@ class SecondAudit(unittest.TestCase):
         self.ok("echo x | tee data/out.txt")
         self.ok("echo x | tee /dev/null")
         self.ok("echo x | tee")
-        self.ok("ssh srv@192.0.2.49 'echo x | tee ~/proj/tk026/o.log'")
 
     def test_powershell_writers(self):
         self.no(f'"x" | Out-File "{self.f}"')
@@ -1063,19 +884,25 @@ class SecondAudit(unittest.TestCase):
         self.ok(f'find "{self.d}" -name a -print')
 
     # ------------------------------------------------------------------------------------------ (в) git
-    def test_git_discard_commands_refused(self):
-        for cmd in ("git checkout -- .", "git checkout -- src/x.rs", "git checkout .", "git checkout HEAD -- f",
-                    "git checkout HEAD~1 f", "git checkout stash@{0} -- f", "git checkout -f", "git checkout -f main",
-                    "git checkout -p", "git checkout --ours -- x", "git checkout *.rs", "git -C . checkout -- x",
-                    "git -c core.x=y checkout -- x", "git restore x", "git restore .", "git restore --worktree x",
-                    "git restore -SW x", "git restore --source=HEAD~1 x", "git restore -p",
-                    "git switch -f main", "git switch --discard-changes main", "git switch --force main",
-                    "git branch -D x", "git branch -d -f x", "git branch -fd x", "git branch --delete --force x",
-                    "git branch -M new", "git branch -f main HEAD~1", "git branch -C a b",
-                    "git stash clear", "git stash drop", "git stash drop stash@{1}",
-                    "sudo git checkout -- x", "bash -c 'git restore x'", 'echo "$(git stash drop)"',
-                    "ssh srv@192.0.2.49 'cd ~/proj && git checkout -- x'", "echo ok && git branch -D x"):
+    def test_git_whole_tree_discard_and_default_branch_delete_refused(self):
+        for cmd in ("git checkout -- .", "git checkout .", "git checkout HEAD -- .", "git checkout -f", "git checkout -f main",
+                    "git checkout *.rs", "git -C . checkout -- .", "git restore .", "git restore --worktree .", "git restore -SW .",
+                    "git restore --source=HEAD~1 .", "git restore 'src/*'", "git switch -f main", "git switch --discard-changes main",
+                    "git switch --force main", "git branch -D main", "git branch -D master", "git branch -d -f main",
+                    "git branch --delete --force main", "git branch -D x main", "git branch -D refs/heads/main",
+                    "sudo git checkout -- .", "bash -c 'git restore .'", 'echo "$(git checkout .)"'):
             self.no_ceo(cmd)
+
+    def test_git_single_file_rollback_and_local_branch_delete_are_free(self):
+        """Откат одного файла и удаление локальной ветки после `worktree remove` не требуют CEO (ложные отказы 100/8)."""
+        for cmd in ("git checkout -- src/x.rs", "git checkout HEAD -- f", "git checkout HEAD~1 f", "git checkout stash@{0} -- f",
+                    "git checkout tracked.txt", "git checkout --ours -- x", "git -C . checkout -- x", "git -c core.x=y checkout -- x",
+                    "git restore x", "git restore --worktree x", "git restore -SW x", "git restore --source=HEAD~1 x",
+                    "git restore --source=HEAD -- x", "git restore -s HEAD x", "git restore -p",
+                    "git branch -D pr208", "git branch -D x y", "git branch -d -f x", "git branch --delete --force x",
+                    "git branch -M new", "git branch -f main HEAD~1", "git branch -C a b", "git branch -D feature/main",
+                    "git stash clear", "git stash drop", "git stash drop stash@{1}", "sudo git checkout -- x"):
+            self.ok(cmd)
 
     def test_git_push_plus_and_delete_refused(self):
         for cmd in ("git push origin +main", "git push origin +HEAD:main", "git push origin :old",
@@ -1100,28 +927,17 @@ class SecondAudit(unittest.TestCase):
         self.ok("grep -n 'git checkout -- ' README.md")
         self.ok("rg 'git push --delete' docs")
 
-    def test_git_discard_allowed_in_scratch_repos_only(self):
+    def test_git_whole_tree_discard_allowed_in_scratch_repos_only(self):
         wt = SCRATCH + "/wt"
-        for cmd in ("git checkout -- .", "git restore .", "git switch -f main", "git branch -D tmp", "git stash drop",
-                    "git stash clear"):
+        for cmd in ("git checkout -- .", "git restore .", "git switch -f main", "git reset --hard", "git clean -fd"):
             self.ok(f'cd "{wt}" && {cmd}')
             self.ok(f'git -C "{wt}" {cmd[4:]}')
             self.ok(cmd, cwd=wt)
             self.no(cmd)                                                   # основное дерево
             self.no(f'cd "C:/visual projects/proj" && {cmd}')
-        self.ok("ssh root@203.0.113.2 'cd /opt/proj-compute/wt1 && git checkout -- . && git stash drop'")
-        self.no("ssh root@203.0.113.2 'cd /opt/proj-compute && git checkout -- .'")
         self.no(f'cd "{wt}" && git push origin +main')                    # push — всегда через CEO
         self.no(f'cd "{wt}" && git push origin --delete x')
-
-    def test_git_checkout_existing_path_without_double_dash(self):
-        from unittest import mock
-        with tempfile.TemporaryDirectory(prefix="dg-proj-") as d:
-            base = cfg.norm(Path(d).as_posix())
-            (Path(d) / "tracked.txt").write_text("x", encoding="utf-8")
-            with mock.patch.object(cfg, "LOCAL_ROOTS", (base + "/",)):
-                self.no("git checkout tracked.txt", cwd=base)                 # такой файл есть: это восстановление пути
-                self.ok("git checkout feature-x", cwd=base)                   # файла нет: переключение ветки
+        self.no(f'cd "{wt}" && git branch -D main')                       # main удалять нельзя нигде
 
     # ------------------------------------------------------------------------------------------ (г) fail-closed
     def test_crash_in_scan_is_refusal_not_pass(self):
@@ -1179,22 +995,6 @@ class SecondAudit(unittest.TestCase):
         self.assertIsNone(self.tool("Write", (t / "f.txt").as_posix()))
         self.assertIsNone(self.tool("Edit", str(t / "f.txt")))
 
-    def test_temp_in_remote_hosts(self):
-        for host in ("root@203.0.113.2", "srv@192.0.2.49"):
-            self.ok(f"ssh {host} 'rm -rf /tmp/x'")
-            self.ok(f"ssh {host} 'echo x > /tmp/dbg.out'")
-            self.ok(f"ssh {host} 'cd /tmp/work && rm -rf out'")
-            self.ok(f"ssh {host} 'echo x > $TMP/y; rm -f $TMPDIR/y'")
-            self.no(f"ssh {host} 'rm -rf /tmp'")
-            self.no(f"ssh {host} 'rm -rf /tmp/*'")
-            self.no(f"ssh {host} 'rm -rf /tmp/../etc/x'")
-
-    def test_temp_not_in_closed_nodes(self):
-        self.no("ssh root@203.0.113.1 'rm -rf /tmp/x'")                      # закрытый хост
-        self.no("ssh root@203.0.113.1 'echo x > /tmp/x'")
-        self.no("ssh $H 'rm -rf /tmp/x'")                                     # хост не определён
-        self.no("ssh $H 'echo x > $TMP/x'")
-
     def test_temp_roots_themselves_dotdot_and_glob_stay_closed(self):
         for target in ("$TMP", "$TEMP/", "/tmp", "/tmp/", "/tmp/*", "$TMP/*", "$TMP/../x", "/tmp/../etc/x",
                        "/tmp/x/../../etc", "$TEMP/..", "C:/Users/x/AppData/Local/Temp/../Documents/f",
@@ -1218,7 +1018,6 @@ class SecondAudit(unittest.TestCase):
         self.ok('W=`mktemp -d`; rm -rf $W/x')
         self.ok('cp a.txt "$(mktemp -d)/b"')
         self.ok("rm -rf $(mktemp -d)")                                        # только что созданный временный каталог
-        self.ok("ssh srv@192.0.2.49 'W=$(mktemp -d); rm -rf $W/x'")
         self.ok("mktemp -d")
 
     def test_mktemp_with_explicit_directory_is_not_temp(self):
@@ -1227,7 +1026,6 @@ class SecondAudit(unittest.TestCase):
         self.no("rm -rf $(mktemp -d /c/Users/x/w.XXXX)/a")
         self.no('W=$(mktemp -d -p /c/Users/x); rm -rf "$W/a"')
         self.no("rm -rf $(mktemp -d)/../a")
-        self.no("ssh root@203.0.113.1 'W=$(mktemp -d); rm -rf $W/x'")
 
     def test_temp_reason_text_and_other_users_dirs_still_closed(self):
         self.no("rm -rf C:/Users/x/Documents/f")
@@ -1291,7 +1089,7 @@ class ThirdAudit(unittest.TestCase):
             for cmd in ("rm -rf .git", "rm -rf ./.git/", 'rm -rf "C:/visual projects/proj/.git"', "rm -rf .*",
                         "rm -rf .[!.]*", "rm -rf .g*", "rm -f .git/config", "rm -rf .git/objects",
                         "mv .git /c/Users/x/old-git", "cd .git && rm -rf objects", "find .git -delete",
-                        "ssh srv@192.0.2.49 'rm -rf ~/proj/repo/.git'", "Remove-Item -Recurse .git"):
+                        "Remove-Item -Recurse .git"):
                 reason = dg.check(cmd, CWD)
                 self.assertIsNotNone(reason, f"{role}: {cmd}")
             self.assertIn(".git", dg.check("rm -rf .git", CWD))
@@ -1337,10 +1135,8 @@ class ThirdAudit(unittest.TestCase):
                     reason = self.tool(name, path)
                     self.assertIsNotNone(reason, f"{role} {name} {path}")
                     self.assertIn("Слово владельца", reason)
-            for cmd in ("echo x >> CLAUDE.md", "echo '## В-9' >> .claude/decisions.md", "rm .claude/goals/G-001.md",
-                        """python -c "open('.claude/decisions.md', 'a').write('## В-9')" """,
-                        "cat x | tee -a .claude/decisions.md", "sed -i 's/a/b/' CLAUDE.md",
-                        "Add-Content .claude\\decisions.md x", "mv .claude/goals/G-001.md /tmp/x"):
+            for cmd in ("echo x > CLAUDE.md", "rm .claude/goals/G-001.md", "cat x | tee .claude/decisions.md",
+                        "Set-Content .claude\\decisions.md x", "mv .claude/goals/G-001.md /tmp/x"):
                 reason = dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
                 self.assertIn("Слово владельца", reason or "", f"{role}: {cmd}")
             for cmd in ("cat CLAUDE.md", "grep В-12 .claude/decisions.md", "ls .claude/goals",
@@ -1367,11 +1163,9 @@ class ThirdAudit(unittest.TestCase):
                     reason = self.tool(name, path)
                     self.assertIsNotNone(reason, f"{role} {name} {path}")
                     self.assertIn("реестр ошибок", reason)
-            for cmd in ("echo 'status: fixed' >> .claude/errors/E-001.md", "echo x > .claude/errors/E-001.md",
-                        "rm .claude/errors/E-001.md", "rm -rf .claude/errors", "rm -rf ./.claude/errors/",
-                        "sed -i 's/open/fixed/' .claude/errors/E-001.md", "cat x | tee .claude/errors/E-002.md",
-                        "cp /tmp/E-001.md .claude/errors/E-001.md", "mv .claude/errors/E-001.md /tmp/x",
-                        "Set-Content .claude\\errors\\E-001.md x", "python -c \"open('.claude/errors/E-001.md','w').write('x')\""):
+            for cmd in ("echo x > .claude/errors/E-001.md", "rm .claude/errors/E-001.md", "rm -rf .claude/errors",
+                        "rm -rf ./.claude/errors/", "cat x | tee .claude/errors/E-002.md", "cp /tmp/E-001.md .claude/errors/E-001.md",
+                        "mv .claude/errors/E-001.md /tmp/x", "Set-Content .claude\\errors\\E-001.md x"):
                 reason = dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
                 self.assertIn("реестр ошибок", reason or "", f"{role}: {cmd}")
             self.assertIsNone(self.tool("Write", "C:/visual projects/proj/docs/errors/E-001.md"))      # не тот каталог
@@ -1415,12 +1209,10 @@ class ProtectedPaths(unittest.TestCase):
         self.d = tempfile.mkdtemp(prefix="dg-pp-", dir=str(Path.home()))    # под домашним: не временный каталог
         self.addCleanup(shutil.rmtree, self.d, True)
         self.base = Path(self.d).as_posix()
-        saved = (cfg.LOCAL_ROOTS, cfg.WRITE_HOME_ROOTS, cfg.PROJECT_DIR, cfg.PROTECTED, cfg.PROTECTED_ERROR, cfg.REMOTE_ROOTS,
-                 cfg.STAGE, cfg.CLOSED_RE)
+        saved = (cfg.LOCAL_ROOTS, cfg.WRITE_HOME_ROOTS, cfg.PROJECT_DIR, cfg.PROTECTED, cfg.PROTECTED_ERROR)
 
         def restore():
-            (cfg.LOCAL_ROOTS, cfg.WRITE_HOME_ROOTS, cfg.PROJECT_DIR, cfg.PROTECTED, cfg.PROTECTED_ERROR, cfg.REMOTE_ROOTS,
-             cfg.STAGE, cfg.CLOSED_RE) = saved
+            (cfg.LOCAL_ROOTS, cfg.WRITE_HOME_ROOTS, cfg.PROJECT_DIR, cfg.PROTECTED, cfg.PROTECTED_ERROR) = saved
         self.addCleanup(restore)
         for rel in self.FILES:
             f = Path(self.d, rel)
@@ -1431,7 +1223,6 @@ class ProtectedPaths(unittest.TestCase):
         self.addCleanup(p.stop)
         self.as_role(None)
         dg.configure(self.d)
-        cfg.REMOTE_ROOTS, cfg.STAGE, cfg.CLOSED_RE, _ = cfg.machine_rules(PROJ_RPV)  # машины проекта proj — как у остальных тестов
 
     def as_role(self, role):
         os.environ.pop("RPV_ROLE", None)
@@ -1439,11 +1230,11 @@ class ProtectedPaths(unittest.TestCase):
             os.environ["RPV_ROLE"] = role
 
     def rpv(self, content):
-        """Записать `.claude/rpv.json` проекта (объект → JSON вместе с машинами proj, строка — как есть) и перечитать."""
+        """Записать `.claude/rpv.json` проекта (объект → JSON, строка — как есть) и перечитать."""
         import json
         path = Path(self.d, ".claude", "rpv.json")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content if isinstance(content, str) else json.dumps({**PROJ_RPV, **content}), encoding="utf-8")
+        path.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
         dg.configure(self.d)
 
     def check(self, cmd):
@@ -1484,7 +1275,7 @@ class ProtectedPaths(unittest.TestCase):
             self.as_role(role)
             for cmd in ("rm -rf data/raw", "rm data/raw/a.bin", "rm -rf backups", "rm keys/id.pem", "find backups -delete",
                         "rm -rf data/raw/ data/other", "cd data && rm -rf raw", "rm -rf ./data/../data/raw",
-                        "mv data/raw/a.bin trash.bin", "rsync -a --delete data/other/ data/raw/",
+                        "mv data/raw/a.bin trash.bin",
                         f'rm -rf "{self.base}/data/raw/a.bin"', "rm -rf DATA/RAW",
                         "python -c \"import shutil; shutil.rmtree('data/raw')\"", "bash -c 'rm -rf backups'",
                         "Remove-Item -Recurse backups"):
@@ -1526,16 +1317,15 @@ class ProtectedPaths(unittest.TestCase):
     # ------------------------------------------------------------------------------------------ как читаются шаблоны
     def test_name_pattern_matches_at_any_depth_and_does_not_block_parents(self):
         self.rpv({"protected_paths": ["raw", "*.pem"]})
-        for cmd in ("rm -rf data/raw", "rm data/raw/a.bin", "rm -rf raw", "rm keys/id.pem", "rm -rf src/deep/raw/x",
-                    "ssh srv@192.0.2.49 'rm -rf ~/proj/e1/raw/x'", "ssh srv@192.0.2.49 'rm -f ~/proj/keys/a.pem'"):
+        for cmd in ("rm -rf data/raw", "rm data/raw/a.bin", "rm -rf raw", "rm keys/id.pem", "rm -rf src/deep/raw/x"):
             self.no(cmd)
-        for cmd in ("rm -rf data", "rm -rf data/rawer", "rm keys/id.pem.bak", "ssh srv@192.0.2.49 'rm -rf ~/proj/e1/tmp'"):
+        for cmd in ("rm -rf data", "rm -rf data/rawer", "rm keys/id.pem.bak"):
             self.ok(cmd)
 
     def test_anchored_pattern_is_from_project_root(self):
         self.rpv({"protected_paths": ["data/raw"]})
         for cmd in ("rm -rf data/raw", "rm data/raw/a.bin", "rm -rf data/ra*", "rm -rf data/*", "rm -rf data",
-                    "rm -rf data/raw/../raw", f'rm -rf "{self.base}/data"', "ssh srv@192.0.2.49 'rm -rf ~/proj/x/data/raw'"):
+                    "rm -rf data/raw/../raw", f'rm -rf "{self.base}/data"'):
             self.no(cmd)
         for cmd in ("rm -rf data/other", "rm -rf data/rawer", "rm -rf src/data/raw", "rm -rf src"):
             self.ok(cmd)
@@ -1566,17 +1356,11 @@ class ProtectedPaths(unittest.TestCase):
         self.no(f'rm -rf "{self.base}/data/raw/a.bin"')
         self.no("rm -rf data/raw")                                                  # тот же путь относительным
         self.ok(f'rm -rf "{self.base}/data/other"')
-        self.ok("ssh srv@192.0.2.49 'rm -rf ~/proj/data/raw'")                       # другой компьютер — другой путь
         for name in ("Write", "Edit"):                                              # CEO правит вне проекта, но не здесь
             key = "file_path"
             ev = lambda rel: {"tool_name": name, "tool_input": {key: f"{Path(out).as_posix()}/{rel}"}, "cwd": self.d}
             self.assertIsNotNone(dg.check_tool(ev("vault/key")), name)
             self.assertIsNone(dg.check_tool(ev("free/f")), name)
-
-    def test_absolute_pattern_on_remote_machine(self):
-        self.rpv({"protected_paths": ["/opt/proj-compute/keep"]})
-        self.no("ssh root@203.0.113.2 'rm -rf /opt/proj-compute/keep/x'")
-        self.ok("ssh root@203.0.113.2 'rm -rf /opt/proj-compute/other'")
 
     def test_home_directory_is_not_part_of_names(self):
         from unittest import mock
@@ -1675,13 +1459,6 @@ class ProtectedPaths(unittest.TestCase):
         self.assertIsNotNone(dg.check_tool(ev("правило", "другое правило")))
         self.assertIsNotNone(dg.check_tool(ev("| a |\nправило", "| a |\nдругое")))
 
-    def test_config_log_is_written_by_command_only(self):
-        for tool in ("Write", "Edit"):
-            self.assertIn("config-log.json", self.tool(tool, ".claude/dispatcher/config-log.json"), tool)
-        reason = dg.check_tool({"tool_name": "Bash", "cwd": self.d,
-                                "tool_input": {"command": "echo '[]' > .claude/dispatcher/config-log.json"}})
-        self.assertIn("config-log.json", reason or "")
-
     def test_load_protected_directly(self):
         self.assertEqual(cfg.load_protected(self.d), ((), None))                    # файла нет
         self.rpv({"protected_paths": ["a", "b/c"]})
@@ -1753,84 +1530,14 @@ class Publication(unittest.TestCase):
         "git push --tags", "git push origin --tags", "git push --follow-tags origin feat/x", "git push --all",
         "git push origin v1.8.48", "git push origin refs/tags/v1.8.48", "git push origin tag v1.8.48",
         "git push --repo=origin main", "git -C data push origin main", "git -c core.x=y push origin main",
-        "npm publish", "npm --otp 123456 publish", "pnpm publish --no-git-checks", "yarn publish", "yarn npm publish",
-        "cargo publish", "poetry publish --build", "uv publish", "uv run twine upload dist/*", "twine upload dist/*",
-        "python -m twine upload dist/*", "py -3 -m twine upload dist/*", "docker push reg/img:1", "docker image push reg/img:1",
-        "gem push x.gem",
         "sudo gh pr merge 5", "bash -c 'git push origin main'", "echo ok && git push origin main",
-        "ssh srv@192.0.2.49 'cd ~/proj && git push origin main'", 'ssh srv@192.0.2.49 "gh release create v1"',
-        "ssh srv@192.0.2.49 'cd ~/proj && git push'",              # на удалённой машине текущая ветка неизвестна
         "python -c \"import subprocess; subprocess.run(['git', 'push', 'origin', 'main'])\"",
         "echo 'abc; git push origin main",                           # не разобрать — прежний регэксп как страховка
     )
     DENY_PS = (
         "git push origin main", "& gh release create v1 --notes x", 'powershell -Command "git push origin HEAD:main"',
-        'pwsh -c "npm publish"', "Set-Location C:\\visual projects\\proj; gh pr merge 5",
+        'pwsh -c "gh pr merge 5"', "Set-Location C:\\visual projects\\proj; gh pr merge 5",
         '& "C:\\Program Files\\Git\\bin\\git.exe" push origin main', "if ($?) { git push origin main }",
-    )
-    # слияние и выпуск мимо `gh pr merge`/`gh release`: `gh api` с записью и curl/wget/Invoke-WebRequest на api.github.com
-    DENY_API = (
-        "gh api -X PUT repos/o/r/pulls/5/merge", "gh api --method PUT /repos/o/r/pulls/5/merge -f merge_method=squash",
-        "gh api repos/o/r/pulls/5/merge -X PUT", "gh api repos/o/r/pulls/5/merge -f merge_method=squash",   # поле без -X — POST
-        "gh api repos/o/r/pulls/5/merge -F sha=abc", "gh api -XPUT repos/o/r/pulls/5/merge", "gh api --method=PUT repos/o/r/pulls/5/merge",
-        "gh api --method put repos/o/r/pulls/5/merge", "gh -R o/r api -X PUT repos/o/r/pulls/5/merge",
-        "gh.exe api -X PUT repos/{owner}/{repo}/pulls/5/merge", "sudo gh api -X PUT repos/o/r/pulls/5/merge",
-        "gh api -X POST repos/o/r/merges -f base=main -f head=feat", "gh api -X POST repos/o/r/releases -f tag_name=v1",
-        "gh api repos/o/r/releases -f tag_name=v1", "gh api -X PATCH repos/o/r/releases/12 -F draft=false",
-        "gh api --method DELETE repos/o/r/releases/12", "gh api https://api.github.com/repos/o/r/releases -f tag_name=v1",
-        "gh api -X POST repos/o/r/git/refs -f ref=refs/heads/x -f sha=abc", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
-        "gh api -X POST repos/o/r/git/tags -f tag=v1", "gh api -X PUT repos/o/r/contents/README.md -f message=m -f content=Zm9v",
-        "gh api repos/o/r/contents/README.md --input body.json",
-        "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-        "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge", "curl -XPUT https://api.github.com/repos/o/r/pulls/5/merge",
-        "curl -sSL -X POST -H 'Authorization: token x' https://api.github.com/repos/o/r/releases -d '{\"tag_name\":\"v1\"}'",
-        "curl -d '{}' https://api.github.com/repos/o/r/releases", "curl -sd '{}' https://api.github.com/repos/o/r/releases",
-        "curl --data-binary @a.json https://api.github.com/repos/o/r/releases", "curl --data-raw '{}' https://api.github.com/x",
-        "curl --json '{}' https://api.github.com/repos/o/r/releases",
-        "curl -F file=@a.zip https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip",
-        "curl -T a.zip https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip",
-        "curl --upload-file a.zip https://uploads.github.com/repos/o/r/releases/1/assets",
-        "curl --request DELETE https://api.github.com/repos/o/r/releases/1", "curl --request=PATCH https://api.github.com/repos/o/r/releases/1",
-        "curl https://api.github.com/repos/o/r/releases -X POST", "curl.exe -X POST https://api.github.com/x",
-        "curl -X post -H 'A: b' 'https://api.github.com/x'", "echo ok && curl -X POST https://api.github.com/x",
-        "wget --method=PUT https://api.github.com/repos/o/r/pulls/5/merge", "wget --method PUT https://api.github.com/x",
-        "wget --post-data='{}' https://api.github.com/repos/o/r/releases", "wget --post-file=a.json https://api.github.com/x",
-        "wget --body-data='{}' --method=PATCH https://api.github.com/x",
-        "bash -c 'gh api -X PUT repos/o/r/pulls/5/merge'", "ssh srv@192.0.2.49 'curl -X POST https://api.github.com/x'",
-        "echo 'abc; gh api -X PUT repos/o/r/pulls/5/merge",          # не разобрать — прежний регэксп как страховка
-        "echo 'abc; curl -X POST https://api.github.com/x",
-    )
-    DENY_API_PS = (
-        "Invoke-WebRequest -Method Put -Uri https://api.github.com/repos/o/r/pulls/5/merge",
-        "Invoke-RestMethod -Uri https://api.github.com/repos/o/r/releases -Method Post -Body $b",
-        "Invoke-RestMethod -Method:Post https://api.github.com/repos/o/r/releases", "iwr -Method Delete https://api.github.com/x",
-        "irm -Method PATCH -Uri https://api.github.com/repos/o/r/releases/1", "Invoke-RestMethod https://api.github.com/x -Meth Post",
-        "Invoke-WebRequest -Uri https://uploads.github.com/repos/o/r/releases/1/assets -Method Post -InFile a.zip",
-        "Invoke-RestMethod https://api.github.com/repos/o/r/releases -Body $b",        # тело без -Method — POST
-        "curl -Method Post -Uri https://api.github.com/x", "curl.exe -X POST https://api.github.com/x",
-        "$r = Invoke-RestMethod -Method Put -Uri 'https://api.github.com/repos/o/r/pulls/5/merge'",
-        'powershell -Command "Invoke-RestMethod -Method Put -Uri https://api.github.com/x"',
-        "& gh api -X PUT repos/o/r/pulls/5/merge",
-    )
-    ALLOW_API = (        # чтение, запись не на GitHub и запись GitHub, не похожая на слияние и выпуск (gh api)
-        "gh api repos/o/r/pulls/5", "gh api repos/o/r/releases", "gh api repos/o/r/pulls/5/merge", "gh api user --jq .login",
-        "gh api repos/o/r/commits --paginate", "gh api repos/o/r/pulls/5/merge -X GET",
-        "gh api repos/o/r/releases -X GET -f per_page=5", "gh api --method GET repos/o/r/contents/README.md -f ref=main",
-        "gh api -X POST repos/o/r/issues/5/comments -f body=x", "gh api -X PATCH repos/o/r/pulls/5 -f state=closed",
-        "gh api graphql -f query='query { viewer { login } }'",
-        "curl https://api.github.com/repos/o/r/releases", "curl -s -H 'Accept: x' https://api.github.com/repos/o/r/pulls/5",
-        "curl -I https://api.github.com/x", "curl -X GET https://api.github.com/x",
-        "curl -G -d per_page=5 https://api.github.com/repos/o/r/releases",         # -G: данные уходят в адрес, это GET
-        "curl -X POST https://example.com/hook -d x", "curl -d x=y https://example.com/hook",
-        "curl -X POST https://example.com/api.github.com.txt", "curl -o a.zip -L https://github.com/o/r/archive/main.zip",
-        "wget https://api.github.com/repos/o/r/releases", "wget -q -O - https://api.github.com/x",
-        "wget --post-data=x https://example.com", "wget --method=GET https://api.github.com/x",
-        "Invoke-WebRequest -Uri https://api.github.com/repos/o/r/releases", "Invoke-RestMethod https://api.github.com/x",
-        "Invoke-RestMethod -Method Get -Uri https://api.github.com/x", "iwr https://api.github.com/x",
-        "Invoke-RestMethod -Method Post -Uri https://example.com/hook -Body $b", "curl https://api.github.com/x",
-        'git commit -m "curl -X POST https://api.github.com/x"', 'echo "gh api -X PUT repos/o/r/pulls/5/merge"',
-        "grep -n 'curl -X POST api.github.com' README.md",
-        'python .claude/dispatcher/tickets.py comment TK-7 --author engineer --text "curl -X POST https://api.github.com/x"',
     )
     ALLOW_OK = (
         "git push -u origin feat/cp2-publish", "git push origin HEAD:feat/x", "git push origin feat/x:feat/y",
@@ -1840,7 +1547,7 @@ class Publication(unittest.TestCase):
         'python .claude/dispatcher/tickets.py comment TK-7 --author engineer --text "git push origin main и gh pr merge 5"',
         'python .claude/dispatcher/tickets.py result TK-7 blocked --why "нужен gh release create"',
         "gh pr create --title x", "gh pr view 5", "gh pr checks 5", "gh release list", "gh release view v1",
-        "npm install", "npm run build", "npm test", "cargo build", "docker build .", "docker run img", "twine check dist/*",
+        "gh api -X PUT repos/o/r/pulls/5/merge", "curl -X POST https://api.github.com/x", "npm publish", "docker push img",
         "uv run pytest", "python -m pytest -q", "git status", "git log --oneline",
     )
 
@@ -1869,14 +1576,14 @@ class Publication(unittest.TestCase):
         return dg.check_tool({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": cwd})
 
     def all_denied(self):
-        for tool, cmds in (("Bash", self.DENY + self.DENY_API), ("PowerShell", self.DENY_PS + self.DENY_API_PS)):
+        for tool, cmds in (("Bash", self.DENY), ("PowerShell", self.DENY_PS)):
             for cmd in cmds:
                 reason = self.reason(cmd, tool)
                 self.assertIsNotNone(reason, f"пропущено: {tool} {cmd!r}")
                 self.assertIn("Публикация", reason, f"{cmd!r}")
 
     def all_allowed(self):
-        for tool, cmds in (("Bash", self.DENY + self.DENY_API), ("PowerShell", self.DENY_PS + self.DENY_API_PS)):
+        for tool, cmds in (("Bash", self.DENY), ("PowerShell", self.DENY_PS)):
             for cmd in cmds:
                 self.assertIsNone(self.reason(cmd, tool), f"ложный отказ: {tool} {cmd!r}")
 
@@ -1896,41 +1603,19 @@ class Publication(unittest.TestCase):
         for cmd in self.ALLOW_OK:
             self.assertIsNone(self.reason(cmd), f"ложный отказ: {cmd!r}")
 
-    def test_api_reads_and_other_writes_allowed(self):
-        """gh api без записи, curl GET, запись на чужой адрес и запись GitHub мимо слияния и выпуска (комментарий) — свободны."""
-        for role in ("engineer", "researcher", "judge"):
-            os.environ["RPV_ROLE"] = role
-            for tool in ("Bash", "PowerShell"):
-                for cmd in self.ALLOW_API:
-                    self.assertIsNone(self.reason(cmd, tool), f"ложный отказ: {role} {tool} {cmd!r}")
-
-    def test_api_write_reason_is_the_publication_text(self):
-        for cmd in ("gh api -X PUT repos/o/r/pulls/5/merge", "curl -X POST https://api.github.com/repos/o/r/releases -d '{}'"):
-            reason = self.reason(cmd)
-            self.assertIn("Публикация", reason, cmd)
-            for part in ("TK-7", "tickets.py allow <ID> publish --ref В-N", "ask-owner", "--why-owner необратимое"):
-                self.assertIn(part, reason, cmd)
-        self.assertIn("gh api PUT repos/o/r/pulls/5/merge", self.reason("gh api -X PUT repos/o/r/pulls/5/merge"))
-        self.assertIn("curl: запись на api.github.com", self.reason("curl -X POST https://api.github.com/x"))
-
-    def test_api_write_journal_group(self):
-        tr = []
-        self.assertIsNotNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "gh api -X PUT repos/o/r/pulls/5/merge"}, "cwd": CWD}, tr))
-        self.assertEqual(tr[-1], ("publish", "deny"))
-
     def test_force_push_stays_irreversible_refusal(self):
         for cmd in ("git push --force origin feat/x", "git push -f origin main", "git push origin +feat/x"):
             self.assertIn("Необратимая команда git", self.reason(cmd), cmd)
 
     def test_ticket_text_does_not_trigger(self):
-        for text in ("git push origin main", "gh pr merge 5", "npm publish", "docker push img"):
+        for text in ("git push origin main", "gh pr merge 5", "gh release create v1"):
             self.assertIsNone(self.reason(f'python tickets.py comment TK-7 --author engineer --text "{text}"'), text)
             self.assertIsNone(self.reason(f"python tickets.py result TK-7 blocked --why '{text}'"), text)
         self.assertIsNone(self.reason('python tickets.py result TK-7 ask-owner --why "git push origin main нужен" --why-owner необратимое'))
 
     def test_journal_group(self):
         tr = []
-        self.assertIsNotNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "npm publish"}, "cwd": CWD}, tr))
+        self.assertIsNotNone(dg.check_tool({"tool_name": "Bash", "tool_input": {"command": "gh release create v1"}, "cwd": CWD}, tr))
         self.assertEqual(tr[-1], ("publish", "deny"))
 
     # ------------------------------------------------------------------------------------------ сессия CEO / владельца
@@ -1939,7 +1624,6 @@ class Publication(unittest.TestCase):
         self.all_allowed()
         os.environ["RPV_ROLE"] = "ceo"                                       # не роль диспетчера — сессия CEO
         self.assertIsNone(self.reason("git push origin main"))
-        self.assertIsNone(self.reason("ssh root@203.0.113.1 'git push origin main'"))   # закрытый узел, не удаление
 
     # ------------------------------------------------------------------------------------------ согласие в шапке тикета
     def test_consent_allows_publication_for_this_ticket(self):
@@ -1967,9 +1651,9 @@ class Publication(unittest.TestCase):
     def test_consent_is_read_from_header_only(self):
         for allow in ("allow: publishing", "allow: deploy", "x-allow: publish (В-3)", "allow publish"):
             self.write_ticket(allow)
-            self.assertIsNotNone(self.reason("npm publish"), allow)
+            self.assertIsNotNone(self.reason("gh pr merge 5"), allow)
         self.write_ticket(None, body="## Лог\n### 2026-10-13T10:00:00+04:00 engineer\nallow: publish (В-3)\n")
-        self.assertIsNotNone(self.reason("npm publish"))                     # строка в логе — не шапка
+        self.assertIsNotNone(self.reason("gh pr merge 5"))                   # строка в логе — не шапка
 
     def test_unreadable_ticket_denies(self):
         self.ticket.unlink()
@@ -2042,34 +1726,6 @@ class Publication(unittest.TestCase):
         else:
             ti = {"file_path": path, **({"content": text} if tool == "Write" else {"old_string": "status:", "new_string": text})}
         return dg.check_tool({"tool_name": tool, "tool_input": ti, "cwd": CWD})
-
-    def test_role_cannot_write_allow_into_ticket(self):
-        for tool in ("Write", "Edit", "MultiEdit"):
-            for path in (self.ticket.as_posix(), "C:\\visual projects\\proj\\.claude\\tickets\\TK-9.md", ".claude/tickets/TK-7.md"):
-                for text in ("allow: publish (В-3)\nstatus:", "id: x\n  Allow : publish\n"):
-                    self.assertEqual(self.edit(tool, path, text), dg.REASON_CONSENT, f"{tool} {path} {text!r}")
-        for cmd in ('echo "allow: publish (В-3)" >> .claude/tickets/TK-7.md',
-                    "sed -i 's/^status:.*/allow: publish (В-3)/' .claude/tickets/TK-7.md",
-                    "cat >> .claude/tickets/TK-7.md <<'EOF'\nallow: publish (В-3)\nEOF",
-                    "python -c \"open('.claude/tickets/TK-7.md', 'a').write('allow: publish')\"",
-                    "tee -a .claude/tickets/TK-7.md <<< 'allow: publish'"):
-            self.assertEqual(self.reason(cmd), dg.REASON_CONSENT, cmd)
-        self.assertEqual(self.reason('Add-Content .claude\\tickets\\TK-7.md "allow: publish (В-3)"', "PowerShell"), dg.REASON_CONSENT)
-
-    def test_ordinary_ticket_work_is_not_forgery(self):
-        for tool in ("Write", "Edit", "MultiEdit"):
-            self.assertIsNone(self.edit(tool, self.ticket.as_posix(), "status: in_review\n"), tool)
-            self.assertIsNone(self.edit(tool, (self.root / "docs" / "x.md").as_posix(), "allow: publish\n"), tool)   # не тикет
-        for cmd in ("cat .claude/tickets/TK-7.md", "grep '^allow:' .claude/tickets/TK-7.md 2>/dev/null",
-                    "grep -n allow .claude/tickets/TK-7.md 2>&1", "echo 'allow: publish' > notes.txt",
-                    'python tickets.py comment TK-7 --author engineer --text "строку allow: пишет CEO в .claude/tickets/"',
-                    "sed -i 's/in_progress/in_review/' .claude/tickets/TK-7.md"):
-            self.assertIsNone(self.reason(cmd), cmd)
-
-    def test_ceo_may_edit_tickets(self):
-        self.as_ceo()
-        self.assertIsNone(self.edit("Edit", self.ticket.as_posix(), "allow: publish (В-3)\nstatus:"))
-        self.assertIsNone(self.reason('echo "allow: publish (В-3)" >> .claude/tickets/TK-7.md'))
 
 
 class HookEntryPoint(unittest.TestCase):
@@ -2253,6 +1909,122 @@ class HookEntryPoint(unittest.TestCase):
         self.assertIn("Страж удаления", r.stderr.decode("utf-8", "replace"))
 
 
+class CutRound(unittest.TestCase):
+    """Вырез 2.0.18 (В-47): то, что стражу раньше давало ложные отказы, теперь проходит."""
+
+    def setUp(self):
+        p = mock.patch.dict(os.environ, {"RPV_ROLE": "engineer", "RPV_TICKET": "TK-9"})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def ok(self, cmd, cwd=CWD):
+        reason = dg.check(cmd, cwd)
+        self.assertIsNone(reason, f"ложный отказ: {cmd!r} → {reason}")
+
+    def no(self, cmd, cwd=CWD):
+        self.assertIsNotNone(dg.check(cmd, cwd), f"пропущено: {cmd!r}")
+
+    def test_role_may_name_its_own_identity_variables(self):
+        """identity (49 отказов в rpv, почти все ложные): тест «без роли» и скрипты с текстом RPV_ROLE — обычная работа Инженера."""
+        for cmd in ("env -u RPV_ROLE python -m pytest -q", "RPV_ROLE= python errors.py fix E-1", "export RPV_ROLE=ceo",
+                    "python -c \"import os; os.environ.pop('RPV_ROLE')\"", "env -i python x.py", "unset RPV_TICKET"):
+            self.ok(cmd)
+
+    def test_signal_consent_and_log_files_are_not_special(self):
+        for cmd in ("echo x >> .claude/dispatcher/ceo-inbox.md", "echo '{}' >> .claude/dispatcher/branch-delete.json",
+                    "echo allow: publish >> .claude/tickets/TK-9.md", "tee -a .claude/dispatcher/config-log.json"):
+            self.ok(cmd)
+        for path, content in ((f"{CWD}/.claude/dispatcher/config-log.json", "[]"), (f"{CWD}/.claude/tickets/TK-9.md", "allow: publish")):
+            ev = {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}, "cwd": CWD}
+            self.assertIsNone(dg.check_tool(ev), path)
+
+    def test_remote_machines_are_not_parsed_but_local_redirects_are(self):
+        for cmd in ("ssh srv 'echo x > /etc/y'", "ssh srv@192.0.2.49 'rm -rf /home/srv/other'", "scp a.txt srv:/etc/y",
+                    "rsync -a --delete data/ srv:/etc/", "ssh srv 'cd /x && git push origin main'"):
+            self.ok(cmd)
+        out = outside_dir()
+        self.addCleanup(shutil.rmtree, out, True)
+        f = Path(out, "a.txt")
+        f.write_text("x", encoding="utf-8")
+        self.no(f'ssh srv ls > "{f.as_posix()}"')                       # `>` вне кавычек — локальная перезапись
+        self.no("rm -rf /c/Users/x")
+        self.no("sudo rm -rf /c/Users/x")
+
+    def test_temp_dir_through_variables(self):
+        for cmd in ('T=$TMPDIR/work; rm -rf "$T/a"', "D=/tmp/x; rm -rf $D/a", 'W=$(mktemp -d); rm -rf "$W/o"', 'rm -rf "$TMPDIR/foo"',
+                    'cd "$(mktemp -d)" && rm -rf stage'):
+            self.ok(cmd)
+        self.no("rm -rf $UNKNOWN/x")
+        self.no("rm -rf $TMPDIR")
+
+    def test_git_branch_delete_and_file_rollback(self):
+        self.ok("git worktree remove .claude/worktrees/pr208 && git branch -D pr208")
+        self.ok("git checkout -- src/a.py")
+        self.ok("git restore --source=HEAD -- src/a.py")
+        self.no("git branch -D main")
+        self.no("git push --force")
+
+    def test_sibling_worktrees_are_roots(self):
+        roots = cfg.project_roots(r"C:\visual projects\proj\.claude\worktrees\cut-1")
+        self.assertEqual(roots, ("c:/visual projects/proj/.claude/worktrees/cut-1/", "/c/visual projects/proj/.claude/worktrees/cut-1/",
+                                 "c:/visual projects/proj/", "/c/visual projects/proj/"))
+        self.assertEqual(cfg.project_roots(r"C:\visual projects\proj"), ("c:/visual projects/proj/", "/c/visual projects/proj/"))
+        with mock.patch.object(cfg, "LOCAL_ROOTS", roots):
+            ctx = paths.Ctx(None)
+            self.assertTrue(paths.allowed("C:/visual projects/proj/.claude/worktrees/cut-2/x.py", ctx))
+            self.assertTrue(paths.allowed("C:/visual projects/proj/src/x.py", ctx))
+            self.assertFalse(paths.allowed("C:/visual projects/other/x.py", ctx))
+            self.assertFalse(paths.allowed("C:/visual projects/proj", ctx))
+            ev = {"tool_name": "Edit", "tool_input": {"file_path": "C:/visual projects/proj/.claude/worktrees/cut-2/x.py"}, "cwd": CWD}
+            self.assertIsNone(dg.check_tool(ev))
+
+    def test_publish_is_the_minimum(self):
+        for cmd in ("gh pr merge 5", "gh release create v1", "git push origin main", "git push --tags"):
+            self.assertIn("Публикация", dg.check(cmd, CWD) or "", cmd)
+        for cmd in ("npm publish", "docker push img", "curl -X POST https://api.github.com/repos/o/r/releases",
+                    "gh api -X PUT repos/o/r/pulls/5/merge", "git push origin feat/x"):
+            self.ok(cmd)
+
+
+class QuickPass(unittest.TestCase):
+    """Быстрый выход: читающие команды пропускаются до импорта пакета разбора; всё сомнительное идёт в полную проверку."""
+
+    def passes(self, cmd, tool="Bash"):
+        return dg.quick_pass({"tool_name": tool, "tool_input": {"command": cmd}})
+
+    def test_reading_commands_pass(self):
+        for cmd in ("ls", "ls -la src", "cat README.md", "head -n 5 a.txt", "tail -F log.txt", "grep -rn foo src", "rg foo", "wc -l a.txt",
+                    "echo hello", "find . -name '*.py'", "git status", "git log --oneline -5", "git diff HEAD~1", "git show abc123",
+                    "git branch", "git branch -a", "git branch --list", "git status | head", "git log | grep fix | wc -l", "/usr/bin/ls -l"):
+            self.assertTrue(self.passes(cmd), cmd)
+        self.assertTrue(self.passes("tail -F log.txt", "Monitor"))
+
+    def test_anything_that_can_write_goes_to_the_full_check(self):
+        for cmd in ("echo hi > a.txt", "cat a >> b", "ls; rm -rf x", "ls && rm x", "ls & rm x", "echo $(rm x)", "echo `rm x`", "ls | xargs rm",
+                    "find . -delete", "find . -exec rm {} ;", "find . -fprint out.txt", "git branch -D x", "git branch new", "git branch -m a b",
+                    "git commit -m x", "git checkout -- a", "git reset --hard", "git diff --output=out.patch", "rg --pre ./x foo",
+                    "FOO=1 ls", "rm -rf x", "sed -i s/a/b/ f", "python x.py", "cat a\nrm x", "ls \\\n; rm x", "", "   "):
+            self.assertFalse(self.passes(cmd), cmd)
+        self.assertFalse(self.passes("ls", "PowerShell"))
+        self.assertFalse(self.passes("ls", "Write"))
+        self.assertFalse(dg.quick_pass({"tool_name": "Bash", "tool_input": {"command": ["ls"]}}))
+        self.assertFalse(dg.quick_pass("ls"))
+
+    def test_entry_point_stays_silent_for_a_reading_command(self):
+        import json
+        import subprocess
+        here = os.path.dirname(os.path.abspath(__file__))
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, ".claude", "roles"))
+            env = dict(os.environ, CLAUDE_PROJECT_DIR=d)
+            env.pop("RPV_ROLE", None)
+            for cmd, deny in (("git status", False), ("rm -rf /etc/x", True)):
+                r = subprocess.run([sys.executable, os.path.join(here, "delete_guard.py")], capture_output=True, env=env,
+                                   input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": d}).encode("utf-8"))
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(bool(r.stdout.strip()), deny, cmd)
+
+
 class Lexer(unittest.TestCase):
     def words(self, text):
         return [c.words for c in lexer.tokenize(text)]
@@ -2284,7 +2056,7 @@ class Lexer(unittest.TestCase):
 
 
 class SettingsSource(unittest.TestCase):
-    """CP8: удалённые машины — ключи `.claude/rpv.json` проекта; окружение (`RPV_GUARD_*`, прежние `ALPHA_*`) не читается."""
+    """CP8: защищённые пути — ключ `.claude/rpv.json` проекта; окружение (`RPV_GUARD_*`, прежние `ALPHA_*`) не читается."""
 
     HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -2299,8 +2071,7 @@ class SettingsSource(unittest.TestCase):
                 json.dump(rpv, f)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("RPV_", "ALPHA_"))}
         env.update(env_extra, CLAUDE_PROJECT_DIR=proj, PYTHONIOENCODING="utf-8")
-        code = ("from dguard import config as c, paths, policy; print(c.STAGE, c.REMOTE_ROOTS, policy.dispatcher_role(), "
-                "paths.closed_host('host-9.example'), c.PROTECTED_ERROR)")
+        code = "from dguard import config as c, policy; print(c.PROTECTED, policy.dispatcher_role(), c.PROTECTED_ERROR)"
         r = subprocess.run([sys.executable, "-c", code], cwd=self.HERE, env=env, capture_output=True, text=True,
                            encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -2308,21 +2079,18 @@ class SettingsSource(unittest.TestCase):
 
     def test_rpv_json_is_read_env_is_not(self):
         out = self.read({"ALPHA_GUARD_STAGE": "/dev/shm/old", "ALPHA_ROLE": "judge", "RPV_GUARD_STAGE": "/dev/shm/env",
-                         "RPV_GUARD_REMOTE_ROOTS": "/srv/env/", "RPV_ROLE": "engineer"},
-                        {"guard_stage": "/dev/shm/new", "guard_remote_roots": ["/srv/new/"],
-                         "guard_forbidden_hosts": ["host-9.example"]})
-        self.assertEqual(out, "/dev/shm/new ('/srv/new/',) engineer True None")
-        self.assertEqual(self.read({"RPV_GUARD_STAGE": "/dev/shm/env"}), "() None False None")
+                         "RPV_ROLE": "engineer"}, {"protected_paths": ["data/raw"]})
+        self.assertEqual(out, "('data/raw',) engineer None")
+        self.assertEqual(self.read({"RPV_PROTECTED_PATHS": "x"}), "() None None")
 
-    def test_bad_machine_keys_are_fail_closed(self):
-        self.assertIn("guard_remote_roots — не список", self.read({}, {"guard_remote_roots": "/srv/new/"}))
-        self.assertIn("guard_stage — не строка", self.read({}, {"guard_stage": ["/x"]}))
+    def test_bad_protected_paths_are_fail_closed(self):
+        self.assertIn("protected_paths — не список", self.read({}, {"protected_paths": "data/raw"}))
 
     def test_texts_name_settings_keys(self):
         for text in (msg.REASON, msg.REASON_OVERWRITE, msg.REASON_IRREVERSIBLE):
             self.assertNotIn("ALPHA_", text)
             self.assertNotIn("RPV_GUARD", text)
-        self.assertIn("guard_remote_roots", msg.REASON)
+        self.assertIn("protected_paths", msg.REASON)
 
 
 class GuardGroups(unittest.TestCase):
@@ -2354,13 +2122,11 @@ class GuardGroups(unittest.TestCase):
             "rm": ("Bash", {"command": "rm -rf /c/Users/x"}),
             "py-ast": ("Bash", {"command": "python -c \"import shutil; shutil.rmtree('/c/Users/x')\""}),
             "ps": ("PowerShell", {"command": "del C:\\x"}),
-            "ssh": ("Bash", {"command": "ssh srv@192.0.2.49 'rm -rf /home/other/x'"}),
             "tee-trunc-cp": ("Bash", {"command": f'echo a > "{self.f}"'}),
             "git": ("Bash", {"command": "git reset --hard"}),
             "publish": ("Bash", {"command": "git push origin main"}),
             "protected": ("Bash", {"command": "rm -rf data/raw/x"}),
             "file": ("Write", {"file_path": self.f}),
-            "ceo-signal": ("Write", {"file_path": "C:/x/.claude/dispatcher/ceo-inbox.md"}),
             "legacy": ("Bash", {"command": "echo 'abc; rm -rf /c/Users/x"}),
         }
         with protect("data/raw"):
@@ -2389,92 +2155,26 @@ class GuardGroups(unittest.TestCase):
         self.assertEqual(tr, [])
 
 
-class BranchDeleteConsentTests(unittest.TestCase):
-    """Удаление веток на удалённом: роли — никогда; CEO — только с согласием владельца на каждую названную ветку
-    (`tickets.py allow-delete` → dispatcher/branch-delete.json, на час); main/master — никогда; остальные необратимые команды git
-    по-прежнему закрыты всем."""
+class BranchDeleteTests(unittest.TestCase):
+    """Удаление веток на удалённом (`git push --delete`, `:ветка`): простой запрет всем, без согласий. Локальная `branch -D` — свободна."""
 
-    def setUp(self):
-        from unittest import mock
-        self.tmp = tempfile.TemporaryDirectory(prefix="dg-bd-")
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-        self.file = self.root / ".claude" / "dispatcher" / "branch-delete.json"
-        self.file.parent.mkdir(parents=True)
-        for p in (mock.patch.dict(os.environ), mock.patch.object(cfg, "PROJECT_DIR", str(self.root))):
-            p.start()
-            self.addCleanup(p.stop)
-        os.environ.pop("RPV_ROLE", None)
-        os.environ.pop("RPV_TICKET", None)
+    def reason(self, cmd):
+        return dg.check_tool({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
 
-    def grant(self, *branches, hours=1, ref="В-3"):
-        import json
-        from datetime import datetime, timedelta
-        until = (datetime.now().astimezone() + timedelta(hours=hours)).isoformat(timespec="seconds")
-        self.file.write_text(json.dumps({b: {"ref": ref, "until": until} for b in branches}), encoding="utf-8")
+    def test_remote_branch_delete_is_refused_for_ceo_and_roles(self):
+        for role in (None, "engineer", "judge"):
+            with mock.patch.dict(os.environ):
+                os.environ.pop("RPV_ROLE", None)
+                if role:
+                    os.environ["RPV_ROLE"] = role
+                for cmd in ("git push origin --delete feat/x", "git push origin :feat/x", "git push -d origin feat/x",
+                            "git push --delete origin refs/heads/feat/x", "git push --mirror origin", "git push --prune origin",
+                            "git push origin --delete main", "git push origin :master"):
+                    self.assertIn("через CEO", self.reason(cmd) or "", (role, cmd))
 
-    def reason(self, cmd, tool="Bash"):
-        return dg.check_tool({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(self.root)})
-
-    def test_ceo_without_consent_is_refused_with_the_way_out(self):
-        for cmd in ("git push origin --delete feat/x", "git push origin :feat/x", "git push -d origin feat/x"):
-            why = self.reason(cmd)
-            self.assertIsNotNone(why, cmd)
-            self.assertIn("allow-delete", why)
-
-    def test_ceo_with_consent_deletes_the_named_branch_in_every_spelling(self):
-        self.grant("feat/x")
-        for cmd in ("git push origin --delete feat/x", "git push --delete origin feat/x", "git push origin :feat/x",
-                    "git push -d origin feat/x", "git push origin --delete refs/heads/feat/x", "git push origin :refs/heads/feat/x"):
+    def test_local_branch_delete_and_other_pushes_are_free(self):
+        for cmd in ("git branch -D pr208", "git push origin feat/x", "git push -u origin feat/x"):
             self.assertIsNone(self.reason(cmd), cmd)
-
-    def test_consent_is_per_branch_and_all_named_must_have_it(self):
-        self.grant("feat/x")
-        self.assertIsNotNone(self.reason("git push origin --delete feat/y"))
-        self.assertIsNotNone(self.reason("git push origin --delete feat/x feat/y"))
-        self.grant("feat/x", "feat/y")
-        self.assertIsNone(self.reason("git push origin --delete feat/x feat/y"))
-        self.assertIsNone(self.reason("git push origin :feat/x :feat/y"))
-
-    def test_expired_missing_or_broken_consent_is_no_consent(self):
-        self.grant("feat/x", hours=-1)
-        self.assertIsNotNone(self.reason("git push origin --delete feat/x"))
-        for text in ("", "{", "[]", '{"feat/x": "да"}', '{"feat/x": {"ref": "В-1"}}', '{"feat/x": {"ref": "слово", "until": "2999-01-01T00:00:00+00:00"}}',
-                     '{"feat/x": {"ref": "В-1", "until": "когда-нибудь"}}'):
-            self.file.write_text(text, encoding="utf-8")
-            self.assertIsNotNone(self.reason("git push origin --delete feat/x"), text)
-        self.file.unlink()
-        self.assertIsNotNone(self.reason("git push origin --delete feat/x"))
-
-    def test_role_run_never_deletes_even_with_consent(self):
-        self.grant("feat/x")
-        for role in ("engineer", "researcher", "judge"):
-            os.environ["RPV_ROLE"] = role
-            self.assertIsNotNone(self.reason("git push origin --delete feat/x"), role)
-
-    def test_default_branches_are_never_deleted(self):
-        self.grant("main", "master")
-        for cmd in ("git push origin --delete main", "git push origin :master", "git push origin --delete refs/heads/main"):
-            self.assertIsNotNone(self.reason(cmd), cmd)
-
-    def test_other_irreversible_commands_stay_closed_for_ceo(self):
-        self.grant("feat/x")
-        for cmd in ("git push --force origin feat/x", "git push origin +feat/x", "git push --mirror origin", "git push --prune origin",
-                    "git push origin --delete 'feat/*'", "git push origin --delete $BRANCH", "git push origin --delete",
-                    "git push origin feat/y :feat/x", "git push --delete feat/x"):
-            self.assertIsNotNone(self.reason(cmd), cmd)
-
-    def test_consent_file_cannot_be_written_by_anyone_but_the_command(self):
-        for role in (None, "engineer"):
-            if role:
-                os.environ["RPV_ROLE"] = role
-            for cmd in ("echo '{}' > .claude/dispatcher/branch-delete.json", "rm .claude/dispatcher/branch-delete.json",
-                        "python -c \"open('.claude/dispatcher/branch-delete.json','w').write('{}')\""):
-                self.assertIsNotNone(self.reason(cmd), (role, cmd))
-            self.assertIsNotNone(dg.check_tool({"tool_name": "Write", "tool_input": {"file_path": str(self.file)}, "cwd": str(self.root)}), role)
-            self.assertIsNone(self.reason("cat .claude/dispatcher/branch-delete.json"), "чтение свободно")
-        os.environ.pop("RPV_ROLE", None)
-        self.assertIsNone(self.reason("python .claude/dispatcher/tickets.py allow-delete feat/x --ref В-1"), "сама команда проходит")
 
 
 if __name__ == "__main__":
