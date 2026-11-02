@@ -168,7 +168,7 @@ def decide(tkt: T.Ticket, state: dict, now, check_wait_for, alive=None) -> "Deci
         if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":
             return None
         if _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
-            return None  # пинг-понг: ревьюера не будим, тикет уходит CEO (escalate_review_limit в tick)
+            return None  # пинг-понг: ревьюера не будим, вопрос владельцу (escalate_review_limit в tick)
         return Decision(role=reviewer, reason="review",
                         header_updates={"status": "in_review"} if status == "done" else None)
 

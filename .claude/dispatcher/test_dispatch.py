@@ -2682,7 +2682,7 @@ class DispatchRunTests(unittest.TestCase):
         self.recording_popen()
         D.tick(now=dt("2026-10-03T15:20:00+04:00"))                     # запуск кончился — эскалация, одна строка
         self.assertEqual(T.read_ticket(path).log[-1].author, "dispatcher")
-        self.assertEqual(len(self.ceo_lines(tid, "done")), 1, self.ceo_lines(tid))
+        self.assertEqual(len(self.ceo_lines(tid, "needs_owner")), 1, self.ceo_lines(tid))
 
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
         path = self.review_setup()
@@ -2691,13 +2691,13 @@ class DispatchRunTests(unittest.TestCase):
             self.owner_resubmits(path, n, "in_review")
         self.recording_popen()
         D.tick()                                       # эскалация + первый тик (метка «историю done не пересказываем»)
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1)
+        self.assertEqual(len(self.ceo_lines(path.stem, "needs_owner")), 1)
         T.append_log(path, "ceo", "принимаю как есть", now=dt("2026-10-03T15:00:00+04:00"))
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-03T15:00:00+04:00"))
         D.tick()
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, self.ceo_lines(path.stem))  # «не сделано» + закрытие CEO
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, self.ceo_lines(path.stem))  # закрытие CEO после вопроса владельцу
         D.tick()
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, "дедуп")
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, "дедуп")
 
     # --- повтор после таймаута
     def test_timeout_without_json_keeps_session_and_retry_resumes(self):
