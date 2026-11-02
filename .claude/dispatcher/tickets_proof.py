@@ -87,3 +87,27 @@ def proof_ack(tid: str, tkt, root: Path) -> tuple[str, str]:
             return (f"команда договора `{cmd}` упала (прогон в {cwd}): {note.replace(chr(10), chr(10) + '    ')}\n"
                     "Принять нельзя: верни работу автору (`result <ID> return`); запись в тикете не сделана"), ""
     return "", f" проверки договора: {len(cmds)} кмд, код 0" if cmds else ""
+
+
+_LATER_IN_GIT = ("не отслеживается git", "не из файлов под git")   # файл теста коммитят позже договора — при записи не отказ
+
+
+def label_problem(text: str, tkt, author: str) -> str:
+    """Запись договора исполнителем (`comment`, TK-089): ярлык теста/запуска без команды, полный прогон проекта или команда
+    вне допустимых форм — отказ при записи, не на приёмке. Файла теста в git ещё может не быть: это проверит приёмка.
+    Чужие записи и `[итог: …]` не трогаются; пусто — писать можно."""
+    if not T.author_is(author, tkt.owner or "") or re.match(r"\s*\[итог:", text or ""):
+        return ""
+    for m in LABEL.finditer(text or ""):
+        kind = m.group(1).lower().split()[0]
+        cmd = " ".join((m.group(2) if m.group(2) is not None else m.group(3) or "").split())
+        if kind in NEED_COMMAND and not cmd:
+            return f"в договоре ярлык [{kind}] без команды проверки: {HINT}"
+        if not cmd:
+            continue
+        if full_run(cmd):
+            return f"команда договора `{cmd}` — полный прогон проекта: {full_run_hint()}"
+        argv, why = errors_mod.check_argv(cmd, Path.cwd())
+        if argv is None and not any(k in why for k in _LATER_IN_GIT):
+            return f"команда договора `{cmd}` не допущена: {why}"
+    return ""
