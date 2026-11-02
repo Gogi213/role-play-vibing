@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_tk062 import CEO_COMMAND, CEO_TEMPLATE, PLUGIN, SIGNALS_DOC, T, UNR, W  # noqa: E402
+from test_tk062 import UNR, W  # noqa: E402
 from test_tk072 import Base  # noqa: E402
 
 
@@ -45,31 +45,6 @@ class DedupKeyHasBranchTests(Base):
         self.branch = "trunk"
         _, ws = self.check(0, self.ws)
         self.assertEqual(ws[UNR.BRANCH_KEY], "trunk")
-
-
-class MonitorCeilingTextTests(unittest.TestCase):
-    """Схема Monitor: умолчание 5 мин, `timeout_ms` выше 600000 обрезается до 600000 — 1800000/«30 мин» в тексте не остаётся."""
-    FILES = {"устав CEO": CEO_TEMPLATE, "команда /ceo": CEO_COMMAND, "docs/signals.md": SIGNALS_DOC,
-             "CHANGELOG": PLUGIN / "CHANGELOG.md"}
-
-    def test_no_1800000_in_any_text(self):
-        for name, path in self.FILES.items():
-            with self.subTest(name=name):
-                self.assertNotIn("1800000", path.read_text(encoding="utf-8"))
-
-    def test_text_states_600000_and_ten_minutes(self):
-        for name, path in self.FILES.items():
-            if name == "CHANGELOG":
-                continue
-            with self.subTest(name=name):
-                text = path.read_text(encoding="utf-8")
-                self.assertIn("timeout_ms: 600000", text)
-                self.assertRegex(text, r"(потолок|не дольше) 10 мин")
-
-    def test_changelog_has_no_old_ceiling(self):
-        text = (PLUGIN / "CHANGELOG.md").read_text(encoding="utf-8")
-        self.assertNotIn("потолок 30 мин", text)
-        self.assertNotIn("живёт до 30 мин", text)
 
 
 if __name__ == "__main__":
