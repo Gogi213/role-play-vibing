@@ -87,6 +87,8 @@ def _add_result_parser(sub) -> None:
     p_result.add_argument("--critic", default=None, help="accept (critic_before_accept): отчёт критика — файл в docs/reviews/")
     p_result.add_argument("--critic-skip", dest="critic_skip", default=None,
                           help="accept (critic_before_accept): обход критика, причина ≥ 10 знаков (считается в отчёт)")
+    p_result.add_argument("--left", default=None,
+                          help="done|pr: что осталось (- = ничего); при tail_fields_only хвосты ищутся только здесь, а не в --why")
     p_result.add_argument("--dry-run", dest="dry_run", action="store_true", help="accept: все отказы гейтов одним списком, ничего не пишется")
     p_result.add_argument("--false-positive", dest="false_positive", default=None,
                           help="accept: отказ эвристики хвостов/чисел ложный — E-NNN, заведённая на этот тикет (errors.py add)")

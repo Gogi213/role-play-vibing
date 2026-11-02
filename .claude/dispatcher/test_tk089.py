@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import unittest
+from unittest import mock
 
 import test_result as TR  # первым: задаёт песочницу CLAUDE_PROJECT_DIR
 import errors as ER
@@ -113,6 +114,47 @@ class GatesTests(unittest.TestCase):
         self.assertEqual(self._comment("Договор: [тест: python -m pytest .claude/dispatcher/test_tk089.py] ок; [чтение кода] п.5")[0], 0)
         self.assertEqual(self._comment("замечание: [тест] без команды", author="judge")[0], 0)
         self.assertEqual(self._comment("[итог: pr] PR #7 — цитата [тест]")[0], 0)
+
+
+    def _fields_only(self):
+        return mock.patch.object(TK.P, "settings", return_value={"tail_fields_only": True})
+
+    def _done_left(self, left, why=BAD_TAIL):
+        self._registry_with_decision()
+        (self.base / "out.md").write_text("готово", encoding="utf-8")
+        (self.base / "review.md").write_text("вердикт", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.res("engineer", "done", path="out.md", why=why, left=left), 0)
+
+    def test_tail_fields_only_ignores_free_why_and_scans_left_field(self):
+        with self._fields_only():
+            self._done_left("-")  # хвостовые слова только в --why, поле «ничего»
+            rc, _, err = self._accept(tail="-", decisions="-", numbers="-")
+            self.assertEqual(rc, 0, err)
+            self.assertIn("хвосты: нет", self.tkt().log[-1].text)
+
+    def test_tail_fields_only_left_field_with_tail_is_refused(self):
+        with self._fields_only():
+            self._done_left("не сделан п.3", why="Готово, тесты зелёные")
+            rc, _, err = self._accept(tail="-", decisions="-", numbers="-")
+            self.assertEqual(rc, 1)
+            self.assertIn("это хвост", err)
+
+    def test_tail_fields_only_empty_remainders_are_not_tails(self):
+        for left in ("ничего", "нет", "приёмка Судьи"):
+            with self.subTest(left=left), self._fields_only():
+                self._done_left(left, why="Готово")
+                rc, _, err = self._accept(tail="-", decisions="-", numbers="-", dry_run=True)
+                self.assertEqual(rc, 0, err)
+
+    def test_tail_fields_only_requires_left_on_done_and_default_scans_why(self):
+        with self._fields_only(), contextlib.redirect_stderr(io.StringIO()) as err:
+            (self.base / "out.md").write_text("готово", encoding="utf-8")
+            self.assertEqual(self.res("engineer", "done", path="out.md"), 1)
+        self.assertIn("--left", err.getvalue())
+        self._done()  # флага нет: умолчание = старое, хвост в --why по-прежнему отказ
+        rc, _, err2 = self._accept(tail="-", decisions="-", numbers="-")
+        self.assertEqual((rc, "это хвост" in err2), (1, True))
 
 
 if __name__ == "__main__":

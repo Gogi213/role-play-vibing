@@ -215,6 +215,9 @@ def _result_refusal(args, role: str, tkt) -> str:
                            why_owner=getattr(args, "why_owner", None) or "")
     if err:
         return err
+    if (P.setting("tail_fields_only", False) is True and args.result in ("done", "pr") and role not in ("judge", "ceo", "")
+            and not (getattr(args, "left", None) or "").strip()):
+        return "tail_fields_only: сдача done|pr — с --left \"что осталось\" (- = ничего): хвосты ищутся только в этом поле"
     if args.result == "continue" and routes_mod.continue_streak(tkt, role) >= routes_mod.CONTINUE_MAX:
         return (f"continue уже {routes_mod.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
                 f"либо blocked")
@@ -275,7 +278,7 @@ def _wait_in_result(args, path: Path, role: str, why: str, proof: str) -> int:
 def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_ceo: str) -> None:
     """Запись итога в лог, номер PR в шапку, хвост CEO в очередь и ход по таблице маршрутов."""
     with T.ticket_lock(path):
-        T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
+        T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}{_left_suffix(args)}")
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
@@ -375,6 +378,24 @@ TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикет�
              "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
 
 
+LEFT_FIELD = re.compile(r"·\s*остаток:\s*(.+)$", re.S)  # поле `--left` в записи итога; слово «остаток» детектор хвостов не ловит
+
+
+def _left_suffix(args) -> str:
+    """Поле `--left` сдачи: " · остаток: …" в конец записи итога (done|pr); `-` — «ничего»."""
+    left = " ".join((getattr(args, "left", None) or "").split())
+    return f" · остаток: {'ничего' if left in ('-', '—') else left}" if left and args.result in ("done", "pr") else ""
+
+
+def _tail_text(sub: str) -> str:
+    """Что сканирует детектор хвостов: сдача целиком (умолчание) или при `tail_fields_only` — только поле `--left`
+    (как фраза «Осталось: …», чтобы работали те же исключения пустого остатка); свободный `--why` не сканируется."""
+    if P.setting("tail_fields_only", False) is not True:
+        return sub
+    m = LEFT_FIELD.search(sub)
+    return f"Осталось: {m.group(1).strip()}" if m else ""
+
+
 def _owner_submission(tkt) -> str:
     """Текст последней сдачи исполнителя (`[итог: done|pr]` владельца тикета) — то, что принимает Судья."""
     for e in reversed(tkt.log):
@@ -439,7 +460,7 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         return f"приёмка — с ответом про хвосты: {TAIL_HINT}; не сделано то, что в заказе или договоре, — не принимать, а вернуть", "", ""
     if raw in ("-", "—"):
         path = TICKETS_DIR / f"{tid}.md"
-        sub = _owner_submission(T.read_ticket(path)) if path.exists() else ""
+        sub = _tail_text(_owner_submission(T.read_ticket(path))) if path.exists() else ""
         sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), sub)  # длина та же: цитата в отказе берётся из этого же текста
         hit = TAIL_WORDS.search(sub)
         if hit:
