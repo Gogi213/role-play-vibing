@@ -116,6 +116,30 @@ class LoadCommandTests(unittest.TestCase):
         self.assertEqual(self.oom_clear("ок", "judge"), 1)
         self.assertIsNotNone(HL.oom_mark(self.tid))
 
+    def test_code_entries_of_ceo_and_judge_are_marked_service(self):
+        """TK-097: проба, нагрузка и снятие OOM пишутся кодом от имени вызвавшего; у ceo/judge — с пометкой, не заказ."""
+        import precheck as PC
+        HL.note_oom(self.tkt(), "rc 137: oom-kill", NOW)
+        self.assertEqual(self.oom_clear("память машины расширена, пик прежний", "judge"), 0)
+        self.assertEqual(self.tkt().log[-1].author, "judge (служебная)")
+        HL.note_oom(self.tkt(), "rc 137: oom-kill", NOW)
+        self.assertEqual(self.oom_clear("память машины расширена, пик прежний", ""), 0)  # CEO: роли нет
+        self.assertEqual(self.tkt().log[-1].author, "ceo (служебная)")
+        by = (datetime.now().astimezone() + timedelta(hours=2)).isoformat(timespec="minutes")
+        a = dict(id=self.tid, spec=SPEC, on_met=None, by=by, probe=record(n="4"))
+        with mock.patch.object(TK, "_caller_role", lambda: ""), mock.patch("sys.stdout", mock.MagicMock()):
+            self.assertEqual(TK.cmd_wait(type("A", (), a)()), 0)
+        authors = [e.author for e in self.tkt().log]
+        self.assertEqual(authors[-2:], ["ceo (служебная)", "ceo (служебная)"])  # [проба] и [нагрузка]
+        self.assertEqual(PC.late_entries(self.tkt(), "engineer", NOW - timedelta(minutes=1)), [])
+
+    def test_wait_entries_of_engineer_keep_plain_author(self):
+        by = (datetime.now().astimezone() + timedelta(hours=2)).isoformat(timespec="minutes")
+        a = dict(id=self.tid, spec=SPEC, on_met=None, by=by, probe=record(n="4"))
+        with mock.patch.object(TK, "_caller_role", lambda: "engineer"), mock.patch("sys.stdout", mock.MagicMock()):
+            self.assertEqual(TK.cmd_wait(type("A", (), a)()), 0)
+        self.assertEqual({e.author for e in self.tkt().log}, {"engineer"})
+
     def test_log_tail_with_oom_text_does_not_mark(self):
         import watch
         job = {"ticket": self.tid, "state": "failed", "unit": "u1", "id": "7", "reason": "rc 1: ошибка данных"}

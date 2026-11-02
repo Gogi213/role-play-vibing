@@ -36,10 +36,11 @@ class ParseEntriesTests(unittest.TestCase):
 
     def test_overseer_reader_is_stricter_through_its_own_header(self):
         got = O.parse_log(LOG)
-        self.assertEqual([e.role for e in got], ["engineer", "judge"])
+        self.assertEqual([e.role for e in got], ["engineer", "engineer", "judge"])  # «роль (уточнение)» — запись роли
         self.assertIn("### Заметка", got[0].text)
-        self.assertIn("engineer (запуск 2)", got[0].text)  # автор из нескольких слов — не граница записей
-        self.assertTrue(O.is_judge_return(got[1]))
+        self.assertNotIn("engineer (запуск 2)", got[0].text)
+        self.assertEqual(got[1].text, "автор из нескольких слов")
+        self.assertTrue(O.is_judge_return(got[2]))
 
     def test_overseer_naive_time_is_owner_time_ticket_naive_time_is_utc(self):
         text = "### 2026-10-27T07:00:00 engineer\nx\n"
