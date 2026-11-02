@@ -511,7 +511,8 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
             return (f"--tail ceo: «{what[:80]}» — про «{hit.group()}»: код, тесты, слияние и т. п. ролям по силам. Заведи тикет "
                     f"(`tickets.py new --owner <роль> --ref <ref тикета> --title \"Хвост {tid}: …\"`) и принимай с `--tail TK-N`; "
                     f"CEO — только то, что ролям не сделать (настройки, CLAUDE.md, устав проекта, слово владельца)"), "", ""
-        return "", f" хвост CEO: {what[:120]}", what
+        shown = what[:120].replace("«", '"').replace("»", '"')  # границу хвоста в логе задают «…» (читает goal_idle._tail_text): своих «» внутри нет
+        return "", f" хвост CEO: «{shown}»", what
     ids = [x for x in re.split(r"[,\s]+", raw) if x]
     bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
            or not any((d / f"{x}.md").exists() for d in (TICKETS_DIR, TICKETS_DIR / "archive"))]
