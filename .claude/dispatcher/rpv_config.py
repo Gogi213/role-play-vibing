@@ -62,6 +62,7 @@ KEYS = {
     "guard_push_scope": (lambda v: isinstance(v, bool), "true или false"),
     "hold_alive_waits": (lambda v: isinstance(v, bool), "true или false"),
     "watch_unreleased": (lambda v: isinstance(v, bool), "true или false"),
+    "goal_idle_min": (_int_min, "целое ≥ 1, минуты"),
     "has_ci": (lambda v: isinstance(v, bool), "true или false"),
     "ceo_wake": (lambda v: isinstance(v, bool), "true или false"),
     "ceo_wake_mode": (_text, "непустая строка: режим разрешений claude (умолчание bypassPermissions)"),

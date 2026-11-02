@@ -163,6 +163,11 @@ class WakeTests(unittest.TestCase):
         self.assertEqual(len(self.stub.calls), 1)
         self.assertIn("[шаг цели принят, следующий не определён] TK-002", self.stub.calls[0][1])
 
+    def test_goal_idle_kind_wakes_once_with_goal_step_event(self):
+        self.signal("watch-goal-idle", tid="TK-002", note="цель G-001: принят шаг, тикета на неё нет")
+        self.assertEqual(len(self.stub.calls), 1)
+        self.assertIn("[шаг цели принят, следующий не определён] TK-002", self.stub.calls[0][1])
+
     def test_set_session_cli(self):
         self.assertEqual(CW.main(["--project", self.tmp.name, "set", "--id", "abc", "--name", "CEO"]), 0)
         self.assertEqual(json.loads(CW.session_file().read_text(encoding="utf-8"))["id"], "abc")

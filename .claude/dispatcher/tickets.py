@@ -375,7 +375,20 @@ TAIL_NEGATION = re.compile(r"хвост\w*\s+нет\b(?!\s+[\w])|\bнет\s+хв
                            r"\bосталось" + _TAIL_SEP + r"(?:ничего|нет(?:\s+(?:блокер|замечани|вопрос)\w*)?)(?![^\W_])" + _TAIL_END + r"|"
                            r"\bне\s+осталось\s+ничего\b" + _TAIL_END, re.I)
 TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
-             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
+             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, устав проекта, слово владельца)")
+# TK-087: хвост про код, тесты, слияние и т. п. ролям по силам — Судья заводит тикет (`new … --title "Хвост TK-N: …"`), CEO его не несёт.
+# Зона CEO — настройки, CLAUDE.md, устав проекта, слово владельца: слова зоны оставляют `--tail ceo:` как есть.
+TAIL_CODE = re.compile(r"\bкод\w*|\bтест\w*|\bpr\b|\bpull\b|\w*мерж\w*|\bmerge\b|слить|слит\w*|слия\w*|влить|влив\w*|коммит\w*|скрипт\w*|"
+                       r"прав[ик]\w*|\bпочин\w*|\bчини\w*|\w*пуш\w*|рефактор\w*|\bбаг\w*|исправ\w*|ошибк\w*|\bмодул\w*|функци\w*", re.I)
+TAIL_OWNER_ZONE = re.compile(r"настройк\w*|settings|rpv\.json|claude\.md|устав\w*|charter|реестр\w*|"
+                             r"(?:слов\w*|решени\w*|согласи\w*)\s+владельц\w*|\ballow\b|токен\w*", re.I)
+
+
+def tail_hit(text: str) -> tuple:
+    """Хвост в тексте сдачи: (текст с погашенными отрицаниями, первое попадание `TAIL_WORDS` или None). Длина текста та же:
+    цитата в отказе берётся из него. Планка правок детектора — корпус реальных сдач (`fixtures/tail_corpus.json`, test_tail_corpus)."""
+    sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), text)
+    return sub, TAIL_WORDS.search(sub)
 
 
 LEFT_FIELD = re.compile(r"·\s*остаток:\s*(.+)$", re.S)  # поле `--left` в записи итога; слово «остаток» детектор хвостов не ловит
@@ -475,8 +488,7 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
     if raw in ("-", "—"):
         path = TICKETS_DIR / f"{tid}.md"
         sub = _tail_text(_owner_submission(T.read_ticket(path))) if path.exists() else ""
-        sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), sub)  # длина та же: цитата в отказе берётся из этого же текста
-        hit = TAIL_WORDS.search(sub)
+        sub, hit = tail_hit(sub)
         if hit:
             return (f"--tail -: в сдаче исполнителя «{sub[max(0, hit.start() - 40):hit.end() + 60].strip()}» — это хвост. "
                     f"Не сделано из заказа или договора — `return`; иначе {TAIL_HINT}"), "", ""
@@ -485,6 +497,10 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         what = " ".join(raw[4:].split()).strip("\"' ")
         if len(what) < 5:
             return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
+        if (hit := TAIL_CODE.search(what)) and not TAIL_OWNER_ZONE.search(what):
+            return (f"--tail ceo: «{what[:80]}» — про «{hit.group()}»: код, тесты, слияние и т. п. ролям по силам. Заведи тикет "
+                    f"(`tickets.py new --owner <роль> --ref <ref тикета> --title \"Хвост {tid}: …\"`) и принимай с `--tail TK-N`; "
+                    f"CEO — только то, что ролям не сделать (настройки, CLAUDE.md, устав проекта, слово владельца)"), "", ""
         return "", f" хвост CEO: {what[:120]}", what
     ids = [x for x in re.split(r"[,\s]+", raw) if x]
     bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
@@ -550,17 +566,18 @@ def cmd_accept(args) -> int:
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
+    args.sha = (args.sha or "").lower()  # регистр не важен: `result` и dry-run принимают ВЕРХНИЙ, accept — так же
+    slug = gates_mod.repo_slug(args)
+    if getattr(args, "dry_run", False):  # весь список, в том числе «--sha не хеш» и «репозиторий не задан» строками
+        return gates_mod.dry_run(args, sys.modules[__name__], slug)
     if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
         return 1
     import merge_rule
     import routes
-    slug = (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
-    if getattr(args, "dry_run", False):
-        return gates_mod.dry_run(args, sys.modules[__name__], slug)
     err = merge_rule.check_pr(slug, int(args.pr), args.sha)
     if err:
         print(f"accept: {err}", file=sys.stderr)
