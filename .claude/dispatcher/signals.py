@@ -20,12 +20,16 @@ MAX_REVIEW_RETURNS = 2
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 
+WAKE_REASON_KINDS = {"watch-goal-idle"}  # в ceo-wake.log к таким видам дописывается причина (TK-086)
+
+
 def _ceo_file_write(tid: str, kind: str, note: str, now=None) -> None:
     CFG.CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
     with open(CFG.CEO_INBOX, "a", encoding="utf-8") as fh:
         fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
     with open(CFG.CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
+        reason = f" — {' '.join(note.split())[:150]}" if kind in WAKE_REASON_KINDS else ""
+        fh.write(f"{T.now_iso(now)} {tid} {kind}{reason}\n")
 
 
 # CP5 (критерий 8): механика CEO не будит — строка в mechanics.log. Владельцу и CEO — одна тревога «работа стоит»
