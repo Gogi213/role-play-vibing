@@ -7,6 +7,7 @@ import sys
 import tempfile
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_watch import WatchSandbox, CFG, T, W  # noqa: E402 — песочница сторожа
@@ -36,11 +37,12 @@ class GoalSandbox(WatchSandbox):
         (Path(self.root.name) / ".claude" / "goals" / f"{gid}.md").write_text(
             f"---\nid: {gid}\nstatus: {status}\nset: 2026-11-01 10:00\naccepted:\n---\n# Цель {gid}\n", encoding="utf-8")
 
-    def ticket(self, ref="G-001", status="in_progress", accepted_at=None, owner="engineer", tail="", desc="", title="шаг", after=""):
+    def ticket(self, ref="G-001", status="in_progress", accepted_at=None, owner="engineer", tail="", desc="", title="шаг", after="", legacy=False):
         path = T.create_ticket(self.tickets_dir, owner, title, reviewer="judge", status=status,
                                description=(f"Ссылка на задачу владельца: {ref}\n\n" if ref else "") + desc, now=self.now)
         if accepted_at is not None:
-            note = f" хвост CEO: {tail}" if tail else " хвосты: нет"  # как пишет `tickets._tail_ack`
+            shown = tail if legacy else f"«{tail}»"  # как пишет `tickets._tail_ack` (legacy — запись до TK-098, без кавычек)
+            note = f" хвост CEO: {shown}" if tail else " хвосты: нет"
             T.append_log(path, "judge", f"[итог: accept] PR #1@abcdef0{note}{after} — принято", now=accepted_at)  # after — поля приёмки после хвоста
         return T.read_ticket(path).id
 
@@ -206,6 +208,33 @@ class TailRealEntryTests(GoalSandbox):
         tail = "сверить, что токен бота отозван (E-012; исследователь пишет — отозван)"
         self.ticket(ref="В-33", status="done", accepted_at=self.now, tail=tail, after=" вживую: docs/reviews/tk-068-live.md")
         self.assertIn(f"«{tail}»", self.events(30)[0][0][2])
+
+    TAIL59 = "ложный хвост: accept считает «Осталось: ничего» хвостом — завести тикет Инженеру на детектор"  # TK-059.md:41
+
+    def test_dash_inside_tail_without_fields_keeps_full_text(self):
+        """TK-098: запись без полей приёмки, в хвосте « — » — режет не по тире, а по кавычкам; вывод Судьи после них не входит."""
+        tail = self.TAIL59.replace("«Осталось: ничего»", "'Осталось: ничего'")
+        step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail=tail)
+        out, _ = self.events(30)
+        self.assertIn(f"«{tail}»", out[0][2])
+        self.assertNotIn("принято", out[0][2])
+        self.assertEqual(GI._tail_text(T.read_ticket(self.tickets_dir / f"{step}.md").log[-1].text), tail)
+
+    def test_tail_text_round_trip_with_tail_ack(self):
+        """Что пишет `tickets._tail_ack`, то читает `_tail_text`: «»-кавычки внутри заменены, срез 120 знаков, поля и вывод Судьи — снаружи."""
+        import tickets as TK
+        what = self.TAIL59 + " и ещё слов, чтобы текст перешёл за сто двадцать знаков — хвост после тире"
+        args = type("A", (), {"tail": f'ceo:"{what}"'})()
+        with mock.patch.object(TK.registry_mod, "decisions_file", return_value=Path(__file__)):
+            err, note, full = TK._tail_ack(args, "TK-999")
+        self.assertEqual((err, full), ("", what))
+        entry = f"[итог: accept] PR #1@abcdef0{note} вживую: docs/x.md — принято"
+        self.assertEqual(GI._tail_text(entry), what[:120].replace("«", '"').replace("»", '"').strip())
+
+    def test_legacy_entry_without_quotes_still_cut_by_dash_and_fields(self):
+        self.ticket(ref="В-33", status="done", accepted_at=self.now, tail="поставить настройку в rpv.json", legacy=True)
+        self.assertIn("«поставить настройку в rpv.json»", self.events(30)[0][0][2])
+        self.assertEqual(GI._tail_text("[итог: accept] PR #1@abc хвост CEO: сделать А — и Б — принято"), "сделать А")
 
     def test_mention_of_the_ticket_is_not_a_tail_ticket(self):
         step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail="поставить настройку в rpv.json")

@@ -450,7 +450,8 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         what = " ".join(raw[4:].split()).strip("\"' ")
         if len(what) < 5:
             return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
-        return "", f" хвост CEO: {what[:120]}", what
+        shown = what[:120].replace("«", '"').replace("»", '"')  # границу хвоста в логе задают «…» (читает goal_idle._tail_text): своих «» внутри нет
+        return "", f" хвост CEO: «{shown}»", what
     ids = [x for x in re.split(r"[,\s]+", raw) if x]
     bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
            or not any((d / f"{x}.md").exists() for d in (TICKETS_DIR, TICKETS_DIR / "archive"))]
