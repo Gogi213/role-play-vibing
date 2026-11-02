@@ -220,6 +220,42 @@ class StuckReasonTests(PulseBase):
         self.state["pulse_since"][f"ci_red:{tid}:9"] = T.now_iso(self.at - timedelta(minutes=31))
         self.assertIn("конфликт", self.pulse()["reasons"][0]["detail"])
 
+    def test_ci_conflict_names_branch_of_mark(self):
+        self.settings(ci_repo="o/r")
+        tid = self.ticket(ref="", status="in_review")
+        T.write_header_updates(self.tickets_dir / f"{tid}.md", {"pr": "9"}, now=self.at)
+        (self.disp / "ci-state.json").write_text(json.dumps({"o/r#9": {"sha": "abc", "state": "success", "red": []}}), encoding="utf-8")
+        (self.disp / "merge-state.json").write_text(json.dumps({"o/r#9": {"conflict": "abc", "base": "develop"}}), encoding="utf-8")
+        self.pulse()
+        self.state["pulse_since"][f"ci_red:{tid}:9"] = T.now_iso(self.at - timedelta(minutes=31))
+        detail = self.pulse()["reasons"][0]["detail"]
+        self.assertIn("с develop", detail)
+        self.assertNotIn("main", detail)
+
+    def test_ci_conflict_old_mark_without_branch_names_no_branch(self):
+        self.settings(ci_repo="o/r")
+        tid = self.ticket(ref="", status="in_review")
+        T.write_header_updates(self.tickets_dir / f"{tid}.md", {"pr": "9"}, now=self.at)
+        (self.disp / "ci-state.json").write_text(json.dumps({"o/r#9": {"sha": "abc", "state": "success", "red": []}}), encoding="utf-8")
+        (self.disp / "merge-state.json").write_text(json.dumps({"o/r#9": {"conflict": "abc"}}), encoding="utf-8")
+        self.pulse()
+        self.state["pulse_since"][f"ci_red:{tid}:9"] = T.now_iso(self.at - timedelta(minutes=31))
+        detail = self.pulse()["reasons"][0]["detail"]
+        self.assertIn("веткой по умолчанию", detail)
+        self.assertNotIn("main", detail)
+
+    def test_closed_pr_in_ticket_list_is_not_ci_red(self):
+        self.settings(ci_repo="o/r")
+        tid = self.ticket(ref="", status="in_review")
+        T.write_header_updates(self.tickets_dir / f"{tid}.md", {"pr": "149, 153"}, now=self.at)   # 149 закрыт без влития, 153 — живой
+        (self.disp / "ci-state.json").write_text(json.dumps({
+            "o/r#149": {"sha": "a", "state": "failure", "red": ["pytest"], "closed": True},
+            "o/r#153": {"sha": "b", "state": "success", "red": []}}), encoding="utf-8")
+        (self.disp / "merge-state.json").write_text(json.dumps({"o/r#149": {"conflict": "a", "base": "main"}}), encoding="utf-8")
+        self.pulse()
+        self.state["pulse_since"] = {f"ci_red:{tid}:149": T.now_iso(self.at - timedelta(minutes=99))}
+        self.assertEqual(self.pulse()["reasons"], [])
+
     def test_old_conflict_mark_after_push_is_not_conflict(self):
         self.settings(ci_repo="o/r")
         tid = self.ticket(ref="", status="in_review")

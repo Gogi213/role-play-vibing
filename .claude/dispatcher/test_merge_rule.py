@@ -124,6 +124,11 @@ class MergeRuleTests(MergeRuleBase):
         self.assertEqual(self.run_m(), [])
         self.assertEqual(self.put(), [])
 
+    def test_conflict_mark_keeps_default_branch(self):  # TK-102: Пульс называет ветку из метки
+        self.mergeable = False
+        self.run_m()
+        self.assertEqual(M._load()[f"{REPO}#7"]["base"], "main")
+
     def test_conflict_reported_even_if_ci_not_green(self):
         self.mergeable = False
         C.save_state({f"{REPO}#7": {"sha": SHA, "state": "pending"}})

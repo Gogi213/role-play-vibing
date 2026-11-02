@@ -39,15 +39,6 @@ class CeoCharterTests(unittest.TestCase):
     def setUp(self):
         self.text = CEO_TEMPLATE.read_text(encoding="utf-8")
 
-    def test_watch_is_kept_always(self):
-        r = rule(self.text, "Наблюдение держишь, пока есть работа")
-        for must in ("потолок 10 мин", "постоянного режима нет", "Monitor expired", "после рестарта", "перевзводи сразу",
-                     "`timeout_ms: 600000`", "умолчание инструмента — 5 мин", "без фильтра `grep` по `TK-`",
-                     "строки сторожа идут с «*»", "молча", "сразу прочитай `tickets.py inbox`", "`tail -n 0` теряет строки",
-                     "Исключение одно — «Monitor expired» при пустой очереди", "`watch_unreleased` выключен — не перевзводи",
-                     "«Напишу, когда …» владельцу не обещай, пока наблюдение не включено"):
-            self.assertIn(must, r)
-
     def test_covered_by_decision_acts_without_asking(self):
         r = rule(self.text, "Покрыто решением")
         for must in ("сверь реестр", "действующее решение В-N", "цитатой владельца прямо называет",
@@ -81,10 +72,7 @@ class CeoCharterTests(unittest.TestCase):
         self.assertIn("**Работа команды — без самодеятельности:**", self.text)
         self.assertIn("«Новые задачи»", rule(self.text, "Покрыто решением"))
 
-    def test_alarm_rule_still_there(self):
-        self.assertIn("`Monitor` на `.claude/dispatcher/ceo-wake.log`", rule(self.text, "Будильник"))
-
-    def test_sync_carries_both_rules_into_project_charter(self):
+    def test_sync_carries_covered_rule_into_project_charter(self):
         with tempfile.TemporaryDirectory() as tmp:
             roles = Path(tmp) / ".claude" / "roles"
             roles.mkdir(parents=True)
@@ -92,26 +80,7 @@ class CeoCharterTests(unittest.TestCase):
             _, _, err = charter.sync(Path(tmp), ["ceo.md"], now=W.datetime.now().astimezone())
             self.assertIsNone(err)
             synced = (roles / "ceo.md").read_text(encoding="utf-8")
-            self.assertIn("**Наблюдение держишь, пока есть работа:**", synced)
             self.assertIn("**Покрыто решением — делай, не спрашивай:**", synced)
-
-
-class CeoCommandTests(unittest.TestCase):
-    def test_command_arms_the_monitor(self):
-        text = CEO_COMMAND.read_text(encoding="utf-8")
-        self.assertIn("allowed-tools: Bash, Monitor", text)
-        self.assertIn("`Monitor` на `<корень проекта>/.claude/dispatcher/ceo-wake.log`", text)
-        self.assertIn("Monitor expired", text)
-        self.assertIn("после рестарта сессии перевзводи сразу и молча", text)
-        self.assertIn("с `timeout_ms: 600000`", text)
-        self.assertIn("без фильтра `grep` по `TK-`", text)
-        self.assertIn("сразу прочитай `tickets.py inbox`", text)
-        self.assertIn("не перевзводи только при «Monitor expired» с пустой очередью", text)
-        self.assertIn("не обещай, пока наблюдение не включено", text)
-
-    def test_monitor_step_precedes_the_reply(self):
-        text = CEO_COMMAND.read_text(encoding="utf-8")
-        self.assertLess(text.index("Взведи наблюдение"), text.index("«Сессия помечена как CEO»"))
 
 
 class UnreleasedSandbox(WatchSandbox):
@@ -301,16 +270,8 @@ class UnreleasedDocsTests(unittest.TestCase):
     def test_signals_doc_lists_the_kind(self):
         text = SIGNALS_DOC.read_text(encoding="utf-8")
         row = next(ln for ln in text.splitlines() if ln.startswith("| `watch-unreleased`"))
-        for must in ("10 мин", "`watch_unreleased`", "по умолчанию выключен", "раз в сутки", "будит"):
+        for must in ("10 мин", "`watch_unreleased`", "по умолчанию выключен", "раз в сутки", "строка очереди"):
             self.assertIn(must, row)
-
-    def test_signals_doc_says_monitor_expires(self):
-        text = SIGNALS_DOC.read_text(encoding="utf-8")
-        self.assertIn("не дольше 10 мин", text)
-        self.assertIn("перевзводит молча и сразу", text)
-        self.assertIn("`timeout_ms: 600000`", text)
-        self.assertIn("Не перевзводит он только при «Monitor expired» с пустой очередью", text)
-
 
 if __name__ == "__main__":
     unittest.main()

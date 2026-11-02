@@ -1,6 +1,6 @@
 ---
 description: Пометить эту сессию как CEO команды ролей (метку читают хуки; роль держится и после /clear в Desktop)
-allowed-tools: Bash, Monitor
+allowed-tools: Bash
 disable-model-invocation: true
 ---
 
@@ -20,10 +20,13 @@ disable-model-invocation: true
    `python "${CLAUDE_PLUGIN_ROOT}/.claude/dispatcher/tickets.py" --project "<корень проекта>"` + подкоманда (`new`,
    `comment`, `start`, `stop`, `allow`, `status`). `${CLAUDE_PLUGIN_ROOT}` пуст — найди каталог плагина `role-play-vibing` под
    `~/.claude/plugins`. Диспетчер и сторож запускает `/rpv-start`.
-5. Взведи наблюдение: `Monitor` на `<корень проекта>/.claude/dispatcher/ceo-wake.log` с `timeout_ms: 600000` (умолчание — 5 мин,
-   потолок 10 мин), без фильтра `grep` по `TK-` (устав CEO, «Будильник»). После взвода сразу прочитай `tickets.py inbox` (`tail -n 0` теряет строки
-   разрыва). При «Monitor expired» и после рестарта сессии перевзводи сразу и молча; не перевзводи только при «Monitor expired» с пустой очередью, если владельцу ничего не обещано и `watch_unreleased` выключен (после рестарта и `/clear` перевзводи всегда); фильтровать можно только строки `summary`;
-   «напишу, когда …» не обещай, пока наблюдение не включено.
+5. Запиши, какая сессия CEO: диспетчер будит её событием (устав CEO, «Побудка»), таймеров и наблюдения нет:
+
+   ```
+   python "${CLAUDE_PLUGIN_ROOT}/.claude/dispatcher/ceo_wake.py" --project "<корень проекта>" set --id "${CLAUDE_SESSION_ID}" --name "<имя сессии в списке агентов, если знаешь>"
+   ```
+
+   Потом прочитай `tickets.py inbox`.
 6. Ответь владельцу одной строкой: «Сессия помечена как CEO». Дальше веди себя по уставу CEO.
 
 Роль определяют хуки: `RPV_ROLE` → эта метка → название сессии Claude Desktop (последний

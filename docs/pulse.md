@@ -28,7 +28,7 @@
 | `step_uncovered` | принятый шаг открытой цели или тикет с `--tail ceo:` без следующего тикета — тот же расчёт, что у сигнала `watch-goal-idle` (TK-086) | `goal_idle_min` = 10 мин |
 | `loop` | у открытого тикета ≥ `pulse_loop_returns` возвратов Судьи, или ≥ `pulse_loop_errors` запусков не `ok` за `pulse_loop_window_min` | 2 · 2 · 60 мин |
 | `merged_unreleased` | сторож держит находку `unreleased:<ветка>` (TK-062); любая ветка репозитория; нужны `watch_unreleased: true` и `ci_repo` | без своего порога |
-| `ci_red` | у открытого тикета с `pr:` (список `149, 153` — каждый номер) CI красный (`ci-state.json`) или конфликт с main: `merge-state.json` `conflict` равен текущей голове PR (`ci-state` `sha`); нужен `ci_repo` | `pulse_ci_red_min` = 30 мин |
+| `ci_red` | у открытого тикета с `pr:` (список `149, 153` — каждый номер) CI красный (`ci-state.json`) или конфликт с веткой по умолчанию (в тексте — её имя из `merge-state.json` `base`): `conflict` равен текущей голове PR (`ci-state` `sha`); закрытые и влитые PR (`closed: true` в `ci-state.json`, ставит ci_watch) пропускаются; нужен `ci_repo` | `pulse_ci_red_min` = 30 мин |
 
 Причину «ждёт Судья/Инженер» без одного из кодов Пульс не выдумывает: нет кода — клетка не `stuck`.
 

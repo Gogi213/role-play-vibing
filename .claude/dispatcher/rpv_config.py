@@ -70,6 +70,8 @@ KEYS = {
     "pulse_loop_errors": (_int_min, "целое ≥ 1"),
     "pulse_loop_window_min": (_int_min, "целое ≥ 1"),
     "has_ci": (lambda v: isinstance(v, bool), "true или false"),
+    "ceo_wake": (lambda v: isinstance(v, bool), "true или false"),
+    "ceo_wake_mode": (_text, "непустая строка: режим разрешений claude (умолчание bypassPermissions)"),
     "critic_before_accept": (lambda v: isinstance(v, bool), "true или false"),
     "tail_fields_only": (lambda v: isinstance(v, bool), "true или false"),
     "require_probe": (lambda v: isinstance(v, bool), "true или false"),
