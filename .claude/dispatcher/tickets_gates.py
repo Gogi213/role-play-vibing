@@ -20,8 +20,17 @@ FP_HINT = ("отказ эвристики (хвосты или числа) ло�
            "--ticket <ID>` и прими с `--false-positive E-NNN`; настоящий — `result <ID> return`")
 
 
+FP_TITLE = "ложное срабатывание"   # заголовок ошибки, по которой снимают отказ эвристики (так велит FP_HINT)
+
+
+def repo_slug(args) -> str:
+    """Репозиторий PR: `--repo`, иначе `ci_repo` из .claude/rpv.json; без догадки по cwd (PR живут не в этом репо)."""
+    return (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()
+
+
 def _false_positive(args, tk) -> tuple[str, str]:
-    """`--false-positive E-NNN`: ошибка есть в реестре и заведена на этот тикет. → (отказ, номер); флага нет — ("", "")."""
+    """`--false-positive E-NNN`: ошибка есть в реестре, заведена на этот тикет и названа «ложное срабатывание: …».
+    → (отказ, номер); флага нет — ("", "")."""
     raw = (getattr(args, "false_positive", None) or "").strip()
     if not raw:
         return "", ""
@@ -29,28 +38,32 @@ def _false_positive(args, tk) -> tuple[str, str]:
     path = errors_mod.errors(tk.PROJECT_ROOT).get(eid)
     if not path:
         return f"--false-positive {raw}: такой ошибки нет в реестре — сначала `errors.py add --title … --ticket {args.id}`", ""
-    if errors_mod.header(path).get("ticket", "").strip().upper() != args.id.upper():
+    head = errors_mod.header(path)
+    if head.get("ticket", "").strip().upper() != args.id.upper():
         return f"--false-positive {raw}: ошибка заведена не на {args.id} (`--ticket {args.id}` при `errors.py add`)", ""
+    if FP_TITLE not in head.get("title", "").lower():
+        return f"--false-positive {raw}: заголовок ошибки без «{FP_TITLE}» — это не отказ эвристики (`errors.py add --title \"{FP_TITLE}: …\"`)", ""
     return "", eid
 
 
-def run(args, tk, collect_all: bool = False, proof: bool = True, record=None) -> tuple[list[str], str, str]:
+def run(args, tk, collect_all: bool = False, proof: bool = True, record=None, heur: list | None = None) -> tuple[list[str], str, str]:
     """Гейты приёмки по порядку. → (отказы, пометки для лога, хвост для CEO). Без `collect_all` дорогие гейты (критик,
     ярлыки) после отказа не гоняются — как было; с ним идут все. `proof=False` — ярлыки гонит вызывающий (cmd_accept).
     `--false-positive` снимает только отказ эвристики: `--tail -` со словом-хвостом в сдаче и `--numbers -` с числами в
-    артефакте; нет файла, чужой номер тикета, число не сходится с источником — структурные отказы, остаются."""
+    артефакте; нет файла, чужой номер тикета, число не сходится с источником — структурные отказы, остаются. В `heur`
+    (если дан) — имена эвристик, чей отказ остался: по ним `dry_run` решает, нужна ли подсказка про `--false-positive`."""
     derr, ack = tk._decisions_ack(args)
     nerr, nack = tk._numbers_ack(args, args.id)
     terr, tack, tail_ceo = tk._tail_ack(args, args.id)
     lerr, lack = tk._live_ack(args, args.id)
     fperr, fp = _false_positive(args, tk)
-    skipped = []
-    if fp:
-        for name, err, given in (("числа", nerr, getattr(args, "numbers", None)), ("хвосты", terr, getattr(args, "tail", None))):
-            if err and (given or "").strip() in HEURISTIC_ARGS:
-                skipped.append(name)
-        nerr = "" if "числа" in skipped else nerr
-        terr = "" if "хвосты" in skipped else terr
+    found = [name for name, err, given in (("числа", nerr, getattr(args, "numbers", None)), ("хвосты", terr, getattr(args, "tail", None)))
+             if err and (given or "").strip() in HEURISTIC_ARGS]
+    skipped = found if fp else []
+    if heur is not None and not fp:
+        heur.extend(found)
+    nerr = "" if "числа" in skipped else nerr
+    terr = "" if "хвосты" in skipped else terr
     errs = [fperr, derr, nerr, terr, tk._left_ack(args.id), lerr]
     cerr, cack = ("", "") if any(errs) and not collect_all else tk._critic_ack(args, args.id, record=record)
     perr, pack = ("", "") if (any(errs) or cerr) and not collect_all or not proof else tk._proof_ack(args.id)
@@ -65,9 +78,10 @@ def _pr_refusal(args, slug: str, head_err: str) -> str:
         return ""
     if not slug:
         return "репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json: PR не проверен"
-    if not re.fullmatch(r"[0-9a-f]{7,40}", (args.sha or "").lower()):
+    sha = (args.sha or "").lower()   # как в cmd_accept: регистр не важен, слиянию уходит нижний
+    if not re.fullmatch(r"[0-9a-f]{7,40}", sha):
         return "" if head_err else "--sha — хеш головы PR (7–40 hex): голова PR не проверена"
-    return merge_rule.check_pr(slug, int(args.pr), args.sha)
+    return merge_rule.check_pr(slug, int(args.pr), sha)
 
 
 def dry_run(args, tk, slug: str = "", head_err: str = "") -> int:
@@ -75,7 +89,8 @@ def dry_run(args, tk, slug: str = "", head_err: str = "") -> int:
     `slug` — репозиторий PR (пусто при `--pr` — отказ «репозиторий не задан»). Проверка, что «не запустилась», — отдельная
     строка «не проверено, не return» (как у настоящей приёмки), а не регресс. 0 — приёмка пройдёт, 1 — список отказов."""
     found = [head_err, _pr_refusal(args, slug, head_err)]
-    errs, _, _ = run(args, tk, collect_all=True, record=lambda *a, **k: None)
+    heur: list[str] = []
+    errs, _, _ = run(args, tk, collect_all=True, record=lambda *a, **k: None, heur=heur)
     found += errs
     wt = tk.PROJECT_ROOT / ".claude" / "worktrees" / args.id
     infra = []
@@ -94,7 +109,7 @@ def dry_run(args, tk, slug: str = "", head_err: str = "") -> int:
     print(f"accept --dry-run {args.id}: отказов {len(found)} (ничего не записано):", file=sys.stderr)
     for i, e in enumerate(found, 1):
         print(f"{i}. {re.sub(chr(10), chr(10) + '   ', e)}", file=sys.stderr)
-    if any(k in e for e in found for k in ("хвост", "числ")):
+    if heur:   # подсказка — только когда остался отказ эвристики, а не любое «хвост»/«числ» в тексте отказа
         print(FP_HINT, file=sys.stderr)
     return 1
 
@@ -104,5 +119,4 @@ def dry_run_result(args, tk, role: str, tkt) -> int:
     if args.result != "accept":
         print("result --dry-run — только для accept", file=sys.stderr)
         return 1
-    slug = (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()
-    return dry_run(args, tk, slug, tk._result_refusal(args, role, tkt))
+    return dry_run(args, tk, repo_slug(args), tk._result_refusal(args, role, tkt))

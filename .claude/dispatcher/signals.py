@@ -12,11 +12,15 @@ import project as P
 import ticket as T
 
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
-# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher, тикет
-# закрыт «не сделано» с остатком (последний возврат ревьюера) в логе — не blocked и не вопрос владельцу (TK-233, 13.10:
-# потолок ремонта 2; был 3 и needs_owner). Число НАЗНАЧЕНО владельцем 13.10, не измерено.
+# После MAX_REVIEW_RETURNS возвратов тикет, снова сданный на ревью, ревьюеру не отдаётся (`review_limit_hit`, первая строка
+# `decide`): запись dispatcher с причинами возвратов, статус needs_owner — вопрос владельцу, а не тихое закрытие (TK-090, В-36;
+# до этого проверка стояла за `next`, который `result pr` ставит сам, и не срабатывала ни разу). Число 2 НАЗНАЧЕНО
+# владельцем 13.10, не измерено.
 MAX_REVIEW_RETURNS = 2
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
+
+
+WAKE_REASON_KINDS = {"watch-goal-idle"}  # в ceo-wake.log к таким видам дописывается причина (TK-086)
 
 
 def _ceo_file_write(tid: str, kind: str, note: str, now=None) -> None:
@@ -24,7 +28,8 @@ def _ceo_file_write(tid: str, kind: str, note: str, now=None) -> None:
     with open(CFG.CEO_INBOX, "a", encoding="utf-8") as fh:
         fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
     with open(CFG.CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"{T.now_iso(now)} {tid} {kind}\n")
+        reason = f" — {' '.join(note.split())[:150]}" if kind in WAKE_REASON_KINDS else ""
+        fh.write(f"{T.now_iso(now)} {tid} {kind}{reason}\n")
 
 
 # CP5 (критерий 8): механика CEO не будит — строка в mechanics.log. Владельцу и CEO — одна тревога «работа стоит»
@@ -116,25 +121,50 @@ def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
         return False
 
 
+AUTO_AUTHORS = ("merge",)  # записи программы о слиянии: не ход роли и не заказ — «последняя запись» их пропускает (TK-018)
+REVIEW_AUTO_AUTHORS = AUTO_AUTHORS + ("ci",)  # записи программ (слияние, CI) после сдачи — не ход роли и не заказ
+REVIEW_CAP_MARK = "Потолок возвратов:"  # начало записи dispatcher при потолке: по нему `alarms.owner_questions` шлёт вопрос владельцу
+
+
+def review_limit_hit(tkt: T.Ticket, state: dict) -> bool:
+    """Потолок возвратов: тикет снова сдан на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов, последний
+    ход — владельца (записи `merge`/`ci` не в счёт), а `next` пуст или стоит на ревьюере (так его ставит `result pr`). Ход CEO или
+    ревьюера — не повод; чужой `next` (владелец позвал CEO или другую роль) потолок не стирает: сработает, когда его съедят."""
+    if tkt.status not in ("done", "in_review") or tkt.reviewer not in P.ROLES or _review_returns(state, tkt.id) < MAX_REVIEW_RETURNS:
+        return False
+    if tkt.next_role not in ("", tkt.reviewer):
+        return False
+    last = next((e for e in reversed(tkt.log) if e.author.lower() not in REVIEW_AUTO_AUTHORS), None)
+    return bool(last) and T.author_is(last.author, tkt.owner)
+
+
+def _return_reasons(tkt: T.Ticket, returns: int) -> list:
+    """Причины последних `returns` возвратов: записи `[итог: return]` ревьюера; нет таких — записи ревьюера."""
+    mine = [e for e in tkt.log if T.author_is(e.author, tkt.reviewer)]
+    found = [e for e in mine if re.match(r"\[итог:\s*return\]", e.text.strip())] or mine
+    return [" ".join(e.text.split())[:300] for e in found[-returns:]]
+
+
 def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
-    """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
-    ревьюера не будим; запись dispatcher с остатком, статус done («не сделано»). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
-    не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
-    if tkt.status not in ("done", "in_review") or tkt.reviewer not in P.ROLES:
+    """Пинг-понг ревью: `review_limit_hit` — ревьюера не будим; запись dispatcher с причинами возвратов (начало `REVIEW_CAP_MARK` —
+    её читает `alarms.owner_questions`: вопрос уходит владельцу в Telegram), статус needs_owner, строка CEO с причинами (маркер
+    статуса ставим сами, иначе `notify_status_for_ceo` напишет вторую и обрежет причины). Счётчик сбрасывается: ответ владельца —
+    новая серия. Возвращает свежий тикет."""
+    if not review_limit_hit(tkt, state):
         return tkt
     returns = _review_returns(state, tkt.id)
-    if returns < MAX_REVIEW_RETURNS or tkt.next_role in P.ROLES or tkt.next_role == "ceo":
-        return tkt
-    last_author = tkt.log[-1].author if tkt.log else ""
-    if not T.author_is(last_author, tkt.owner):
-        return tkt
-    rest = next((e.text.strip() for e in reversed(tkt.log) if T.author_is(e.author, tkt.reviewer)), "")
+    found = _return_reasons(tkt, returns)
+    reasons = "; ".join(f"{i}) {r}" for i, r in enumerate(found, 1)) or "(записей ревьюера нет)"
     T.append_log(path, "dispatcher",
-                 f"Не сделано: ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (потолок ремонта) — тикет закрыт "
-                 f"без нового круга. Остаток (последний возврат ревьюера): {rest[:1500] or '(записи ревьюера нет)'}. "
-                 f"Взять остаток — новый тикет со ссылкой на задачу владельца (`new --ref`).", now=now)
-    T.write_header_updates(path, {"status": "done", "next": ""}, now=now)
-    return T.read_ticket(path)
+                 f"{REVIEW_CAP_MARK} ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд, она снова сдана — третий круг не "
+                 f"запускаю. Причины возвратов: {reasons}. Вопрос владельцу: продолжать (и как), сузить заказ или закрыть.", now=now)
+    T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)
+    state.setdefault("review_returns", {}).pop(tkt.id, None)
+    fresh = T.read_ticket(path)
+    append_ceo_inbox(tkt.id, "needs_owner", f"потолок возвратов ({returns}): " + "; ".join(r[:100] for r in found), now)
+    state.setdefault("ceo_status_notified", {})[tkt.id] = f"needs_owner@{fresh.header.get('updated', '')}"
+    CFG.save_state(state)
+    return fresh
 
 
 JUDGE_GRACE = timedelta(minutes=25)  # CEO 04:37: Судье на ответ по blocked исполнителя — 25 мин, потом сигнал CEO (alpha: ~22 из 61 решал CEO)
@@ -243,7 +273,6 @@ NO_REVIEW_MARK = "закрыто без ревью"  # в записи «[ито
 
 
 CLOSED_BY_MERGE_MARK = "тикет закрыт без запуска ролей"  # в записи «[итог: done]…» диспетчера: PR влит, приёмка Судьи на голове есть (TK-018)
-AUTO_AUTHORS = ("merge",)  # записи программы о слиянии: не ход роли и не заказ — «последняя запись» их пропускает (TK-018)
 
 
 def last_move(tkt: T.Ticket):
