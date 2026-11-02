@@ -3,13 +3,13 @@
 
 Отчёт критика (Sonnet, свежий контекст) по PR #208@24981f7 (main@976e423 слит), дифф 362dd2f..24981f7 и origin/main..24981f7.
 
-1. read() ловит http.client.HTTPException — держится (pulse_view.py:36; тест test_pulse_page.py:237-264 через настоящий urlopen с InvalidURL и IncompleteRead).
-2. tick без RPV_TG_TOKEN/RPV_TG_CHAT — «off» до чтения проектов — держится (pulse_tg.py:99, notify.configured; тест test_pulse_tg.py:185-192, fetched пуст).
-3. Пустой pulse_projects — «Проектов нет…» — держится (pulse_tg.py:104 → pulse_view.summary). Оговорка: нечитаемый rpv.json даёт pulse_telegram=False → «off», сообщение не меняется; иначе нельзя — без файла неизвестно, включён ли Telegram.
-4. EnvironmentFile 0600 в docs/pulse.md — держится (:70, :78-79).
-5. Принятое ранее (порог старости, пояс generated, закрепление, не чаще раза в минуту, «отправлено» только при ok) — держится; normalise/sync/_pin не тронуты; dispatch.py — от слияния main, вызов в _guarded.
-6. Иные пути падения do_GET от одной записи — не хватает общей страховки на проект (pulse_server.py:105-106, pulse_view.py:93): теоретически RecursionError на сверхглубоком JSON, Overflow в parse_time на крайних годах. Оба искусственные: pulse.build пишет дату с поясом; падает один запрос, не сервер (ThreadingHTTPServer ловит исключение хендлера).
-7. Вне правки: единичный таймаут удалённого проекта переключает TG-сообщение туда-обратно — поведение прежних голов.
+1. read() ловит http.client.HTTPException — **держится** (pulse_view.py:36; тест test_pulse_page.py:237-264 через настоящий urlopen с InvalidURL и IncompleteRead).
+2. tick без RPV_TG_TOKEN/RPV_TG_CHAT — «off» до чтения проектов — **держится** (pulse_tg.py:99, notify.configured; тест test_pulse_tg.py:185-192, fetched пуст).
+3. Пустой pulse_projects — «Проектов нет…» — **держится** (pulse_tg.py:104 → pulse_view.summary). Оговорка: нечитаемый rpv.json даёт pulse_telegram=False → «off», сообщение не меняется; иначе нельзя — без файла неизвестно, включён ли Telegram.
+4. EnvironmentFile 0600 в docs/pulse.md — **держится** (:70, :78-79).
+5. Принятое ранее (порог старости, пояс generated, закрепление, не чаще раза в минуту, «отправлено» только при ok) — **держится**; normalise/sync/_pin не тронуты; dispatch.py — от слияния main, вызов в _guarded.
+6. Иные пути падения do_GET от одной записи — **не хватает** общей страховки на проект (pulse_server.py:105-106, pulse_view.py:93): теоретически RecursionError на сверхглубоком JSON, Overflow в parse_time на крайних годах. Оба искусственные: pulse.build пишет дату с поясом; падает один запрос, не сервер (ThreadingHTTPServer ловит исключение хендлера).
+7. Вне правки — **держится** (замечание): единичный таймаут удалённого проекта переключает TG-сообщение туда-обратно — поведение прежних голов.
 
 Ответ Судьи на 6: возражаю против возврата. Реальные входы закрыты: битый URL, обрыв ответа, cells не список, generated не строка — тесты на каждый. Оставшиеся случаи требуют злонамеренно собранного файла (вложенность ~1000 уровней, год 0001/9999 без пояса), а pulse.json пишет только pulse.build; ущерб — пустой ответ на один запрос, сервер живёт. Замечание: при следующей правке pulse_view — try на проект в load_all вместо перечисления классов.
 Ответ Судьи на 3 (оговорка) и 7: замечания, не возврат — вне договора и не от этой правки.
