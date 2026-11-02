@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -178,6 +179,25 @@ class TextTests(unittest.TestCase):
         self.assertIn("**Побудка:**", charter)
         self.assertNotIn("или вопрос владельцу, не пересказ.", charter, "висящий обрывок старого пункта")
         self.assertNotIn("Monitor", (PLUGIN / "docs/signals.md").read_text(encoding="utf-8").split("## Побудка CEO")[1].split("## Передача")[0])
+
+    def _svg_block(self, title):
+        svg = (PLUGIN / "docs/img/ceo-signals.svg").read_text(encoding="utf-8")
+        after = svg.split(f'class="t">{title}</text>')[1].split("<rect")[0]
+        text = " ".join(re.findall(r">([^<]+)</text>", after))
+        return {k.strip() for k in re.split(r"[·\s]+", text) if k.strip()}
+
+    def test_scheme_wake_kinds_are_event_of(self):
+        self.assertEqual(self._svg_block("будит"), set(CW.EVENT_OF))
+        queue = self._svg_block("строка очереди")
+        self.assertFalse(queue & set(CW.EVENT_OF), queue)
+        self.assertIn("done", queue)
+
+    def test_signals_table_wake_rows_are_event_of_and_has_not_woken_row(self):
+        doc = (PLUGIN / "docs/signals.md").read_text(encoding="utf-8")
+        rows = [r for r in doc.splitlines() if r.startswith("| `")]
+        woken = {k for r in rows if r.rstrip().endswith("| будит событием |") for k in re.findall(r"`([^`]+)`", r.split("|")[1])}
+        self.assertEqual(woken, set(CW.EVENT_OF))
+        self.assertTrue(any(r.startswith("| `ceo-не-разбужен` |") for r in rows))
 
 
 if __name__ == "__main__":
