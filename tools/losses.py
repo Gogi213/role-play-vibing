@@ -8,7 +8,7 @@ import statistics as st
 from collections import Counter, defaultdict
 from pathlib import Path
 
-HEAD = re.compile(r"^### (\S+) (\S+)\s*$")
+HEAD = re.compile(r"^### (\S+) (\S+)(?:[ \t]+\([^)\n]*\))?\s*$")  # «роль (уточнение)» — роль первое слово
 RES = re.compile(r"^\[итог: ([a-z-]+)\]\s*(.*)")
 PRNUM = re.compile(r"PR #(\d+)")
 KV = re.compile(r"(\w+)=(\S+)")

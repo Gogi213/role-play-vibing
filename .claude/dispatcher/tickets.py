@@ -329,6 +329,13 @@ def _caller_role() -> str:
     return P.caller_role(CFG.PROJECT_ROOT)
 
 
+def _code_author(role: str) -> str:
+    """Автор записи, которую пишет код от имени вызвавшего (проба, нагрузка, снятие OOM): у CEO и Судьи — с пометкой
+    «служебная» (precheck не считает её заказом, TK-091/TK-097), у остальных ролей — их имя; без роли — `ceo`."""
+    role = role or "ceo"
+    return T.service_author(role) if role in precheck.ORDER_AUTHORS else role
+
+
 def _decisions_ack(args) -> tuple[str, str]:
     """CP2 (критерий 6): приёмка Судьи при заведённом реестре — с перечнем решений владельца, с которыми сдача сверена:
     `--decisions В-3,В-7` (номера есть в реестре) или `--decisions -` (связанных нет). → (отказ, пометка для лога)."""
@@ -652,9 +659,9 @@ def cmd_wait(args) -> int:
         print(e, file=sys.stderr)
         return 1
     if probe_log:
-        T.append_log(path, _caller_role() or "ceo", probe_log)
+        T.append_log(path, _code_author(_caller_role()), probe_log)
     if load_log:
-        T.append_log(path, _caller_role() or "ceo", load_log)
+        T.append_log(path, _code_author(_caller_role()), load_log)
     if load_upd:
         LOAD.clear_oom(args.id)  # новый замер принят — отметка OOM снята
     print(f"{args.id}: status: waiting, wait_for: {spec}" + (f", срок {upd['wait_by']}" if by else ""))
@@ -676,7 +683,7 @@ def cmd_oom_clear(args) -> int:
         print(f"{args.id}: отметки OOM нет — снимать нечего")
         return 0
     LOAD.clear_oom(args.id)
-    T.append_log(path, role or "ceo", f"[oom] отметка OOM снята без нового замера: {why}")
+    T.append_log(path, _code_author(role), f"[oom] отметка OOM снята без нового замера: {why}")
     print(f"{args.id}: отметка OOM снята")
     return 0
 

@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 SLOW_MIN = 10
-ENTRY = re.compile(r"^### (\S+) (\S+)\s*$", re.M)
+ENTRY = re.compile(r"^### (\S+) (\S+)(?:[ \t]+\([^)\n]*\))?\s*$", re.M)  # «роль (уточнение)» — роль первое слово
 PR = re.compile(r"\[итог: pr\]\s*PR #(\d+)@([0-9a-f]{7,40})")
 MARKER = re.compile(r"(?:коммит|голов\w*)\s+([0-9a-f]{7,40}).{0,160}(?:не запушен|detached HEAD)", re.I)
 MARKER_BY = {"ceo", "judge", "engineer"}
