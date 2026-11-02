@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import test_result as TR  # первым: задаёт песочницу CLAUDE_PROJECT_DIR
@@ -155,6 +157,96 @@ class GatesTests(unittest.TestCase):
         self._done()  # флага нет: умолчание = старое, хвост в --why по-прежнему отказ
         rc, _, err2 = self._accept(tail="-", decisions="-", numbers="-")
         self.assertEqual((rc, "это хвост" in err2), (1, True))
+
+
+class ReturnFixesTests(unittest.TestCase):
+    """Возврат Судьи по PR #203@e6dea84 (docs/reviews/TK-089-critic.md): dry-run не падает и не путает «не запустилось» с
+    регрессией; `--false-positive` снимает только эвристику; сдача без поля «остаток» при tail_fields_only — отказ."""
+    setUp, tearDown, res, tkt, refused, _registry_with_decision = (
+        TR.ResultTests.setUp, TR.ResultTests.tearDown, TR.ResultTests.res, TR.ResultTests.tkt, TR.ResultTests.refused,
+        TR.ResultTests._registry_with_decision)
+    _done, _accept, _error, _fields_only = GatesTests._done, GatesTests._accept, GatesTests._error, GatesTests._fields_only
+
+    def _ok(self):
+        self._done("Готово, тесты зелёные")
+
+    def test_dry_run_pr_without_sha_is_a_line_not_a_crash(self):
+        self._ok()
+        import merge_rule
+        with mock.patch.object(merge_rule, "check_pr", side_effect=AttributeError("sha.lower() от None")):
+            rc, _, err = self._accept(pr=7, sha=None, dry_run=True, tail="-", decisions="-", numbers="-")
+        self.assertEqual(rc, 1)
+        self.assertIn("--sha", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_dry_run_pr_without_repo_is_a_line(self):
+        self._ok()
+        self.settings = {}
+        rc, _, err = self._accept(pr=7, sha="a" * 40, dry_run=True, tail="-", decisions="-", numbers="-")
+        self.assertEqual(rc, 1)
+        self.assertIn("репозиторий не задан", err)
+
+    def test_dry_run_unrun_check_is_not_a_regression(self):
+        self._ok()
+
+        def unrun(root, cwd=None, timeout=None, report=None, infra=None):
+            infra.append(("E-001", "проверка", "таймаут"))
+            return []
+
+        with mock.patch.object(ER, "run_all", unrun):
+            rc, _, err = self._accept(dry_run=True, tail="-", decisions="-", numbers="-")
+        self.assertEqual(rc, 1)
+        self.assertIn("не проверено, не return", err)
+        self.assertNotIn("регрессия", err)
+
+    def test_dry_run_green_hint_lists_no_ci_gate(self):
+        self.assertNotIn("CI", GATES_LINE.search(JUDGE_TEMPLATE).group(0))
+
+    def _numbers_table(self, row):
+        (self.base / "tbl.md").write_text(f"| число | файл:строка |\n|---|---|\n{row}\n", encoding="utf-8")
+
+    def test_false_positive_does_not_lift_structural_refusals(self):
+        self._ok()
+        self._error()
+        self._numbers_table("| 42 | out.md:1 |")  # в out.md числа 42 нет
+        for kw, part in ((dict(numbers="nofile.md", tail="-"), "файла нет в проекте"),
+                         (dict(numbers="tbl.md", tail="-"), "не сходятся с источником"),
+                         (dict(numbers="-", tail="TK-999"), "нужен номер"),
+                         (dict(numbers="-", tail="ceo:x"), "напиши, что сделать CEO")):
+            with self.subTest(kw=kw):
+                rc, _, err = self._accept(decisions="-", false_positive="E-001", **kw)
+                self.assertEqual(rc, 1)
+                self.assertIn(part, err)
+
+    def test_false_positive_lifts_heuristic_numbers_refusal(self):
+        self._ok()
+        self._error()
+        (self.base / "review.md").write_text("Метрика выросла до 431 строки, было 77", encoding="utf-8")
+        rc, _, err = self._accept(decisions="-", tail="-", numbers="-")
+        self.assertEqual(rc, 1)
+        self.assertIn("в сдаче есть числа", err)
+        rc, _, err = self._accept(decisions="-", tail="-", numbers="-", false_positive="E-001")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("ложное срабатывание: E-001 (числа)", self.tkt().log[-1].text)
+
+    def test_tail_fields_only_submission_without_left_field_is_refused(self):
+        self._ok()  # сдача записана до включения ключа: поля «остаток» нет
+        self._error()
+        with self._fields_only():
+            rc, _, err = self._accept(tail="-", decisions="-", numbers="-")
+            self.assertEqual(rc, 1)
+            self.assertIn("нет поля «остаток»", err)
+            self.assertNotIn("--false-positive", err)  # структурный отказ эвристикой не снимается
+            rc, _, err = self._accept(tail="-", decisions="-", numbers="-", false_positive="E-001")
+            self.assertEqual(rc, 1)
+            self.assertIn("нет поля «остаток»", err)
+            rc, _, err = self._accept(tail="-", decisions="-", numbers="-", dry_run=True)
+            self.assertEqual(rc, 1)
+            self.assertIn("нет поля «остаток»", err)
+
+
+GATES_LINE = re.compile(r"Отказ гейта — сначала `--dry-run`.*?\(([^)]*)\)")
+JUDGE_TEMPLATE = (Path(__file__).resolve().parents[2] / "templates" / "roles" / "judge.md").read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

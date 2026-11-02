@@ -396,6 +396,20 @@ def _tail_text(sub: str) -> str:
     return f"Осталось: {m.group(1).strip()}" if m else ""
 
 
+def _left_ack(tid: str) -> str:
+    """`tail_fields_only`: сдача done|pr исполнителя без поля «остаток» — отказ приёмки (пустой скан пропустил бы `--tail -`
+    молча). Сдача судьи/CEO поле не обязана нести (как в `_result_refusal`)."""
+    path = TICKETS_DIR / f"{tid}.md"
+    if P.setting("tail_fields_only", False) is not True or not path.exists():
+        return ""
+    tkt = T.read_ticket(path)
+    sub = _owner_submission(tkt)
+    if not sub or (tkt.owner or "") in ("judge", "ceo", "") or LEFT_FIELD.search(sub):
+        return ""
+    return ("tail_fields_only: в сдаче исполнителя нет поля «остаток» (result done|pr --left \"что осталось\", - = ничего) — "
+            "проверять нечего; верни сдачу на дополнение поля")
+
+
 def _owner_submission(tkt) -> str:
     """Текст последней сдачи исполнителя (`[итог: done|pr]` владельца тикета) — то, что принимает Судья."""
     for e in reversed(tkt.log):
