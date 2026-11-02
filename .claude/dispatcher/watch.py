@@ -40,6 +40,7 @@ import project as P  # noqa: E402
 import hide  # noqa: E402
 import ticket as T  # noqa: E402
 import unreleased as UNR  # noqa: E402 — «влито, не выпущено» (TK-062)
+import goal_idle as GI  # noqa: E402 — «у цели нет следующего шага» (TK-086)
 import hostload as HL  # noqa: E402 — отметка OOM-kill (TK-070)
 
 # Пути состояния — в `<проект>/.claude/dispatcher/` (тот же каталог, что у диспетчера); проект выставляет
@@ -860,7 +861,7 @@ def run_once(now=None, probes=True) -> list:
             probed += check(ws, now)
         except Exception as e:
             print(f"[watch] {getattr(check, '__name__', 'check')}: {type(e).__name__}: {e}", file=sys.stderr)
-    findings = collect_findings(now, alive_waits=alive_waits) + probed
+    findings = collect_findings(now, alive_waits=alive_waits) + probed + [Finding("goal-idle", f"{g}@{t}", m) for g, t, m in GI.goal_idle_events(ws, now)]
     posted = notify_findings(findings, ws, now)
     save_watch_state(ws)
     write_heartbeat(now, sum(not f.unknown for f in findings))

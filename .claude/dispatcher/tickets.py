@@ -70,6 +70,7 @@ import tickets_numbers as numbers_mod  # noqa: E402
 import critic_gate  # noqa: E402
 import precheck  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
+import tickets_gates as gates_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
 # Проект и тикеты берутся у диспетчера (CFG.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
@@ -172,6 +173,9 @@ def cmd_comment(args) -> int:
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
     nxt, auto_next, kept = args.next, False, ""
+    if bad := proof_mod.label_problem(args.text, T.read_ticket(path), args.author):  # TK-089: ярлыки — при записи, не на приёмке
+        print(f"comment: {bad}; запись не сделана", file=sys.stderr)
+        return 1
     with T.ticket_lock(path):  # запись, `next` и сжатие лога — одним куском (диспетчер правит шапку тем же замком)
         T.append_log(path, args.author, args.text)
         if not nxt and T.author_is(args.author, "judge"):
@@ -212,6 +216,9 @@ def _result_refusal(args, role: str, tkt) -> str:
                            why_owner=getattr(args, "why_owner", None) or "")
     if err:
         return err
+    if (P.setting("tail_fields_only", False) is True and args.result in ("done", "pr") and role not in ("judge", "ceo", "")
+            and not (getattr(args, "left", None) or "").strip()):
+        return "tail_fields_only: сдача done|pr — с --left \"что осталось\" (- = ничего): хвосты ищутся только в этом поле"
     if args.result == "continue" and routes_mod.continue_streak(tkt, role) >= routes_mod.CONTINUE_MAX:
         return (f"continue уже {routes_mod.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
                 f"либо blocked")
@@ -235,16 +242,9 @@ def _result_proof(args, role: str, tkt) -> str:
 
 
 def _accept_checks(args) -> tuple[str, str, str]:
-    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка. → (отказ, пометки для лога, хвост для CEO)."""
-    err, ack = _decisions_ack(args)
-    nerr, nack = _numbers_ack(args, args.id)
-    terr, tack, tail_ceo = _tail_ack(args, args.id)
-    lerr, lack = _live_ack(args, args.id)
-    err = err or nerr or terr or lerr
-    cerr, cack = ("", "") if err else _critic_ack(args, args.id)
-    err = err or cerr
-    perr, pack = ("", "") if err or args.pr else _proof_ack(args.id)  # с PR команды гонит cmd_accept: дважды не гоняем
-    return err or perr, ack + nack + tack + lack + cack + pack, tail_ceo
+    """Сверки приёмки Судьи: решения, числа, хвосты, живая проверка, критик, ярлыки. → (отказ, пометки для лога, хвост для CEO)."""
+    errs, ack, tail_ceo = gates_mod.run(args, sys.modules[__name__], proof=not args.pr)  # с PR команды гонит cmd_accept
+    return (errs or [""])[0], ack, tail_ceo
 
 
 def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
@@ -258,6 +258,7 @@ def _accept_in_pr(args, path: Path, role: str, why: str, ack: str) -> int:
                                   "live": getattr(args, "live", None),
                                   "critic": getattr(args, "critic", None),
                                   "critic_skip": getattr(args, "critic_skip", None),
+                                  "false_positive": getattr(args, "false_positive", None),
                                   "after_merge": getattr(args, "after_merge", None)})())
     if rc == 0:
         with T.ticket_lock(path):
@@ -278,7 +279,7 @@ def _wait_in_result(args, path: Path, role: str, why: str, proof: str) -> int:
 def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_ceo: str) -> None:
     """Запись итога в лог, номер PR в шапку, хвост CEO в очередь и ход по таблице маршрутов."""
     with T.ticket_lock(path):
-        T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}")
+        T.append_log(path, role, f"[итог: {args.result}]{proof} — {why}{_left_suffix(args)}")
         if args.result == "pr":
             prs = [n for n in re.findall(r"\d+", str(tkt.header.get("pr") or "")) if n != str(args.pr)]
             T.write_header_updates(path, {"pr": ", ".join(prs + [str(args.pr)])}, stamp_updated=False)
@@ -299,6 +300,8 @@ def cmd_result(args) -> int:
         return 1
     role = _caller_role()
     tkt = T.read_ticket(path)
+    if getattr(args, "dry_run", False):  # TK-089: все отказы приёмки одним списком, ничего не пишется
+        return gates_mod.dry_run_result(args, sys.modules[__name__], role, tkt)
     err = _result_refusal(args, role, tkt)
     if err:
         print(f"result: {err}", file=sys.stderr)
@@ -380,7 +383,54 @@ TAIL_NEGATION = re.compile(r"хвост\w*\s+нет\b(?!\s+[\w])|\bнет\s+хв
                            r"\bосталось" + _TAIL_SEP + r"(?:ничего|нет(?:\s+(?:блокер|замечани|вопрос)\w*)?)(?![^\W_])" + _TAIL_END + r"|"
                            r"\bне\s+осталось\s+ничего\b" + _TAIL_END, re.I)
 TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
-             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
+             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, устав проекта, слово владельца)")
+# TK-087: хвост про код, тесты, слияние и т. п. ролям по силам — Судья заводит тикет (`new … --title "Хвост TK-N: …"`), CEO его не несёт.
+# Зона CEO — настройки, CLAUDE.md, устав проекта, слово владельца: слова зоны оставляют `--tail ceo:` как есть.
+TAIL_CODE = re.compile(r"\bкод\w*|\bтест\w*|\bpr\b|\bpull\b|\w*мерж\w*|\bmerge\b|слить|слит\w*|слия\w*|влить|влив\w*|коммит\w*|скрипт\w*|"
+                       r"прав[ик]\w*|\bпочин\w*|\bчини\w*|\w*пуш\w*|рефактор\w*|\bбаг\w*|исправ\w*|ошибк\w*|\bмодул\w*|функци\w*", re.I)
+TAIL_OWNER_ZONE = re.compile(r"настройк\w*|settings|rpv\.json|claude\.md|устав\w*|charter|реестр\w*|"
+                             r"(?:слов\w*|решени\w*|согласи\w*)\s+владельц\w*|\ballow\b|токен\w*|\.claude/roles/[\w-]+\.md", re.I)
+# TK-099: имя флага (`--after-merge`) — не код: слово внутри него не считается.
+TAIL_FLAG = re.compile(r"(?<![\w-])--[\w-]+")
+
+
+def tail_hit(text: str) -> tuple:
+    """Хвост в тексте сдачи: (текст с погашенными отрицаниями, первое попадание `TAIL_WORDS` или None). Длина текста та же:
+    цитата в отказе берётся из него. Планка правок детектора — корпус реальных сдач (`fixtures/tail_corpus.json`, test_tail_corpus)."""
+    sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), text)
+    return sub, TAIL_WORDS.search(sub)
+
+
+LEFT_FIELD = re.compile(r"·\s*остаток:\s*(.+)$", re.S)  # поле `--left` в записи итога; слово «остаток» детектор хвостов не ловит
+
+
+def _left_suffix(args) -> str:
+    """Поле `--left` сдачи: " · остаток: …" в конец записи итога (done|pr); `-` — «ничего»."""
+    left = " ".join((getattr(args, "left", None) or "").split())
+    return f" · остаток: {'ничего' if left in ('-', '—') else left}" if left and args.result in ("done", "pr") else ""
+
+
+def _tail_text(sub: str) -> str:
+    """Что сканирует детектор хвостов: сдача целиком (умолчание) или при `tail_fields_only` — только поле `--left`
+    (как фраза «Осталось: …», чтобы работали те же исключения пустого остатка); свободный `--why` не сканируется."""
+    if P.setting("tail_fields_only", False) is not True:
+        return sub
+    m = LEFT_FIELD.search(sub)
+    return f"Осталось: {m.group(1).strip()}" if m else ""
+
+
+def _left_ack(tid: str) -> str:
+    """`tail_fields_only`: сдача done|pr исполнителя без поля «остаток» — отказ приёмки (пустой скан пропустил бы `--tail -`
+    молча). Сдача судьи/CEO поле не обязана нести (как в `_result_refusal`)."""
+    path = TICKETS_DIR / f"{tid}.md"
+    if P.setting("tail_fields_only", False) is not True or not path.exists():
+        return ""
+    tkt = T.read_ticket(path)
+    sub = _owner_submission(tkt)
+    if not sub or (tkt.owner or "") in ("judge", "ceo", "") or LEFT_FIELD.search(sub):
+        return ""
+    return ("tail_fields_only: в сдаче исполнителя нет поля «остаток» (result done|pr --left \"что осталось\", - = ничего) — "
+            "проверять нечего; верни сдачу на дополнение поля")
 
 
 def _owner_submission(tkt) -> str:
@@ -426,9 +476,9 @@ def _live_ack(args, tid: str) -> tuple[str, str]:
     return "", f" вживую: {rel}"
 
 
-def _critic_ack(args, tid: str) -> tuple[str, str]:
+def _critic_ack(args, tid: str, record=None) -> tuple[str, str]:
     """Ворота критика (TK-071): за ключом `critic_before_accept`; свежесть отчёта — от головы PR (`--sha`)."""
-    return critic_gate.critic_ack(args, tid, PROJECT_ROOT, getattr(args, "sha", None) or "")
+    return critic_gate.critic_ack(args, tid, PROJECT_ROOT, getattr(args, "sha", None) or "", record=record)
 
 
 def _proof_ack(tid: str) -> tuple[str, str]:
@@ -447,9 +497,8 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         return f"приёмка — с ответом про хвосты: {TAIL_HINT}; не сделано то, что в заказе или договоре, — не принимать, а вернуть", "", ""
     if raw in ("-", "—"):
         path = TICKETS_DIR / f"{tid}.md"
-        sub = _owner_submission(T.read_ticket(path)) if path.exists() else ""
-        sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), sub)  # длина та же: цитата в отказе берётся из этого же текста
-        hit = TAIL_WORDS.search(sub)
+        sub = _tail_text(_owner_submission(T.read_ticket(path))) if path.exists() else ""
+        sub, hit = tail_hit(sub)
         if hit:
             return (f"--tail -: в сдаче исполнителя «{sub[max(0, hit.start() - 40):hit.end() + 60].strip()}» — это хвост. "
                     f"Не сделано из заказа или договора — `return`; иначе {TAIL_HINT}"), "", ""
@@ -458,6 +507,10 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         what = " ".join(raw[4:].split()).strip("\"' ")
         if len(what) < 5:
             return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
+        if (hit := TAIL_CODE.search(TAIL_FLAG.sub(" ", what))) and not TAIL_OWNER_ZONE.search(what):
+            return (f"--tail ceo: «{what[:80]}» — про «{hit.group()}»: код, тесты, слияние и т. п. ролям по силам. Заведи тикет "
+                    f"(`tickets.py new --owner <роль> --ref <ref тикета> --title \"Хвост {tid}: …\"`) и принимай с `--tail TK-N`; "
+                    f"CEO — только то, что ролям не сделать (настройки, CLAUDE.md, устав проекта, слово владельца)"), "", ""
         return "", f" хвост CEO: {what[:120]}", what
     ids = [x for x in re.split(r"[,\s]+", raw) if x]
     bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
@@ -523,12 +576,15 @@ def cmd_accept(args) -> int:
     if not path.exists():
         print(f"нет тикета {args.id}", file=sys.stderr)
         return 1
+    args.sha = (args.sha or "").lower()  # регистр не важен: `result` и dry-run принимают ВЕРХНИЙ, accept — так же
+    slug = gates_mod.repo_slug(args)
+    if getattr(args, "dry_run", False):  # весь список, в том числе «--sha не хеш» и «репозиторий не задан» строками
+        return gates_mod.dry_run(args, sys.modules[__name__], slug)
     if not re.fullmatch(r"[0-9a-f]{7,40}", args.sha):
         print("accept: --sha — хеш головы PR (7–40 hex)", file=sys.stderr)
         return 1
     import merge_rule
     import routes
-    slug = (getattr(args, "repo", None) or P.setting("ci_repo", "") or "").strip()  # без догадки по cwd: PR живут не в этом репо
     if not slug:
         print("accept: репозиторий не задан — --repo <владелец/репо> или ci_repo в .claude/rpv.json", file=sys.stderr)
         return 1
@@ -536,16 +592,10 @@ def cmd_accept(args) -> int:
     if err:
         print(f"accept: {err}", file=sys.stderr)
         return 1
-    derr, ack = _decisions_ack(args)
-    nerr, nack = _numbers_ack(args, args.id)
-    terr, tack, tail_ceo = _tail_ack(args, args.id)
-    lerr, lack = _live_ack(args, args.id)
-    cerr, cack = ("", "") if derr or nerr or terr or lerr else _critic_ack(args, args.id)
-    perr, pack = ("", "") if derr or nerr or terr or lerr or cerr else _proof_ack(args.id)
-    if derr or nerr or terr or lerr or cerr or perr:
-        print(f"accept: {derr or nerr or terr or lerr or cerr or perr}", file=sys.stderr)
+    errs, ack, tail_ceo = gates_mod.run(args, sys.modules[__name__])
+    if errs:
+        print(f"accept: {errs[0]}", file=sys.stderr)
         return 1
-    ack += nack + tack + lack + cack + pack
     if _regression(args.id, "accept"):
         return 1
     if tail_ceo:

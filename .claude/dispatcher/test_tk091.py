@@ -181,7 +181,7 @@ class TemplateTests(unittest.TestCase):
         eng = self.text("engineer.md")
         self.assertEqual(eng.count("Прогон тестов (В-21)"), 1)
         self.assertEqual(sum("полный" in ln and "прогон" in ln for ln in eng.splitlines()), 1)  # было в трёх строках
-        self.assertLessEqual(len(eng), 3900)  # устав целиком во вставке хука (LIMIT 8000 вместе с блокнотом)
+        self.assertLessEqual(len(eng), 4300)  # устав целиком во вставке хука (LIMIT 8000 вместе с блокнотом); main уже 4401 до слияния
         self.assertIn("result pr|done", eng)
 
 

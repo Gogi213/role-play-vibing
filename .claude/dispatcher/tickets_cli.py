@@ -53,6 +53,9 @@ def _add_ticket_parsers(sub) -> None:
     p_accept.add_argument("--live", default=None, help="договор с [вживую]: файл живой проверки (что увидит владелец)")
     p_accept.add_argument("--critic", default=None, help="critic_before_accept: отчёт критика — файл в docs/reviews/")
     p_accept.add_argument("--critic-skip", dest="critic_skip", default=None, help="critic_before_accept: обход критика, причина ≥ 10 знаков")
+    p_accept.add_argument("--dry-run", dest="dry_run", action="store_true", help="все отказы гейтов одним списком, ничего не пишется")
+    p_accept.add_argument("--false-positive", dest="false_positive", default=None,
+                          help="отказ эвристики хвостов/чисел ложный: E-NNN, заведённая на этот тикет (errors.py add)")
     p_accept.add_argument("--after-merge", dest="after_merge", default=None,
                           help="шаг после слияния (тег, выкладка, выпуск): после влива диспетчер будит автора на него, а не закрывает тикет")
 
@@ -84,6 +87,11 @@ def _add_result_parser(sub) -> None:
     p_result.add_argument("--critic", default=None, help="accept (critic_before_accept): отчёт критика — файл в docs/reviews/")
     p_result.add_argument("--critic-skip", dest="critic_skip", default=None,
                           help="accept (critic_before_accept): обход критика, причина ≥ 10 знаков (считается в отчёт)")
+    p_result.add_argument("--left", default=None,
+                          help="done|pr: что осталось (- = ничего); при tail_fields_only хвосты ищутся только здесь, а не в --why")
+    p_result.add_argument("--dry-run", dest="dry_run", action="store_true", help="accept: все отказы гейтов одним списком, ничего не пишется")
+    p_result.add_argument("--false-positive", dest="false_positive", default=None,
+                          help="accept: отказ эвристики хвостов/чисел ложный — E-NNN, заведённая на этот тикет (errors.py add)")
     p_result.add_argument("--after-merge", dest="after_merge", default=None,
                           help="accept по PR: шаг после слияния (тег, выкладка, выпуск) — после влива будится автор, тикет не закрывается")
 

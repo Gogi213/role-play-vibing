@@ -807,6 +807,12 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn("не отправлено (нет RPV_TG_TOKEN/RPV_TG_CHAT): Работа стоит",
                       (CFG.DISPATCHER_DIR / "notify.log").read_text(encoding="utf-8"))
 
+    def test_tick_writes_pulse_json(self):
+        t0 = dt("2026-10-06T12:00:00+04:00")
+        D.tick(t0)
+        data = json.loads(self.dispatcher_dir.joinpath("pulse.json").read_text(encoding="utf-8"))
+        self.assertEqual((data["version"], len(data["cells"]), data["state"]), (1, 96, "ok"))
+
     def test_downtime_throttle_in_slo_and_limit_pause_outside(self):
         t0 = dt("2026-10-06T12:00:00+04:00")
         T.create_ticket(self.tickets_dir, owner="engineer", title="Тормоз", now=t0 - timedelta(hours=1))
@@ -2558,9 +2564,9 @@ class DispatchRunTests(unittest.TestCase):
         D._finish_run(tid, info, state, base + timedelta(seconds=30), timed_out=False)
         D.save_state(state)
 
-    def owner_resubmits(self, path, n, status="done"):
+    def owner_resubmits(self, path, n, status="done", next_role=""):
         T.append_log(path, "engineer", f"доработал {n}", now=dt("2026-10-03T12:00:00+04:00") + timedelta(minutes=n))
-        T.write_header_updates(path, {"status": status, "next": ""},     # диспетчер очищает next при запуске владельца
+        T.write_header_updates(path, {"status": status, "next": next_role},     # `result pr` ставит next: ревьюер (routes.route)
                                now=dt("2026-10-03T12:00:00+04:00") + timedelta(minutes=n))
 
     def ceo_lines(self, tid, kind=None):
@@ -2596,25 +2602,25 @@ class DispatchRunTests(unittest.TestCase):
         self.review_round(path, 2, "in_review", next_role="ceo")
         self.assertNotIn(path.stem, D.load_state().get("review_returns", {}))
 
-    def test_two_returns_then_resubmit_closes_not_done_with_remainder_and_reviewer_is_not_woken(self):
+    def test_two_returns_then_resubmit_asks_owner_with_reasons_and_reviewer_is_not_woken(self):
         path = self.review_setup()
         tid = path.stem
         for n in (1, 2):
             self.review_round(path, n, "in_progress")
-            self.owner_resubmits(path, n, "in_review" if n < 2 else "done")
+            self.owner_resubmits(path, n, "in_review", next_role="judge")  # как `result pr`: next: judge — потолок не за ним (TK-090)
         self.assertEqual(D.load_state()["review_returns"][tid], 2)
         calls = self.recording_popen()
         D.tick()
         tkt = T.read_ticket(path)
         self.assertEqual(calls, [], "ревьюера на третий круг не будим")
-        self.assertEqual(tkt.status, "done")  # TK-233: закрыт «не сделано», не blocked/needs_owner
+        self.assertEqual(tkt.status, "needs_owner")  # TK-090: вопрос владельцу с причинами, не тихое закрытие
         self.assertEqual(tkt.log[-1].author, "dispatcher")
-        self.assertIn("Не сделано", tkt.log[-1].text)
-        self.assertIn("Остаток", tkt.log[-1].text)
-        self.assertIn("круг 2", tkt.log[-1].text, "остаток — последний возврат ревьюера")
+        self.assertIn("Потолок возвратов", tkt.log[-1].text)
+        self.assertIn("круг 1", tkt.log[-1].text, "причины всех возвратов, не только последнего")
+        self.assertIn("круг 2", tkt.log[-1].text)
         self.assertEqual(tkt.next_role, "")
         self.assertEqual(len(self.ceo_lines(tid)), 1, self.ceo_lines(tid))
-        self.assertIn("[done]", self.ceo_lines(tid)[0])
+        self.assertIn("[needs_owner]", self.ceo_lines(tid)[0])
         D.tick()
         D.tick()
         self.assertEqual(len(self.ceo_lines(tid)), 1, "повторов нет")
@@ -2682,7 +2688,7 @@ class DispatchRunTests(unittest.TestCase):
         self.recording_popen()
         D.tick(now=dt("2026-10-03T15:20:00+04:00"))                     # запуск кончился — эскалация, одна строка
         self.assertEqual(T.read_ticket(path).log[-1].author, "dispatcher")
-        self.assertEqual(len(self.ceo_lines(tid, "done")), 1, self.ceo_lines(tid))
+        self.assertEqual(len(self.ceo_lines(tid, "needs_owner")), 1, self.ceo_lines(tid))
 
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
         path = self.review_setup()
@@ -2691,13 +2697,13 @@ class DispatchRunTests(unittest.TestCase):
             self.owner_resubmits(path, n, "in_review")
         self.recording_popen()
         D.tick()                                       # эскалация + первый тик (метка «историю done не пересказываем»)
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1)
+        self.assertEqual(len(self.ceo_lines(path.stem, "needs_owner")), 1)
         T.append_log(path, "ceo", "принимаю как есть", now=dt("2026-10-03T15:00:00+04:00"))
         T.write_header_updates(path, {"status": "done"}, now=dt("2026-10-03T15:00:00+04:00"))
         D.tick()
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, self.ceo_lines(path.stem))  # «не сделано» + закрытие CEO
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, self.ceo_lines(path.stem))  # закрытие CEO после вопроса владельцу
         D.tick()
-        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 2, "дедуп")
+        self.assertEqual(len(self.ceo_lines(path.stem, "done")), 1, "дедуп")
 
     # --- повтор после таймаута
     def test_timeout_without_json_keeps_session_and_retry_resumes(self):
