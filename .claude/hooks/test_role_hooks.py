@@ -316,7 +316,8 @@ class Fit(unittest.TestCase):
     def test_huge_notebook_keeps_tail(self):
         self.write("judge.md", "# Судья\nкоротко\n")
         self.write("notes/judge.md", "\n".join(f"строка {i}" for i in range(5000)) + "\nПОСЛЕДНЯЯ")
-        text = rc.full_context("judge", "Роль: Судья", "startup", {})
+        with mock.patch.object(rc, "rotate_notebook", return_value=0):   # запасной путь хука без ротации (TK-092)
+            text = rc.full_context("judge", "Роль: Судья", "startup", {})
         self.assertLessEqual(len(text), rc.LIMIT)
         self.assertTrue(text.rstrip().endswith("ПОСЛЕДНЯЯ"))
         self.assertIn("начало — в файле", text)

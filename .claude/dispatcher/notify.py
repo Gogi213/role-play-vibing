@@ -22,9 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 
 API = "https://api.telegram.org/bot{token}/sendMessage"
+ME = "https://api.telegram.org/bot{token}/getMe"   # проверка токена без сообщения (doctor)
 TRIES = 3
 TIMEOUT_S = 15.0
 LIMIT = 4000  # знаков в сообщении (у Telegram 4096)
+RETRY_S = 300.0  # не доставленное при настроенном Telegram повторяется не чаще раза в 5 мин: тик не ждёт сеть каждый раз
 
 
 def configured() -> bool:
@@ -75,22 +77,36 @@ def send(text: str, project=None, opener=urllib.request.urlopen, sleep=time.slee
     return False
 
 
+def delivered(text: str, **kw) -> bool:
+    """Сообщение дошло или слать некуда: `send()` True, либо Telegram не настроен вовсе (повторять незачем). Настроен, но
+    сбой (401, сеть) — False: «отправлено» не ставим, повтор позже (TK-092: двое суток 401 при «отправлено»)."""
+    return send(text, **kw) or not configured()
+
+
 def episode(st: dict, flag: str, firing: bool, cleared: bool, down, up, log_dir=None, ceo_down=None, ceo_up=None) -> None:
     """Одна тревога на эпизод (TK-010): `firing` и флага `st[flag]` нет — `down()` уходит владельцу (и в `ceo_down(text)`, если
     задана строка CEO), флаг встаёт; `cleared` и флаг есть — `up()` уходит так же, флаг снимается. Пока ни то ни другое —
     ничего. Текст строится функцией только в момент отправки: поле, которого нет вне эпизода, тревоге не мешает."""
+    try_key = flag + "_try"   # время последней недоставленной попытки: CEO строку получает один раз, повтор — не чаще RETRY_S
+    now = time.time()
     if firing and not st.get(flag):
-        text = down()
-        send(text, log_dir=log_dir)
-        if ceo_down:
-            ceo_down(text)
-        st[flag] = True
+        step, ceo, want = down, ceo_down, True
     elif cleared and st.get(flag):
-        text = up()
-        send(text, log_dir=log_dir)
-        if ceo_up:
-            ceo_up(text)
-        st[flag] = False
+        step, ceo, want = up, ceo_up, False
+    else:
+        if not firing:
+            st.pop(try_key, None)
+        return
+    if now - st.get(try_key, -RETRY_S) < RETRY_S:
+        return
+    text = step()
+    if ceo and try_key not in st:
+        ceo(text)
+    if delivered(text, log_dir=log_dir):
+        st[flag] = want
+        st.pop(try_key, None)
+    else:
+        st[try_key] = now
 
 
 def main(argv=None) -> int:

@@ -96,7 +96,7 @@ class EpisodeTests(unittest.TestCase):
 
     def run_episode(self, st, firing, cleared, **kw):
         sent = []
-        with mock.patch.object(N, "send", side_effect=lambda text, **k: sent.append(text)):
+        with mock.patch.object(N, "send", side_effect=lambda text, **k: sent.append(text) or True):
             N.episode(st, "flag", firing, cleared, down=lambda: "стоит", up=lambda: "идёт", **kw)
         return sent
 
@@ -116,6 +116,40 @@ class EpisodeTests(unittest.TestCase):
         st = {}
         self.assertEqual(self.run_episode(st, True, False), ["стоит"])
         self.assertEqual(self.run_episode(st, False, True), ["идёт"])
+
+    def failing_episode(self, st, firing, cleared, at, ok=False, **kw):
+        sent = []
+        with mock.patch.object(N, "send", side_effect=lambda text, **k: (sent.append(text), ok)[1]),                 mock.patch.object(N, "configured", return_value=True), mock.patch.object(N.time, "time", return_value=at):
+            N.episode(st, "flag", firing, cleared, down=lambda: "стоит", up=lambda: "идёт", **kw)
+        return sent
+
+    def test_failed_send_keeps_flag_down_and_retries_throttled(self):
+        """TK-092: Telegram настроен, но не принял (401, сеть) — «отправлено» не ставим; повтор не чаще RETRY_S, CEO — один раз."""
+        st, ceo = {}, []
+        kw = {"ceo_down": ceo.append}
+        self.assertEqual(self.failing_episode(st, True, False, 1000.0, **kw), ["стоит"])
+        self.assertFalse(st.get("flag"), "не дошло — флаг не ставим")
+        self.assertEqual(self.failing_episode(st, True, False, 1100.0, **kw), [], "раньше RETRY_S — не пытаемся")
+        self.assertEqual(self.failing_episode(st, True, False, 1000.0 + N.RETRY_S + 1, **kw), ["стоит"], "позже — повтор")
+        self.assertEqual(ceo, ["стоит"], "CEO строку получает один раз")
+        self.assertEqual(self.failing_episode(st, True, False, 2000.0, ok=True, **kw), ["стоит"])
+        self.assertTrue(st["flag"])
+        self.assertNotIn("flag_try", st)
+        self.assertEqual(self.failing_episode(st, True, False, 2100.0, ok=True, **kw), [], "дошло — эпизод закрыт")
+
+    def test_failed_recovery_message_retried_and_flag_kept(self):
+        st = {"flag": True}
+        self.assertEqual(self.failing_episode(st, False, True, 1000.0), ["идёт"])
+        self.assertTrue(st["flag"], "«ожило» не дошло — флаг держится")
+        self.assertEqual(self.failing_episode(st, False, True, 1000.0 + N.RETRY_S + 1, ok=True), ["идёт"])
+        self.assertFalse(st["flag"])
+
+    def test_not_configured_counts_as_handled(self):
+        """Telegram не настроен вовсе — слать некуда: эпизод закрывается, как раньше (иначе CEO получал бы строку каждый тик)."""
+        st = {}
+        with mock.patch.object(N, "configured", return_value=False):
+            self.assertEqual(self.run_episode(st, True, False), ["стоит"])
+        self.assertTrue(st["flag"])
 
     def test_both_alarms_use_it(self):
         """Обе тревоги идут через `notify.episode`: ни у одной нет своей копии «флаг + отправка»."""
