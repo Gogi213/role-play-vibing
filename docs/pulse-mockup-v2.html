@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пульс</title>
+<style>
+:root{
+  --bg:#f6f5f2; --card:#fff; --ink:#1b1b19; --mute:#77756f; --line:#e7e5df;
+  --c0:#ecebe6; --c1:#c9e3a6; --c2:#97c968; --c3:#5f9b34;
+  --owner:#f2c46d; --owner-ink:#8a5a00; --stuck:#ef9a94; --stuck-ink:#a3302a; --ok-ink:#3f7a1f;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141413; --card:#1d1d1b; --ink:#eeede8; --mute:#8d8b84; --line:#2c2c29;
+  --c0:#2a2a27; --c1:#3f5a2a; --c2:#5f8a37; --c3:#8cc152;
+  --owner:#c99a3e; --owner-ink:#f2c46d; --stuck:#c4605a; --stuck-ink:#f0a29c; --ok-ink:#9fd36a;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,"Segoe UI",Inter,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding:32px 24px 48px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.state{font-size:30px;font-weight:650;letter-spacing:-.02em;line-height:1.15}
+.state small{display:block;font-size:15px;font-weight:400;color:var(--mute);letter-spacing:0;margin-top:6px}
+.state.owner{color:var(--owner-ink)} .state.stuck{color:var(--stuck-ink)}
+.meta{color:var(--mute);font-size:13px;text-align:right;white-space:nowrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-top:18px;max-width:100%}
+.seg button{all:unset;cursor:pointer;padding:6px 14px;font-size:13px;color:var(--mute);white-space:nowrap}
+.seg sup{font-size:10px;opacity:.7;margin-left:2px}
+.seg button.on{background:var(--ink);color:var(--bg)}
+.sum{display:flex;gap:28px;margin:22px 0 26px;flex-wrap:wrap}
+.sum div{font-size:13px;color:var(--mute)} .sum b{display:block;font-size:22px;color:var(--ink);font-weight:600}
+
+.proj{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:14px}
+.proj summary{list-style:none;cursor:pointer;padding:18px 20px 16px;display:grid;grid-template-columns:210px 1fr 240px;gap:20px;align-items:center}
+.proj summary::-webkit-details-marker{display:none}
+.name{font-weight:650;font-size:17px}
+.goal{font-size:12.5px;color:var(--mute);margin-top:3px;line-height:1.35}
+.bar{height:4px;background:var(--c0);border-radius:2px;margin-top:7px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--c3)}
+.tl{min-width:0}
+.hours,.cells{display:grid;grid-template-columns:repeat(32,1fr);gap:3px}
+.hours span{grid-column:span 4;font-size:11px;color:var(--mute);padding-left:1px}
+.cells{margin-top:5px}
+.cells i{height:22px;border-radius:4px;background:var(--c0)}
+.cells i.a{background:var(--c1)} .cells i.b{background:var(--c2)} .cells i.c{background:var(--c3)}
+.cells i.o{background:var(--owner)} .cells i.s{background:var(--stuck)}
+.cells i.now{outline:2px solid var(--ink);outline-offset:1px}
+.now-line{font-size:13.5px;line-height:1.4}
+.now-line .who{color:var(--mute);font-size:12.5px;display:block}
+.now-line.owner{color:var(--owner-ink)} .now-line.stuck{color:var(--stuck-ink)}
+.body{border-top:1px solid var(--line);padding:14px 20px 18px;display:grid;grid-template-columns:1fr 1fr;gap:24px;font-size:13.5px}
+.body h4{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+.body ul{margin:0;padding:0;list-style:none}
+.body li{padding:4px 0;display:flex;gap:10px}
+.body li em{font-style:normal;color:var(--mute);min-width:52px}
+.tag{font-size:11px;padding:1px 6px;border-radius:5px;background:var(--c0);color:var(--mute)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--mute);margin-top:18px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.act{display:inline-block;margin-top:10px;padding:7px 12px;border-radius:8px;background:var(--owner);color:#2a1d00;font-size:13px;font-weight:600;text-decoration:none}
+
+.cells i{transition:transform .12s,opacity .12s,box-shadow .12s;cursor:default}
+.cells:hover i{opacity:.55}
+.cells i.hl{opacity:1!important;transform:scaleY(1.25);box-shadow:0 0 0 2px var(--ink)}
+.cells i.col{opacity:1!important}
+.tip{position:fixed;z-index:9;pointer-events:none;background:var(--ink);color:var(--bg);border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.45;max-width:260px;box-shadow:0 6px 24px rgba(0,0,0,.25);opacity:0;transform:translateY(4px);transition:opacity .1s,transform .1s}
+.tip.on{opacity:1;transform:none}
+.tip b{display:block;font-size:13px;margin-bottom:2px}
+.tip .st{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;margin-left:6px;color:#1b1b19}
+.tip ul{margin:5px 0 0;padding:0;list-style:none;opacity:.85}
+@media (max-width:760px){
+  .wrap{padding:20px 16px 32px}
+  .state{font-size:24px}
+  .proj summary{grid-template-columns:1fr;gap:12px;padding:16px}
+  .hours,.cells{grid-template-columns:repeat(16,1fr)}
+  .hours span:nth-child(-n+4),.cells i:nth-child(-n+16){display:none}
+  .body{grid-template-columns:1fr;padding:14px 16px}
+  .sum{gap:20px}
+  .seg{display:flex}.seg button{flex:1;text-align:center;padding:6px 4px;font-size:12.5px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div id="state" class="state"></div>
+    <div class="meta">обновлено 03:23</div>
+  </div>
+  <div class="seg" id="seg">
+        <button data-s="all" class="on">Все <sup></sup></button><button data-s="ok">Идёт <sup></sup></button><button data-s="owner">Нужен ответ <sup></sup></button><button data-s="stuck">Застряло <sup></sup></button>
+      </div>
+
+  <div class="sum">
+    <div><b>9</b>принято сегодня</div>
+    <div><b>1</b>возврат</div>
+    <div><b>2</b>в работе</div>
+    <div><b>3</b>в очереди</div>
+  </div>
+
+  <div id="projects"></div>
+  <div class="tip" id="tip"></div>
+
+  <div class="legend">
+    <span><i style="background:var(--c0)"></i>тихо</span>
+    <span><i style="background:var(--c1)"></i><i style="background:var(--c3)"></i>работа, темнее — больше</span>
+    <span><i style="background:var(--owner)"></i>ждали ответа</span>
+    <span><i style="background:var(--stuck)"></i>застряло</span>
+    <span>клетка — 15 минут</span>
+  </div>
+</div>
+
+<script>
+const H=["20","21","22","23","00","01","02","03"];
+const rnd=(seed)=>()=>((seed=(seed*9301+49297)%233280)/233280);
+function cells(seed,tail){const r=rnd(seed),out=[];for(let i=0;i<32;i++){const x=r();out.push(i<10?(x<.7?"":"a"):x<.15?"":x<.45?"a":x<.8?"b":"c")}
+  tail.forEach((c,k)=>out[32-tail.length+k]=c);return out}
+const ROWS=[
+ {n:"rpv",st:"ok",g:"Пульс v2 — страница как в макете",p:[1,3],c:cells(3,["b","c","b","c"]),
+  now:"Инженер правит страницу Пульса",who:"TK-105 · 25 мин",k:"",
+  q:[["TK-106","Строка «за сегодня» в Telegram"],["TK-107","Наблюдатель вместо сторожа"]],
+  d:[["02:41","TK-104","Выпуск 2.0.20"],["01:55","TK-103","Снята устаревшая проверка E-006"],["00:56","TK-101","CHANGELOG 2.0.18"]]},
+ {n:"alpha",st:"owner",g:"Закачка истории Bybit за 2 года",p:[2,5],c:cells(7,["c","o","o","o"]),
+  now:"Ждёт вас 45 мин: фьючерсы или только спот",who:"TK-485",k:"owner",act:"Ответить",
+  q:[["TK-486","Сверка свечей с биржей"]],d:[["01:12","TK-483","Загрузчик с докачкой"],["23:40","TK-481","Схема хранения свечей"]]},
+ {n:"invoice",st:"stuck",g:"Выгрузка счетов в 1С",p:[3,4],c:cells(11,["b","s","s","s"]),
+  now:"Диспетчер молчит 23 мин",who:"чинит CEO · в очереди 3",k:"stuck",
+  q:[["TK-121","Повтор при сбое 1С"]],d:[["01:30","TK-119","Сопоставление контрагентов"]]}
+];
+const HEAD={stuck:["Застряло: invoice","Диспетчер молчит 23 мин — перезапускает CEO","stuck"],
+ owner:["Нужен ваш ответ","alpha · TK-485: брать фьючерсы или только спот?","owner"],
+ ok:["Всё идёт","От вас ничего не нужно",""]};
+function head(){const w=["stuck","owner","ok"].find(x=>ROWS.some(r=>r.st===x))||"ok",h=HEAD[w],st=document.getElementById("state");
+  st.className="state "+h[2];st.innerHTML=h[0]+"<small>"+h[1]+"</small>";
+  const n=x=>ROWS.filter(r=>x==="all"||r.st===x).length;
+  document.querySelectorAll("#seg button").forEach(b=>b.querySelector("sup").textContent=n(b.dataset.s));}
+function render(f){
+  document.getElementById("projects").innerHTML=ROWS.filter(r=>f==="all"||r.st===f).map(r=>`
+  <details class="proj" data-n="${r.n}">
+   <summary>
+    <div><div class="name">${r.n}</div><div class="goal">${r.g}<br>шаг ${r.p[0]} из ${r.p[1]}</div>
+     <div class="bar"><i style="width:${r.p[0]/r.p[1]*100}%"></i></div></div>
+    <div class="tl"><div class="hours">${H.map(h=>`<span>${h}</span>`).join("")}</div>
+     <div class="cells">${r.c.map((c,i)=>`<i class="${c}${i==31?" now":""}"></i>`).join("")}</div></div>
+    <div class="now-line ${r.k}">${r.now}<span class="who">${r.who}</span>${r.act?`<a class="act" href="#">${r.act}</a>`:""}</div>
+   </summary>
+   <div class="body">
+    <div><h4>Сделано сегодня</h4><ul>${r.d.map(x=>`<li><em>${x[0]}</em><span>${x[2]} <span class="tag">${x[1]}</span></span></li>`).join("")}</ul></div>
+    <div><h4>Дальше по очереди</h4><ul>${r.q.length?r.q.map(x=>`<li><span>${x[1]} <span class="tag">${x[0]}</span></span></li>`).join(""):"<li><span style='color:var(--mute)'>пусто</span></li>"}</ul></div>
+   </div>
+  </details>`).join("")||"<p style='color:var(--mute)'>Таких проектов нет</p>";
+}
+document.getElementById("seg").onclick=e=>{const b=e.target.closest("button");if(!b)return;
+  document.querySelectorAll("#seg button").forEach(x=>x.classList.toggle("on",x===b));render(b.dataset.s)};
+
+const JOBS=[["Инженер","TK-105","страница Пульса"],["Судья","TK-104","выпуск 2.0.20"],["Инженер","TK-484","закачка Bybit"],["Исследователь","TK-102","разбор возвратов"],["Судья","TK-483","загрузчик"]];
+function cellInfo(r,i){
+  const end=new Date(2026,10,3,3,30-(31-i)*15),beg=new Date(end-15*60000),f=d=>d.toTimeString().slice(0,5);
+  const c=r.c[i],t=`${f(beg)}–${f(end)}`+(i==31?" · сейчас":"");
+  if(c==="o")return{t,st:["Ждали ответа","var(--owner)"],l:[r.now]};
+  if(c==="s")return{t,st:["Застряло","var(--stuck)"],l:[r.now,r.who]};
+  if(!c)return{t,st:["Тихо","var(--c0)"],l:["запусков не было, очередь пуста"]};
+  const n={a:1,b:2,c:4}[c],l=[];for(let k=0;k<Math.min(n,3);k++){const j=JOBS[(i+k)%JOBS.length];l.push(`${j[0]} · ${j[2]} (${j[1]})`)}
+  if(n>3)l.push(`и ещё ${n-3}`);
+  return{t,st:[`${n} ${n==1?"запуск":n<5?"запуска":"запусков"}`,"var(--c2)"],l};
+}
+const tip=document.getElementById("tip");
+document.getElementById("projects").addEventListener("pointerover",e=>{
+  const el=e.target.closest(".cells i");if(!el)return;
+  const card=el.closest(".proj"),r=ROWS.find(x=>x.n===card.dataset.n),i=[...el.parentNode.children].indexOf(el),inf=cellInfo(r,i);
+  document.querySelectorAll(".cells i.hl,.cells i.col").forEach(x=>x.classList.remove("hl","col"));
+  el.classList.add("hl");document.querySelectorAll(".cells").forEach(cs=>cs.children[i]&&cs.children[i].classList.add("col"));
+  tip.innerHTML=`<b>${r.n} · ${inf.t}</b><span class="st" style="background:${inf.st[1]}">${inf.st[0]}</span><ul>${inf.l.map(x=>`<li>${x}</li>`).join("")}</ul>`;
+  const b=el.getBoundingClientRect(),w=tip.offsetWidth;
+  tip.style.left=Math.max(8,Math.min(innerWidth-w-8,b.left+b.width/2-w/2))+"px";
+  tip.style.top=(b.top-tip.offsetHeight-10<0?b.bottom+10:b.top-tip.offsetHeight-10)+"px";tip.classList.add("on");
+});
+document.getElementById("projects").addEventListener("pointerout",e=>{if(e.target.closest(".cells i")&&!(e.relatedTarget&&e.relatedTarget.closest&&e.relatedTarget.closest(".cells i"))){tip.classList.remove("on");document.querySelectorAll(".cells i.hl,.cells i.col").forEach(x=>x.classList.remove("hl","col"))}});
+document.getElementById("projects").addEventListener("click",e=>{if(e.target.closest(".cells"))e.preventDefault()});
+head();render("all");
+</script>
+</body>
+</html>

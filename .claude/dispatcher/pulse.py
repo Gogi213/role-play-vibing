@@ -15,6 +15,7 @@ import goal_idle  # noqa: E402 — TK-086: тот же сигнал, что бу
 import heartbeat as HB  # noqa: E402
 import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
+import pulse_facts  # noqa: E402 — TK-105: поля версии 2 (цель, кто что делает, день)
 import runs as RUNS  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -234,12 +235,12 @@ def build(state: dict, now: datetime, tickets=None, runs=None) -> dict:
     else:
         kind, phrase = "ok", "Всё идёт. От вас ничего."
     cells = _cells(state, runs, now)
-    return {"version": 1, "project": project, "day": now.date().isoformat(), "generated": T.now_iso(now), "state": kind, "phrase": phrase,
+    return {"version": 2, "project": project, "day": now.date().isoformat(), "generated": T.now_iso(now), "state": kind, "phrase": phrase,
             "now": (f"{working[0][1]} · {working[0][2]}" if working else
                     (f"запусков нет, в очереди {len(waiting)}" if waiting else "очередь пуста")),
             "pause": _pause(cells, cell_index(now)),
             "reasons": [{"code": c, "detail": d, "since": s} for c, d, s in active], "owner": [{"ticket": t, "action": a} for t, a in owner],
-            "cells": cells}
+            "cells": cells, **pulse_facts.facts(state, tickets, active, owner, now)}
 
 
 def update(state: dict, now: datetime, written: datetime | None = None) -> dict:
