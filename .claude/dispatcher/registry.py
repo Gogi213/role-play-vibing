@@ -6,7 +6,7 @@
     registry.py decide --quote - --gist "..." <<'EOF'      # цитата с кавычками и переносами — из stdin как есть
     <слова владельца>
     EOF
-    registry.py goal --title "..." --quote "<дословно>" [--criterion "..."]... [--budget "..."] [--due "..."] [--at <время>]
+    registry.py goal --title "..." --quote "<дословно>" [--criterion "..."]... [--step "<роль> | <заголовок> | <готово, когда>"]... [--budget "..."] [--due "..."] [--at <время>]
     registry.py accept-goal G-NNN [--at <время>]     # владелец принял результат цели: отметка времени принятия
     registry.py drop-goal G-NNN --quote "<дословно>"  # владелец снял цель
     registry.py repeat В-N --quote -                 # владелец повторил уже принятое — отметка в блоке, нового В-N нет
@@ -15,6 +15,9 @@
 
 Слово владельца короче 15 знаков («да», «1 - да») — ответ на вопрос CEO: без `--question` (вопрос дословно) решение не пишется,
 суть короткого ответа не проверить. Из сессии CEO `decide` пускает только помощник `secretary` (страж, TK-007).
+
+`--step` (повторяемый, по порядку) — план шагов цели: CEO показывает его владельцу вместе с целью; тикет следующего шага после
+приёмки предыдущего диспетчер заводит сам (`goal_steps.py`, TK-087).
 
 Файлы: `<проект>/.claude/decisions.md` (блок на решение, новое — в конец) и `<проект>/.claude/goals/G-NNN.md` (шапка
 `id/status/set/accepted` + цитата, критерии, бюджет). Номер ставит команда: следующий после наибольшего в реестре.
@@ -34,6 +37,8 @@ import project as P  # noqa: E402
 DECISION = re.compile(r"^## В-(\d+) · (.+)$", re.M)
 GOAL_ID = re.compile(r"^G-(\d{3,})$")
 NOT_NAMED = "не названо — спросить владельца"
+STEPS_HEAD = "## План шагов"
+STEP_LINE = re.compile(r"^(\d+)\. (\S+) \| (.+?) \| (.+)$")  # «1. engineer | Заголовок | готово, когда»
 SHORT_QUOTE = 15       # слово владельца короче — ответ на вопрос CEO: без вопроса суть не проверить
 QUESTION = "Вопрос CEO: "
 
@@ -87,6 +92,30 @@ def ref_exists(root: Path, ref: str) -> bool:
         p = goals(root).get(ref)
         return bool(p) and goal_header(p).get("status") == "open"
     return False
+
+
+def goal_steps(root: Path, gid: str) -> list[dict]:
+    """План шагов цели по порядку: [{"n", "role", "title", "done"}]; плана нет — пусто."""
+    p = goals(root).get(gid)
+    text = p.read_text(encoding="utf-8") if p else ""
+    if STEPS_HEAD not in text:
+        return []
+    body = text.split(STEPS_HEAD, 1)[1].split("\n## ", 1)[0]
+    found = [STEP_LINE.match(ln.strip()) for ln in body.splitlines() if ln.strip()]
+    return [{"n": int(m.group(1)), "role": m.group(2), "title": m.group(3), "done": m.group(4)} for m in found if m]
+
+
+def _step_lines(raw: list[str]) -> tuple[list[str], str]:
+    """`--step "<роль> | <заголовок> | <готово, когда>"` → (строки плана, отказ)."""
+    lines = []
+    for i, item in enumerate(raw or [], 1):
+        parts = [" ".join(x.split()) for x in item.split("|")]
+        if len(parts) != 3 or not all(parts):
+            return [], f"--step {item!r}: нужно «<роль> | <заголовок> | <готово, когда>»"
+        if parts[0] not in P.ROLES:
+            return [], f"--step {item!r}: роль {parts[0]!r} — одна из {', '.join(P.ROLES)}"
+        lines.append(f"{i}. {parts[0]} | {parts[1]} | {parts[2]}")
+    return lines, ""
 
 
 def _refuse_role() -> str:
@@ -158,6 +187,10 @@ def cmd_goal(a, root: Path) -> int:
     if not (a.title or "").strip():
         print("нужен --title", file=sys.stderr)
         return 1
+    steps, bad = _step_lines(a.step)
+    if bad:
+        print(bad, file=sys.stderr)
+        return 1
     n = max((int(k[2:]) for k in goals(root)), default=0) + 1
     gid = f"G-{n:03d}"
     crit = [c.strip() for c in (a.criterion or []) if c.strip()] or [NOT_NAMED]
@@ -166,6 +199,7 @@ def cmd_goal(a, root: Path) -> int:
         f"# {' '.join(a.title.split())}", "",
         "## Что нужно владельцу", *_quote_block(a.quote), "",
         "## Критерии приёмки", *[f"- {c}" for c in crit], "",
+        *([STEPS_HEAD, *steps, ""] if steps else []),
         "## Бюджет и срок", f"Бюджет: {(a.budget or '').strip() or 'не назван'}",
         f"Срок: {(a.due or '').strip() or 'не назван'}", ""])
     d = goals_dir(root)
@@ -277,6 +311,7 @@ def main(argv=None) -> int:
     g.add_argument("--title", required=True)
     g.add_argument("--quote", required=True, help="слова владельца дословно; «-» — из stdin")
     g.add_argument("--criterion", action="append", help="критерий приёмки, названный владельцем (повторяемый)")
+    g.add_argument("--step", action="append", help="шаг плана: «<роль> | <заголовок> | <готово, когда>» (повторяемый, по порядку)")
     g.add_argument("--budget", default=None, help="бюджет словами владельца")
     g.add_argument("--due", default=None, help="срок словами владельца")
     g.add_argument("--at", default=None, help="ГГГГ-ММ-ДД ЧЧ:ММ (по умолчанию сейчас)")

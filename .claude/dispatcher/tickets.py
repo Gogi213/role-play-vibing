@@ -375,7 +375,13 @@ TAIL_NEGATION = re.compile(r"хвост\w*\s+нет\b(?!\s+[\w])|\bнет\s+хв
                            r"\bосталось" + _TAIL_SEP + r"(?:ничего|нет(?:\s+(?:блокер|замечани|вопрос)\w*)?)(?![^\W_])" + _TAIL_END + r"|"
                            r"\bне\s+осталось\s+ничего\b" + _TAIL_END, re.I)
 TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
-             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
+             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, устав проекта, слово владельца)")
+# TK-087: хвост про код, тесты, слияние и т. п. ролям по силам — Судья заводит тикет (`new … --title "Хвост TK-N: …"`), CEO его не несёт.
+# Зона CEO — настройки, CLAUDE.md, устав проекта, слово владельца: слова зоны оставляют `--tail ceo:` как есть.
+TAIL_CODE = re.compile(r"\bкод\w*|\bтест\w*|\bpr\b|\bpull\b|\w*мерж\w*|\bmerge\b|слить|слит\w*|слия\w*|влить|влив\w*|коммит\w*|скрипт\w*|"
+                       r"прав[ик]\w*|\bпочин\w*|\bчини\w*|\w*пуш\w*|рефактор\w*|\bбаг\w*|исправ\w*|ошибк\w*|\bмодул\w*|функци\w*", re.I)
+TAIL_OWNER_ZONE = re.compile(r"настройк\w*|settings|rpv\.json|claude\.md|устав\w*|charter|реестр\w*|"
+                             r"(?:слов\w*|решени\w*|согласи\w*)\s+владельц\w*|\ballow\b|токен\w*", re.I)
 
 
 def tail_hit(text: str) -> tuple:
@@ -491,6 +497,10 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         what = " ".join(raw[4:].split()).strip("\"' ")
         if len(what) < 5:
             return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
+        if (hit := TAIL_CODE.search(what)) and not TAIL_OWNER_ZONE.search(what):
+            return (f"--tail ceo: «{what[:80]}» — про «{hit.group()}»: код, тесты, слияние и т. п. ролям по силам. Заведи тикет "
+                    f"(`tickets.py new --owner <роль> --ref <ref тикета> --title \"Хвост {tid}: …\"`) и принимай с `--tail TK-N`; "
+                    f"CEO — только то, что ролям не сделать (настройки, CLAUDE.md, устав проекта, слово владельца)"), "", ""
         return "", f" хвост CEO: {what[:120]}", what
     ids = [x for x in re.split(r"[,\s]+", raw) if x]
     bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
