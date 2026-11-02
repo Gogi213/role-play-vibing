@@ -767,7 +767,7 @@ def tick(now=None) -> int:
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
     _guarded("пульс", PULSE.update, state, now)  # после счётчика простоя: берёт его флаги dt_flags и прежний last_tick
     _guarded("отчёт", _daily_report, state, now)
-    _guarded("пульс", lambda: PULSE_TG.tick(CFG.PROJECT_ROOT, state, now))  # В-38: закреплённое сообщение; ключ pulse_telegram
+    _guarded("пульс Telegram", lambda: PULSE_TG.tick(CFG.PROJECT_ROOT, state, now))  # В-38: закреплённое сообщение; ключ pulse_telegram
     _guarded("надзиратель", _overseer, state, now)
     _guarded("вопрос владельцу", _owner_questions, state, now)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому

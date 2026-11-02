@@ -57,7 +57,7 @@ def narrow_cells(view: dict) -> str:
         part = view["cells"][g * GROUP:(g + 1) * GROUP]
         kinds = {c[0] for c in part}
         runs = sum(c[1] for c in part)
-        out.append("o" if "stuck" in kinds else "y" if "owner" in kinds else level("work", runs, GROUP // 2) if runs else "")
+        out.append("o" if "stuck" in kinds else "y" if "owner" in kinds else level("work", runs, GROUP // 2) if runs or "work" in kinds else "")
     return f'<div class="c k">{_spans(out, view["idx"] // GROUP)}</div>'
 
 

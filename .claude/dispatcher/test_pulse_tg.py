@@ -1,25 +1,51 @@
-"""Пульс, шаг 2 (TK-096): закреплённое сообщение Telegram — заглушка API: одна правка при смене текста, ноль при том же."""
+"""Пульс, шаг 2 (TK-096): закреплённое сообщение Telegram — заглушка API: одна правка при смене текста, ноль при том же.
+Фикстуры — настоящий вывод `pulse.build` (формат шага 1, TK-095), не свой формат."""
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_tk095 as K  # noqa: E402 — песочница шага 1 (PulseBase) и его запуски pulse.build
 import pulse_tg as G  # noqa: E402
 import pulse_view as V  # noqa: E402
 
-TZ = timezone(timedelta(hours=4))
-T0 = datetime(2026, 11, 2, 16, 0, tzinfo=TZ)
+CFG, T = K.CFG, K.T
 
 
-def view(name, phrase, now=T0):
-    return V.normalise(name, {"ts": now.isoformat(), "phrase": phrase, "cells": []}, now)
+class States(K.PulseBase):
+    """Три состояния проекта — выводом `pulse.build`: ok (работа в клетках, идёт запуск), owner (needs_owner), stuck (возврат ×2)."""
+
+    def setUp(self):
+        super().setUp()
+        self.name = Path(CFG.PROJECT_ROOT).name
+        self.cur = K.PU.cell_index(self.at)
+
+    def ok_data(self):
+        for m in (40, 25, 24, 23, 10, 9, 8, 7, 6):  # клетки 49 (1 запуск), 50 (3), 51 (5); текущая 52 — идёт запуск
+            self.run_line(m)
+        self.state["active_runs"] = {"TK-7": {"role": "judge", "started": T.now_iso(self.at)}}
+        return self.pulse()
+
+    def owner_data(self):
+        self.state["pulse_cells"] = {"day": self.at.date().isoformat(), "cells": {str(i): "owner" for i in range(self.cur - 7, self.cur)}}
+        self.ticket(ref="", status="needs_owner")
+        return self.pulse()
+
+    def stuck_data(self):
+        tid = self.ticket(ref="", status="in_progress")
+        self.state["review_returns"] = {tid: 2}
+        return self.pulse()
+
+    def view(self, name, data, at=None):
+        return V.normalise(name, data, at or self.at)
 
 
 class Api:
@@ -44,30 +70,28 @@ class Api:
         return [m for m, _ in self.calls]
 
 
-class PulseTelegram(unittest.TestCase):
+class PulseTelegram(States):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        super().setUp()
+        self.proj = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.proj, True)
         self.api, self.state = Api(), {}
         patch = mock.patch.dict(os.environ, {"RPV_TG_TOKEN": "t", "RPV_TG_CHAT": "42"})
         patch.start()
         self.addCleanup(patch.stop)
-        self.ok = [view("rpv", V.OK_PHRASE), view("alpha", V.OK_PHRASE)]
-        self.stuck = [view("rpv", "Застряло: rpv — CI красный."), view("alpha", V.OK_PHRASE)]
+        self.ok_raw = self.ok_data()
+        self.ok = [self.view("rpv", self.ok_raw), self.view("alpha", self.ok_raw)]
+        self.stuck = [self.view("rpv", self.stuck_data()), self.view("alpha", self.ok_raw)]
 
     def sync(self, views, minutes=0):
-        return G.sync(self.tmp, self.state, views, T0 + timedelta(minutes=minutes), self.api)
+        return G.sync(self.proj, self.state, views, self.at + timedelta(minutes=minutes), self.api)
 
     def log(self):
-        p = self.tmp / ".claude" / "dispatcher" / "notify.log"
+        p = self.proj / ".claude" / "dispatcher" / "notify.log"
         return p.read_text(encoding="utf-8") if p.exists() else ""
 
     def sent_lines(self):
         return [ln for ln in self.log().splitlines() if "	отправлено:" in ln]
-
-    def test_text_first_line_phrase_then_project_lines(self):
-        views = [view("rpv", "Нужны вы: rpv — ответить по TK-5."), view("alpha", V.OK_PHRASE), view("inv", "Застряло: inv — CI красный.")]
-        self.assertEqual(V.tg_text(views), "Застряло: inv — CI красный. (и ещё 1)\nrpv — нужны вы: ответить по TK-5\n"
-                                           "alpha — идёт\ninv — застряло: CI красный")
 
     def test_first_run_creates_and_pins_once(self):
         self.assertEqual(self.sync(self.ok), "sent")
@@ -84,14 +108,14 @@ class PulseTelegram(unittest.TestCase):
         self.assertEqual(self.sync(self.stuck, 4), "edited")
         self.assertEqual(self.api.methods(), ["editMessageText"])
         self.assertEqual(self.api.calls[0][1]["message_id"], 77)
-        self.assertTrue(self.api.calls[0][1]["text"].startswith("Застряло: rpv"))
+        self.assertTrue(self.api.calls[0][1]["text"].startswith("Застряло:"))
 
     def test_not_more_than_once_a_minute(self):
         self.sync(self.ok)
         self.api.calls.clear()
-        self.assertEqual(G.sync(self.tmp, self.state, self.stuck, T0 + timedelta(seconds=30), self.api), "wait")
+        self.assertEqual(G.sync(self.proj, self.state, self.stuck, self.at + timedelta(seconds=30), self.api), "wait")
         self.assertEqual(self.api.calls, [])
-        self.assertEqual(G.sync(self.tmp, self.state, self.stuck, T0 + timedelta(seconds=61), self.api), "edited")
+        self.assertEqual(G.sync(self.proj, self.state, self.stuck, self.at + timedelta(seconds=61), self.api), "edited")
 
     def test_failed_edit_is_not_logged_as_sent_and_text_not_remembered(self):
         self.sync(self.ok)
@@ -122,17 +146,30 @@ class PulseTelegram(unittest.TestCase):
         self.assertEqual(self.sent_lines(), [])
 
     def test_tick_is_off_without_flag_and_reads_projects_with_it(self):
-        (self.tmp / ".claude").mkdir(exist_ok=True)
-        pj = self.tmp / "p.json"
-        pj.write_text(json.dumps({"ts": T0.isoformat(), "phrase": V.OK_PHRASE, "cells": []}), encoding="utf-8")
-        rpv = self.tmp / ".claude" / "rpv.json"
+        (self.proj / ".claude").mkdir(exist_ok=True)
+        pj = self.proj / "p.json"
+        pj.write_text(json.dumps(self.ok_raw), encoding="utf-8")
+        rpv = self.proj / ".claude" / "rpv.json"
         rpv.write_text(json.dumps({"pulse_projects": {"rpv": str(pj)}}), encoding="utf-8")
-        self.assertEqual(G.tick(self.tmp, self.state, T0, self.api), "off")
+        self.assertEqual(G.tick(self.proj, self.state, self.at, self.api), "off")
         self.assertEqual(self.api.calls, [])
         rpv.write_text(json.dumps({"pulse_projects": {"rpv": str(pj)}, "pulse_telegram": True}), encoding="utf-8")
-        os.utime(rpv, (T0.timestamp() + 5, T0.timestamp() + 5))  # кэш настроек — по времени изменения
-        self.assertEqual(G.tick(self.tmp, self.state, T0, self.api), "sent")
+        os.utime(rpv, (self.at.timestamp() + 5, self.at.timestamp() + 5))  # кэш настроек — по времени изменения
+        self.assertEqual(G.tick(self.proj, self.state, self.at, self.api), "sent")
         self.assertEqual(self.api.calls[0][1]["text"], f"{V.OK_PHRASE}\nrpv — идёт")
+
+
+class TextTests(States):
+    def test_text_first_line_phrase_then_project_lines(self):
+        ok = self.ok_data()
+        owner = self.owner_data()
+        stuck = self.stuck_data()
+        views = [self.view("rpv", owner), self.view("alpha", ok), self.view("inv", stuck)]
+        tid = stuck["reasons"][0]["detail"].split(":")[0]
+        self.assertEqual(V.tg_text(views), f"{stuck['phrase']} (и ещё 1)\n"
+                                           f"rpv — нужны вы: ответить на вопрос по {owner['owner'][0]['ticket']}\n"
+                                           f"alpha — идёт\n"
+                                           f"inv — застряло: {tid}: возвращён Судьёй 2 раз")
 
 
 if __name__ == "__main__":

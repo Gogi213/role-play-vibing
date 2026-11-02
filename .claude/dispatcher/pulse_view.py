@@ -41,44 +41,45 @@ def projects_of(root) -> dict:
     return {str(k): str(v) for k, v in value.items() if k and v} if isinstance(value, dict) else {}
 
 
-def _cell(item) -> tuple:
-    cls = item.get("cls") if isinstance(item, dict) else item
-    runs = item.get("runs", 0) if isinstance(item, dict) else 0
-    return (cls if cls in CLASSES else "none", runs if isinstance(runs, int) and runs > 0 else 0)
-
-
-def _state(raw: dict, phrase: str) -> str:
-    if raw.get("state") in STATES:
-        return raw["state"]
-    return "owner" if phrase.startswith("Нужны вы") else "stuck" if phrase.startswith("Застряло") else "ok"
+def _cells_of(raw: dict) -> list:
+    """96 клеток (класс, запусков) из `cells` шага 1: `{i, n, c, why?}`; нет клетки или класс неизвестен — ('none', 0)."""
+    out = [("none", 0)] * CELLS
+    for item in raw.get("cells") or []:
+        i = item.get("i") if isinstance(item, dict) else None
+        if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < CELLS:
+            n = item.get("n")
+            out[i] = (item.get("c") if item.get("c") in CLASSES else "none", n if isinstance(n, int) and n > 0 else 0)
+    return out
 
 
 def _slot(moment: datetime) -> int:
     return min(CELLS - 1, (moment.hour * 60 + moment.minute) // 15)
 
 
+def _unreadable(name: str, now: datetime) -> dict:
+    return {"name": name, "state": "stuck", "phrase": f"Застряло: {name} — пульс не читается.", "now": "", "pause": "",
+            "cells": [("none", 0)] * CELLS, "idx": _slot(now), "age_s": None}
+
+
 def normalise(name: str, raw, now: datetime) -> dict:
     """Один вид проекта: name, state, phrase, now, pause, cells [(класс, запусков)] ×96, idx (текущая клетка), age_s.
-    Файла нет или он старше STALE_S — «застряло: диспетчер не отвечает», клетки после последней записи — stuck."""
-    if raw is None:
-        return {"name": name, "state": "stuck", "phrase": f"Застряло: {name} — пульс не читается.", "now": "", "pause": "",
-                "cells": [("none", 0)] * CELLS, "idx": _slot(now), "age_s": None}
-    cells = [_cell(c) for c in (raw.get("cells") or [])][:CELLS]
-    cells += [("none", 0)] * (CELLS - len(cells))
-    phrase = str(raw.get("phrase") or OK_PHRASE)
-    stamp = P.parse_time(raw.get("ts"), strict=False) if raw.get("ts") else None
-    view = {"name": name, "state": _state(raw, phrase), "phrase": phrase, "now": str(raw.get("now") or ""),
-            "pause": str(raw.get("pause") or ""), "cells": cells, "idx": _slot(now), "age_s": None}
-    if stamp is None:
-        return view
-    stamp = stamp.astimezone(now.tzinfo) if stamp.tzinfo else stamp
-    age = max(0, int((now - stamp).total_seconds())) if stamp.tzinfo else 0
-    view["age_s"], view["idx"] = age, _slot(stamp)
+    Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated). Нет файла, `state` не из списка или `generated` не
+    время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после записи — stuck."""
+    stamp = P.parse_time(raw.get("generated"), strict=False) if isinstance(raw, dict) and raw.get("generated") else None
+    if stamp is None or stamp.tzinfo is None or raw.get("state") not in STATES:
+        return _unreadable(name, now)
+    stamp = stamp.astimezone(now.tzinfo)
+    age = max(0, int((now - stamp).total_seconds()))
+    view = {"name": name, "state": raw["state"], "phrase": str(raw.get("phrase") or OK_PHRASE), "now": str(raw.get("now") or ""),
+            "pause": str(raw.get("pause") or ""), "cells": _cells_of(raw), "idx": _slot(stamp), "age_s": age}
     if age > STALE_S:
-        view.update(state="stuck", phrase=f"Застряло: {name} — диспетчер не отвечает {max(1, age // 60)} мин.")
-        for i in range(view["idx"] + 1, _slot(now) + 1):
-            cells[i] = ("stuck", 0)
-        view["idx"] = _slot(now)
+        same_day = stamp.date() == now.date()
+        first = view["idx"] + 1 if same_day else 0
+        if not same_day:
+            view["cells"] = [("none", 0)] * CELLS
+        view.update(state="stuck", phrase=f"Застряло: {name} — диспетчер не отвечает {max(1, age // 60)} мин.", idx=_slot(now))
+        for i in range(first, view["idx"] + 1):
+            view["cells"][i] = ("stuck", 0)
     return view
 
 
