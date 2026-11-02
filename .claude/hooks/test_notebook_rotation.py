@@ -1,4 +1,5 @@
 """TK-092: блокнот роли > 4 КБ ужимается кодом при старте роли (`role_context.rotate_notebook`), старое — в notes/archive."""
+import importlib.util
 import json
 import os
 import shutil
@@ -12,11 +13,31 @@ PLUGIN = os.path.dirname(os.path.dirname(HERE))
 TMP = tempfile.mkdtemp(prefix="rotation-test-")
 PROJECT = os.path.join(TMP, "proj")
 shutil.copytree(os.path.join(PLUGIN, "templates", "roles"), os.path.join(PROJECT, ".claude", "roles"))
-os.environ["CLAUDE_PROJECT_DIR"] = PROJECT
-for var in ("RPV_ROLE", "RPV_TICKET"):
-    os.environ.pop(var, None)
 sys.path.insert(0, HERE)
-import role_context as rc  # noqa: E402
+
+
+def load_role_context():
+    """Свой экземпляр модуля под проект-пустышку: sys.modules["role_context"] и окружение не трогаются —
+    другие тесты хуков в том же процессе (xdist) держат свой проект."""
+    keys = ("CLAUDE_PROJECT_DIR", "RPV_ROLE", "RPV_TICKET")
+    saved = {k: os.environ.get(k) for k in keys}
+    os.environ["CLAUDE_PROJECT_DIR"] = PROJECT
+    os.environ.pop("RPV_ROLE", None)
+    os.environ.pop("RPV_TICKET", None)
+    try:
+        spec = importlib.util.spec_from_file_location("role_context_rotation", os.path.join(HERE, "role_context.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+rc = load_role_context()
 
 NOTES = os.path.join(PROJECT, ".claude", "roles", "notes")
 
