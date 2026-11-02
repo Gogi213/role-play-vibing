@@ -5,8 +5,8 @@
 Находку собирает `watch.check_goal_idle`; здесь только проверка. Шаг — тикет, чьё описание ссылается на цель
 (`Ссылка на задачу владельца: G-NNN`), закрытый приёмкой Судьи.
 Второй вид события — хвост без цели: тикет принят с `--tail ceo:"…"`, а за `goal_idle_min` минут не заведён тикет, в чьём
-названии или описании назван этот тикет (`new --desc "Хвост TK-N: …"`; `--ref` у `new` — только номер реестра), и CEO не
-снял хвост записью `ceo` в логе принятого тикета со словом «хвост» (`comment TK-N --author ceo --text "хвост снят: …"`)."""
+названии или описании есть «Хвост TK-N» (`new --title "Хвост TK-N: …"`; `--ref` у `new` — только номер реестра), и CEO не
+снял хвост записью `ceo` в логе принятого тикета «хвост снят» или «хвост закрыт» (`comment TK-N --author ceo --text "хвост снят: …"`)."""
 from __future__ import annotations
 
 import re
@@ -22,7 +22,9 @@ import ticket as T  # noqa: E402
 
 GOAL_IDLE_MIN = 10  # умолчание, как у `unreleased.UNRELEASED_IDLE_MIN`; точное число — за Судьёй (В-4/В-10), меняется ключом `goal_idle_min`
 TAIL_MARK = "хвост CEO:"  # пометка приёмки в логе: `tickets._tail_ack` пишет « хвост CEO: <что>»
+TAIL_FIELDS = re.compile(r"\s(?:вживую|критик|проверки договора): ")  # поля приёмки после текста хвоста (`tickets.cmd_accept`)
 TAIL_GOAL = "хвост"  # вместо номера цели в ключе события и в находке
+TAIL_CLEARED = re.compile(r"хвост\s+(?:снят|закрыт)", re.IGNORECASE)  # другие слова о хвосте (нет, остаётся) его не снимают
 SEEN_KEY = "goal_idle_seen"  # watch-state.json: события, о которых CEO уже сказали
 
 
@@ -67,11 +69,19 @@ def _goal_state(tickets) -> tuple:
 
 
 def _tail_handled(tkt, entry, tickets) -> bool:
-    """Хвост принятого тикета занят: назван в другом тикете (название или описание) или снят записью `ceo` после приёмки."""
-    named = re.compile(r"\b" + re.escape(tkt.id) + r"\b")
+    """Хвост принятого тикета занят: есть тикет с «Хвост TK-N» в названии или описании (форма из устава Судьи; простое
+    упоминание номера не в счёт) либо `ceo` после приёмки записал «хвост снят» / «хвост закрыт»."""
+    named = re.compile(r"(?<!\w)хвост\s+" + re.escape(tkt.id) + r"(?!\w)", re.IGNORECASE)
     if any(o.id != tkt.id and named.search(f"{o.header.get('title') or ''} {o.description}") for o in tickets):
         return True
-    return any(T.author_is(e.author, "ceo") and e.ts > entry.ts and "хвост" in e.text.lower() for e in tkt.log)
+    return any(T.author_is(e.author, "ceo") and e.ts > entry.ts and TAIL_CLEARED.search(e.text) for e in tkt.log)
+
+
+def _tail_text(entry_text: str) -> str:
+    """Текст хвоста из записи приёмки: от «хвост CEO:» до следующего поля приёмки, иначе до « — » перед выводом Судьи."""
+    rest = entry_text.split(TAIL_MARK, 1)[1]
+    field = TAIL_FIELDS.search(rest)
+    return (rest[:field.start()] if field else rest.split(" — ", 1)[0]).strip()
 
 
 def _tail_state(tickets) -> dict:
@@ -80,8 +90,7 @@ def _tail_state(tickets) -> dict:
     for tkt in tickets:
         entry = _accepted(tkt)
         if entry and TAIL_MARK in entry.text and not _tail_handled(tkt, entry, tickets):
-            what = entry.text.split(TAIL_MARK, 1)[1].split(" — ", 1)[0].strip()
-            out[tkt.id] = (entry.ts, what)
+            out[tkt.id] = (entry.ts, _tail_text(entry.text))
     return out
 
 
@@ -105,8 +114,8 @@ def _due(tickets, now) -> dict:
     for tid, (ts, what) in _tail_state(tickets).items():
         age = (now - ts).total_seconds() / 60
         if age >= limit:
-            due[f"{TAIL_GOAL}@{tid}"] = (TAIL_GOAL, tid, f"{tid} принят с хвостом CEO «{what}» {age:.0f} мин назад, тикета на хвост нет — "
-                                                         f"завести тикет с «{tid}» в описании или снять хвост записью ceo в {tid}")
+            due[f"{TAIL_GOAL}@{tid}"] = (TAIL_GOAL, tid, f"{tid}: тикета на хвост нет {age:.0f} мин — хвост CEO «{what}» — завести тикет "
+                                                         f"«Хвост {tid}: …» или снять хвост записью ceo «хвост снят» в {tid}")
     return due
 
 

@@ -36,12 +36,12 @@ class GoalSandbox(WatchSandbox):
         (Path(self.root.name) / ".claude" / "goals" / f"{gid}.md").write_text(
             f"---\nid: {gid}\nstatus: {status}\nset: 2026-11-01 10:00\naccepted:\n---\n# Цель {gid}\n", encoding="utf-8")
 
-    def ticket(self, ref="G-001", status="in_progress", accepted_at=None, owner="engineer", tail="", desc=""):
-        path = T.create_ticket(self.tickets_dir, owner, "шаг", reviewer="judge", status=status,
+    def ticket(self, ref="G-001", status="in_progress", accepted_at=None, owner="engineer", tail="", desc="", title="шаг", after=""):
+        path = T.create_ticket(self.tickets_dir, owner, title, reviewer="judge", status=status,
                                description=(f"Ссылка на задачу владельца: {ref}\n\n" if ref else "") + desc, now=self.now)
         if accepted_at is not None:
             note = f" хвост CEO: {tail}" if tail else " хвосты: нет"  # как пишет `tickets._tail_ack`
-            T.append_log(path, "judge", f"[итог: accept] PR #1@abcdef0{note} — принято", now=accepted_at)
+            T.append_log(path, "judge", f"[итог: accept] PR #1@abcdef0{note}{after} — принято", now=accepted_at)  # after — поля приёмки после хвоста
         return T.read_ticket(path).id
 
     def events(self, minutes=0, ws=None):
@@ -178,9 +178,53 @@ class TailIdleTests(GoalSandbox):
         posted = W.run_once(self.now + timedelta(minutes=30), probes=False)
         self.assertEqual([f.kind for f in posted], ["goal-idle"])
         line = next(ln for ln in CFG.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines() if "watch-goal-idle" in ln)
-        for must in (self.step, "хвостом CEO", self.TAIL, "тикета на хвост нет"):
+        for must in (self.step, "хвост CEO", self.TAIL, "тикета на хвост нет"):
             self.assertIn(must, line)
         self.assertEqual(W.run_once(self.now + timedelta(minutes=31), probes=False), [])
+
+
+class TailRealEntryTests(GoalSandbox):
+    """Хвост в записи приёмки, как её пишет Судья (TK-082, TK-068): после текста идут поля приёмки; замечания критика к TK-086."""
+    TAIL82 = "синк устава проекта .claude/roles/ceo.md с шаблоном и выпуск с CHANGELOG для всех проектов где стоит плагин сразу везде"  # 120 знаков, как предел `tickets._tail_ack`
+    FIELDS82 = " критик: docs/reviews/TK-082-critic.md (пунктов 5, не держится 0) проверки договора: 2 кмд, код 0"
+
+    def wake_line(self, minutes=30):
+        W.run_once(self.now + timedelta(minutes=minutes), probes=False)
+        return next(ln for ln in CFG.CEO_WAKE_LOG.read_text(encoding="utf-8").splitlines() if "watch-goal-idle" in ln)
+
+    def test_text_is_the_tail_only_and_wake_log_keeps_minutes(self):
+        step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail=self.TAIL82, after=self.FIELDS82)
+        out, _ = self.events(30)
+        self.assertIn(f"«{self.TAIL82}»", out[0][2])
+        self.assertNotIn("критик", out[0][2])
+        self.assertNotIn("проверки договора", out[0][2])
+        line = self.wake_line()
+        for must in (step, "тикета на хвост нет", "30 мин"):  # срез причины в ceo-wake.log (150 знаков) их не теряет
+            self.assertIn(must, line)
+
+    def test_live_field_ends_the_tail_and_dash_inside_stays(self):
+        tail = "сверить, что токен бота отозван (E-012; исследователь пишет — отозван)"
+        self.ticket(ref="В-33", status="done", accepted_at=self.now, tail=tail, after=" вживую: docs/reviews/tk-068-live.md")
+        self.assertIn(f"«{tail}»", self.events(30)[0][0][2])
+
+    def test_mention_of_the_ticket_is_not_a_tail_ticket(self):
+        step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail="поставить настройку в rpv.json")
+        self.ticket(ref="В-33", status="todo", title=f"Релиз по итогам {step}", desc=f"выпуск после {step}")  # упомянут, но не хвост
+        self.assertEqual([t for _, t, _ in self.events(30)[0]], [step])
+
+    def test_title_form_covers_the_tail(self):
+        step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail="поставить настройку в rpv.json")
+        self.ticket(ref="В-33", status="todo", title=f"Хвост {step}: настройка в rpv.json")
+        self.assertEqual(self.events(30)[0], [])
+
+    def test_only_tail_cleared_or_closed_by_ceo_clears(self):
+        step = self.ticket(ref="В-33", status="done", accepted_at=self.now, tail="поставить настройку в rpv.json")
+        path = self.tickets_dir / f"{step}.md"
+        for i, text in enumerate(("хвостов нет", "хвост остаётся, думаю", "хвост не снят")):
+            T.append_log(path, "ceo", text, now=self.now + timedelta(minutes=1 + i))
+        self.assertEqual(len(self.events(30)[0]), 1)
+        T.append_log(path, "ceo", "Хвост закрыт: сделано вручную", now=self.now + timedelta(minutes=10))
+        self.assertEqual(self.events(30)[0], [])
 
 
 class GoalIdleDocsTests(WatchSandbox):
@@ -194,5 +238,5 @@ class GoalIdleDocsTests(WatchSandbox):
     def test_signals_doc_row(self):
         text = (PLUGIN / "docs" / "signals.md").read_text(encoding="utf-8")
         row = next(ln for ln in text.splitlines() if ln.startswith("| `watch-goal-idle`"))
-        for must in ("`goal_idle_min`", "один раз на событие", "ceo-wake.log", "будит", "`--tail ceo:`", "тикета на хвост"):
+        for must in ("`goal_idle_min`", "один раз на событие", "ceo-wake.log", "будит", "`--tail ceo:`", "тикета на хвост", "«Хвост TK-N»", "«хвост снят»"):
             self.assertIn(must, row)
