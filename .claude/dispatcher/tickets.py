@@ -68,6 +68,7 @@ import ticket as T  # noqa: E402
 import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
 import critic_gate  # noqa: E402
+import precheck  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
@@ -214,7 +215,7 @@ def _result_refusal(args, role: str, tkt) -> str:
     if args.result == "continue" and routes_mod.continue_streak(tkt, role) >= routes_mod.CONTINUE_MAX:
         return (f"continue уже {routes_mod.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
                 f"либо blocked")
-    return ""
+    return precheck.refusal(args, role, tkt, PROJECT_ROOT, precheck.run_started(P.read_json(CFG.STATE_FILE, {}), tkt.id, role))  # TK-091
 
 
 def _result_proof(args, role: str, tkt) -> str:
