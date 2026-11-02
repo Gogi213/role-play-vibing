@@ -10,6 +10,7 @@ from pathlib import Path
 import ceo_wake as CW
 import project_paths as CFG
 import project as P
+import registry as R
 import ticket as T
 
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
@@ -203,6 +204,20 @@ def notify_due_missed(tkt: T.Ticket, state: dict, now) -> None:
         return
     append_ceo_inbox(tkt.id, "due", f"срок {due} сорван, тикет в статусе {tkt.status}", now)
     notified[tkt.id] = due
+
+
+def notify_goal_closed(state: dict, now) -> None:
+    """Цель закрыта (принята владельцем или снята) — одно событие CEO на цель. Первый обход только запоминает уже закрытые
+    цели (старые не будят); дальше — каждая цель, перешедшая из открытых в закрытые."""
+    closed = {gid: R.goal_header(p).get("status") for gid, p in R.goals(CFG.PROJECT_ROOT).items()
+              if R.goal_header(p).get("status") in ("accepted", "dropped")}
+    seen = state.get("goals_closed_seen")
+    state["goals_closed_seen"] = sorted(closed)
+    if seen is None:
+        return
+    for gid in sorted(set(closed) - set(seen)):
+        how = "принята владельцем" if closed[gid] == "accepted" else "снята владельцем"
+        append_ceo_inbox(gid, "goal-done", f"цель {gid} {how}: скажи владельцу итог", now)
 
 
 def notify_parse_error(tid: str, err_text: str, state: dict, now) -> None:

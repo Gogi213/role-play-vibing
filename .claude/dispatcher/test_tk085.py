@@ -51,7 +51,7 @@ class WakeTests(unittest.TestCase):
         SIG.append_ceo_inbox(tid, kind, note, NOW)
 
     def test_one_headless_call_per_event(self):
-        for n, kind in enumerate(("needs_owner", "blocked", "due", "goal-step", "goal-done"), 1):
+        for n, kind in enumerate(("needs_owner", "blocked", "due", "следующий-не-определён", "goal-done"), 1):
             self.signal(kind)
             self.assertEqual(len(self.stub.calls), n, kind)
 
@@ -107,6 +107,31 @@ class WakeTests(unittest.TestCase):
         SIG.notify_due_missed(tkt, {}, NOW)
         self.assertEqual(len(self.stub.calls), 1, "срок не наступил или тикет закрыт — события нет")
 
+    def test_goal_closed_is_one_event_per_goal(self):
+        goals = Path(self.tmp.name) / ".claude" / "goals"
+        goals.mkdir(parents=True)
+
+        def goal(gid, status):
+            text = "\n".join(["---", f"id: {gid}", f"status: {status}", "set: 2026-11-02 10:00", "accepted:", "---", "# цель", ""])
+            (goals / f"{gid}.md").write_text(text, encoding="utf-8")
+        goal("G-001", "accepted")
+        goal("G-002", "open")
+        state: dict = {}
+        SIG.notify_goal_closed(state, NOW)
+        self.assertEqual(self.stub.calls, [], "уже закрытые цели при первом обходе не будят")
+        goal("G-002", "accepted")
+        goal("G-003", "dropped")
+        SIG.notify_goal_closed(state, NOW)
+        SIG.notify_goal_closed(state, NOW)
+        self.assertEqual(len(self.stub.calls), 2)
+        self.assertIn("[цель закрыта] G-002", self.stub.calls[0][1])
+        self.assertIn("[цель закрыта] G-003", self.stub.calls[1][1])
+
+    def test_next_undefined_kind_is_the_one_goal_steps_sends(self):
+        self.signal("следующий-не-определён", tid="TK-002", note="цель G-001: все шаги плана приняты")
+        self.assertEqual(len(self.stub.calls), 1)
+        self.assertIn("[шаг цели принят, следующий не определён] TK-002", self.stub.calls[0][1])
+
     def test_set_session_cli(self):
         self.assertEqual(CW.main(["--project", self.tmp.name, "set", "--id", "abc", "--name", "CEO"]), 0)
         self.assertEqual(json.loads(CW.session_file().read_text(encoding="utf-8"))["id"], "abc")
@@ -119,7 +144,9 @@ class TextTests(unittest.TestCase):
             self.assertNotIn("Monitor", text, rel)
             self.assertNotIn("будильник", text.lower().replace("таймеров и наблюдения нет", ""), rel)
         self.assertIn("ceo_wake.py", (PLUGIN / "commands/ceo.md").read_text(encoding="utf-8"))
-        self.assertIn("**Побудка:**", (PLUGIN / "templates/roles/ceo.md").read_text(encoding="utf-8"))
+        charter = (PLUGIN / "templates/roles/ceo.md").read_text(encoding="utf-8")
+        self.assertIn("**Побудка:**", charter)
+        self.assertNotIn("или вопрос владельцу, не пересказ.", charter, "висящий обрывок старого пункта")
         self.assertNotIn("Monitor", (PLUGIN / "docs/signals.md").read_text(encoding="utf-8").split("## Побудка CEO")[1].split("## Передача")[0])
 
 

@@ -111,7 +111,7 @@ MAX_IDLE_RUNS = 2
 
 from signals import (  # noqa: E402,F401 — сигналы CEO вынесены в signals.py; имена для вызовов из dispatch и tickets
     _mech_log, append_ceo_inbox, route_ceo_signal, handle_next_ceo, escalate_review_limit, notify_status_for_ceo,
-    notify_parse_error, notify_due_missed, baseline_done_notified, notify_done, haiku_refused_reason)
+    notify_parse_error, notify_due_missed, notify_goal_closed, baseline_done_notified, notify_done, haiku_refused_reason)
 
 
 def notify_wait_for_problem(tkt: T.Ticket, state: dict, now) -> None:
@@ -661,6 +661,10 @@ def _collect_candidates(state: dict, now) -> tuple:
     candidates = []  # (path, ticket, decision) — кого можно запустить; порядок и лимиты — в _launch_candidates
     STALLED.clear()
     waiting_nocond = False  # TK-076 п.4: роль ждёт без условия (ни wait_for, ни next) дольше IDLE_GRACE_S
+    try:
+        notify_goal_closed(state, now)
+    except Exception as e:  # noqa: BLE001 — сигнал о цели не роняет тик
+        print(f"[dispatch] goal_closed: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
     for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)
