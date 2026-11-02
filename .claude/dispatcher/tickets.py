@@ -375,6 +375,13 @@ TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикет�
              "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
 
 
+def tail_hit(text: str) -> tuple:
+    """Хвост в тексте сдачи: (текст с погашенными отрицаниями, первое попадание `TAIL_WORDS` или None). Длина текста та же:
+    цитата в отказе берётся из него. Планка правок детектора — корпус реальных сдач (`fixtures/tail_corpus.json`, test_tail_corpus)."""
+    sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), text)
+    return sub, TAIL_WORDS.search(sub)
+
+
 def _owner_submission(tkt) -> str:
     """Текст последней сдачи исполнителя (`[итог: done|pr]` владельца тикета) — то, что принимает Судья."""
     for e in reversed(tkt.log):
@@ -440,8 +447,7 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
     if raw in ("-", "—"):
         path = TICKETS_DIR / f"{tid}.md"
         sub = _owner_submission(T.read_ticket(path)) if path.exists() else ""
-        sub = TAIL_NEGATION.sub(lambda m: " " * len(m.group()), sub)  # длина та же: цитата в отказе берётся из этого же текста
-        hit = TAIL_WORDS.search(sub)
+        sub, hit = tail_hit(sub)
         if hit:
             return (f"--tail -: в сдаче исполнителя «{sub[max(0, hit.start() - 40):hit.end() + 60].strip()}» — это хвост. "
                     f"Не сделано из заказа или договора — `return`; иначе {TAIL_HINT}"), "", ""

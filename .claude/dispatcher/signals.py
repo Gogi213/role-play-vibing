@@ -12,9 +12,10 @@ import project as P
 import ticket as T
 
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
-# После MAX_REVIEW_RETURNS возвратов тикет, снова пришедший на ревью, ревьюеру не отдаётся: запись dispatcher, тикет
-# закрыт «не сделано» с остатком (последний возврат ревьюера) в логе — не blocked и не вопрос владельцу (TK-233, 13.10:
-# потолок ремонта 2; был 3 и needs_owner). Число НАЗНАЧЕНО владельцем 13.10, не измерено.
+# После MAX_REVIEW_RETURNS возвратов тикет, снова сданный на ревью, ревьюеру не отдаётся (`review_limit_hit`, первая строка
+# `decide`): запись dispatcher с причинами возвратов, статус needs_owner — вопрос владельцу, а не тихое закрытие (TK-090, В-36;
+# до этого проверка стояла за `next`, который `result pr` ставит сам, и не срабатывала ни разу). Число 2 НАЗНАЧЕНО
+# владельцем 13.10, не измерено.
 MAX_REVIEW_RETURNS = 2
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
@@ -116,24 +117,39 @@ def _ceo_handoff_during_run(state: dict, tid: str, info: dict) -> bool:
         return False
 
 
+REVIEW_AUTO_AUTHORS = ("merge", "ci")  # записи программ (слияние, CI) после сдачи — не ход роли и не заказ
+
+
+def review_limit_hit(tkt: T.Ticket, state: dict) -> bool:
+    """Потолок возвратов: тикет снова сдан на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов, и последний
+    ход — владельца (записи `merge`/`ci` не в счёт). Ход CEO или ревьюера — не повод: явный заказ CEO (`next`) потолок не перебивает."""
+    if tkt.status not in ("done", "in_review") or tkt.reviewer not in P.ROLES or _review_returns(state, tkt.id) < MAX_REVIEW_RETURNS:
+        return False
+    last = next((e for e in reversed(tkt.log) if e.author.lower() not in REVIEW_AUTO_AUTHORS), None)
+    return bool(last) and T.author_is(last.author, tkt.owner)
+
+
+def _return_reasons(tkt: T.Ticket, returns: int) -> list:
+    """Причины последних `returns` возвратов: записи `[итог: return]` ревьюера; нет таких — записи ревьюера."""
+    mine = [e for e in tkt.log if T.author_is(e.author, tkt.reviewer)]
+    found = [e for e in mine if re.match(r"\[итог:\s*return\]", e.text.strip())] or mine
+    return [" ".join(e.text.split())[:400] for e in found[-returns:]]
+
+
 def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Ticket:
-    """Пинг-понг ревью: тикет вернулся на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов —
-    ревьюера не будим; запись dispatcher с остатком, статус done («не сделано»). Только когда последняя запись — владельца (он отправил работу на ревью): запись CEO/ревьюера/dispatcher
-    не повод. Явный `next` (CEO будит ревьюера или другую роль) не перебиваем. Возвращает свежий тикет."""
-    if tkt.status not in ("done", "in_review") or tkt.reviewer not in P.ROLES:
+    """Пинг-понг ревью: `review_limit_hit` — ревьюера не будим; запись dispatcher с причинами возвратов, статус needs_owner (вопрос
+    владельцу; строка «ждёт вас» уходит из `notify_status_for_ceo`). Счётчик сбрасывается: ответ владельца — новая серия. Возвращает
+    свежий тикет."""
+    if not review_limit_hit(tkt, state):
         return tkt
     returns = _review_returns(state, tkt.id)
-    if returns < MAX_REVIEW_RETURNS or tkt.next_role in P.ROLES or tkt.next_role == "ceo":
-        return tkt
-    last_author = tkt.log[-1].author if tkt.log else ""
-    if not T.author_is(last_author, tkt.owner):
-        return tkt
-    rest = next((e.text.strip() for e in reversed(tkt.log) if T.author_is(e.author, tkt.reviewer)), "")
+    reasons = "; ".join(f"{i}) {r}" for i, r in enumerate(_return_reasons(tkt, returns), 1)) or "(записей ревьюера нет)"
     T.append_log(path, "dispatcher",
-                 f"Не сделано: ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд (потолок ремонта) — тикет закрыт "
-                 f"без нового круга. Остаток (последний возврат ревьюера): {rest[:1500] or '(записи ревьюера нет)'}. "
-                 f"Взять остаток — новый тикет со ссылкой на задачу владельца (`new --ref`).", now=now)
-    T.write_header_updates(path, {"status": "done", "next": ""}, now=now)
+                 f"Потолок возвратов: ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд, она снова сдана — третий круг не "
+                 f"запускаю, вопрос владельцу: продолжать (и как), сузить заказ или закрыть. Причины возвратов: {reasons}.", now=now)
+    T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)
+    state.setdefault("review_returns", {}).pop(tkt.id, None)
+    CFG.save_state(state)
     return T.read_ticket(path)
 
 
