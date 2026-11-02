@@ -34,6 +34,7 @@ import downtime  # noqa: E402
 import on_met as ON_MET  # noqa: E402
 import waits as W  # noqa: E402
 import alarms as AL  # noqa: E402
+import goal_steps as GS  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
 from role_args import (  # noqa: E402,F401 — запуск роли (усилие, MCP, промпт) вынесен в role_args.py; имена для launch_run и тестов
@@ -754,6 +755,7 @@ def tick(now=None) -> int:
     unblock_limit_victims(now)
     paused = _limit_paused(state, now)  # TK-070 п.2: пока лимит сессии не сброшен — новых запусков нет, тикеты не трогаем
     candidates, waiting_nocond = _collect_candidates(state, now)
+    _guarded("шаги целей", GS.advance, CFG.PROJECT_ROOT, CFG.TICKETS_DIR, state, now)  # TK-087: следующий шаг плана цели
     launched, throttled = _launch_candidates(candidates, state, now, paused)
 
     idle_now = not RUNNING and not launched and not paused

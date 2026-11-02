@@ -68,6 +68,7 @@ import ticket as T  # noqa: E402
 import waits as W  # noqa: E402
 import tickets_numbers as numbers_mod  # noqa: E402
 import critic_gate  # noqa: E402
+import precheck  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
 import tickets_gates as gates_mod  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
@@ -221,7 +222,7 @@ def _result_refusal(args, role: str, tkt) -> str:
     if args.result == "continue" and routes_mod.continue_streak(tkt, role) >= routes_mod.CONTINUE_MAX:
         return (f"continue уже {routes_mod.CONTINUE_MAX} раз подряд — сдай pr/done или wait (долгое — фоновый процесс), "
                 f"либо blocked")
-    return ""
+    return precheck.refusal(args, role, tkt, PROJECT_ROOT, precheck.run_started(P.read_json(CFG.STATE_FILE, {}), tkt.id, role))  # TK-091
 
 
 def _result_proof(args, role: str, tkt) -> str:
@@ -375,7 +376,15 @@ TAIL_NEGATION = re.compile(r"хвост\w*\s+нет\b(?!\s+[\w])|\bнет\s+хв
                            r"\bосталось" + _TAIL_SEP + r"(?:ничего|нет(?:\s+(?:блокер|замечани|вопрос)\w*)?)(?![^\W_])" + _TAIL_END + r"|"
                            r"\bне\s+осталось\s+ничего\b" + _TAIL_END, re.I)
 TAIL_HINT = ("--tail - (хвостов нет) | --tail TK-M[,TK-N] (тикеты на хвост заведены до приёмки) | "
-             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, решение владельца)")
+             "--tail ceo:\"что сделать CEO\" (хвост, который ролям не сделать: настройки, CLAUDE.md, устав проекта, слово владельца)")
+# TK-087: хвост про код, тесты, слияние и т. п. ролям по силам — Судья заводит тикет (`new … --title "Хвост TK-N: …"`), CEO его не несёт.
+# Зона CEO — настройки, CLAUDE.md, устав проекта, слово владельца: слова зоны оставляют `--tail ceo:` как есть.
+TAIL_CODE = re.compile(r"\bкод\w*|\bтест\w*|\bpr\b|\bpull\b|\w*мерж\w*|\bmerge\b|слить|слит\w*|слия\w*|влить|влив\w*|коммит\w*|скрипт\w*|"
+                       r"прав[ик]\w*|\bпочин\w*|\bчини\w*|\w*пуш\w*|рефактор\w*|\bбаг\w*|исправ\w*|ошибк\w*|\bмодул\w*|функци\w*", re.I)
+TAIL_OWNER_ZONE = re.compile(r"настройк\w*|settings|rpv\.json|claude\.md|устав\w*|charter|реестр\w*|"
+                             r"(?:слов\w*|решени\w*|согласи\w*)\s+владельц\w*|\ballow\b|токен\w*|\.claude/roles/[\w-]+\.md", re.I)
+# TK-099: имя флага (`--after-merge`) — не код: слово внутри него не считается.
+TAIL_FLAG = re.compile(r"(?<![\w-])--[\w-]+")
 
 
 def tail_hit(text: str) -> tuple:
@@ -491,6 +500,10 @@ def _tail_ack(args, tid: str) -> tuple[str, str, str]:
         what = " ".join(raw[4:].split()).strip("\"' ")
         if len(what) < 5:
             return f"--tail ceo:\"…\" — напиши, что сделать CEO ({TAIL_HINT})", "", ""
+        if (hit := TAIL_CODE.search(TAIL_FLAG.sub(" ", what))) and not TAIL_OWNER_ZONE.search(what):
+            return (f"--tail ceo: «{what[:80]}» — про «{hit.group()}»: код, тесты, слияние и т. п. ролям по силам. Заведи тикет "
+                    f"(`tickets.py new --owner <роль> --ref <ref тикета> --title \"Хвост {tid}: …\"`) и принимай с `--tail TK-N`; "
+                    f"CEO — только то, что ролям не сделать (настройки, CLAUDE.md, устав проекта, слово владельца)"), "", ""
         return "", f" хвост CEO: {what[:120]}", what
     ids = [x for x in re.split(r"[,\s]+", raw) if x]
     bad = [x for x in ids if not re.fullmatch(r"TK-\d+", x) or x == tid
@@ -515,7 +528,7 @@ def _set_due(path: Path, due, said: str = "") -> None:
         if not (tkt.header.get("due_first") or "").strip():
             upd["due_first"] = iso
         T.write_header_updates(path, upd, stamp_updated=False)
-        T.append_log(path, "ceo", f"Срок владельцу: {iso}" + (f" — «{' '.join(said.split())}»" if said.strip() else ""))
+        T.append_log(path, T.service_author("ceo"), f"Срок владельцу: {iso}" + (f" — «{' '.join(said.split())}»" if said.strip() else ""))
 
 
 def cmd_due(args) -> int:
@@ -758,7 +771,7 @@ def cmd_allow(args) -> int:
                 print(f"{args.id}: согласия на публикацию не было — снимать нечего")
                 return 0
             T.write_header_updates(path, {"allow": ""}, stamp_updated=False)
-            T.append_log(path, "ceo", "согласие на публикацию снято")
+            T.append_log(path, T.service_author("ceo"), "согласие на публикацию снято")
         print(f"{args.id}: согласие на публикацию снято")
         return 0
     ref = (args.ref or "").strip()
@@ -771,7 +784,7 @@ def cmd_allow(args) -> int:
         return 1
     with T.ticket_lock(path):
         T.write_header_updates(path, {"allow": f"publish ({ref})"}, stamp_updated=False)
-        T.append_log(path, "ceo", f"согласие владельца на публикацию по этому тикету ({ref}): выпуск, слияние PR, пуш в "
+        T.append_log(path, T.service_author("ceo"), f"согласие владельца на публикацию по этому тикету ({ref}): выпуск, слияние PR, пуш в "
                      f"основную ветку и теги, публикация пакетов")
     print(f"{args.id}: allow: publish ({ref})")
     return 0
