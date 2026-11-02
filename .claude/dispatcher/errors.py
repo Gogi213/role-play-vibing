@@ -7,6 +7,7 @@
 
     errors.py [--project <путь>] add --title "..." [--ticket TK-N] [--what "..."]   # → E-NNN, status: open
     errors.py fix E-NNN --check "<команда>" [--before <коммит>] [--timeout S] [--cwd <каталог>]   # красный → зелёный → fixed
+    errors.py retire E-NNN --decision В-N --why "..."   # снять ошибку решением владельца: проверка больше не гоняется
     errors.py run [--cwd <каталог>] [--timeout S]     # проверки всех исправленных ошибок; упала любая — код 1
     errors.py show E-NNN
     errors.py list [--open]
@@ -35,6 +36,9 @@ FAIL («менять проверку можно только через Суд�
 уложилась в срок): не проверено, не вина работы. Отказ тогда велит ждать (`wait at:…`), а не возвращать; в regressions.log
 строка с четвёртым полем `infra` (регрессом в отчёте не считается); после 3 таких отказов подряд по тикету — сигнал CEO. Читать
 вывод проверки на «BUILD FAILED» и подобное нельзя: его печатает и ошибка компиляции в самой работе.
+Снятие (`retire`, только Судья или сессия без роли): решение владельца В-N из реестра отменило то, что проверка закрепляла
+(вырез кода вместе с его тестом) — `status: retired`, `decision: В-N`, `retired`, `retired_why`; приёмка такую ошибку не гоняет.
+Тест, ставший лишним без решения владельца, снимать нельзя — приёмка его вернёт.
 Исправление, чей `fixed_sha` не предок головы каталога запуска (ветка PR ещё не влита), приёмка пропускает: «исправление ещё не влито».
 """
 from __future__ import annotations
@@ -55,6 +59,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hide  # noqa: E402
 import project as P  # noqa: E402
+import registry as R  # noqa: E402
 import ticket as T  # noqa: E402
 
 ERROR_ID = re.compile(r"^E-(\d{3,})$")
@@ -626,6 +631,33 @@ def cmd_fix(a, root: Path) -> int:
     return 0
 
 
+def cmd_retire(a, root: Path) -> int:
+    role = P.caller_role(root)
+    if role and role != "judge":
+        print(f"retire: ошибку снимает Судья (запуск роли {role} — не может): сдай работу `tickets.py result <ID> pr|done "
+              f"--why \"...\"` и назови решение владельца В-N, которое отменило проверку", file=sys.stderr)
+        return 1
+    eid = _norm(a.id)
+    path = errors(root).get(eid)
+    if not path:
+        print(f"нет ошибки {a.id}", file=sys.stderr)
+        return 1
+    ref, why = (a.decision or "").strip(), _one_line(a.why)
+    if not re.fullmatch(r"В-\d+", ref) or not R.ref_exists(root, ref):
+        print(f"retire: --decision {ref or '—'}: нужно решение владельца В-N, уже занесённое в реестр (`registry.py list`); "
+              f"{eid} остаётся как есть", file=sys.stderr)
+        return 1
+    if not why:
+        print(f"retire: нужен --why — что именно решение {ref} отменило; {eid} остаётся как есть", file=sys.stderr)
+        return 1
+    if header(path).get("status") == "retired":
+        print(f"retire: {eid} уже снята", file=sys.stderr)
+        return 1
+    _set_header(path, {"status": "retired", "retired": _now(), "decision": ref, "retired_why": why})
+    print(f"{eid}: retired решением {ref}, проверка больше не гоняется")
+    return 0
+
+
 def cmd_run(a, root: Path) -> int:
     cwd = Path(a.cwd).expanduser().resolve() if a.cwd else root
     seen = []
@@ -677,6 +709,11 @@ def main(argv=None) -> int:
     fx.add_argument("--timeout", type=float, default=None, help=f"секунд на проверку (по умолчанию {CHECK_TIMEOUT_S:g})")
     fx.add_argument("--cwd", default=None, help="каталог запуска (по умолчанию корень проекта), например worktree тикета")
     fx.set_defaults(func=cmd_fix)
+    rt = sub.add_parser("retire", help="только Судья: решение владельца В-N отменило то, что закрепляла проверка → status: retired")
+    rt.add_argument("id")
+    rt.add_argument("--decision", required=True, help="решение владельца В-N, уже занесённое в реестр")
+    rt.add_argument("--why", required=True, help="что решение отменило, одной строкой")
+    rt.set_defaults(func=cmd_retire)
     rn = sub.add_parser("run", help="проверки всех исправленных ошибок; упала любая — код 1, не запустилась (OSError, таймаут) — 2")
     rn.add_argument("--cwd", default=None)
     rn.add_argument("--timeout", type=float, default=None, help="секунд на каждую проверку (поверх записи ошибки)")
