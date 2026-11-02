@@ -94,6 +94,15 @@ def role_parallel() -> dict:
     return ROLE_PARALLEL if v is None else _parse_role_parallel(v)
 
 
+JUDGE_SCALE_QUEUE = 2  # TK-100 (В-40): с такой очереди сдач на приёмку разрешён второй Судья
+
+
+def judge_scale_queue() -> int:
+    """Очередь на приёмку, с которой разрешён второй Судья: `judge_scale_queue` из `.claude/rpv.json`, иначе JUDGE_SCALE_QUEUE."""
+    v = P.setting("judge_scale_queue")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else JUDGE_SCALE_QUEUE
+
+
 RUN_TIMEOUT = 20 * 60.0
 
 # Защита от петли (владелец 27.09, v1.1). MAX_RUNS_PER_TICKET_HOUR/MIN_GAP_S — троттлинг решений (а)-(г):
@@ -245,12 +254,39 @@ def _log_run_summary(*args, **kwargs) -> None:
     RL.log_run_summary(CLAUDE_PROJECTS_DIR, *args, **kwargs)
 
 
-def _role_busy(role: str) -> bool:
+def _role_busy(role: str, judge_queue: int = 0) -> bool:
     """v2 (02.10): активных запусков роли по всем тикетам сразу не больше её предела (по умолчанию 1; раньше — только
     при scope="role"; аудит: одну задачу вели три сессии Исследователя, до 6 запусков параллельно). Предел на роль
     настраивается `role_parallel` в rpv.json; на один тикет —
-    по-прежнему один запуск роли (RUNNING по ключу тикета). Занята — запуск ждёт следующего тика."""
-    return sum(1 for info in RUNNING.values() if info["role"] == role) >= role_parallel().get(role, 1)
+    по-прежнему один запуск роли (RUNNING по ключу тикета). Занята — запуск ждёт следующего тика.
+    TK-100 (В-40): у Судьи предел 1, пока очередь на приёмку меньше `judge_scale_queue`; идущие запуски не трогаем."""
+    limit = role_parallel().get(role, 1)
+    if role == "judge" and judge_queue < judge_scale_queue():
+        limit = 1
+    return sum(1 for info in RUNNING.values() if info["role"] == role) >= limit
+
+
+_JUDGE_SCALE_MODE = ["idle"]  # последнее решение о втором Судье: idle | scale | cap — строка в лог только при смене
+
+
+def _judge_queue(candidates: list, state: dict, now) -> int:
+    """Сдачи, ждущие Судью: кандидаты роли judge без идущего запуска, готовые к запуску — не придержанные троттлингом (TK-100)."""
+    return sum(1 for p, t, d in candidates if d.role == "judge" and t.id not in RUNNING and p.stem not in RUNNING
+               and not _rate_limited(state, t.id, now, d.role))
+
+
+def _note_judge_scale(queue: int, now) -> None:
+    """TK-100 п.4: почему второй Судья разрешён или нет — одна строка в dispatch.run.log, только при смене решения."""
+    need, cap = judge_scale_queue(), role_parallel().get("judge", 1)
+    running = sum(1 for info in RUNNING.values() if info["role"] == "judge")
+    mode = "idle" if queue < need else "scale" if cap > 1 else "cap"
+    if mode == _JUDGE_SCALE_MODE[0]:
+        return
+    _JUDGE_SCALE_MODE[0] = mode
+    why = {"idle": f"второй Судья не нужен: очередь на приёмку {queue} < порога {need}, идущих Судей {running}",
+           "scale": f"второй Судья разрешён: очередь на приёмку {queue} ≥ порога {need} (role_parallel.judge {cap})",
+           "cap": f"второй Судья не запущен: очередь на приёмку {queue} ≥ порога {need}, но role_parallel.judge = {cap}"}
+    print(f"[dispatch] {T.now_iso(now)} {why[mode]}", flush=True)
 
 
 # --- защита от петли и перерасхода (v1.1) --------------------------------------------------
@@ -731,13 +767,16 @@ def _launch_candidates(candidates: list, state: dict, now, paused) -> tuple:
     """Запуск кандидатов по очереди приоритета с пределами (параллельность, роль, часовой троттлинг); (запущено, придержано)."""
     launched = 0
     throttled = 0
+    judge_queue = _judge_queue(candidates, state, now)
+    if not paused:  # на паузе запусков нет — решение о втором Судье не пишем
+        _note_judge_scale(judge_queue, now)
     for path, tkt, decision in sorted(candidates, key=lambda c: _candidate_sort_key(state, c[1], c[2])):
         tid = tkt.id
         if paused or len(RUNNING) >= max_parallel():
             break
         if tid in RUNNING or path.stem in RUNNING:
             continue  # на один тикет — один запуск роли (RUNNING по stem файла; tkt.id из шапки мог разойтись с ним)
-        if _role_busy(decision.role):
+        if _role_busy(decision.role, judge_queue):
             continue  # у роли уже предел запусков (на любых задачах) — ждёт следующего тика
         if _rate_limited(state, tid, now, decision.role):
             throttled += 1
