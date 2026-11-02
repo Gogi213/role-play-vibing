@@ -34,6 +34,7 @@ import downtime  # noqa: E402
 import on_met as ON_MET  # noqa: E402
 import waits as W  # noqa: E402
 import alarms as AL  # noqa: E402
+import pulse_tg as PULSE_TG  # noqa: E402
 import signals as SIG  # noqa: E402
 import stop as STOP  # noqa: E402
 from role_args import (  # noqa: E402,F401 — запуск роли (усилие, MCP, промпт) вынесен в role_args.py; имена для launch_run и тестов
@@ -764,6 +765,7 @@ def tick(now=None) -> int:
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
     _guarded("отчёт", _daily_report, state, now)
+    _guarded("пульс", lambda: PULSE_TG.tick(CFG.PROJECT_ROOT, state, now))  # В-38: закреплённое сообщение; ключ pulse_telegram
     _guarded("надзиратель", _overseer, state, now)
     _guarded("вопрос владельцу", _owner_questions, state, now)
     state["last_tick"] = T.now_iso(now)  # судья TK-002 п.2а: сторож проверяет диспетчер жив по этому
