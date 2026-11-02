@@ -397,8 +397,6 @@ def main():
     hook_in = read_stdin()
     event = hook_in.get("hook_event_name")
     try:
-        if event == "PostToolUse":  # напоминаний после инструментов нет
-            return 0
         if event == "UserPromptSubmit":
             try:
                 mark_ceo_on_command(hook_in)

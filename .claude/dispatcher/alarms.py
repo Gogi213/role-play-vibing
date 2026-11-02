@@ -108,13 +108,19 @@ def owner_questions(state: dict, now) -> None:
         q = next((e for e in reversed(tkt.log) if _is_owner_question(e)), None)
         if q is None or sent.get(tkt.id) == q.ts_raw:
             continue
+        tried = state.setdefault("owner_try", {})
+        if tkt.id in tried and (now - T.parse_dt(tried[tkt.id])).total_seconds() < notify.RETRY_S:
+            continue   # прошлая отправка не дошла — повтор не чаще RETRY_S
         cap = q.text.strip().startswith(REVIEW_CAP_MARK)  # потолок возвратов (диспетчер): причины возвратов длиннее вопроса Судьи
         why = re.search(r"повод: ([\w-]+)", q.text)
         body = re.sub(r"^\[итог:\s*ask-owner\]\s*(?:повод: [\w-]+)?\s*[—-]?\s*", "", q.text.strip())
         title = " ".join((tkt.header.get("title") or tkt.id).split())[:80]
-        notify.send(f"Вопрос вам ({'потолок-возвратов' if cap else why.group(1) if why else 'без повода'}): «{title}» — "
-                    f"{' '.join(body.split())[:1500 if cap else 400]} Ответьте CEO.", log_dir=CFG.DISPATCHER_DIR)
-        sent[tkt.id] = q.ts_raw
+        if notify.delivered(f"Вопрос вам ({'потолок-возвратов' if cap else why.group(1) if why else 'без повода'}): «{title}» — "
+                            f"{' '.join(body.split())[:1500 if cap else 400]} Ответьте CEO.", log_dir=CFG.DISPATCHER_DIR):
+            sent[tkt.id] = q.ts_raw
+            tried.pop(tkt.id, None)
+        else:
+            tried[tkt.id] = T.now_iso(now)
 
 
 OVERSEER_EVERY_S = 15 * 60.0  # CP14: Надзиратель — не чаще раза в 15 мин и только если тикеты менялись

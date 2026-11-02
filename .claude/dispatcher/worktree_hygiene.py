@@ -1,8 +1,10 @@
 """Гигиена рабочих копий (TK-104): worktree закрытого тикета (done/stopped) убирается, несохранённое — коммитом в ветку.
 
-Копии живут только в `<проект>/.claude/worktrees/<имя>`; имя привязано к тикету токеном `tk<N>` (tk049-rs, rpv-tk104).
+Копии живут только в `<проект>/.claude/worktrees/<имя>`; имя привязано к тикету токеном `tk<N>` или `tk-<N>`
+(TK-030, tk-030-x, tk049-rs, rpv-tk104).
     sweep(project, tickets)  — убрать копии закрытых тикетов (вызывает тик диспетчера)
-    findings(project, tickets) — (закрытые, чужие) для doctor, ничего не меняет"""
+    findings(project, tickets) — (закрытые, чужие) для doctor, ничего не меняет
+    orphans(project, tickets)  — копии в .claude/worktrees без тикета (нет токена или такого тикета нет)"""
 from __future__ import annotations
 
 import re
@@ -11,7 +13,7 @@ from pathlib import Path
 import hide
 import ticket as T
 
-TOKEN = re.compile(r"tk0*(\d+)", re.I)
+TOKEN = re.compile(r"(?<![a-z0-9])tk-?0*(\d+)", re.I)
 
 
 def _git(project: Path, *a, cwd=None, timeout=60):
@@ -68,6 +70,12 @@ def findings(project: Path, status_of: dict) -> tuple:
         elif is_closed(path, branch, status_of):
             closed.append(path)
     return closed, foreign
+
+
+def orphans(project: Path, status_of: dict) -> list:
+    """Копии внутри .claude/worktrees, к которым нет тикета: в имени нет токена `tk<N>` или такого тикета нет."""
+    return [path for path, _ in list_worktrees(project)
+            if _inside(project, path) and ticket_of(path) not in status_of]
 
 
 BUILD_IGNORED = ("target/", "node_modules/", "__pycache__/", ".pytest_cache/", ".venv/")
