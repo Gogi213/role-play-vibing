@@ -764,7 +764,7 @@ def tick(now=None) -> int:
     _account_downtime(state, now, ready_unserved=(len(candidates) - launched - throttled > 0 and idle_now),
                       throttled=(throttled > 0 and idle_now), limit_paused=(bool(paused) and bool(candidates) and not RUNNING),
                       work_present=bool(candidates) or bool(RUNNING), waiting_nocond=waiting_nocond)
-    _guarded("пульс", PULSE.update, state, now, datetime.now().astimezone())  # после счётчика простоя: берёт его флаги dt_flags и прежний last_tick
+    _guarded("пульс", PULSE.update, state, now, datetime.now().astimezone())  # после счётчика простоя: берёт его флаги dt_flags и last_tick_end прошлого тика (метку этого тика ставим ниже)
     _guarded("отчёт", _daily_report, state, now)
     _guarded("надзиратель", _overseer, state, now)
     _guarded("вопрос владельцу", _owner_questions, state, now)

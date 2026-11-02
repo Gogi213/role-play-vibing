@@ -63,6 +63,17 @@ def _count_error(st: dict, key: str, sha: str, tkt, pr_number: int, e: Exception
                                    "Проверь PR и права gh вручную; ci_watch продолжает опрос.")
 
 
+def _mark_closed(st: dict, repo: str, open_numbers: set, complete: bool) -> None:
+    """Записи PR этого репо, которых нет среди открытых, помечаются `closed: true` (Пульс не жжёт ci_red по закрытым, TK-102);
+    запись остаётся: из неё `ci_done`. Неполная страница (≥ 100 открытых) — не помечаем: отсутствие в ней ничего не доказывает."""
+    if not complete:
+        return
+    for key, ent in st.items():
+        head, _, number = key.partition("#")
+        if head == repo and number.isdigit() and int(number) not in open_numbers and isinstance(ent, dict):
+            ent["closed"] = True
+
+
 def run_once(repo: str, gh=gh_api) -> list:
     """Один проход. Возвращает список (PR, sha7, state, кого разбудили)."""
     st, out = load_state(), []
@@ -72,7 +83,9 @@ def run_once(repo: str, gh=gh_api) -> list:
             tickets.append(T.read_ticket(p))
         except Exception:
             continue
-    for pr in gh(f"repos/{repo}/pulls?state=open&per_page=100"):
+    prs = gh(f"repos/{repo}/pulls?state=open&per_page=100")
+    _mark_closed(st, repo, {int(p["number"]) for p in prs}, complete=len(prs) < 100)
+    for pr in prs:
         sha = pr["head"]["sha"]
         try:
             runs = gh(f"repos/{repo}/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
@@ -84,6 +97,7 @@ def run_once(repo: str, gh=gh_api) -> list:
         key = f"{repo}#{pr['number']}"
         prev = st.get(key) or {}
         prev.pop("errs", None)
+        prev.pop("closed", None)  # открыт снова
         if prev.get("sha") == sha and prev.get("state") == state:
             continue
         woke = ""
