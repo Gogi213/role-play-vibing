@@ -122,7 +122,7 @@
 | пауза между запусками одной роли на тикете (передача другой роли — без паузы) / запусков тикета в час | 60 с / 12 | `MIN_GAP_S` / `MAX_RUNS_PER_TICKET_HOUR` (час — ещё и `max_runs_per_ticket_hour` в `rpv.json`) |
 | запусков подряд с записью, но без смены статуса → `blocked` | 12 | `MAX_SAME_STATUS_RUNS` |
 | запусков подряд без записи и без смены статуса → `blocked` | 2 | `MAX_IDLE_RUNS` |
-| возвратов ревьюера; дальше тикет закрывается «не сделано» с остатком | 2 | `MAX_REVIEW_RETURNS` |
+| возвратов ревьюера; дальше тикет needs_owner с причинами возвратов | 2 | `MAX_REVIEW_RETURNS` |
 | модель и усилие ролей | Судья — Opus 5.5 **high**; Инженер — Sonnet 5.5 **xhigh**; Исследователь — Sonnet 5.5 high. Усилие Судьи и Инженера жёсткое: поле `effort` тикета на него не действует (Исследователю — действует) | `ROLE_MODEL`, `ROLE_EFFORT`, `FIXED_EFFORT_ROLES` |
 | механические задачи (`executor: haiku`), сжатие логов и конспектов | Haiku 5.5 xhigh | `CLAUDE_HAIKU_MODEL`, `haiku_aux.MODEL` |
 | сверка `wait_for host:…` одним ssh на машину | 300 с | `WAIT_RECON_S` |

@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
-from signals import CLOSED_BY_MERGE_MARK, MAX_REVIEW_RETURNS, _review_returns, closed_without_review, last_move, _done_marker  # noqa: E402
+from signals import CLOSED_BY_MERGE_MARK, MAX_REVIEW_RETURNS, _review_returns, closed_without_review, last_move, _done_marker, review_limit_hit  # noqa: E402
 
 
 @dataclass
@@ -115,6 +115,8 @@ def decide(tkt: T.Ticket, state: dict, now, check_wait_for, alive=None) -> "Deci
     запускается ни по какому поводу (в том числе `next:` — он остаётся в шапке и сработает, когда ожидание кончится)."""
     if tkt.status == "backlog":
         return None  # перенесено из TASKS.md, ещё не в работе — диспетчер не трогает; см. `tickets.py start`
+    if review_limit_hit(tkt, state):
+        return None  # потолок возвратов — раньше ветки (0): `result pr` сам ставит `next: judge`, за ним потолок не доживал (TK-090)
     if (alive is not None and tkt.status == "waiting" and tkt.owner in P.ROLES and alive(tkt)
             and not check_wait_for(tkt.header.get("wait_for", ""))):
         return None
@@ -166,7 +168,7 @@ def decide(tkt: T.Ticket, state: dict, now, check_wait_for, alive=None) -> "Deci
         if T.author_is(last_author, reviewer) or last_author.lower() == "dispatcher":
             return None
         if _review_returns(state, tkt.id) >= MAX_REVIEW_RETURNS:
-            return None  # пинг-понг: ревьюера не будим, тикет уходит CEO (escalate_review_limit в tick)
+            return None  # пинг-понг: ревьюера не будим, вопрос владельцу (escalate_review_limit в tick)
         return Decision(role=reviewer, reason="review",
                         header_updates={"status": "in_review"} if status == "done" else None)
 
