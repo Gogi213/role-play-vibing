@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ os.makedirs(os.path.join(_SANDBOX, ".claude", "roles"))
 os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import alarms as A  # noqa: E402
 import decide as D  # noqa: E402
 import finish as F  # noqa: E402
 import project_paths as CFG  # noqa: E402
@@ -119,15 +121,57 @@ class ReviewCapReplay(unittest.TestCase):
         self.assertEqual((len(tkt.log), decision), (size, None), "повторов записи нет")
         self.assertNotIn(self.path.stem, self.state.get("review_returns", {}), "ответ владельца — новая серия возвратов")
 
-    def test_ceo_explicit_order_after_submission_is_not_overridden(self):
+    def _to_cap(self):
+        """Два возврата и третья сдача: тикет на пороге потолка, `next: judge` от `result pr`."""
         self.result("engineer", "pr", "PR #184@sha0")
         for n in range(2):
+            self.ci()
             self.judge_returns()
             self.engineer_resubmits(n + 1)
+
+    def test_ceo_explicit_order_after_submission_is_not_overridden(self):
+        self._to_cap()
+        T.write_header_updates(self.path, {"next": ""}, now=self.clock)  # тик съел остаток `next: judge` от result pr
         T.append_log(self.path, "ceo", "Судье: проверь ещё раз", now=self.tick_time())
+        T.write_header_updates(self.path, {"next": "judge"}, now=self.clock, stamp_updated=False)  # `comment --author ceo --next judge`
         tkt, decision = self.tick()
         self.assertEqual(tkt.status, "in_review")
         self.assertEqual(decision.role, "judge", "заказ CEO потолок не перебивает")
+
+    def test_ceo_comment_without_next_does_not_hide_the_cap(self):
+        self._to_cap()
+        T.write_header_updates(self.path, {"next": ""}, now=self.clock)
+        T.append_log(self.path, "ceo", "наблюдаю", now=self.tick_time())
+        tkt, decision = self.tick()
+        self.assertEqual((tkt.status, decision), ("in_review", None), "последний ход CEO — не сдача владельца: потолок молчит")
+
+    def test_owner_next_ceo_survives_the_cap_and_the_cap_fires_after_it(self):
+        self._to_cap()
+        T.write_header_updates(self.path, {"next": "ceo"}, now=self.clock, stamp_updated=False)  # `comment --author engineer --next ceo`
+        tkt, decision = self.tick()
+        self.assertEqual((tkt.status, tkt.next_role), ("in_review", "ceo"), "позвал CEO — потолок `next` не стирает")
+        SIG.handle_next_ceo(self.path, tkt, self.state, self.tick_time())
+        self.assertIn("next-ceo", CFG.CEO_INBOX.read_text(encoding="utf-8"), "CEO получил сигнал владельца")
+        tkt, decision = self.tick()
+        self.assertEqual((tkt.status, decision), ("needs_owner", None), "съеденный `next` — потолок срабатывает следом")
+
+    def test_cap_question_reaches_the_owner_and_the_ceo_line_has_reasons(self):
+        self._to_cap()
+        tkt, _ = self.tick()
+        line = CFG.CEO_INBOX.read_text(encoding="utf-8").strip().splitlines()[-1]
+        self.assertIn("[needs_owner]", line)
+        for reason in TK074_RETURNS[:2]:
+            self.assertIn(reason[:30], line, "в строке CEO — причины возвратов")
+        SIG.notify_status_for_ceo(tkt, self.state, self.tick_time())
+        self.assertEqual(sum("[needs_owner]" in x for x in CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines()), 1, "одна строка CEO")
+        with mock.patch.object(A.notify, "send", return_value=True) as send:
+            A.owner_questions(self.state, self.clock)
+            A.owner_questions(self.state, self.clock)
+        self.assertEqual(send.call_count, 1, "вопрос владельцу — один раз")
+        text = send.call_args[0][0]
+        self.assertIn("потолок-возвратов", text)
+        for reason in TK074_RETURNS[:2]:
+            self.assertIn(reason[:30], text, "владелец видит причины возвратов")
 
 
 if __name__ == "__main__":
