@@ -1,0 +1,908 @@
+{
+ "about": "Корпус реальных сдач исполнителей (`[итог: done|pr]`) и ответ детектора хвостов tickets.tail_hit на main (TK-090). corpus — ответ main, правка детектора не должна его менять (0 расхождений); ordered — строки заказа правки с ожидаемым ответом.",
+ "corpus": [
+  {
+   "id": "TK-001#0",
+   "text": "[итог: pr] PR #111@012fbf3 — PR #111: отрицание хвоста, отказ done/accept по закрытому, next CEO цел; тесты TK-264/266/282, pytest -n auto 1186 зелёных. Алгоритм: регулярки, замер не нужен",
+   "tail": true
+  },
+  {
+   "id": "TK-001#3",
+   "text": "[итог: pr] PR #111@7307854 — E-001: отрицание сужено до «ничего не осталось»; проверка python -m pytest .claude/dispatcher/test_tail_not_left.py (падает на 012fbf3). pytest -n auto 1188 зелёных",
+   "tail": false
+  },
+  {
+   "id": "TK-001#9",
+   "text": "[итог: pr] PR #111@d3bdd94 — Заказ CEO 04:37: П2 откатил, П3 — одно условие (непустой next цел), П1 как принят. pytest -n auto 1185 зелёных. Приёмка 7307854 была до заказа — нужна новая",
+   "tail": false
+  },
+  {
+   "id": "TK-001#14",
+   "text": "[итог: done] результат: .claude/dispatcher/test_tail_not_left.py — PR #111 влит в main на d3bdd94, принят Судьёй; E-001 — python -m pytest .claude/dispatcher/test_tail_not_left.py. Новых работ по тикету нет",
+   "tail": false
+  },
+  {
+   "id": "TK-002#0",
+   "text": "[итог: pr] PR #112@2842f80 — PR #112: П0 закрытие после merged, П2б ceo-order-after-accept, blocked исполнителя не будит CEO, orphan молчит 10 мин. test_tk002 13 шт, pytest -n auto 785 зелёных. Алгоритм: код без замеров.",
+   "tail": false
+  },
+  {
+   "id": "TK-002#3",
+   "text": "[итог: pr] PR #112@9044a07 — E-002: фильтр _awaits_judge в watch.check_blocked_and_needs_owner; проверка python -m pytest .claude/dispatcher/test_tk002.py (падала до, 15 зелёных); pytest -n auto 1194 зелёных",
+   "tail": false
+  },
+  {
+   "id": "TK-002#10",
+   "text": "[итог: pr] PR #112@fb65520 — Заказ CEO 04:37: закрытие по слиянию только при wait Судьи и base=default; льгота 25 мин и возраст в watch-blocked; тест orphan в test_watch. pytest -n auto 1207 зелёных",
+   "tail": false
+  },
+  {
+   "id": "TK-002#15",
+   "text": "[итог: done] результат: docs/reviews/TK-002-fb65520-2026-10-27.md — PR #112 влит в main на fb65520, принят Судьёй, CI зелёный; новых заказов нет. Проверка E-002: python -m pytest .claude/dispatcher/test_tk002.py",
+   "tail": false
+  },
+  {
+   "id": "TK-003#5",
+   "text": "[итог: pr] PR #114@e288114 — PR #114: runs.log terminal_reason/is_error, пауза и blocked при ошибке API, SessionEnd без Haiku; unrecognized_model — диагностика старого CLI. 1194 passed. Живой конспект — Судье",
+   "tail": false
+  },
+  {
+   "id": "TK-003#13",
+   "text": "[итог: done] результат: docs/reviews/TK-003-2026-10-27.md — PR #114 принят Судьёй на e288114 и влит в main (d2a6454); все пункты заказа сданы, 1194 теста зелёные",
+   "tail": false
+  },
+  {
+   "id": "TK-004#1",
+   "text": "[итог: pr] PR #117@d0bc06e — Три исхода проверки, отказ «wait, не return», infra в regressions.log, сигнал CEO на 4-й раз, пропуск не влитого fixed_sha. Тесты 1218 зелёные в копии TK-004",
+   "tail": false
+  },
+  {
+   "id": "TK-004#6",
+   "text": "[итог: done] результат: docs/reviews/tk-004-2026-10-27.md — PR #117 влит в main на d0bc06e, принят Судьёй, CI зелёный; все пункты заказа и дополнение CEO закрыты",
+   "tail": false
+  },
+  {
+   "id": "TK-005#1",
+   "text": "[итог: pr] PR #116@07fbe9c — Шесть правок уставов/Надзирателя в PR #116; COST_STEPS=(6,12), тест; pytest -n auto 1207 зелёных, errors.py run чисто",
+   "tail": false
+  },
+  {
+   "id": "TK-005#6",
+   "text": "[итог: done] результат: docs/reviews/TK-005-2026-10-27.md — PR #116 влит в main (голова 07fbe9c в origin/main), COST_STEPS=(6,12) на main; правок больше нет",
+   "tail": false
+  },
+  {
+   "id": "TK-006#4",
+   "text": "[итог: done] результат: docs/findings/review-round-2026-10-27.md — Сводка по 5 осям на a8c7d76: 53 находки с файл:строка и пометкой поведения, списки сложности и длины. Судье: сверить 10 находок",
+   "tail": false
+  },
+  {
+   "id": "TK-006#8",
+   "text": "[итог: done] результат: docs/findings/review-round-2026-10-27.md — TK-001 закрыт, PR #111 влит. Пересдача без новой работы: тот же файл; Судье принять по вердикту docs/reviews/TK-006-2026-10-27.md",
+   "tail": false
+  },
+  {
+   "id": "TK-007#1",
+   "text": "[итог: pr] PR #113@8f83801 — Страж закрыл rpv.json и уставы CEO; config set (ключи, журнал, Судья, откат 2 ч), отчёт, ceo.md; 1189 тестов зелёные. Алгоритм: n/a",
+   "tail": false
+  },
+  {
+   "id": "TK-007#5",
+   "text": "[итог: pr] PR #113@8660405 — п.3: страж пускает decide из CEO только secretary; --question при цитате <15 знаков, вопрос в журнале/Судье/отчёте; тесты, 1191 зелёных. Алгоритм: n/a",
+   "tail": false
+  },
+  {
+   "id": "TK-007#10",
+   "text": "[итог: done] результат: docs/reviews/TK-007-recheck-2026-10-27.md — PR #113 влит в main на 8660405, принят Судьёй; страж, config set, журнал, отчёт, ceo.md, decide через secretary с --question сданы",
+   "tail": false
+  },
+  {
+   "id": "TK-009#4",
+   "text": "[итог: pr] PR #118@e3799e9 — Ось 2 ещё: роли — один project.ROLES (кроме стража delete_guard — только stdlib), agents/*.md — haiku_aux.agent_meta. Тесты 1239. Дальше: delete_guard, _popen.",
+   "tail": false
+  },
+  {
+   "id": "TK-009#8",
+   "text": "[итог: pr] PR #118@7a06e06 — Ось 2 закрыта: delete_guard (40,41,42 сделаны; 49 отказ с причиной), clean_env для ask_reporter, _popen отказ с причиной — построчно в комментарии. Тесты 1238 зелёные. Нужен CI на голове.",
+   "tail": false
+  },
+  {
+   "id": "TK-009#13",
+   "text": "[итог: done] результат: docs/reviews/TK-009-7a06e06-2026-10-27.md — PR #118 влит в main (de9fdf0, голова 7a06e06): оси 1–2 закрыты, отказы :49/:37/:48 обоснованы, CI зелёный. Правки Б — TK-010.",
+   "tail": false
+  },
+  {
+   "id": "TK-010#1",
+   "text": "[итог: pr] PR #119@e0a5a76 — Часть 1, 2 коммита: «закрыт» (done/stopped) и один маркер ceo-inbox; тесты зелёные. Следом: usage 3/4, heartbeat 600/240, остальные дубли оси 5",
+   "tail": false
+  },
+  {
+   "id": "TK-010#10",
+   "text": "[итог: pr] PR #119@c9d27a7 — PR 119: main 2.0.7 влит, флаги CREATE_* и SEMVER в одном месте, тесты 1264 зелёные, таблица docs/reviews/TK-010-table. Пункты с живой проверкой или решением Судьи — в таблице, отдельный проход",
+   "tail": false
+  },
+  {
+   "id": "TK-010#18",
+   "text": "[итог: pr] PR #119@5c49a36 — PR 119 @5c49a36: разбор лога — одна ticket.parse_entries, замки/read_pid — в project; тесты 1293 зелёные; таблица docs/reviews/TK-010-table: все строки закрыты",
+   "tail": false
+  },
+  {
+   "id": "TK-010#20",
+   "text": "[итог: pr] PR #119@76a1200 — PR 119 @76a1200: ISO везде на project.parse_time (cfg, downtime, heartbeat, dispatch, ticket), pid-замок через atomic_write_text; тесты 1295 зелёные, таблица обновлена",
+   "tail": false
+  },
+  {
+   "id": "TK-010#28",
+   "text": "[итог: done] результат: .claude/worktrees/tk010/docs/reviews/TK-010-table-2026-10-27.md — PR 119 влит в main @07cb1b7 (76a1200); таблица находок docs/reviews/TK-010-table-2026-10-27.md, все строки закрыты; тесты 1295 зелёные",
+   "tail": false
+  },
+  {
+   "id": "TK-011#9",
+   "text": "[итог: pr] PR #126@f3133a6 — Партия 1: procs/on_met/waits/config/cost/alarms вынесены, dispatch.py 2767→1869, 881 passed. В ветке конфликт с main (tickets.py, watch.py) — слить main; остаток партией 2",
+   "tail": false
+  },
+  {
+   "id": "TK-011#23",
+   "text": "[итог: pr] PR #126@a466a56 — dispatch.py 840; merge_once F→C, ci_core.py: циклов нет, E/F нет, файлов>900 и функций>100 нет; 881 passed @a466a56",
+   "tail": false
+  },
+  {
+   "id": "TK-011#27",
+   "text": "[итог: pr] PR #126@b190f20 — test_role_hooks: путь промпта итога → finish.py (только путь); весь набор .claude tools -n auto: 1295 passed, 8 skipped @b190f20",
+   "tail": false
+  },
+  {
+   "id": "TK-013#1",
+   "text": "[итог: pr] PR #121@d13c8ea — PR #121: раздел 2.0.7 в CHANGELOG + версия в манифестах (иначе CI красный); тесты 1239 зелёных. После влива: тег v2.0.7 на main, push тега",
+   "tail": false
+  },
+  {
+   "id": "TK-013#4",
+   "text": "[итог: pr] PR #121@3021a74 — PR #121: убран не влитый пункт про закрытый тикет, «за сутки»→«за полтора дня»; release.py check зелёный, тесты версий 12 зелёных. После влива: тег v2.0.7",
+   "tail": false
+  },
+  {
+   "id": "TK-013#9",
+   "text": "[итог: done] результат: CHANGELOG.md — Выпуск 2.0.7: PR #121 влит, тег v2.0.7 на 7d9afbd в origin, check зелёный. CI на голове зелёный со 2-й попытки: win py3.12 разово упал test_changed_or_deleted_check_file (git worktree add)",
+   "tail": false
+  },
+  {
+   "id": "TK-014#2",
+   "text": "[итог: pr] PR #123@8349fb7 — PR #123: страж = вход + dguard/ (14 модулей ≤418 строк), scan_one 41 строка, radon без E/F; pytest -n auto 1295 зелёных, errors.py run ok",
+   "tail": false
+  },
+  {
+   "id": "TK-015#1",
+   "text": "[итог: pr] PR #122@c635f4a — tickets.py 782 строк, main/triage_waits/build_parser <100, routes.check и overseer.look без E/F; тесты не правил; красен лишь test_release (2.0.7 в CHANGELOG, TK-013)",
+   "tail": false
+  },
+  {
+   "id": "TK-015#4",
+   "text": "[итог: pr] PR #122@a0602ee — PR #122 слит с main, MERGEABLE; чужой файл TK-013 убран; tickets 770/watch 794/overseer 719 строк; pytest -n auto 1295 passed; тесты не правил",
+   "tail": false
+  },
+  {
+   "id": "TK-015#8",
+   "text": "[итог: pr] PR #124@8ab5a1e — PR #124 вместо #122: ветка от origin/main без ae4e7a0, один коммит с кодом a0602ee; тесты не правил, pytest -n auto 1295 passed; #122 закрыт",
+   "tail": false
+  },
+  {
+   "id": "TK-016#1",
+   "text": "[итог: pr] PR #125@16b8609 — radon cmd_result F→B(9), triage_waits E→B(6); тесты без правок 881 passed; Алгоритм: не узкое место, разбиение; PR #125, ждёт Судью",
+   "tail": false
+  },
+  {
+   "id": "TK-017#0",
+   "text": "[итог: done] результат: docs/findings/review-round-2026-10-27-pass2.md — Сводка на 085f98e: 17 строк по 5 осям; ошибка E-003 (bench_dispatch.py:20 NameError); radon E/F — 9 в tools/; .claude/ порог чист; циклов нет",
+   "tail": false
+  },
+  {
+   "id": "TK-018#1",
+   "text": "[итог: pr] PR #127@7497571 — Запись merge не будит Судью после закрытия, повтор закрытия без 2-го done, текст 'приёмка Судьи <sha> есть'; test_tk018.py, 888 passed. Ошибок не заводил.",
+   "tail": false
+  },
+  {
+   "id": "TK-019#2",
+   "text": "[итог: pr] PR #130@cb07c70 — PR #130: E-003 (проверка test_bench_dispatch.py), radon E/F в tools/ 9→0, мёртвый код; pytest 1296 ok. Нет: load_agent/build_cmd (.claude/), eval_common",
+   "tail": false
+  },
+  {
+   "id": "TK-020#9",
+   "text": "[итог: pr] PR #129@e1acd1f — Все находки прохода 2 по .claude/ сделаны (таблица в комментарии), 1303 passed, radon E/F=0; нет: обёртки decide/build_prompt (тесты), tools — TK-019/021",
+   "tail": false
+  },
+  {
+   "id": "TK-021#1",
+   "text": "[итог: pr] PR #131@b07fb29 — eval_common (emit, замок, jsonl, разбор JSON claude) в helper_eval и overseer_eval, tools 58 passed. load_agent/claude -p в helper_eval на agent_def — после влива #129 (TK-020)",
+   "tail": false
+  },
+  {
+   "id": "TK-021#9",
+   "text": "[итог: pr] PR #131@760e505 — helper_eval на haiku_aux.agent_def/agent_cmd(tools=None); 1313 passed, radon tools E/F=0; E-002..004 ok. Алгоритм: n/a",
+   "tail": false
+  },
+  {
+   "id": "TK-022#1",
+   "text": "[итог: pr] PR #132@2a1544d — Проход 3 на 23c35fe: порог Судьи чист (E/F 0, файл макс 827, функция макс 83); 7 мелких находок (мёртвый код 4, избыточность 1, дубли 2), дизайн 0",
+   "tail": false
+  },
+  {
+   "id": "TK-022#5",
+   "text": "[итог: done] результат: docs/reviews/TK-022-2a1544d-2026-10-27.md — PR #132 влит (7112a9f), сводка docs/findings/review-round-2026-10-27-pass3.md. Дальше Инженеру: правка 7 находок (оси 1,2,5), затем проход 4.",
+   "tail": false
+  },
+  {
+   "id": "TK-023#1",
+   "text": "[итог: pr] PR #133@4b3bb22 — Все 7 сделано, PR #133; pytest -n auto 1314 passed. find_bash меняет поведение (Windows, WSL-заглушка) — Судье утвердить (В-10)",
+   "tail": false
+  },
+  {
+   "id": "TK-023#6",
+   "text": "[итог: done] результат: docs/reviews/TK-023-4b3bb22-2026-10-27.md — PR #133 принят Судьёй и влит в main (8495ba9); все 7 находок сделаны, find_bash утверждён по В-10. Дальше ничего.",
+   "tail": false
+  },
+  {
+   "id": "TK-024#0",
+   "text": "[итог: pr] PR #134@ce222ee — Проход 4 на 8495ba9: 4 мелкие находки (2 мёртвый код, 2 дубли), ост. оси 0; порог чист. Сводка docs/findings/...pass4.md. Дальше: Судья, затем правка и проход 5",
+   "tail": false
+  },
+  {
+   "id": "TK-025#0",
+   "text": "[итог: pr] PR #135@711e8d3 — 4 находки прохода 4 сделаны (PR #135): docstring-и, run_jsons, load_agent. pytest -n auto 1318 passed; errors.py run ok. Жду приёмку и проход 5",
+   "tail": false
+  },
+  {
+   "id": "TK-026#2",
+   "text": "[итог: pr] PR #137@9f0dc5d — PR #137: раздел 2.0.8 в CHANGELOG + версия в манифестах, check зелёный, 1318 passed. Макс. файл до — 2727 (dispatch.py), не 2671. Дальше: приёмка, влив, тег v2.0.8",
+   "tail": false
+  },
+  {
+   "id": "TK-026#8",
+   "text": "[итог: done] результат: .claude/worktrees/TK-026-ls-remote.txt — Тег v2.0.8 на e2b4740 в GitHub (ls-remote), check зелёный; CI main 5955cc2 (= e2b4740 + docs) success, прогон на e2b4740 отменён новым пушем",
+   "tail": false
+  },
+  {
+   "id": "TK-027#2",
+   "text": "[итог: pr] PR #138@62e0210 — accept --after-merge + строка «после слияния:» в заказе → close_after_merge не закрывает, будит автора. test_tk027.py, 1326 passed. Дальше: Судья",
+   "tail": false
+  },
+  {
+   "id": "TK-028#1",
+   "text": "[итог: done] результат: docs/release.md — Тег v2.0.8 на origin = e2b4740; release.py check зелёный (2.0.8 везде); CI по e2b4740 success (run 40466284383). Тег уже был на удалённом к моему push — Everything up-to-date.",
+   "tail": false
+  },
+  {
+   "id": "TK-029#1",
+   "text": "[итог: pr] PR #139@a754cf7 — charter sync + страж на запись CEO в .claude/roles/*.md; E-005, проверка: pytest .claude/hooks/test_charter_guard.py; pytest -n auto 1346 passed. Ждёт приёмки",
+   "tail": false
+  },
+  {
+   "id": "TK-029#6",
+   "text": "[итог: pr] PR #139@fe029dd — Вернул по вердикту: страж видит цель записи (cd, cp -r в .claude, чтение не отказ), зоны проекта вне шаблона остаются. E-005: pytest .claude/hooks/test_charter_guard.py; 1350 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-030#1",
+   "text": "[итог: pr] PR #140@36b9d99 — CHANGELOG 2.0.9 (TK-027, TK-029, charter sync), версии 2.0.9, check зелёный, 1350 passed. Дальше: приёмка с --after-merge тег v2.0.9",
+   "tail": false
+  },
+  {
+   "id": "TK-031#2",
+   "text": "[итог: done] результат: docs/reviews/TK-026-tag-check-2026-10-27.txt — Тег v2.0.9 на 84ca237 (голова main после PR #140) отправлен; ls-remote показывает 84ca237, release.py check зелёный: plugin/marketplace/CHANGELOG = 2.0.9",
+   "tail": false
+  },
+  {
+   "id": "TK-032#0",
+   "text": "[итог: pr] PR #141@631d2a3 — Раунд 2 на v2.0.9: порог чист (E/F, >900, >100 — 0); 5 находок: 1 мёртвый, 1 избыточность, 1 дизайн, 2 дубля (1 меняет поведение). Нужна приёмка Судьи и проход 2",
+   "tail": false
+  },
+  {
+   "id": "TK-033#0",
+   "text": "[итог: pr] PR #142@ade68c7 — 5 находок раунда 2 в PR #142; 1355 passed, errors.py run ok. popd теперь сбрасывает cwd (как dguard) — закреплено тестом. Дальше: приёмка Судьи, проход 2",
+   "tail": false
+  },
+  {
+   "id": "TK-033#3",
+   "text": "[итог: pr] PR #142@f636a67 — E-006: popd оставляет каталог (BLOCK как раньше); тест на 3 команды, падал до правки: .claude/hooks/test_charter_guard.py; 1355 passed. Дальше: приёмка Судьи",
+   "tail": false
+  },
+  {
+   "id": "TK-034#0",
+   "text": "[итог: pr] PR #143@f9272dc — Проход 2 по PR #142@f636a67: находок 0 по пяти осям, radon E/F=0, 17 тестов зелёные. Отчёт в PR #143. Дальше: приёмка Судьи",
+   "tail": false
+  },
+  {
+   "id": "TK-034#7",
+   "text": "[итог: done] результат: docs/reviews/TK-034-verdict-f9272dc-2026-10-27.md — PR #143 влит; проход 2 раунда 2 чист (0 находок, radon E/F=0, 17 тестов), вердикт Судьи принят. Новых шагов нет",
+   "tail": false
+  },
+  {
+   "id": "TK-035#0",
+   "text": "[итог: pr] PR #144@b205ad7 — Проход 2 по origin/main ba2ef65: 1 мелкая находка (rpv_config._atomic — пустая обёртка), порог 0, 17 тестов. Раунд не чист. Файл совпадает с PR #143 (TK-034)",
+   "tail": false
+  },
+  {
+   "id": "TK-035#5",
+   "text": "[итог: pr] PR #144@c839572 — main слит в ветку: конфликт в файле прохода 2 снят в пользу версии TK-035 (находка _atomic, принята Судьёй). Нужны CI и вердикт на новой голове",
+   "tail": false
+  },
+  {
+   "id": "TK-036#0",
+   "text": "[итог: pr] PR #145@564081c — _atomic удалена, 6 вызовов на P.write_json; pyflakes чисто, полный прогон 1355 passed, errors.py run чисто. Алгоритм: n/a. После влива — проход 3 раунда 2.",
+   "tail": false
+  },
+  {
+   "id": "TK-036#5",
+   "text": "[итог: pr] PR #146@77bfc4b — Проход 3 раунда 2 на main 26ec1ab: находок 0, раунд чист; файл docs/findings/review-round2-pass3-2026-10-27.md. Алгоритм: чтение+статика.",
+   "tail": false
+  },
+  {
+   "id": "TK-037#0",
+   "text": "[итог: pr] PR #149@474532c — Сдал: update.py+/rpv-update, PATH/CLAUDE_BIN в plist, doctor FAIL без PATH; тесты test_update.py; pytest -n auto 1372 passed. CHANGELOG не трогал",
+   "tail": false
+  },
+  {
+   "id": "TK-037#5",
+   "text": "[итог: pr] PR #149@dc85877 — Слил main в ветку (конфликты doctor.py, README — оставил обе строки); pytest -n auto 1383 passed; запушил dc85877. CI и вердикт на новой голове — заново",
+   "tail": false
+  },
+  {
+   "id": "TK-037#10",
+   "text": "[итог: pr] PR #149@e3ed542 — Слил main в ветку (конфликт README: оставил /rpv-update и описание надстроек); pytest -n auto 1396 passed; запушил e3ed542. CI и вердикт — заново",
+   "tail": false
+  },
+  {
+   "id": "TK-037#15",
+   "text": "[итог: pr] PR #153@0af8c9f — Выпуск 2.0.10: CHANGELOG, версии, check зелёный, 1420 passed. После слияния тег v2.0.10 — нужно согласие на публикацию (allow publish)",
+   "tail": false
+  },
+  {
+   "id": "TK-037#21",
+   "text": "[итог: done] результат: docs/reviews/TK-037-tag-v2.0.10-2026-10-27.txt — Заказ CEO (публикация, В-10) выполнен: тег v2.0.10 на голове main 2a0ae2e после PR #153, check зелёный, тег виден на origin",
+   "tail": false
+  },
+  {
+   "id": "TK-038#1",
+   "text": "[итог: pr] PR #150@deecdb5 — PR #150: charter addon + project/<роль>.md (синк не трогает, в контексте роли), sync без --ref отказ, список убранных строк; 1368 passed. /rpv-update в плагине нет",
+   "tail": false
+  },
+  {
+   "id": "TK-039#0",
+   "text": "[итог: pr] PR #148@1a047c9 — Хуки SessionStart/UserPromptSubmit: строка о старой версии; doctor: строка версий. Тесты: подмена installed_plugins.json, 1366 passed. Алгоритм: n/a. Ждёт приёмки Судьи.",
+   "tail": false
+  },
+  {
+   "id": "TK-040#0",
+   "text": "[итог: pr] PR #151@3084ccd — Итог 3084ccd: страж пуша в main отказывает с sha при коммитах вне accepted (флаг guard_push_scope, выкл.); 1379 passed; Алгоритм: git rev-list. Осталось: приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-042#0",
+   "text": "[итог: pr] PR #152@384c2f5 — PR #152@384c2f5: E-007, «Осталось: приёмка» не хвост; проверка python -m pytest .claude/dispatcher/test_tail_accept_line.py; 1381 passed. Алгоритм: регэксп. Осталось: приёмка",
+   "tail": true
+  },
+  {
+   "id": "TK-042#4",
+   "text": "[итог: pr] PR #152@c4d6529 — E-007 по вердикту: гасится только «Осталось: приёмка/приемка» до . ! конца строки; ; — ( / + хвост. pytest test_tail_accept_line.py; 1381 passed. Лишняя ветка eng/tk-042-tail-accept-line",
+   "tail": true
+  },
+  {
+   "id": "TK-042#7",
+   "text": "[итог: pr] PR #152@c4d6529 — E-007 по вердикту Судьи: гасится только «Осталось: приёмка/приемка» до конца предложения; проверка pytest .claude/dispatcher/test_tail_accept_line.py; 1381 passed",
+   "tail": true
+  },
+  {
+   "id": "TK-042#9",
+   "text": "[итог: pr] PR #152@c4d6529 — E-007 исправлена по вердикту Судьи; проверка python -m pytest .claude/dispatcher/test_tail_accept_line.py; полный прогон 1381 passed; код не менялся",
+   "tail": false
+  },
+  {
+   "id": "TK-042#13",
+   "text": "[итог: done] результат: .claude/worktrees/TK-042/.claude/dispatcher/test_tail_accept_line.py — PR #152 влит в main (ff619af, голова c4d6529); E-007 исправлена, Судья принял; проверка pytest .claude/dispatcher/test_tail_accept_line.py",
+   "tail": false
+  },
+  {
+   "id": "TK-043#0",
+   "text": "[итог: pr] PR #155@ad4c936 — Раунд 3 на v2.0.10: 6 находок (push_publication radon E; update.py и plugin_version.py дублируют чтение установки; мёртвый код). Нужна приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-044#0",
+   "text": "[итог: pr] PR #156@e0e22ef — #1–#6 исправлены; radon E/F=0, pyflakes без update.py:14, 1430 passed; #4 меняет поведение (тест на несколько записей). Нужна приёмка Судьи.",
+   "tail": false
+  },
+  {
+   "id": "TK-045#0",
+   "text": "[итог: pr] PR #157@a03acb7 — role_args.py:62 → PV.norm; тест test_tk045 падал до правки; 1433 passed, errors.py run ок. PR #157 поверх #156 (база eng/tk-044-round3).",
+   "tail": false
+  },
+  {
+   "id": "TK-046#1",
+   "text": "[итог: pr] PR #158@d5aa4f2 — Проход 2: #1–#6 закрыты, новых 3 без поведения (#7 в PR #157, #8, #9), порог не нарушен; раунд чист: нет. pytest 1430 зелёных",
+   "tail": false
+  },
+  {
+   "id": "TK-047#0",
+   "text": "[итог: pr] PR #159@52251ab — Находки #8, #9 сделаны без смены поведения; тесты 1023 passed, errors.py run ок; дальше приёмка Судьи и влив",
+   "tail": false
+  },
+  {
+   "id": "TK-048#0",
+   "text": "[итог: pr] PR #160@489ac36 — Проход 3: #7–#9 закрыты, новых 0, пороги целы, pytest 1435 ок. Раунд чист: да. Отчёт в PR #160",
+   "tail": false
+  },
+  {
+   "id": "TK-049#1",
+   "text": "[итог: pr] PR #161@947b120 — PR #161: CHANGELOG 2.0.11, версии 2.0.11 (check зелёный), 1435 тестов зелёные. Дальше: Судья принимает; после слияния тег v2.0.11 на main и пуш тега.",
+   "tail": false
+  },
+  {
+   "id": "TK-049#6",
+   "text": "[итог: done] результат: docs/reviews/TK-049-release-2.0.11-tag.txt — Тег v2.0.11 на a220e61 (голова main после #161) создан и запушен; ls-remote показывает его. Версия в plugin.json 2.0.11.",
+   "tail": false
+  },
+  {
+   "id": "TK-050#1",
+   "text": "[итог: pr] PR #162@5792c4b — PR #162: ярлыки тест/запуск/чтение в договоре, accept перезапускает команды (код≠0 — отказ); 3 строки в шаблонах; 1444 passed. charter sync --ref В-14 после влива — CEO",
+   "tail": false
+  },
+  {
+   "id": "TK-051#1",
+   "text": "[итог: done] результат: docs/findings/returns-and-cost-2026-10-30.md — 23 возврата размечены; (б) не нужно: заказ 0–22%; (а) нужно по цене (малый тикет≈код 1–2 файла, 66% — Судья), не по возвратам. Скрипт tools/returns_cost.py",
+   "tail": false
+  },
+  {
+   "id": "TK-052#2",
+   "text": "[итог: pr] PR #163@4e785d1 — PR #163: порог контекста CEO 350 тыс. вставка, 400 тыс. хардстоп (rpv.json ceo_context_*). 1464 тестов зелёные; вживую на реальном транскрипте отказ за 1,4 с.",
+   "tail": false
+  },
+  {
+   "id": "TK-052#8",
+   "text": "[итог: pr] PR #163@4f837e6 — CI windows чинён: encoding utf-8 в тесте (test_ceo_context.py:50,197); CI зелёный на 3 ОС; 432 passed hooks; [вживую] — владелец в alpha (В-20)",
+   "tail": false
+  },
+  {
+   "id": "TK-052#13",
+   "text": "[итог: pr] PR #163@4f837e6 — Самопроверка переписана полными командами ярлыков (запись выше); код не менялся; тесты и CI зелёные; [вживую] — владелец в alpha (В-20)",
+   "tail": false
+  },
+  {
+   "id": "TK-052#17",
+   "text": "[итог: pr] PR #163@4f837e6 — Самопроверка с [запуск: python -m pytest -q .claude/hooks] без -n; код не менялся; 432 passed, CI зелёный; [вживую] — владелец в alpha (В-20)",
+   "tail": false
+  },
+  {
+   "id": "TK-053#1",
+   "text": "[итог: pr] PR #164@e10125c — PR #164: agents/critic.md, правило в шаблоне CEO, test_tk053 (8), sync переносит; прогон 1386 passed; вживую critic поймал ложный пункт. Живая CEO-сессия — после выпуска.",
+   "tail": false
+  },
+  {
+   "id": "TK-053#6",
+   "text": "[итог: pr] PR #164@e10125c — Договор переписан: пункт 4 без -n, с ярлыком чтения кода (CI ci-ok, 1386 passed). Код и голова PR #164 не менялись.",
+   "tail": false
+  },
+  {
+   "id": "TK-054#3",
+   "text": "[итог: pr] PR #165@19bba5b — П.3: сторож пишет в тикет «жив, N из M, ETA» без модели (раз в 60 мин, при сдвиге). pytest -n auto: 1457 passed. Таблица, удержание — в PR #165",
+   "tail": false
+  },
+  {
+   "id": "TK-054#6",
+   "text": "[итог: pr] PR #165@27bf8a6 — E-009: watch._past_deadline учитывает hold_alive_waits; тест TK-117 под false. Проверка: pytest -q .claude/dispatcher/test_watch.py; -n auto 1457 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-054#9",
+   "text": "[итог: pr] PR #165@27bf8a6 — Договор переписан без ярлыка -n (В-21); код не менялся, принят Судьёй. Тесты test_tk054+test_watch: 93 passed; полный прогон — CI",
+   "tail": false
+  },
+  {
+   "id": "TK-054#14",
+   "text": "[итог: pr] PR #165@f336299 — Конфликты с main сняты слиянием (rpv_config, configuration.md: оба ключа); код тот же. Тесты dispatcher+hooks: 1423 passed. Нужен CI и слияние",
+   "tail": false
+  },
+  {
+   "id": "TK-055#0",
+   "text": "[итог: pr] PR #166@670e94b — PR #166: pytest -n auto|N допущен; тест test_tk055 красный на main, зелёный в PR; прогон 1382 passed за 361 с — дольше срока проверки 300 с: узкие команды в договорах",
+   "tail": false
+  },
+  {
+   "id": "TK-055#4",
+   "text": "[итог: done] результат: docs/reviews/tk-055-accept-2026-10-30.md — PR #166 влит e82cef9: pytest -n auto|N допущен ярлыком запуск, тест test_tk055 красный до/зелёный после; приёмка Судьи в вердикте",
+   "tail": false
+  },
+  {
+   "id": "TK-056#1",
+   "text": "[итог: pr] PR #167@0d246d4 — Приёмка отказывает на полный прогон pytest (без пути, ., .claude); 3 шаблона с правилом; тест test_tk056 + tk050/055/errors: 80 passed. Алгоритм: n/a. charter sync — CEO после выпуска",
+   "tail": false
+  },
+  {
+   "id": "TK-057#1",
+   "text": "[итог: pr] PR #168@e1bb71d — PR #168: CHANGELOG 2.0.12 (TK-050…056), версии 2.0.12, release.py check зелёный. Дальше: Судья принимает, CI; после слияния тег v2.0.12 на main и push тега",
+   "tail": false
+  },
+  {
+   "id": "TK-057#5",
+   "text": "[итог: done] результат: docs/reviews/TK-057-release-2.0.12-tag.txt — Тег v2.0.12 на 9fa944b (main после PR #168) создан и запушен; проверка: git ls-remote --tags origin v2.0.12",
+   "tail": false
+  },
+  {
+   "id": "TK-058#3",
+   "text": "[итог: pr] PR #169@8eeadd2 — worker-light (Haiku xhigh), правило устава CEO, README, test_tk058 — 22 passed на правке; ждём CI и приёмку Судьи",
+   "tail": false
+  },
+  {
+   "id": "TK-058#6",
+   "text": "[итог: pr] PR #169@332b542 — Дописан маршрут в правило CEO (Исследователь medium/high, код — Инженеру) + тест; 17 passed на правке; ждём CI и Судью",
+   "tail": false
+  },
+  {
+   "id": "TK-059#1",
+   "text": "[итог: pr] PR #170@72c27a2 — PR #170: CHANGELOG 2.0.13 (TK-058), версии 2.0.13, release check зелёный. Дальше: приёмка, CI, слияние; тег v2.0.13 на main и push",
+   "tail": false
+  },
+  {
+   "id": "TK-059#5",
+   "text": "[итог: done] результат: docs/reviews/TK-059-release-2.0.13-tag.txt — Тег v2.0.13 на f2cf497 (голова main после PR #170) поставлен и запушен; ls-remote подтверждает. Осталось: ничего",
+   "tail": false
+  },
+  {
+   "id": "TK-060#1",
+   "text": "[итог: pr] PR #171@e53102d — PR #171@e53102d: TAIL_NEGATION гасит «Осталось: ничего/нет», «не осталось ничего»; E-011 проверка: pytest .claude/dispatcher/test_tail_empty_left.py; 1074 passed. Осталось: приёмка.",
+   "tail": true
+  },
+  {
+   "id": "TK-060#3",
+   "text": "[итог: pr] PR #171@e53102d — Пересдача без цитаты: детектор хвостов гасит пустой остаток; E-011, проверка test_tail_empty_left.py; 1074 passed. Осталось: приёмка.",
+   "tail": true
+  },
+  {
+   "id": "TK-060#5",
+   "text": "[итог: pr] PR #171@e53102d — Пересдача: правка детектора в TAIL_NEGATION, проверка E-011 — pytest .claude/dispatcher/test_tail_empty_left.py; 1074 passed. Осталось: приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-061#2",
+   "text": "[итог: pr] PR #172@21bca19 — PR выпуска 2.0.14: CHANGELOG (TK-060), версии в двух json; release.py check зелёный, test_release 7 passed. Тег v2.0.14 — после слияния. Осталось: приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-061#6",
+   "text": "[итог: done] результат: docs/reviews/TK-061-release-2.0.14-tag.txt — Тег v2.0.14 на 0960432 (голова main после #172) запушен, ls-remote подтверждает. Осталось: ничего.",
+   "tail": false
+  },
+  {
+   "id": "TK-062#1",
+   "text": "[итог: pr] PR #173@be531c9 — PR #173: наблюдение всегда и «покрыто решением» в уставе CEO и /ceo; сторож watch-unreleased за ключом; тесты правки и полный прогон зелёные. Дальше приёмка Судьи.",
+   "tail": false
+  },
+  {
+   "id": "TK-063#2",
+   "text": "[итог: pr] PR #174@af0b118 — PR #174 выпуска 2.0.15: CHANGELOG (TK-062), версии в двух json; release.py check зелёный, test_release 7 passed. Тег v2.0.15 — после слияния. Осталось: приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-063#6",
+   "text": "[итог: done] результат: docs/reviews/TK-063-release-2.0.15-tag.txt — Тег v2.0.15 на голове main 3ddb6a6 (PR #174) поставлен и запушен; ls-remote подтверждает. Осталось: ничего.",
+   "tail": false
+  },
+  {
+   "id": "TK-064#1",
+   "text": "[итог: pr] PR #175@4a6f1d5 — PR #175: покрыто решением сужено, порядок Monitor (1800000, без grep, inbox, молча) в уставе/команде/доке; test_tk062 30 passed. Ждёт приёмки Судьи",
+   "tail": false
+  },
+  {
+   "id": "TK-064#5",
+   "text": "[итог: done] результат: docs/reviews/tk-064-accept-2026-10-30.md — PR #175 принят Судьёй и влит в main (6afcf2a, голова 4a6f1d5); устав CEO сужен, порядок Monitor записан. Осталось: charter sync у CEO, выпуск отдельным тикетом",
+   "tail": true
+  },
+  {
+   "id": "TK-065#1",
+   "text": "[итог: pr] PR #176@dfc5955 — PR #176: короткий стиль ответов CEO (до 3 строк, TK-номер, без механики) в шаблоне устава; test_tk065 + соседние 46 passed. Ждёт приёмки",
+   "tail": false
+  },
+  {
+   "id": "TK-066#2",
+   "text": "[итог: pr] PR #177@3f80824 — PR #177 выпуска 2.0.16: CHANGELOG (TK-064, TK-065), версии в двух json; release.py check зелёный, test_release 7 passed. Тег v2.0.16 — после слияния. Осталось: приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-066#6",
+   "text": "[итог: done] результат: docs/reviews/TK-066-release-2.0.16-tag.txt — Тег v2.0.16 на голове main 0c411e3 (PR #177) поставлен и запушен; ls-remote подтверждает. Осталось: ничего.",
+   "tail": false
+  },
+  {
+   "id": "TK-067#1",
+   "text": "[итог: pr] PR #178@cfec0b9 — tools/losses.py+тест, отчёт docs/findings/g006-losses-2026-10-30.md (топ-5, 2 примера). Тест: python -m pytest tools/test_losses.py. PR→CI не считается: нет меток. Жду приёмку.",
+   "tail": false
+  },
+  {
+   "id": "TK-067#3",
+   "text": "[итог: pr] PR #178@078c310 — Возврат закрыт: потеря 5 — 113/1615 запусков, $57.13 (9%), примеры из скрипта; примеры потери 2 из вывода; петли названы расходом. Тест: python -m pytest tools/test_losses.py",
+   "tail": false
+  },
+  {
+   "id": "TK-068#4",
+   "text": "[итог: pr] PR #179@e351057 — Отчёт, скрипт, тест (8 зелёных) в PR #179. Существенной разницы по цене/действиям/поправкам нет; Sonnet пишет длиннее. Г4 типология не считана.",
+   "tail": false
+  },
+  {
+   "id": "TK-068#7",
+   "text": "[итог: pr] PR #179@2cda8e1 — Доделано по возврату: задержка от [done], прирост контекста, нарушения/самопризнания, типы поправок, 11/9→10/10. Тест 10 зелёных; прогон на реальных данных.",
+   "tail": false
+  },
+  {
+   "id": "TK-068#10",
+   "text": "[итог: pr] PR #179@5a2f2ef — Токен скрыт в TSV, маска в скрипте + тест (11 зел.), поправка=претензия одним определением (Opus 24% / Sonnet 21%, шум). Токен отозвать владельцу (E-012).",
+   "tail": false
+  },
+  {
+   "id": "TK-068#18",
+   "text": "[итог: done] результат: docs/findings/g007-ceo-opus-vs-sonnet-2026-10-31.md — Заказ CEO (хвост E-012, токен) закрыт CEO: владелец отозвал. Моя часть выполнена: PR #179 влит в main (0a07fd8), отчёт и скрипт в main. Остатка нет.",
+   "tail": true
+  },
+  {
+   "id": "TK-069#2",
+   "text": "[итог: pr] PR #180@28d91d2 — PR #180: wait --probe, require_probe/probe_threshold_min, строки в уставы; 23 теста правки и 522 связанных зелёные, полный прогон — CI",
+   "tail": false
+  },
+  {
+   "id": "TK-069#5",
+   "text": "[итог: pr] PR #180@91733a2 — Возврат учтён: мин*/сек* считаются способом и оценкой, проба-файл пишет [проба] в лог; test_tk069 24 passed, связанные 84 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-069#8",
+   "text": "[итог: pr] PR #180@91733a2 — Договор повторён записью с командами в ярлыках; код без изменений с 91733a2, test_tk069+configuration_doc 24 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-070#2",
+   "text": "[итог: pr] PR #182@96d158e — PR #182: пик/N в пробе, host_free_cmd + N_max в wait, отметка OOM; test_tk070+test_tk069 46 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-070#6",
+   "text": "[итог: pr] PR #182@922a57b — PR #182@922a57b: правка по возврату — пик ≤ 0 отказ, OOM по причине самого задания, форма при отметке; 145 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-070#10",
+   "text": "[итог: pr] PR #182@722a17c — Правка по возврату 2 (E-015): форма job: берёт причину адаптера в отметку OOM; «нет oom-kill» не отметка; 147 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-070#13",
+   "text": "[итог: pr] PR #182@d466236 — Влит main в ветку, конфликт configuration.md снят (оба набора ключей); 160 passed; жду CI",
+   "tail": false
+  },
+  {
+   "id": "TK-071#3",
+   "text": "[итог: pr] PR #181@59c19f6 — Ворота критика --critic/--critic-skip за ключом critic_before_accept, тесты test_tk071 зелёные; PR #181 на приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-071#7",
+   "text": "[итог: pr] PR #181@7262811 — Возврат закрыт: head_time через hide.git (GitOnce зелёный), тест model/effort critic.md, поиск отчёта от корня; PR #181 на приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-071#10",
+   "text": "[итог: pr] PR #181@9810a6e — Возврат 2: main влит, конфликты сняты (оба ключа), 37 тестов правки зелёные; PR #181 на приёмку, CI пойдёт сам",
+   "tail": false
+  },
+  {
+   "id": "TK-071#14",
+   "text": "[итог: pr] PR #181@9810a6e — Договор повторён с командами, код не менялся; 15 тестов правки зелёные на 9810a6e; PR #181 на приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-072#1",
+   "text": "[итог: pr] PR #185@6ed2638 — PR #185: К1, V1, V3–V5, мелочи; тесты правки зелёные; V7 — persistent в репо нет. Дальше: приёмка и слияние.",
+   "tail": false
+  },
+  {
+   "id": "TK-072#5",
+   "text": "[итог: pr] PR #185@db14d9f — V5: compare per_page=1, предел по потолку files 300; тесты 150 docs — тишина, 300 — сигнал; 49 passed. Дальше: приёмка.",
+   "tail": false
+  },
+  {
+   "id": "TK-073#2",
+   "text": "[итог: pr] PR #183@f68e077 — PR #183: порог пробы по сумме ожиданий, ворота критика без регистра/худший при повторе; test_tk073 11 passed (8 падали до). Хвосты — TK-074",
+   "tail": true
+  },
+  {
+   "id": "TK-073#9",
+   "text": "[итог: pr] PR #183@19e931c — PR #183@19e931c: п.1–9 сданы; досдано wait --check, oom-clear, хвост лога без OOM, цена критика в журнале; dispatcher 1163 passed",
+   "tail": true
+  },
+  {
+   "id": "TK-073#13",
+   "text": "[итог: pr] PR #183@cea17b1 — Возврат 2: не было oom-kill не OOM; Тикет/Голова в critic.md, judge.md, docs; Sonnet без тревоги только при critic в subagent_stats; 1165 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-073#16",
+   "text": "[итог: pr] PR #183@5a37d36 — Возврат 3: main слит, конфликт снят; : и тире отрезают отрицание в is_oom (тест); 1184 passed",
+   "tail": false
+  },
+  {
+   "id": "TK-073#23",
+   "text": "[итог: done] результат: docs/reviews/tk-073-accept-2026-11-01.md — PR #183 влит в main на 5a37d36 (проверено: предок origin/main), принят Судьёй; новой работы нет, тикет закрыт",
+   "tail": false
+  },
+  {
+   "id": "TK-074#2",
+   "text": "[итог: pr] PR #184@76e0e73 — PR #184, E-016: регэксп хвостов + тесты, dispatcher 1118 passed. Дальше приёмка Судьи; проверка E-016: pytest test_tail_empty_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#6",
+   "text": "[итог: pr] PR #184@b750451 — Сужено продолжение хвоста по возврату (3 строки Судьи + __ничего__), тесты 8 passed. Дальше приёмка Судьи; E-016: pytest test_tail_empty_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#10",
+   "text": "[итог: pr] PR #184@e882ee4 — Сужено: только(?!\\s+что), отложен[аоы]? — «Только что…» и «Отложенных нет» не хвост; 8 passed. E-016: pytest test_tail_empty_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#12",
+   "text": "[итог: pr] PR #184@e882ee4 — Запушен e882ee4 в eng/tk-074-tail-empty (ls-remote = e882ee4). «Только что», «Отложенных нет» не хвост. E-016: pytest test_tail_empty_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#16",
+   "text": "[итог: pr] PR #184@3a33d4c — Отложен…: не хвост при «не» перед и «нет/ничего» следом; 3 теста Судьи, 8 passed. ls-remote = 3a33d4c. E-016: pytest test_tail_empty_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#19",
+   "text": "[итог: pr] PR #184@a4255c5 — Отложен…: хвост только в фразе без не|нет|ничего; 5 строк Судьи в тест, 8 passed, падают на 3a33d4c. ls-remote=a4255c5. E-016: pytest test_tail_empty_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#23",
+   "text": "[итог: pr] PR #184@6849243 — Одно правило отрицания (не|нет|нету|ничего|без|пусто|0 в фразе) на все ветки продолжения; 10 строк в тест. ls-remote=6849243. E-017: pytest test_tail_empty_left.py",
+   "tail": false
+  },
+  {
+   "id": "TK-074#27",
+   "text": "[итог: pr] PR #184@8212630 — Продолжение хвоста только для пустого остатка; «приёмка» как на main. 8 passed, 47 проб ок. ls-remote=8212630. E-018: pytest test_tail_not_left.py",
+   "tail": true
+  },
+  {
+   "id": "TK-074#30",
+   "text": "[итог: pr] PR #184@8212630 — Пересдача головы 8212630 (ls-remote совпадает), код принят Судьёй. E-018: pytest test_tail_not_left.py",
+   "tail": false
+  },
+  {
+   "id": "TK-075#1",
+   "text": "[итог: pr] PR #186@033a238 — PR #186 (база — ветка #185): потолок Monitor 10 мин/600000, ws под стражем, ключ unreleased:<ветка>. Тесты правки зелёные; влить после #185.",
+   "tail": false
+  },
+  {
+   "id": "TK-075#4",
+   "text": "[итог: pr] PR #186@033a238 — База PR #186 перенацелена на main (gh pr edit); diff против main — 12 файлов TK-075, голова 033a238, CI зелёный. Код не менялся.",
+   "tail": false
+  },
+  {
+   "id": "TK-076#0",
+   "text": "[итог: pr] PR #187@4f3592d — Скрипт, тест, отчёт: 1 достоверный залип из 376 сдач (0,3%, TK-074, 17,8 мин); alpha 0. Дальше приёмка Судьи",
+   "tail": false
+  },
+  {
+   "id": "TK-077#2",
+   "text": "[итог: pr] PR #188@170d9ab — Раздел 2.0.17 в CHANGELOG, версии 2.0.17, check зелёный, test_release 7 passed. После приёмки и слияния — тег v2.0.17 на merge-коммит main.",
+   "tail": false
+  },
+  {
+   "id": "TK-077#6",
+   "text": "[итог: pr] PR #188@31a3d22 — Из CHANGELOG убран литерал 1800000 (валил test_tk075); test_tk075+test_release 15 passed, release check зелёный. Ждём CI, затем слияние и тег v2.0.17.",
+   "tail": false
+  },
+  {
+   "id": "TK-077#11",
+   "text": "[итог: done] результат: docs/reviews/TK-077-release-2.0.17-tag.txt — Тег v2.0.17 на merge-коммит a3f7594 (PR #188) поставлен и запушен; ls-remote подтверждает. Выпуск 2.0.17 готов.",
+   "tail": false
+  },
+  {
+   "id": "TK-079#1",
+   "text": "[итог: pr] PR #190@28f01a1 — PR #190: версия сессии из CLAUDE_PLUGIN_ROOT, ложное «уже на» убрано; test_update.py 24 passed; нужна приёмка и CI",
+   "tail": false
+  },
+  {
+   "id": "TK-079#6",
+   "text": "[итог: pr] PR #190@9c2ee47 — Возврат закрыт: тест п.2 без мока (падает до правки), with с \\-переносами, assertNotIn(RESTART); 24 passed; ждёт приёмку и CI",
+   "tail": false
+  },
+  {
+   "id": "TK-079#8",
+   "text": "[итог: pr] PR #190@9c2ee47 — Код не менялся: красный windows — флейк test_errors (E-019), перезапуск зелёный на 9c2ee47; ждёт приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-079#14",
+   "text": "[итог: pr] PR #190@9c2ee47 — Договор перезаписан: [чтение кода] без текста в скобках (обход E-020), код не менялся; ждёт приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-080#1",
+   "text": "[итог: pr] PR #193@c8f84b0 — PR #193: ключ has_ci, условные уставы, строка в хуке; тесты правки зелёные; жду приёмку Судьи и CI",
+   "tail": false
+  },
+  {
+   "id": "TK-080#6",
+   "text": "[итог: pr] PR #193@2a8bacb — PR #193: engineer.md:12 — полный прогон перед сдачей только при has_ci false; тесты правки зелёные; жду CI и приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-081#1",
+   "text": "[итог: pr] PR #192@e635c92 — PR #192: probe_kinds (host,job), file: без пробы, сумма одного расчёта сбрасывается после done/accept; тесты правки 15, 8 падали до. Жду приёмку и CI",
+   "tail": false
+  },
+  {
+   "id": "TK-082#1",
+   "text": "[итог: pr] PR #191@444e1e4 — PR #191: ceo.md — 3 строки для своих сообщений, прямой вопрос без лимита; test_tk082+tk065 14 passed, до правки 6 failed. Дальше: приёмка Судьи",
+   "tail": false
+  },
+  {
+   "id": "TK-082#3",
+   "text": "[итог: pr] PR #191@7e5b981 — CI красный: моя строка в ceo.md перехватила поиск правила в test_tk053; переформулировал. 8 файлов про ceo.md — 100 passed. Дальше: CI и приёмка",
+   "tail": false
+  },
+  {
+   "id": "TK-082#7",
+   "text": "[итог: pr] PR #191@9c2ca5a — Возврат критика: механика — кроме той, о которой спросили; «статус» в :5 — свой, запрос — reporter; +тест. 101 passed (8 файлов про ceo.md). Дальше: CI и приёмка",
+   "tail": false
+  },
+  {
+   "id": "TK-083#1",
+   "text": "[итог: pr] PR #194@86eeddf — PR #194: has_ci в подсказке приёмки, review-round, engineer.md:6, merge_rule (влив без CI); тесты правки зелёные; жду CI и приёмку",
+   "tail": false
+  },
+  {
+   "id": "TK-084#1",
+   "text": "[итог: pr] PR #195@119a2dd — PR #195 (база — ветка #194): приёмка и wait ci: при has_ci false, цепочка PR без CI; test_tk084 11 passed, 5 падали до правки",
+   "tail": false
+  },
+  {
+   "id": "TK-085#2",
+   "text": "[итог: pr] PR #199@dadff06 — PR #199: побудка CEO событием (ceo_wake.py), Monitor убран; test_tk085 10 зелёных, полный прогон 1687 passed. Живая проверка — владелец в alpha",
+   "tail": false
+  },
+  {
+   "id": "TK-086#1",
+   "text": "[итог: pr] PR #198@98169f5 — watch-goal-idle: принятый шаг цели без открытого тикета ≥10 мин будит CEO раз на событие; причина в ceo-wake.log; тесты 143 зелёные; порог — Судье",
+   "tail": false
+  },
+  {
+   "id": "TK-087#1",
+   "text": "[итог: pr] PR #200@f71c8c7 — PR #200: registry goal --step, goal_steps.advance в tick, отказ --tail ceo: про код, доки. test_tk087 10 passed; полный прогон -n auto запущен, итог за CI PR",
+   "tail": false
+  },
+  {
+   "id": "TK-088#1",
+   "text": "[итог: pr] PR #201@922901f — PR #201: устав CEO — 4 события и строка «Что от вас», пример в signals.md, тесты зелёные. Судья/контейнер judge.md не влезает во вставку — вне тикета.",
+   "tail": false
+  }
+ ],
+ "ordered": [
+  {
+   "text": "Готово. Осталось: ничего. Следующий шаг — выпуск.",
+   "tail": false
+  },
+  {
+   "text": "Осталось: ничего, кроме экспорта.",
+   "tail": true
+  },
+  {
+   "text": "Отложено: нет.",
+   "tail": false
+  },
+  {
+   "text": "Хвост: нет метрик у 431 строки",
+   "tail": true
+  }
+ ]
+}

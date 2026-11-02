@@ -375,6 +375,17 @@ def author_is(author: str, role: str) -> bool:
     return bool(words) and words[0].strip("[]():,") == role.lower()
 
 
+SERVICE_MARK = "(служебная)"  # TK-091: запись кода от имени роли (срок, согласие) — не заказ; признак в заголовке автора
+
+
+def service_author(role: str) -> str:
+    return f"{role} {SERVICE_MARK}"
+
+
+def is_service(author: str) -> bool:
+    return SERVICE_MARK in (author or "")
+
+
 def role_entry_keys(tkt: "Ticket", role: str) -> list:
     """Ключи «<ts> <автор>» записей лога, оставленных ролью (заголовок `### <ts> <роль>`). v2 (02.10):
     «роль оставила запись» = в логе появился ключ, которого не было на старте запуска; от смещений

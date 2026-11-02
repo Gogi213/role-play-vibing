@@ -5,14 +5,14 @@
 Модуль не запускает ролей и не ходит в сеть: GitHub уже спрашивали сторожа и CI-наблюдатель, читаем их файлы."""
 from __future__ import annotations
 
-import json
-import os
 import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import goal_idle  # noqa: E402 — TK-086: тот же сигнал, что будит CEO; дублировать нельзя
+import heartbeat as HB  # noqa: E402
 import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
 import runs as RUNS  # noqa: E402
@@ -25,13 +25,13 @@ CODES = ("dispatcher_dead", "unserved", "step_uncovered", "loop", "merged_unrele
 # пороги по умолчанию, минуты (ключи `.claude/rpv.json`; менять — Судья, В-4/В-10); step_uncovered берёт `goal_idle_min` (TK-086)
 LIMITS = {"pulse_dead_min": 2, "pulse_unserved_min": 20, "pulse_ci_red_min": 30, "pulse_loop_returns": 2, "pulse_loop_errors": 2,
           "pulse_loop_window_min": 60}
-OWNER_WAIT = re.compile(r"слов\w*\s+владельц|владельц\w*\s+(?:ответ|слов)|owner", re.IGNORECASE)  # wait_for с условием «слово владельца»
+OWNER_WAIT = re.compile(r"слов\w*\s+владельц|ответ\w*\s+владельц|владельц\w*\s+(?:ответ|слов)", re.IGNORECASE)  # только слово владельца; «owner» в пути — не оно
 PAUSE_MIN_CELLS = 2  # пауза короче двух клеток (30 мин) в строку не попадает
 RANK = {"none": 0, "owner": 1, "stuck": 2, "work": 3}  # худшее за клетку; «работал» перекрывает остальное
 
 
 def limit(key: str) -> int:
-    """Порог из `.claude/rpv.json`; не число ≥ 0 — умолчание. Ключи записаны буквально: по ним сверяется docs/configuration.md."""
+    """Порог из `.claude/rpv.json`; не целое ≥ 1 — умолчание. Ключи записаны буквально: по ним сверяется docs/configuration.md."""
     root = CFG.PROJECT_ROOT
     got = {"pulse_dead_min": P.setting("pulse_dead_min", LIMITS["pulse_dead_min"], root=root),
            "pulse_unserved_min": P.setting("pulse_unserved_min", LIMITS["pulse_unserved_min"], root=root),
@@ -39,7 +39,7 @@ def limit(key: str) -> int:
            "pulse_loop_returns": P.setting("pulse_loop_returns", LIMITS["pulse_loop_returns"], root=root),
            "pulse_loop_errors": P.setting("pulse_loop_errors", LIMITS["pulse_loop_errors"], root=root),
            "pulse_loop_window_min": P.setting("pulse_loop_window_min", LIMITS["pulse_loop_window_min"], root=root)}[key]
-    return got if isinstance(got, int) and not isinstance(got, bool) and got >= 0 else LIMITS[key]
+    return got if isinstance(got, int) and not isinstance(got, bool) and got >= 1 else LIMITS[key]
 
 
 def cell_index(now: datetime) -> int:
@@ -47,11 +47,8 @@ def cell_index(now: datetime) -> int:
 
 
 def _read_json(path: Path) -> dict:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = P.read_json(path, {})
+    return data if isinstance(data, dict) else {}
 
 
 def _runs(now: datetime) -> list:
@@ -69,17 +66,6 @@ def _runs(now: datetime) -> list:
             out.append((T.parse_dt(parts[0]).astimezone(now.tzinfo), parts[1], parts[2], parts[3]))
         except ValueError:
             continue
-    return out
-
-
-def _tickets():
-    """Все тикеты проекта; None — какой-то не читается (неизвестно, что в нём: причин не выдумываем)."""
-    out = []
-    for path in T.list_tickets(CFG.TICKETS_DIR):
-        try:
-            out.append(T.read_ticket(path))
-        except Exception:
-            return None
     return out
 
 
@@ -103,7 +89,6 @@ def _found(state: dict, tickets, now: datetime, runs: list) -> dict:
             found["unserved"] = ("unserved", f"тикет в очереди, слот свободен, запуска нет ({sub})")
             break
     try:
-        import goal_idle  # TK-086: тот же сигнал, что будит CEO; дублировать нельзя
         for key, (_, tid, text) in goal_idle._due(tickets, now).items():
             found[f"step_uncovered:{key}"] = ("step_uncovered", text if tid in text else f"{tid}: {text}")
     except Exception as e:
@@ -120,19 +105,20 @@ def _found(state: dict, tickets, now: datetime, runs: list) -> dict:
     for tid, n in errors.items():
         if n >= limit("pulse_loop_errors"):
             found[f"loop:{tid}"] = ("loop", f"{tid}: запуск падает и перезапускается ({n} за {limit('pulse_loop_window_min')} мин)")
-    if "unreleased:main" in (_read_json(CFG.DISPATCHER_DIR / "watch-state.json").get("notified") or {}):
-        found["merged_unreleased"] = ("merged_unreleased", "влито в main, не выпущено, очередь пуста")
+    branch = next((k.split(":", 1)[1] for k in (_read_json(CFG.DISPATCHER_DIR / "watch-state.json").get("notified") or {})
+                   if k.startswith("unreleased:")), "")  # сторож пишет `unreleased:<ветка репозитория по ответу GitHub>`
+    if branch:
+        found["merged_unreleased"] = ("merged_unreleased", f"влито в {branch}, не выпущено, очередь пуста")
     repo = P.setting("ci_repo", "", root=CFG.PROJECT_ROOT)
     ci, merge = _read_json(CFG.DISPATCHER_DIR / "ci-state.json"), _read_json(CFG.DISPATCHER_DIR / "merge-state.json")
     for t in tickets:
-        pr = str(t.header.get("pr") or "").strip()
-        if not (repo and pr and t.status in T.OPEN_STATUSES):
-            continue
-        entry, key = ci.get(f"{repo}#{pr}") or {}, f"{repo}#{pr}"
-        if entry.get("state") in ("failure", "error") or entry.get("red"):
-            found[f"ci_red:{t.id}"] = ("ci_red", f"{t.id}: CI красный на PR #{pr}")
-        elif (merge.get(key) or {}).get("conflict"):
-            found[f"ci_red:{t.id}"] = ("ci_red", f"{t.id}: PR #{pr} в конфликте с main")
+        for pr in (re.findall(r"\d+", str(t.header.get("pr") or "")) if repo and t.status in T.OPEN_STATUSES else []):  # `pr: 149, 153` — каждый
+            entry = ci.get(f"{repo}#{pr}") or {}
+            conflict = (merge.get(f"{repo}#{pr}") or {}).get("conflict")
+            if entry.get("state") in ("failure", "error") or entry.get("red"):
+                found[f"ci_red:{t.id}:{pr}"] = ("ci_red", f"{t.id}: CI красный на PR #{pr}")
+            elif conflict and conflict == entry.get("sha"):  # метка конфликта не снимается после пуша: только на текущей голове
+                found[f"ci_red:{t.id}:{pr}"] = ("ci_red", f"{t.id}: PR #{pr} в конфликте с main")
     return found
 
 
@@ -152,9 +138,15 @@ def _active(state: dict, now: datetime, found: dict) -> list:
     return sorted(out, key=lambda r: CODES.index(r[0]))
 
 
+def _last_alive(state: dict):
+    """Когда диспетчер в последний раз был жив: конец прошлого тика (`last_tick_end`), иначе начало (`last_tick`)."""
+    stamp = state.get("last_tick_end") or state.get("last_tick")
+    return P.parse_time(stamp, strict=True) if stamp else None
+
+
 def dispatcher_dead_min(state: dict, now: datetime) -> float:
-    """Сколько минут нет тика; 0 — нет метки (первый запуск)."""
-    last = P.parse_time(state["last_tick"], strict=True) if state.get("last_tick") else None
+    """Сколько минут тишины с конца прошлого тика (долгий тик — не тишина); 0 — нет метки (первый запуск)."""
+    last = _last_alive(state)
     return max((now - last).total_seconds() / 60, 0.0) if last else 0.0
 
 
@@ -166,8 +158,8 @@ def _record_cell(state: dict, now: datetime, cls: str) -> None:
         book = state["pulse_cells"] = {"day": day, "cells": {}}
     cells, idx = book["cells"], cell_index(now)
     gap = dispatcher_dead_min(state, now)
-    if gap > limit("pulse_dead_min") and state.get("last_tick"):
-        prev = P.parse_time(state["last_tick"], strict=True)
+    if gap > limit("pulse_dead_min") and _last_alive(state):
+        prev = _last_alive(state)
         first = cell_index(prev) + 1 if prev.date() == now.date() else 0
         for i in range(first, idx):
             cells.setdefault(str(i), "stuck:dispatcher_dead")
@@ -213,13 +205,13 @@ def _pause(cells: list, upto: int) -> str:
 
 def build(state: dict, now: datetime, tickets=None, runs=None) -> dict:
     """Содержимое pulse.json; побочный эффект — отметки `pulse_since`/`pulse_cells` в state."""
-    tickets = _tickets() if tickets is None else tickets
+    tickets = goal_idle._read_all() if tickets is None else tickets  # None — тикет не читается: причин не выдумываем
     runs = _runs(now) if runs is None else runs
     project = Path(CFG.PROJECT_ROOT).name
     dead = dispatcher_dead_min(state, now) > limit("pulse_dead_min")
     active = [] if tickets is None else _active(state, now, _found(state, tickets, now, runs))
     if dead:
-        active.insert(0, ("dispatcher_dead", f"диспетчер молчал {dispatcher_dead_min(state, now):.0f} мин", state["last_tick"]))
+        active.insert(0, ("dispatcher_dead", f"диспетчер молчал {dispatcher_dead_min(state, now):.0f} мин", T.now_iso(_last_alive(state))))
     owner = [] if tickets is None else _owner_items(tickets)
     working = sorted((r.get("started") or "", r.get("role") or "", tid) for tid, r in (state.get("active_runs") or {}).items())
     waiting = [t for t in (tickets or []) if t.status in T.OPEN_STATUSES]
@@ -248,23 +240,22 @@ def build(state: dict, now: datetime, tickets=None, runs=None) -> dict:
             "cells": cells}
 
 
-def update(state: dict, now: datetime) -> dict:
-    """Тик диспетчера: построить и записать целиком (временный файл + замена: читатель не увидит половину)."""
+def update(state: dict, now: datetime, written: datetime | None = None) -> dict:
+    """Тик диспетчера: построить и записать целиком (`generated` — время записи, не начала тика; запись атомарная)."""
     data = build(state, now)
-    path = CFG.DISPATCHER_DIR / FILE_NAME
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    data["generated"] = T.now_iso(written or now)
+    P.write_json(CFG.DISPATCHER_DIR / FILE_NAME, data)
     return data
 
 
 def read(now: datetime) -> dict:
-    """Для читателя (табло, шаг 2): файл как есть, но если диспетчер не обновлял его дольше `pulse_dead_min` — «Застряло»."""
+    """Для читателя (табло, шаг 2): файл как есть, но если диспетчер не обновлял его дольше `HB.STALE_S` (так же завис он для смотрителя;
+    тик бывает долгим, меньший срок читателю нельзя) — «Застряло»."""
     data = _read_json(CFG.DISPATCHER_DIR / FILE_NAME)
     try:
         age = (now - T.parse_dt(data["generated"])).total_seconds() / 60
     except (KeyError, ValueError):
         return {}
-    if age > limit("pulse_dead_min"):
+    if age > HB.STALE_S / 60:
         data = dict(data, state="stuck", phrase=f"Застряло: {data.get('project', '')} — диспетчер не отвечает {age:.0f} мин.")
     return data

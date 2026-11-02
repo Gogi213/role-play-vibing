@@ -272,7 +272,7 @@ class OwnerQuestionTests(unittest.TestCase):
         self.addCleanup(lambda: (setattr(CFG, "TICKETS_DIR", saved[0]), setattr(CFG, "DISPATCHER_DIR", saved[1])))
         CFG.TICKETS_DIR, CFG.DISPATCHER_DIR = self.root / ".claude" / "tickets", self.root / ".claude" / "dispatcher"
         self.sent = []
-        p = mock.patch.object(NOTIFY, "send", lambda text, **kw: self.sent.append(text))
+        p = mock.patch.object(NOTIFY, "send", lambda text, **kw: self.sent.append(text) or True)
         p.start()
         self.addCleanup(p.stop)
 
@@ -294,6 +294,24 @@ class OwnerQuestionTests(unittest.TestCase):
         D._owner_questions(state, T0 + timedelta(hours=1))
         self.assertEqual(len(self.sent), 2)
         self.assertIn("(направление)", self.sent[1])
+
+    def test_failed_delivery_not_marked_sent_and_retried_throttled(self):
+        """TK-092: Telegram настроен, но не принял — вопрос не помечен отправленным, повтор не чаще notify.RETRY_S."""
+        ok = []
+        self.write("needs_owner", [(T0, "judge", "[итог: ask-owner] повод: деньги — брать?")])
+        state = {}
+        with mock.patch.object(NOTIFY, "send", lambda text, **kw: self.sent.append(text) or bool(ok)),                 mock.patch.object(NOTIFY, "configured", return_value=True):
+            D._owner_questions(state, T0)
+            self.assertEqual(len(self.sent), 1)
+            self.assertNotIn("TK-300", state["owner_asked"])
+            D._owner_questions(state, T0 + timedelta(seconds=30))
+            self.assertEqual(len(self.sent), 1, "раньше RETRY_S — не пытаемся")
+            ok.append(1)
+            D._owner_questions(state, T0 + timedelta(seconds=NOTIFY.RETRY_S + 5))
+            self.assertEqual(len(self.sent), 2)
+            self.assertIn("TK-300", state["owner_asked"])
+            D._owner_questions(state, T0 + timedelta(hours=1))
+            self.assertEqual(len(self.sent), 2, "дошло — больше не шлём")
 
     def test_no_message_without_question_to_owner(self):
         self.write("in_progress", [(T0, "judge", "[итог: ask-owner] повод: деньги — вопрос")])
