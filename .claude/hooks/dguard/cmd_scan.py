@@ -1,14 +1,13 @@
-"""Разбор простой команды рекурсивно: удаление, Python-код, `find`, `ssh`, обёртки; вход — `scan_text`."""
+"""Разбор простой команды рекурсивно: удаление, Python-код, `find`, `git`, обёртки; вход — `scan_text`. `ssh`/`scp`/`rsync` не разбираются."""
 import ast
 import re
 import textwrap
 from dguard.git_scan import git_scan
 from dguard.lexer import Cmd, tokenize
 from dguard.messages import Forbid, MAX_DEPTH, Over, Publish, UNKNOWN_TARGET
-from dguard.paths import CLOSED_HOST, closed_host, Ctx
-from dguard.publish import HTTP_NAMES, publish_label, PUBLISH_SUBS
-from dguard.words import ASSIGN, cmd_name, DEL_OS, DEL_VERBS, expand_args, expand_vars, host_of, HOST_RE, join_cwd, OTHER_DEL_RE, OTHER_INTERP, pipe_src, ps_code, PS_DOTNET_DELETE, PS_NAMES, PY_CALL_RE, PY_NAMES, RESERVED, RUNNERS, shell_code, SHELLS, skip_wrapper, SSH_VAL, SUBPROC, TEXT_CMDS, WRAPPERS
-from dguard.writes import cp_scan, dd_scan, del_targets, over, PS_COPY_NAMES, ps_copy_scan, PS_RENAME_NAMES, ps_rename_scan, PS_WRITE_NAMES, ps_write_scan, rsync_scan, tee_scan, truncate_scan
+from dguard.publish import publish_label, PUBLISH_SUBS
+from dguard.words import ASSIGN, cmd_name, DEL_OS, DEL_VERBS, expand_args, expand_vars, join_cwd, OTHER_DEL_RE, OTHER_INTERP, pipe_src, ps_code, PS_DOTNET_DELETE, PS_NAMES, PY_CALL_RE, PY_NAMES, RESERVED, RUNNERS, shell_code, SHELLS, skip_wrapper, SUBPROC, WRAPPERS
+from dguard.writes import cp_scan, dd_scan, del_targets, over, PS_COPY_NAMES, ps_copy_scan, PS_RENAME_NAMES, ps_rename_scan, PS_WRITE_NAMES, ps_write_scan, tee_scan, truncate_scan
 
 
 def python_consts(tree):
@@ -192,44 +191,6 @@ def find_scan(args, ctx, vars_, depth):
         yield from (x for x in extra if isinstance(x[0], (Over, Forbid)))
 
 
-def ssh_scan(args, ctx, vars_, stdin, depth):
-    j = 0
-    ident = []
-    while j < len(args):
-        a = args[j]
-        if a == "--":
-            j += 1
-            break
-        if a.startswith("-") and len(a) > 1:
-            if a in SSH_VAL:
-                if a in ("-i", "-F", "-J", "-l"):
-                    ident.append(args[j + 1] if j + 1 < len(args) else "")
-                j += 2
-                continue
-            j += 1
-            continue
-        if (re.fullmatch(r"\$\{?\w+(?:\[[@*]\])?\}?", a) and j + 1 < len(args)
-                and re.fullmatch(r"[^@\s$]+@[^@\s$]+|\d+\.\d+\.\d+\.\d+", args[j + 1])):
-            j += 1                                  # `ssh "${K[@]}" user@host …` — неизвестный массив/строка опций
-            continue
-        break
-    host = args[j] if j < len(args) else ""
-    rest = args[j + 1:]
-    host = expand_vars(host, vars_)
-    bad = closed_host(host + " " + " ".join(ident)) or "$" in host
-    remote = Ctx(None, True, host=CLOSED_HOST if bad else host_of(host))
-    if rest:
-        found = list(scan_text(" ".join(rest), remote, stdin, depth + 1))
-    else:                                       # оболочка на стороне ssh читает stdin (heredoc / конвейер)
-        found = []
-        for text in stdin:
-            found.extend(scan_text(text, remote, (), depth + 1))
-    if bad and any(not isinstance(x[0], Publish) for x in found):     # публикация на закрытом узле — не удаление: решает check
-        yield (f"<ssh {host}: удаление на закрытом хосте (`guard_forbidden_hosts`) или хост не определён>", ctx.copy())
-    else:
-        yield from found
-
-
 def record_var(vars_, word, depth):
     """`NAME=value` → строка; `NAME=(a b c)` → список слов."""
     k, _, v = word.partition("=")
@@ -243,7 +204,7 @@ def strip_assignment(words, vars_, depth):
     """Слова команды без присваиваний (`$x = …`, `NAME=v`); None — команды нет, переменные записаны."""
     if len(words) >= 3 and re.fullmatch(r"\$\w+", words[0]) and words[1] in ("=", "+="):
         if len(words) == 3:
-            vars_[words[0][1:]] = words[2]            # PowerShell: `$script = @'...'@` — строка, которую потом отдадут ssh
+            vars_[words[0][1:]] = words[2]            # PowerShell: `$script = @'...'@` — строка, которую потом отдадут оболочке
             return None
         return words[2:]                              # PowerShell: `$r = Invoke-RestMethod …` — разбирается команда справа
     if len(words) == 1 and re.match(r"^\$\w+=", words[0]):    # PowerShell: `$out="data\dashboard"` (без пробелов)
@@ -280,7 +241,7 @@ def command_start(words, vars_):
             i = j
             continue
         if w.startswith("$") and not w.startswith("$(") and expand_vars(w, vars_) != w:
-            val = expand_vars(w, vars_)              # `$SSHC host 'rm x'` при SSHC="ssh -p 23 …"
+            val = expand_vars(w, vars_)              # `$CMD x` при CMD="rm -f"
             sub = tokenize(val)
             words[i:i + 1] = sub[0].words if sub else []
             continue
@@ -327,17 +288,18 @@ def scan_one(cmd, ctx, vars_, stdin, depth):
     elif name == "git":
         redirected = any(re.match(r"(?:GIT_DIR|GIT_WORK_TREE)=", x) for x in words[:i])
         yield from git_scan(args, ctx, vars_, redirected)
-    elif name == "ssh":
-        yield from ssh_scan(args, ctx, vars_, sin, depth)
+    elif name in REMOTE:                             # чужие машины не разбираем
+        return
     else:
         yield from other_scan(w, name, args, ctx, vars_, sin, depth)
 
 
+REMOTE = frozenset({"ssh", "scp", "rsync", "sftp"})                # команды чужих машин
+
+
 def writer_scan(name, args, ctx, vars_, xargs):
-    """Команды, которые пишут в файл: cp/mv, rsync, tee, dd, truncate и их PowerShell-аналоги."""
-    if name == "rsync":
-        yield from rsync_scan(args, ctx)
-    elif name in ("cp", "mv"):
+    """Команды, которые пишут в файл: cp/mv, tee, dd, truncate и их PowerShell-аналоги."""
+    if name in ("cp", "mv"):
         yield from cp_scan(args, ctx, vars_, move=name == "mv", xargs=xargs)
     elif name in PS_COPY_NAMES:
         yield from ps_copy_scan(name, args, ctx, vars_, xargs)
@@ -353,11 +315,11 @@ def writer_scan(name, args, ctx, vars_, xargs):
         yield from dd_scan(args, ctx, vars_)
 
 
-WRITERS = frozenset({"rsync", "cp", "mv", "tee", "truncate", "dd", *PS_COPY_NAMES, *PS_RENAME_NAMES, *PS_WRITE_NAMES})
+WRITERS = frozenset({"cp", "mv", "tee", "truncate", "dd", *PS_COPY_NAMES, *PS_RENAME_NAMES, *PS_WRITE_NAMES})
 
 
 def other_scan(w, name, args, ctx, vars_, sin, depth):
-    """Остальные команды: запускалки, интерпретаторы, смена каталога; неизвестная — `generic_scan`."""
+    """Остальные команды: запускалки, интерпретаторы, смена каталога; неизвестная — не разбирается."""
     if name == "rclone":
         if args and args[0] in ("delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup"):
             yield (f"<rclone {args[0]}>", ctx.copy())
@@ -388,15 +350,12 @@ def other_scan(w, name, args, ctx, vars_, sin, depth):
         ctx.cwd = join_cwd(ctx.cwd, pos[0] if pos else None, vars_)
     elif name == "popd":
         ctx.cwd = None
-    else:
-        yield from generic_scan(w, name, args, ctx, vars_, sin, depth)
 
 
 def runner_scan(args, ctx, vars_, sin, depth):
     for k, a in enumerate(args):
         nm = cmd_name(a)
-        if (nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git", "rsync", "ssh") or nm in PUBLISH_SUBS
-                or nm in HTTP_NAMES or PY_NAMES.match(nm)):
+        if nm in DEL_VERBS or nm in SHELLS or nm in ("find", "git") or nm in PUBLISH_SUBS or PY_NAMES.match(nm):
             yield from scan_one(Cmd(args[k:]), ctx, vars_, sin, depth + 1)
             break
 
@@ -442,28 +401,6 @@ def shell_cmd_scan(name, args, sin, ctx, depth):
         texts = [" ".join(args)]
     for text in texts:
         yield from scan_text(text, ctx, (), depth + 1)
-
-
-def generic_scan(w, name, args, ctx, vars_, sin, depth):
-    """Неизвестная команда: обёртка над ssh (`/tmp/sshx user@host 'rm …'`, `$SSH host '…'`, функция `rsh() {…}`).
-    Строки-аргументы разбираются как удалённые команды только если есть признак обёртки — `user@host` среди
-    аргументов, переменная вместо команды или функция, объявленная здесь же; иначе это просто текст."""
-    if name in TEXT_CMDS:
-        return
-    unresolved = w.startswith("$") and not w.startswith("$(")
-    if unresolved and args and args[0] in ("=", "+="):          # PowerShell: `$x = <строка>` — присваивание
-        return
-    if any(HOST_RE.fullmatch(a) for a in args):
-        yield from ssh_scan(args, ctx, vars_, sin, depth)
-    elif unresolved or name in ctx.funcs:
-        inner = []
-        for a in args:
-            if re.search(r"\s", a):
-                inner.extend(scan_text(a, Ctx(None, True, ctx.funcs), (), depth + 1))
-        if inner and unresolved:
-            yield (f"<команда задана переменной {w}>", ctx.copy())
-        else:
-            yield from inner
 
 
 def scan_cmds(cmds, ctx, stdin=(), depth=0):

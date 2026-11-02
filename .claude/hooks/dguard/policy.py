@@ -1,14 +1,13 @@
-"""Личность запуска, согласия на публикацию, защищённые пути, настройки, уставы, слово владельца."""
+"""Роль запуска, согласие на публикацию, защищённые пути, настройки, уставы, слово владельца."""
 import fnmatch
 import os
 import posixpath
 import re
 from dguard import config
-from dguard.ceo_signal import command_text, parts_write, shell_writes
 from dguard.config import _env, norm
 from dguard.messages import REASON_CEO_CONFIG, REASON_GIT_DIR, REASON_GIT_WRITE, REASON_OWNER_RECORD, REASON_PROTECTED, REASON_PROTECTED_CONFIG, REASON_SETTINGS
 from dguard.paths import literal_part, placeholder, temp_rest, under_cwd
-from dguard.tools import file_target, SHELL_TOOLS
+from dguard.tools import file_target
 from dguard.writes import may_exist
 
 
@@ -25,31 +24,6 @@ def dispatcher_role():
     сессия CEO или владельца."""
     r = _env("ROLE").strip().lower()
     return r if r in DISPATCH_ROLES else None
-
-
-# CP1/CP2 (слово владельца 14.10: «нельзя притворяться CEO»): запуск роли не меняет и не стирает свою роль и тикет —
-# иначе `RPV_ROLE= python errors.py fix …` выглядит как CEO. Ловится запись (присваивание, unset, env -u/-i, $env:…=,
-# Remove-Item Env:, SetEnvironmentVariable, os.environ / putenv / unsetenv); чтение (`echo $RPV_ROLE`) — можно. Второй слой —
-# `project.caller_role`: роль узнаётся и по дереву процессов, стёртое окружение её не прячет.
-_IDENT = r"(?:RPV_(?:ROLE|TICKET|PROJECT)|CLAUDE_PROJECT_DIR)\b"  # кто запущен и где
-IDENTITY_RE = re.compile(
-    r"(?:^|[\s;&|(`'\"])(?:export\s+|set\s+|declare\s+(?:-\w+\s+)*|typeset\s+|local\s+|readonly\s+)?" + _IDENT + r"\s*\+?="
-    r"|\bunset\b[^;&|\n]*" + _IDENT
-    + r"|\bexport\s+-n\b[^;&|\n]*" + _IDENT
-    + r"|\benv\b[^;&|\n]*(?:-u\s*|--unset[= ])" + _IDENT
-    + r"|\benv\s+(?:-\w*i\w*|--ignore-environment|-)(?=\s|$)"
-    + r"|\$env:" + _IDENT + r"\s*="
-    + r"|\b(?:Remove-Item|Set-Item|Clear-Item|New-Item|Rename-Item|ri|si|ni|del|rm|erase)\b[^;\n]*\benv:\\?" + _IDENT
-    + r"|SetEnvironmentVariable\s*\(\s*['\"]" + _IDENT
-    + r"|\bos\.(?:environ|putenv|unsetenv)\b[^;\n]*" + _IDENT
-    + r"|" + _IDENT + r"[^;\n]*\bos\.(?:environ|putenv|unsetenv)\b"
-    + r"|\bprocess\.env\." + _IDENT + r"\s*=|\bdelete\s+process\.env\." + _IDENT,
-    re.I)
-
-
-def identity_change(tool, ti) -> bool:
-    """Команда оболочки запуска роли меняет или стирает `RPV_ROLE`/`RPV_TICKET` (или всё окружение)."""
-    return tool in SHELL_TOOLS and bool(IDENTITY_RE.search(str(ti.get("command") or "")))
 
 
 def publish_consent():
@@ -143,42 +117,6 @@ def owner_record(t, ctx):
     return any(segs[i] == ".claude" and segs[i + 1] in ("goals", "errors") for i in range(len(segs) - 1))
 
 
-OWNER_RECORD_NAMES = ("claude.md", ".claude/decisions.md", ".claude/goals", ".claude/errors", "dispatcher/state.json")
-
-
-def owner_record_write(tool, ti):
-    """Запись запуска диспетчера в слово владельца через оболочку, в т. ч. дописывание `>>` (его разбор целей не видит);
-    чтение свободно (в т. ч. с `2>/dev/null`, `2>&1`), текст `--text`/`--why` у tickets.py не в счёт. Сам `errors.py` через
-    оболочку по-прежнему пишет в `.claude/errors/`: путь скрипта (`…/dispatcher/errors.py`) названием каталога не считается."""
-    return tool in SHELL_TOOLS and parts_write(command_text(ti, benign=True), OWNER_RECORD_NAMES)
-
-
-CONSENT_LINE = re.compile(r"(?mi)^[ \t]*allow[ \t]*:")      # строка шапки тикета `allow: publish (В-N)`
-
-
-def _strings(x):
-    """Все строки внутри значения tool_input (Edit: new_string, MultiEdit: edits[].new_string, Write: content)."""
-    if isinstance(x, str):
-        yield x
-    elif isinstance(x, dict):
-        for v in x.values():
-            yield from _strings(v)
-    elif isinstance(x, (list, tuple)):
-        for v in x:
-            yield from _strings(v)
-
-
-def consent_forge(tool, ti):
-    """Запись запуском диспетчера строки `allow:` в файл тикета (`.claude/tickets/…`) мимо `tickets.py allow`: согласие на
-    публикацию ставит только CEO. Файловые инструменты — строка шапки `allow:` в новом тексте; оболочка — команда, которая
-    пишет (как в `owner_record_write`), называет `.claude/tickets/` и `allow:`; чтение и текст `--text`/`--why` не в счёт."""
-    if tool in SHELL_TOOLS:
-        cmd = command_text(ti, benign=True)
-        return bool(shell_writes(cmd, (".claude/tickets/",)) and re.search(r"\ballow[ \t]*:", cmd, re.I))
-    path = file_target(ti) or ""
-    return ".claude/tickets/" in path.replace("\\", "/").lower() and any(CONSENT_LINE.search(s) for s in _strings(ti))
-
-
 def _segs(p):
     return [s for s in p.split("/") if s and s != "."]
 
@@ -209,11 +147,8 @@ def _glob_contains(pp, ps):
     return _glob_seg(pp[0], ps[0]) and _glob_contains(pp[1:], ps[1:])
 
 
-def _canon(p, remote):
-    """Путь для сопоставления с шаблонами: локально `~`/`$home` — домашний каталог, `/c/x` — `c:/x` (Windows); на удалённой
-    машине путь остаётся текстом."""
-    if remote:
-        return p
+def _canon(p):
+    """Путь для сопоставления с шаблонами: `~`/`$home` — домашний каталог, `/c/x` — `c:/x` (Windows)."""
     for pre in ("~", "$home", "${home}"):
         if p == pre or p.startswith(pre + "/"):
             return norm(os.path.expanduser("~")).rstrip("/") + p[len(pre):]
@@ -226,9 +161,7 @@ def protected_match(t, ctx, deleting):
     при удалении — ещё каталог, внутри которого лежит защищённое (`rm -rf data` при `data/raw/**`; шаблоны, начинающиеся с
     имени или `**`, родителей не закрывают: глубина у них любая). Шаблон без `/` — имя на любой глубине (как в .gitignore);
     с `/` — путь от корня проекта; с начальным `/`, `~` или диском (`c:/`) — именно этот путь. Маска в цели (`rm data/*`)
-    считается «может задеть». На удалённой машине корень проекта неизвестен: шаблон с `/` ищется на любой глубине. Путь,
-    начало которого — неизвестная переменная, не видно (решают прочие правила); временный каталог (`$TMP/x`) — виден."""
-    remote = bool(getattr(ctx, "remote", False))
+    считается «может задеть». Путь, начало которого — неизвестная переменная, не видно (решают прочие правила); временный каталог (`$TMP/x`) — виден."""
     p = _abs_norm(t, ctx)
     if placeholder(p):
         return None
@@ -237,20 +170,19 @@ def protected_match(t, ctx, deleting):
     if lit:
         if lit != p and not lit.endswith("/"):
             lit += "*"                                       # `data/ra$X` — как `data/ra*`
-        p = _canon(lit, remote)
+        p = _canon(lit)
         if ".." in p.split("/"):
             p = posixpath.normpath(p)
         absolute = p.startswith(("/", "~", "$home", "${home}")) or bool(re.match(r"[a-z]:", p))
         segs = _segs(p)
-        if not remote:
-            for root in config.LOCAL_ROOTS:
-                if (p + "/").startswith(root):
-                    rel = _segs(p[len(root):])
-                    break
-            if rel is None and not absolute:
-                rel = segs                                   # относительный путь без известного cwd — от корня проекта
+        for root in config.LOCAL_ROOTS:
+            if (p + "/").startswith(root):
+                rel = _segs(p[len(root):])
+                break
+        if rel is None and not absolute:
+            rel = segs                                       # относительный путь без известного cwd — от корня проекта
         name_segs = rel if rel is not None else segs
-        if rel is None and not remote:                       # вне проекта домашний каталог в имена не входит
+        if rel is None:                                      # вне проекта домашний каталог в имена не входит
             home = _segs(norm(os.path.expanduser("~")))
             if home and segs[:len(home)] == home:
                 name_segs = segs[len(home):]
@@ -262,8 +194,8 @@ def protected_match(t, ctx, deleting):
         name_segs = segs
     for pat in config.PROTECTED:
         if pat.startswith(("/", "~", "$home", "${home}")) or re.match(r"[a-z]:", pat):
-            pp, subj = _segs(_canon(pat, remote)), (segs if absolute else None)
-        elif "/" in pat and not remote:
+            pp, subj = _segs(_canon(pat)), (segs if absolute else None)
+        elif "/" in pat:
             pp, subj = _segs(pat), rel
         else:
             pp, subj = ["**"] + _segs(pat), name_segs

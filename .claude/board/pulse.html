@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Пульс</title>
+<style>
+:root{--bg:#fff;--box:#fff;--card:#f4f3ee;--line:#d9d7cf;--t1:#1c1c1a;--t2:#5f5e5a;--t3:#888780;--you:#854F0B;--stuck:#A32D2D}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--box:#1f1f1c;--card:#2c2c28;--line:#3a3a35;--t1:#ecebe6;--t2:#b5b4ac;--t3:#8a8981;--you:#EF9F27;--stuck:#F09595}}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--t1);max-width:760px;margin:24px auto;padding:0 16px}
+.box{background:var(--box);border:0.5px solid var(--line);border-radius:16px;padding:20px 22px 16px}
+.head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.phrase{font-size:22px;font-weight:500}
+.phrase.you{color:var(--you)}.phrase.stuck{color:var(--stuck)}
+.r{display:grid;grid-template-columns:72px minmax(0,1fr) 170px;gap:14px;align-items:center;padding:9px 0}
+.c{display:grid;gap:2px}
+.c.w{grid-template-columns:repeat(32,minmax(0,1fr))}.c.k{grid-template-columns:repeat(12,minmax(0,1fr));display:none}
+.c span{height:22px;border-radius:3px;background:var(--card)}
+.c .n{background:#C0DD97}.c .m{background:#97C459}.c .h{background:#639922}
+.c .y{background:#FAC775}.c .o{background:#F09595}
+.c .cur{outline:1.5px solid var(--t1);outline-offset:1px}
+.meta{font-size:12px;color:var(--t2);text-align:right;line-height:1.5}
+.meta.you{color:var(--you);font-weight:500}.meta.stuck{color:var(--stuck)}
+.hl{font-size:11px;color:var(--t3);display:grid;grid-template-columns:repeat(8,minmax(0,1fr))}
+.leg{display:flex;flex-wrap:wrap;gap:18px;margin-top:12px;padding-top:12px;border-top:0.5px solid var(--line);font-size:12px;color:var(--t3);align-items:center}
+.leg i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:middle}
+@media (max-width:480px){
+  body{margin:12px auto}.box{padding:16px 14px 12px}.phrase{font-size:18px}
+  .r{grid-template-columns:56px minmax(0,1fr);gap:6px 10px}.r .meta{grid-column:1 / -1;text-align:left}
+  .c.w,.hl{display:none}.c.k{display:grid}
+}
+</style>
+<div class="box" id="app">__BODY__</div>
+<div class="meta stuck" id="err" hidden style="text-align:center;margin-top:10px"></div>
+<script>
+// автообновление раз в 30 с: подменяем содержимое только если оно изменилось — без мерцания
+(function(){
+  var app=document.getElementById('app'),err=document.getElementById('err'),url=location.pathname.replace(/\/?$/,'/')+'body',last=null;
+  function tick(){
+    fetch(url,{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.text()}).then(function(t){
+      err.hidden=true;
+      if(t!==last){last=t;app.innerHTML=t;}
+    }).catch(function(){err.textContent='Не удалось обновить · '+new Date().toLocaleTimeString().slice(0,5);err.hidden=false;});
+  }
+  setInterval(tick,30000);
+})();
+</script>
+</html>
