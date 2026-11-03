@@ -180,7 +180,7 @@ class PulseTelegram(States):
         rpv.write_text(json.dumps({"pulse_projects": {"rpv": str(pj)}, "pulse_telegram": True}), encoding="utf-8")
         os.utime(rpv, (self.at.timestamp() + 5, self.at.timestamp() + 5))  # кэш настроек — по времени изменения
         self.assertEqual(G.tick(self.proj, self.state, self.at, self.api), "sent")
-        self.assertEqual(self.api.calls[0][1]["text"], f"{V.OK_PHRASE}\nrpv — идёт")
+        self.assertEqual(self.api.calls[0][1]["text"], f"{V.OK_TITLE}\n{V.OK_SUB}\nrpv — идёт")
 
     def test_tick_is_off_without_token_and_does_not_read_projects(self):
         (self.proj / ".claude").mkdir(exist_ok=True)
@@ -199,16 +199,19 @@ class PulseTelegram(States):
 
 
 class TextTests(States):
-    def test_text_first_line_phrase_then_project_lines(self):
+    def test_text_starts_with_the_two_header_lines_then_project_lines(self):
         ok = self.ok_data()
         owner = self.owner_data()
         stuck = self.stuck_data()
         views = [self.view("rpv", owner), self.view("alpha", ok), self.view("inv", stuck)]
         tid = stuck["reasons"][0]["detail"].split(":")[0]
-        self.assertEqual(V.tg_text(views), f"{stuck['phrase']} (и ещё 1)\n"
-                                           f"rpv — нужны вы: ответить на вопрос по {owner['owner'][0]['ticket']}\n"
+        ask = owner["ask"]
+        self.assertEqual(V.tg_text(views), f"Застряло: inv\n{tid}: возвращён Судьёй 2 раз — разбирает CEO\n"
+                                           f"rpv — нужны вы: {ask['ticket']}: {ask['question']}\n"
                                            f"alpha — идёт\n"
                                            f"inv — застряло: {tid}: возвращён Судьёй 2 раз")
+        head = V.header(views)
+        self.assertEqual(V.tg_text(views).split("\n")[:2], [head["title"], head["sub"]])
 
 
 if __name__ == "__main__":

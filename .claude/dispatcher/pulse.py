@@ -15,6 +15,7 @@ import goal_idle  # noqa: E402 — TK-086: тот же сигнал, что бу
 import heartbeat as HB  # noqa: E402
 import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
+import pulse_facts  # noqa: E402 — TK-105: поля версии 2 (цель, кто что делает, день)
 import runs as RUNS  # noqa: E402
 import ticket as T  # noqa: E402
 
@@ -26,6 +27,7 @@ CODES = ("dispatcher_dead", "unserved", "step_uncovered", "loop", "merged_unrele
 LIMITS = {"pulse_dead_min": 2, "pulse_unserved_min": 20, "pulse_ci_red_min": 30, "pulse_loop_returns": 2, "pulse_loop_errors": 2,
           "pulse_loop_window_min": 60}
 OWNER_WAIT = re.compile(r"слов\w*\s+владельц|ответ\w*\s+владельц|владельц\w*\s+(?:ответ|слов)", re.IGNORECASE)  # только слово владельца; «owner» в пути — не оно
+RUNS_PER_CELL = 3  # запусков клетки в pulse.json для подсказки (остальные — числом n)
 PAUSE_MIN_CELLS = 2  # пауза короче двух клеток (30 мин) в строку не попадает
 RANK = {"none": 0, "owner": 1, "stuck": 2, "work": 3}  # худшее за клетку; «работал» перекрывает остальное
 
@@ -169,11 +171,14 @@ def _record_cell(state: dict, now: datetime, cls: str) -> None:
         cells[str(idx)] = cls
 
 
-def _cells(state: dict, runs: list, now: datetime) -> list:
+def _cells(state: dict, runs: list, now: datetime, tickets=None) -> list:
+    """96 клеток {i, n, c, why?, runs?}: `runs` — не больше RUNS_PER_CELL последних запусков клетки (кто, тикет, заголовок), n — все."""
     counts = [0] * CELLS
-    for ts, *_ in runs:
+    listed = [[] for _ in range(CELLS)]
+    for ts, tid, role, _ in runs:
         if ts.date() == now.date():
             counts[cell_index(ts)] += 1
+            listed[cell_index(ts)].append(pulse_facts.run_entry(tid, role, tickets))
     book = (state.get("pulse_cells") or {}).get("cells") or {}
     out = []
     for i in range(CELLS):
@@ -183,6 +188,8 @@ def _cells(state: dict, runs: list, now: datetime) -> list:
         cell = {"i": i, "n": counts[i], "c": cls}
         if cls == "stuck" and why:
             cell["why"] = why
+        if listed[i]:
+            cell["runs"] = listed[i][-RUNS_PER_CELL:]
         out.append(cell)
     return out
 
@@ -233,13 +240,13 @@ def build(state: dict, now: datetime, tickets=None, runs=None) -> dict:
         kind, phrase = "owner", f"Нужны вы: {project} — {owner[0][1]} по {owner[0][0]}."
     else:
         kind, phrase = "ok", "Всё идёт. От вас ничего."
-    cells = _cells(state, runs, now)
-    return {"version": 1, "project": project, "day": now.date().isoformat(), "generated": T.now_iso(now), "state": kind, "phrase": phrase,
+    cells = _cells(state, runs, now, tickets)
+    return {"version": 2, "project": project, "day": now.date().isoformat(), "generated": T.now_iso(now), "state": kind, "phrase": phrase,
             "now": (f"{working[0][1]} · {working[0][2]}" if working else
                     (f"запусков нет, в очереди {len(waiting)}" if waiting else "очередь пуста")),
             "pause": _pause(cells, cell_index(now)),
             "reasons": [{"code": c, "detail": d, "since": s} for c, d, s in active], "owner": [{"ticket": t, "action": a} for t, a in owner],
-            "cells": cells}
+            "cells": cells, **pulse_facts.facts(state, tickets, active, owner, now)}
 
 
 def update(state: dict, now: datetime, written: datetime | None = None) -> dict:
@@ -259,5 +266,5 @@ def read(now: datetime) -> dict:
     except (KeyError, ValueError):
         return {}
     if age > HB.STALE_S / 60:
-        data = dict(data, state="stuck", phrase=f"Застряло: {data.get('project', '')} — диспетчер не отвечает {age:.0f} мин.")
+        data = dict(data, state="stuck", phrase=f"Застряло: {data.get('project', '')} — диспетчер не отвечает {pulse_facts.ago(age * 60)}.")
     return data
