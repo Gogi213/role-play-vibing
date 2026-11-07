@@ -54,11 +54,12 @@
 <rect class="n-group" x="340" y="128" width="206" height="392" rx="8"/>
 <text x="352" y="148" class="m">append_ceo_inbox</text>
 <text x="352" y="163" class="s">код сортирует по виду сигнала</text>
-<rect class="n-wake" x="352" y="174" width="182" height="76" rx="6"/>
+<rect class="n-wake" x="352" y="174" width="182" height="84" rx="6"/>
 <text x="362" y="192" class="t">будит</text>
 <text x="362" y="208" class="s">needs_owner · blocked · auth</text>
 <text x="362" y="222" class="s">goal-done · watch-goal-idle</text>
 <text x="362" y="236" class="s">следующий-не-определён · due</text>
+<text x="362" y="250" class="s">watch-unreleased</text>
 <rect class="n-code" x="352" y="260" width="182" height="84" rx="6"/>
 <text x="362" y="278" class="t">строка очереди</text>
 <text x="362" y="294" class="s">done · next-ceo · ждёт-ceo</text>

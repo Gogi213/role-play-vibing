@@ -115,8 +115,8 @@ class UnreleasedSandbox(WatchSandbox):
 
 
 class UnreleasedSwitchTests(UnreleasedSandbox):
-    def test_off_by_default_and_gh_not_called(self):
-        self.rpv(ci_repo="owner/repo")
+    def test_explicit_false_turns_it_off_and_gh_not_called(self):
+        self.rpv(watch_unreleased=False, ci_repo="owner/repo")
         out, ws = self.check(60)
         self.assertEqual(out, [])
         self.assertEqual(self.calls, [])
@@ -265,7 +265,7 @@ class UnreleasedDocsTests(unittest.TestCase):
     def test_signals_doc_lists_the_kind(self):
         text = SIGNALS_DOC.read_text(encoding="utf-8")
         row = next(ln for ln in text.splitlines() if ln.startswith("| `watch-unreleased`"))
-        for must in ("10 мин", "`watch_unreleased`", "по умолчанию выключен", "раз в сутки", "строка очереди"):
+        for must in ("10 мин", "`watch_unreleased`", "включён по умолчанию", "раз в сутки", "будит событием"):
             self.assertIn(must, row)
 
 if __name__ == "__main__":
