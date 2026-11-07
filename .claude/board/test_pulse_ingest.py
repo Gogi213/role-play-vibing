@@ -89,6 +89,10 @@ class AcceptTests(IngestServer):
         self.assertEqual(conn.getresponse().status, 411)
         conn.close()
 
+    def test_big_body_413_is_stable(self):  # сервер сбрасывает тело в пределе: клиент получает ответ, а не обрыв (Windows)
+        for _ in range(8):
+            self.assertEqual(self.put("rpv", b"x" * (S.MAX_BODY * 2))[0], 413)
+
     def test_bad_names_are_404(self):
         for name in ("", "..", "a%2Fb", "a/b", "x" * 41, "%D0%B8%D0%BC%D1%8F", "a.b"):
             self.assertEqual(self.put(name, self.ok_data())[0], 404, name)
