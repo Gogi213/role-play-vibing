@@ -777,6 +777,7 @@ def triage_stalls(ws: dict, now, runs_path=None) -> list:
 def check_unreleased(ws: dict, now, gh=None) -> list:
     """TK-062 (В-24): очередь пуста, а в main влито и не выпущено — ключ `watch_unreleased` (умолчание выключен)."""
     text = UNR.unreleased_message(ws, now, gh)
+    UNR.record_open(ws, now, text)  # счётчик простоя берёт находку отсюда, второго предиката нет (TK-112)
     return [] if text == "" else [Finding("unreleased", str(ws.get(UNR.BRANCH_KEY) or "main"), text or "", unknown=text is None)]
 
 
