@@ -38,7 +38,7 @@ class ResearcherContractTests(unittest.TestCase):
     def test_judge_checks_researcher_contract(self):
         text = charter("judge.md")
         self.assertIn("Договор Исследователя", text)
-        self.assertIn("устав Исследователя", text)
+        self.assertIn("уставу Исследователя", text)
         self.assertEqual(text.count("Договор Исследователя"), 1)
 
 
