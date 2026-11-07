@@ -1,6 +1,7 @@
 """Сторож «влито, не выпущено» (TK-062, В-24): тикетов в работе нет дольше UNRELEASED_IDLE_MIN, а на origin/main (у GitHub,
 не в локальном main) есть коммиты после последнего тега `v*` с файлами вне docs/ и tools/ — очередь пуста, выпуск никто не заведёт. Вид `watch-unreleased`
-будит CEO; за ключом `watch_unreleased` в `.claude/rpv.json` (умолчание — выключен), репозиторий — `ci_repo`.
+будит CEO событием (`ceo_wake.EVENT_OF`). Репозиторий — `ci_repo`: задан — сигнал включён сам; ключ `watch_unreleased: false` в
+`.claude/rpv.json` выключает (TK-110, до этого умолчание было «выключен»).
 Находку собирает `watch.check_unreleased`; здесь только проверка без записи сигналов."""
 from __future__ import annotations
 
@@ -63,11 +64,12 @@ def has_release_files(compare: dict) -> bool:
 
 
 def unreleased_message(ws: dict, now, gh=None) -> "str | None":
-    """Текст находки; пустая строка — находки нет: ключ выключен (только `true`), нет `ci_repo`, очередь не пуста / пуста меньше
+    """Текст находки; пустая строка — находки нет: ключ выключен (не указан или `true` — включён, всё прочее выключает), нет `ci_repo`, очередь не пуста / пуста меньше
     порога, тегов нет, после последнего тега ничего не влито или влиты только docs/ и tools/. None — GitHub не ответил: «не знаю»,
     сторож не снимает метку суточного повтора. `gh(путь)` — вызов GitHub; ветку берём у репозитория (`default_branch`)."""
     gh = gh or CORE.gh_api
-    repo = P.setting("watch_unreleased", False) is True and P.setting("ci_repo", "")
+    switch = P.setting("watch_unreleased", None)  # не указан — включён там, где задан ci_repo; ровно false и любое не-true значение выключают
+    repo = (switch is None or switch is True) and P.setting("ci_repo", "")
     if not repo:
         ws.pop(IDLE_SINCE_KEY, None)
         return ""
