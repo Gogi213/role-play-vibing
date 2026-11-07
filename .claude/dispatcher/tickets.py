@@ -207,11 +207,11 @@ def cmd_comment(args) -> int:
     return 0
 
 
-def _regression(tid: str, cmd: str) -> bool:
+def _regression(tid: str, cmd: str, sha: str = "") -> bool:
     """V2-3: приёмка Судьи — только при зелёных проверках всех исправленных ошибок (`errors.py`). True — отказ (причина уже
     в stderr, в тикет ничего не пишем). Нет реестра ошибок или исправленных в нём — ничего не запускается. Проверка, что «не
     запустилась», — тоже отказ (не проверено), а повтор сверх потолка зовёт CEO (`SIG.append_ceo_inbox`)."""
-    err = errors_mod.gate(PROJECT_ROOT, tid, signal=SIG.append_ceo_inbox)
+    err = errors_mod.gate(PROJECT_ROOT, tid, signal=SIG.append_ceo_inbox, sha=sha)
     if err:
         print(f"{cmd}: {err}", file=sys.stderr)
     return bool(err)
@@ -332,7 +332,7 @@ def cmd_result(args) -> int:
         proof += ack
         if args.pr:
             return _accept_in_pr(args, path, role, why, ack)
-        if _regression(args.id, "result"):  # приёмка в PR проходит ту же проверку в cmd_accept
+        if _regression(args.id, "result", args.sha or ""):  # приёмка в PR проходит ту же проверку в cmd_accept
             return 1
     if args.result == "wait":
         return _wait_in_result(args, path, role, why, proof)
@@ -490,10 +490,10 @@ def _live_ack(args, tid: str) -> tuple[str, str]:
     return "", f" вживую: {rel}"
 
 
-def _proof_ack(tid: str) -> tuple[str, str]:
+def _proof_ack(tid: str, sha: str = "") -> tuple[str, str]:
     """Ярлыки доказательства договора (TK-050): приёмка сама перезапускает его команды, код не 0 — отказ (`tickets_proof`)."""
     path = TICKETS_DIR / f"{tid}.md"
-    return proof_mod.proof_ack(tid, T.read_ticket(path), PROJECT_ROOT) if path.exists() else ("", "")
+    return proof_mod.proof_ack(tid, T.read_ticket(path), PROJECT_ROOT, sha) if path.exists() else ("", "")
 
 
 def _tail_ack(args, tid: str) -> tuple[str, str, str]:
@@ -606,7 +606,7 @@ def cmd_accept(args) -> int:
     if errs:
         print(f"accept: {errs[0]}", file=sys.stderr)
         return 1
-    if _regression(args.id, "accept"):
+    if _regression(args.id, "accept", args.sha):
         return 1
     if tail_ceo:
         SIG.append_ceo_inbox(args.id, "хвост", tail_ceo)

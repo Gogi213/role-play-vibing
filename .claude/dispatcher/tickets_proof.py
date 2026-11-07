@@ -3,7 +3,8 @@
 Пункт договора несёт ярлык — на чём проверен: `[чтение кода]` · `[тест: <команда>]` · `[запуск: <команда>]` · `[вживую]`
 (последний разбирает `tickets._live_ack`). Команда — в тех же рамках, что у проверок ошибок (`errors.check_argv`: python|bash
 скрипт из git или `-m pytest|unittest <тест из git>`); в ярлыке — до `]` или в обратных кавычках: `[тест: `python -m pytest a.py -k "x[1]"`]`.
-Приёмка перезапускает команды сама, в копии тикета `.claude/worktrees/<ID>` (нет копии — в корне проекта): код выхода не 0 —
+Приёмка перезапускает команды сама, в копии тикета `.claude/worktrees/<ID>` (нет копии — во временной копии головы PR,
+`errors.accept_dir`, нет и её — в корне проекта): код выхода не 0 —
 отказ; ярлык «тест» или «запуск» без команды — тоже отказ. Прогон идёт при каждой приёмке заново, поэтому последний прогон — всегда
 тот, что решает: более свежий провал отменяет прежний успех. Договор — последняя запись исполнителя, где есть ярлык доказательства;
 договор без ярлыков (старый) приёмку не меняет. Команда — только на тесты самой правки: полный прогон проекта (pytest без пути, по
@@ -62,8 +63,9 @@ def contract_labels(tkt) -> list[tuple[str, str]]:
     return []
 
 
-def proof_ack(tid: str, tkt, root: Path) -> tuple[str, str]:
-    """Приёмка: перезапуск команд договора. → (отказ, пометка для лога); договор без ярлыков — ("", "")."""
+def proof_ack(tid: str, tkt, root: Path, sha: str = "") -> tuple[str, str]:
+    """Приёмка: перезапуск команд договора. → (отказ, пометка для лога); договор без ярлыков — ("", "").
+    `sha` — голова PR: без копии тикета команды идут в её временной копии (корень может стоять на чужой ветке — E-039)."""
     labels = contract_labels(tkt)
     if not labels:
         return "", ""
@@ -72,9 +74,13 @@ def proof_ack(tid: str, tkt, root: Path) -> tuple[str, str]:
         return f"в договоре ярлык [{bare[0]}] без команды проверки: {HINT}", ""
     if dead := errors_mod.dead_copy(root, tid):
         return errors_mod.dead_copy_refusal(dead), ""
-    wt = root / ".claude" / "worktrees" / tid
-    cwd = wt if wt.is_dir() else root
     cmds = list(dict.fromkeys(cmd for k, cmd in labels if cmd))
+    with errors_mod.accept_dir(root, tid, sha) as cwd:
+        return _run_contract(cmds, cwd)
+
+
+def _run_contract(cmds: list[str], cwd: Path) -> tuple[str, str]:
+    """Команды договора по очереди в `cwd` → (отказ, пометка), как у `proof_ack`."""
     for cmd in cmds:
         if full_run(cmd):
             return f"команда договора `{cmd}` — полный прогон проекта: {full_run_hint()}", ""

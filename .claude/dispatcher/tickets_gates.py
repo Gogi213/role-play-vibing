@@ -64,7 +64,7 @@ def run(args, tk, collect_all: bool = False, proof: bool = True, heur: list | No
     nerr = "" if "числа" in skipped else nerr
     terr = "" if "хвосты" in skipped else terr
     errs = [fperr, derr, nerr, terr, tk._left_ack(args.id), lerr]
-    perr, pack = ("", "") if any(errs) and not collect_all or not proof else tk._proof_ack(args.id)
+    perr, pack = ("", "") if any(errs) and not collect_all or not proof else tk._proof_ack(args.id, getattr(args, "sha", None) or "")
     marks = f" ложное срабатывание: {fp} ({', '.join(skipped)})" if skipped else ""
     return [e for e in errs + [perr] if e], ack + nack + tack + lack + pack + marks, tail_ceo
 
@@ -90,9 +90,9 @@ def dry_run(args, tk, slug: str = "", head_err: str = "") -> int:
     heur: list[str] = []
     errs, _, _ = run(args, tk, collect_all=True, heur=heur)
     found += errs
-    wt = tk.PROJECT_ROOT / ".claude" / "worktrees" / args.id
     infra = []
-    bad = errors_mod.run_all(tk.PROJECT_ROOT, wt if wt.is_dir() else tk.PROJECT_ROOT, infra=infra)
+    with errors_mod.accept_dir(tk.PROJECT_ROOT, args.id, getattr(args, "sha", None) or "") as cwd:   # как в настоящей приёмке (E-039)
+        bad = errors_mod.run_all(tk.PROJECT_ROOT, cwd, infra=infra)
     if bad:
         found.append("регрессия — упали проверки исправленных ошибок: "
                      + "; ".join(f"{eid} «{title}»: {note.splitlines()[0] if note else ''}" for eid, title, note in bad[:5]))
