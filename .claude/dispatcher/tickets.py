@@ -70,6 +70,7 @@ import tickets_numbers as numbers_mod  # noqa: E402
 import precheck  # noqa: E402
 import tickets_proof as proof_mod  # noqa: E402
 import tickets_gates as gates_mod  # noqa: E402
+import turn as TURN  # noqa: E402
 from tickets_cli import build_parser  # noqa: E402
 
 # Проект и тикеты берутся у диспетчера (CFG.configure_project при импорте — по --project/RPV_PROJECT/CLAUDE_PROJECT_DIR/поиску вверх);
@@ -281,6 +282,12 @@ def _wait_in_result(args, path: Path, role: str, why: str, proof: str) -> int:
     return rc
 
 
+def _tail_turn(path: Path, tail_ceo: str) -> None:
+    """TK-127: хвост CEO после приёмки — ход Судье (заводит тикетом, В-35); строка в очереди CEO остаётся «к сведению»."""
+    if tail_ceo:
+        TURN.give_turn(path, T.read_ticket(path), "хвост", f"принято с хвостом для CEO: «{tail_ceo[:300]}».")
+
+
 def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_ceo: str) -> None:
     """Запись итога в лог, номер PR в шапку, хвост CEO в очередь и ход по таблице маршрутов."""
     with T.ticket_lock(path):
@@ -293,6 +300,8 @@ def _write_result(args, path: Path, role: str, tkt, why: str, proof: str, tail_c
     upd = routes_mod.route(role, args.result, tkt.owner, tkt.header.get("reviewer", ""),
                            owner_last=routes_mod.last_owner_result(tkt) if args.result == "accept" else "", executor=tkt.executor)
     T.write_header_updates(path, upd)
+    if not upd.get("next"):
+        _tail_turn(path, tail_ceo)
     print(f"{args.id}: итог {args.result} → status: {upd['status']}" + (f", next: {upd['next']}" if upd.get("next") else ""))
 
 
@@ -612,6 +621,7 @@ def cmd_accept(args) -> int:
             acc.pop(int(args.pr), None)
             T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "done", "wait_for": "",
                                          "on_met": "", "next": ""})
+        _tail_turn(path, tail_ceo)
         print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} (влит) → status: done")
         return 0
     with T.ticket_lock(path):
@@ -622,6 +632,7 @@ def cmd_accept(args) -> int:
         # ждём влития: после merged диспетчер разбудит владельца (done или следующий шаг); Судью повторно не будим
         T.write_header_updates(path, {"accepted": merge_rule.format_accepted(acc), "status": "waiting",
                                      "wait_for": f"merged:{slug}#{args.pr}", "on_met": "", "next": ""})
+    _tail_turn(path, tail_ceo)
     print(f"{args.id}: принято PR #{args.pr}@{args.sha[:7]} → status: waiting, wait_for: merged:{slug}#{args.pr}")
     return 0
 

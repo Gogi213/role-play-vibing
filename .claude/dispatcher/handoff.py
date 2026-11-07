@@ -12,6 +12,7 @@ import project_paths as CFG  # noqa: E402
 import project as P  # noqa: E402
 import signals as SIG  # noqa: E402
 import ticket as T  # noqa: E402
+import turn as TURN  # noqa: E402
 from signals import MAX_REVIEW_RETURNS, WAIT_NOTICE_EVERY, _review_returns  # noqa: E402
 
 
@@ -53,7 +54,7 @@ def expire_ceo_handoff(tkt: T.Ticket, state: dict, running) -> None:
     _drop_ceo_handoff(state, tkt.id)
 
 
-def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
+def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now, path: "Path | None" = None) -> bool:
     """Передача CEO (`--next ceo`) — ход, пока CEO не ответил: метка живёт до первой записи CEO после неё (или смены
     статуса на не-ожидание). Без ответа дольше INVARIANT_GRACE_S — одна повторная строка CEO, владельца не будим."""
     handoffs = state.get("ceo_handoffs") or {}
@@ -73,12 +74,17 @@ def _ceo_handoff_pending(tkt: T.Ticket, state: dict, now) -> bool:
         reminded = state.setdefault("ceo_handoff_reminded", {})
         if reminded.get(tkt.id) != at:
             reminded[tkt.id] = at
-            SIG.append_ceo_inbox(tkt.id, "ждёт-ceo", f"передача CEO без ответа дольше {int(INVARIANT_GRACE_S // 60)} мин "
+            mins = int(INVARIANT_GRACE_S // 60)
+            if path is not None and TURN.give_turn(path, tkt, "ждёт-ceo", f"передача CEO без ответа дольше {mins} мин.", now):
+                _drop_ceo_handoff(state, tkt.id)  # TK-127: мяч у Судьи, CEO его не держит
+                SIG.append_ceo_inbox(tkt.id, "ждёт-ceo", f"передача CEO без ответа дольше {mins} мин (к сведению: ход отдан Судье)", now)
+                return True
+            SIG.append_ceo_inbox(tkt.id, "ждёт-ceo", f"передача CEO без ответа дольше {mins} мин "
                              f"(владельца не будим, ход за CEO)", now)
     return True
 
 
-def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | None":
+def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None, path: "Path | None" = None) -> "str | None":
     """TK-076 п.6: у открытого тикета есть ход — роль запущена / next / годный wait_for / передача CEO. Здесь —
     тикет, которого decide() не будит, а хода нет дольше INVARIANT_GRACE_S (от `updated`): причина или None."""
     if tkt.next_role or tkt.status not in ("waiting", "in_review"):
@@ -91,7 +97,7 @@ def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | N
             return None
     except Exception:
         return None
-    if state is not None and _ceo_handoff_pending(tkt, state, now):
+    if state is not None and _ceo_handoff_pending(tkt, state, now, path):
         return None
     if tkt.status == "waiting":
         spec = (tkt.header.get("wait_for") or "").strip()
@@ -107,7 +113,7 @@ def _no_move_reason(tkt: T.Ticket, now, state: "dict | None" = None) -> "str | N
 
 def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ticket":
     """Нарушение инварианта: будим владельца (status → in_progress, запись диспетчера) + строка CEO (раз на эпизод)."""
-    reason = _no_move_reason(tkt, now, state)
+    reason = _no_move_reason(tkt, now, state, path)
     if not reason:
         return tkt
     AL.STALLED.append(AL._stall_title(tkt))
@@ -119,14 +125,16 @@ def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ti
                          + (f"владелец {tkt.owner} разбужен" if tkt.owner in P.ROLES else "владельца-роли нет, нужен CEO"), now)
     if tkt.owner not in P.ROLES:
         return tkt
-    T.write_header_updates(path, {"status": "in_progress"}, now=now)
-    T.append_log(path, "dispatcher", f"инвариант «у открытого тикета есть ход»: {reason} — владелец разбужен "
+    turn = bool(TURN.target("нет-хода", tkt))  # TK-127: ход владельцу — и `next`, и запись «почему ход тебе»
+    T.write_header_updates(path, {"status": "in_progress", **({"next": tkt.owner} if turn else {})}, now=now)
+    T.append_log(path, "dispatcher", (f"{TURN.MARK} (нет-хода): " if turn else "")
+                 + f"инвариант «у открытого тикета есть ход»: {reason} — владелец разбужен "
                  f"(status: in_progress). Следующий ход обязателен: работа / `--next <роль>` / "
                  f"`tickets.py wait <ID> <форма>` / вопрос владельцу.", now=now)
     return T.read_ticket(path)
 
 
-def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
+def notify_wait_cycle(tkt: T.Ticket, state: dict, now, path: "Path | None" = None) -> None:
     """TK-076 п.7: уже существующий цикл ожиданий ticket:<ID> → строка CEO (раз в сутки, от тикета с наименьшим ID)."""
     if tkt.status != "waiting":
         return
@@ -145,5 +153,7 @@ def notify_wait_cycle(tkt: T.Ticket, state: dict, now) -> None:
                 return
         except ValueError:
             pass
-    SIG.append_ceo_inbox(tkt.id, "цикл-ожиданий", " -> ".join(cycle) + " — каждый ждёт следующего, никто не пойдёт; разорвать", now)
+    text = " -> ".join(cycle) + " — каждый ждёт следующего, никто не пойдёт"
+    turn = path is not None and TURN.give_turn(path, tkt, "цикл-ожиданий", text + ".", now)  # TK-127: разрывает Судья
+    SIG.append_ceo_inbox(tkt.id, "цикл-ожиданий", text + ("; к сведению: ход отдан Судье" if turn else "; разорвать"), now)
     notified[tkt.id] = T.now_iso(now)
