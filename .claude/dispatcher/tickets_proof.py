@@ -70,6 +70,8 @@ def proof_ack(tid: str, tkt, root: Path) -> tuple[str, str]:
     bare = [k for k, cmd in labels if k in NEED_COMMAND and not cmd]
     if bare:
         return f"в договоре ярлык [{bare[0]}] без команды проверки: {HINT}", ""
+    if dead := errors_mod.dead_copy(root, tid):
+        return errors_mod.dead_copy_refusal(dead), ""
     wt = root / ".claude" / "worktrees" / tid
     cwd = wt if wt.is_dir() else root
     cmds = list(dict.fromkeys(cmd for k, cmd in labels if cmd))
