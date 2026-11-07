@@ -23,9 +23,9 @@ FIX = {"dispatcher_dead": "перезапускает CEO", "unserved": "раз�
        "merged_unreleased": "решает CEO", "ci_red": "чинит Инженер"}
 ASK_MARK = re.compile(r"\[итог: ask-owner\]\s*(.*?)(?:\s+повод:.*)?$", re.S)
 LIST_MAX = 12
-SHORT, LEFT_SHORT, LEFT_MAX, DONE_SHOWN = 40, 28, 4, 3  # знаков «Что» · знаков шага в «Осталось» · шагов в «Осталось» · принятых строк в таблице
+SHORT, LEFT_SHORT, LEFT_MAX, DONE_SHOWN = 120, 60, 4, 3  # знаков «Что» · знаков шага в «Осталось» · шагов в «Осталось» · принятых строк в таблице
 SERVICE = re.compile(r"^(?:(?:Хвост|Правка|Возврат|Доработка)\s+)?TK-\d+\s*[:—–-]\s*")  # служебный префикс заголовка: «Хвост TK-112: …»
-WAIT_TEXT = {"ticket": "ждёт {1}", "merged": "ждёт слияния", "ci": "ждёт CI", "ci-run": "ждёт CI"}  # по первой части parse_wait_for
+WAIT_TEXT = {"ticket": "ждёт {1}", "merged": "ждёт слияния", "ci": "ждёт CI", "ci-run": "ждёт CI", "job": "ждёт задание на {1}"}  # по первой части parse_wait_for; file, host и at — в `_waits_on` (имя файла, юнит, местное время)
 MOVE_WARN_MIN, MOVE_BAD_MIN = 15, 30  # «стоит N мин» жёлтым / красным, минуты (ключи `.claude/rpv.json`, docs/pulse.md)
 
 
@@ -242,9 +242,18 @@ def _of_goal(tkt, gid: str) -> bool:
 
 
 def _waits_on(tkt) -> str:
-    """«ждёт TK-N» (wait_for вида ticket:ID) · «ждёт слияния» · «ждёт CI» · иначе «ждёт результата»."""
+    """Чего ждёт `waiting` тикет, по форме `wait_for`: «ждёт TK-N» · «ждёт слияния» · «ждёт CI» · «ждёт файл имя» · «ждёт процесс юнит на хост» ·
+    «ждёт итог расчёта на хост» · «ждёт задание на хост» · «ждёт до дд.мм чч:мм»; пусто или форма не понята — «ждёт, не сказано чего»."""
     parsed = T.parse_wait_for(str(tkt.header.get("wait_for") or ""))
-    return WAIT_TEXT.get(parsed[0], "ждёт результата").format(*parsed) if parsed else "ждёт результата"
+    if not parsed:
+        return "ждёт, не сказано чего"
+    if parsed[0] == "file":
+        return f"ждёт файл {parsed[1].replace(chr(92), '/').rsplit('/', 1)[-1]}"
+    if parsed[0] == "host":
+        return f"ждёт процесс {parsed[3]} на {parsed[1]}" if parsed[2] == "unit" else f"ждёт итог расчёта на {parsed[1]}"
+    if parsed[0] == "at":
+        return f"ждёт до {parsed[1].astimezone():%d.%m %H:%M}"
+    return WAIT_TEXT[parsed[0]].format(*parsed)
 
 
 def _live_phrase(tkt, role: str) -> str:

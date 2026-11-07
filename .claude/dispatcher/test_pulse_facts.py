@@ -190,11 +190,24 @@ class StatusTests(FactsBase):
     def test_short_title_drops_service_prefix_and_cuts_by_word(self):
         self.assertEqual(F.short("Хвост TK-112: нестабильный test"), "Нестабильный test")
         self.assertEqual(F.short("TK-5 — выпуск"), "Выпуск")
-        long = F.short("Правка настроек для проверки длинного заголовка тикета, который не влезает")
+        long = F.short("Правка настроек для проверки длинного заголовка тикета, который не влезает " * 2)
         self.assertLessEqual(len(long), F.SHORT)
         self.assertTrue(long.endswith("…") and not long.endswith(" …"), long)
         self.assertEqual(F.short("Пульс: таблица", 40), "Пульс: таблица", "тематический префикс — не служебный")
         self.assertEqual(F.short("x" * 60, 10), "X" + "x" * 8 + "…", "слова нет — режем по знакам")
+
+    def test_title_limits_are_120_for_what_and_60_for_left_steps(self):
+        """TK-133 (В-66): заголовок в «Что» не резали до 40 знаков — таблица переносит строкой."""
+        self.assertEqual((F.SHORT, F.LEFT_SHORT), (120, 60))
+        mid = " ".join(["слово"] * 16)  # 95 знаков
+        self.assertEqual(F.short(mid), F.short(mid)[:1].upper() + mid[1:], "95 знаков — без обрезки")
+        self.assertFalse(F.short(mid).endswith("…"))
+        cut = F.short(" ".join(["слово"] * 30))  # 179 знаков
+        self.assertTrue(len(cut) <= 120 and cut.endswith("…") and len(cut) > 100, len(cut))
+        steps = [{"n": 1, "mark": "run", "title": " ".join(["шаг"] * 14)}, {"n": 2, "mark": "next", "title": " ".join(["шаг"] * 30)}]  # 55 и 119 знаков
+        left = self.status(plan=steps)["left"].split(", ")
+        self.assertEqual(len(left[0]), 55, "55 знаков в «Осталось» не режем")
+        self.assertTrue(len(left[1]) <= 60 and left[1].endswith("…") and len(left[1]) > 40, left[1])
 
     def test_rows_are_tickets_of_the_goal_only_and_titles_are_short(self):
         a = self.ticket(status="in_progress", title="Хвост TK-081: " + "слово " * 12)
@@ -241,10 +254,21 @@ class StatusTests(FactsBase):
 
     def test_waits_on_ticket_from_wait_for_and_other_forms(self):
         base = "Ссылка на задачу владельца: G-001\n"
-        ids = [T.read_ticket(T.create_ticket(self.tickets_dir, "engineer", title, "judge", base, spec, self.now, status="waiting")).id
-               for title, spec in (("ждёт", "ticket:TK-005"), ("слияние", "merged:o/r#5"), ("файл", "file:/tmp/x"))]
-        self.assertEqual(self.where(at=self.now + timedelta(hours=2)), [(ids[0], "ждёт TK-005", "next", ""), (ids[1], "ждёт слияния", "next", ""),
-                                                                       (ids[2], "ждёт результата", "next", "")], "ожидание не «стоит»")
+        at = (self.now + timedelta(hours=5)).astimezone()
+        forms = (("ticket:TK-005", "ждёт TK-005"), ("merged:o/r#5", "ждёт слияния"), ("ci:o/r#5", "ждёт CI"), ("ci-run:o/r#5", "ждёт CI"),
+                 ("file:/tmp/x", "ждёт файл x"), (r"file:C:\data\out\calc.json", "ждёт файл calc.json"),
+                 ("host:sofia:unit:rpv-pulse", "ждёт процесс rpv-pulse на sofia"), ("host:sofia:/opt/rpv/out.json", "ждёт итог расчёта на sofia"),
+                 ("job:sofia:calc-7", "ждёт задание на sofia"), (f"at:{T.now_iso(at)}", f"ждёт до {at:%d.%m %H:%M}"), ("", "ждёт, не сказано чего"))
+        ids = [T.read_ticket(T.create_ticket(self.tickets_dir, "engineer", f"ждёт {i}", "judge", base, spec, self.now, status="waiting")).id
+               for i, (spec, _) in enumerate(forms)]
+        self.assertEqual(self.where(at=self.now + timedelta(hours=2)), [(tid, text, "next", "") for tid, (_, text) in zip(ids, forms)],
+                         "ожидание не «стоит»; «ждёт результата» нигде нет")
+
+    def test_waits_on_unknown_form_is_not_said_as_a_result(self):
+        tid = self.ticket(status="waiting")
+        path = self.tickets_dir / f"{tid}.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("wait_for: ", "wait_for: что-то странное", 1), encoding="utf-8")
+        self.assertEqual(self.where(), [(tid, "ждёт, не сказано чего", "next", "")])
 
     def test_queued_step_waits_on_nearest_unaccepted_step_before_it(self):
         self.plan_goal()
