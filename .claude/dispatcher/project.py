@@ -58,17 +58,19 @@ def set_root(root) -> None:
 def settings(root=None) -> dict:
     """Настройки проекта `<проект>/.claude/rpv.json` (объект JSON); проект — `root`, иначе заданный `set_root`. Нет
     файла — {}; не читается или не объект — {} и строка в stderr один раз на версию файла (страж удаления читает его сам
-    и при порче отказывает — fail-closed). Перечитывается по времени изменения: правка CEO действует без перезапуска."""
+    и при порче отказывает — fail-closed). Перечитывается по времени изменения и размеру: правка CEO действует без
+    перезапуска, а две записи в одну отметку времени (часы Windows ~15 мс) не отдают старое."""
     root = Path(root) if root else _ROOT
     if root is None:
         return {}
     path = root / ".claude" / SETTINGS_NAME
     try:
-        mtime = path.stat().st_mtime_ns
+        st = path.stat()
+        version = (st.st_mtime_ns, st.st_size)
     except OSError:
         return {}
     hit = _CACHE.get(str(path))
-    if hit and hit[0] == mtime:
+    if hit and hit[0] == version:
         return hit[1]
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -77,7 +79,7 @@ def settings(root=None) -> dict:
     except (OSError, ValueError) as e:
         print(f"[rpv] {path}: не прочитан ({type(e).__name__}: {e}) — настройки проекта по умолчанию", file=sys.stderr)
         data = {}
-    _CACHE[str(path)] = (mtime, data)
+    _CACHE[str(path)] = (version, data)
     return data
 
 
