@@ -18,6 +18,14 @@ class FactsBase(GoalSandbox):
     def log(self, tid, author, text, at=None):
         T.append_log(self.tickets_dir / f"{tid}.md", author, text, now=at or self.now)
 
+    def plan_goal(self, n=3, gid="G-001"):
+        path = Path(self.root.name) / ".claude" / "goals" / f"{gid}.md"
+        steps = "\n".join(f"{i}. engineer | Заголовок {i} | готово {i}" for i in range(1, n + 1))
+        path.write_text(path.read_text(encoding="utf-8") + f"\n## План шагов\n{steps}\n", encoding="utf-8")
+
+    def step(self, n, total=3, **kw):
+        return self.ticket(desc=f"Шаг {n} из {total} цели G-001.", **kw)
+
 
 class AgoTests(unittest.TestCase):
     def test_human_durations(self):
@@ -66,14 +74,6 @@ class GoalCardTests(FactsBase):
 
 class PlanTests(FactsBase):
     """TK-108 (В-53): план цели по шагам, движение у текущего шага, числа «шаг N из M» из того же списка."""
-
-    def plan_goal(self, n=3, gid="G-001"):
-        path = Path(self.root.name) / ".claude" / "goals" / f"{gid}.md"
-        steps = "\n".join(f"{i}. engineer | Заголовок {i} | готово {i}" for i in range(1, n + 1))
-        path.write_text(path.read_text(encoding="utf-8") + f"\n## План шагов\n{steps}\n", encoding="utf-8")
-
-    def step(self, n, total=3, **kw):
-        return self.ticket(desc=f"Шаг {n} из {total} цели G-001.", **kw)
 
     def plan(self, state=None, active=(), owner=(), runs=(), at=None):
         return F.plan_of("G-001", self.read(), state or {}, list(active), list(owner), list(runs), at or self.now)
@@ -245,6 +245,28 @@ class StatusTests(FactsBase):
                for title, spec in (("ждёт", "ticket:TK-005"), ("слияние", "merged:o/r#5"), ("файл", "file:/tmp/x"))]
         self.assertEqual(self.where(at=self.now + timedelta(hours=2)), [(ids[0], "ждёт TK-005", "next", ""), (ids[1], "ждёт слияния", "next", ""),
                                                                        (ids[2], "ждёт результата", "next", "")], "ожидание не «стоит»")
+
+    def test_queued_step_waits_on_nearest_unaccepted_step_before_it(self):
+        self.plan_goal()
+        first = self.step(1, status="done", accepted_at=self.now)
+        second = self.step(2, status="in_progress")
+        third = self.step(3, status="todo")
+        state = {"active_runs": {second: {"role": "engineer", "started": T.now_iso(self.now)}}}
+        plan = F.plan_of("G-001", self.read(), state, [], [], [], self.now)
+        self.assertEqual(self.where(state=state, plan=plan), [(first, "принят 12:00", "done", ""), (second, "Инженер делает", "run", ""),
+                                                              (third, f"ждёт {second}", "next", "")])
+
+    def test_first_unaccepted_step_in_queue_does_not_wait(self):
+        self.plan_goal()
+        self.step(1, status="done", accepted_at=self.now)
+        second, third = self.step(2, status="todo"), self.step(3, status="todo")
+        plan = F.plan_of("G-001", self.read(), {}, [], [], [], self.now)
+        self.assertEqual([r[:2] for r in self.where(plan=plan)][1:], [(second, "в очереди"), (third, f"ждёт {second}")])
+
+    def test_blocked_is_not_with_the_judge(self):
+        blocked, review = self.ticket(status="blocked"), self.ticket(status="in_review", owner="judge")
+        self.log(blocked, "engineer", "заметка", self.now - timedelta(minutes=40))
+        self.assertEqual(self.where(), [(blocked, "ждёт CEO", "stuck", "bad"), (review, "у Судьи", "run", "")])
 
     def test_asks_owner(self):
         tid = self.ticket(status="needs_owner")

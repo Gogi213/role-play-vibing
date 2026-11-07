@@ -250,7 +250,7 @@ def _waits_on(tkt) -> str:
 def _live_phrase(tkt, role: str) -> str:
     """Кто сейчас держит живой тикет, до пяти слов: «у Судьи» · «в очереди» · «Инженер правит после возврата» · «Инженер делает»."""
     role = (role or str(tkt.owner)).strip().lower()
-    if role == "judge" or tkt.status in ("in_review", "blocked"):
+    if role == "judge" or tkt.status == "in_review":
         return "у Судьи"
     if tkt.status == "todo" and role == tkt.owner:
         return "в очереди"
@@ -261,9 +261,20 @@ def _live_phrase(tkt, role: str) -> str:
     return f"{name} делает" if name else "в работе"
 
 
-def _where(tkt, state: dict, owner_ids: set, stuck_text: str, runs: list, now: datetime) -> tuple:
-    """(отметка, «Где сейчас», уровень, минут без движения): принят чч:мм · ждёт вашего ответа · ждёт TK-N · стоит N мин (жёлтое/красное от
-    порогов TK-108; очередь и ожидание не «стоят») · кто держит. Отметка — из PLAN_MARKS страницы: done / ask / next / stuck / run."""
+def _blockers(plan: list) -> dict:
+    """{тикет шага: тикет ближайшего предыдущего не принятого шага} — «ждёт TK-N» по порядку плана (номер шага `n`); шаг без тикета пропущен."""
+    out, prev = {}, ""
+    for row in sorted((r for r in plan if r["n"] and r["mark"] != "done" and r.get("ticket")), key=lambda r: r["n"]):
+        if prev:
+            out[row["ticket"]] = prev
+        prev = row["ticket"]
+    return out
+
+
+def _where(tkt, state: dict, owner_ids: set, stuck_text: str, runs: list, now: datetime, after: str = "") -> tuple:
+    """(отметка, «Где сейчас», уровень, минут без движения): принят чч:мм · ждёт вашего ответа · ждёт CEO (blocked) · ждёт TK-N (wait_for, а
+    в очереди — предыдущий шаг плана `after`) · стоит N мин (жёлтое/красное от порогов TK-108; очередь и ожидание не «стоят») · кто держит.
+    Отметка — из PLAN_MARKS страницы: done / ask / next / stuck / run."""
     if tkt.status == "done":
         at = _accepted_text(_accepted_at(tkt, now), now)
         return "done", f"принят {at}" if at else "принят", "", None
@@ -271,13 +282,17 @@ def _where(tkt, state: dict, owner_ids: set, stuck_text: str, runs: list, now: d
         return "ask", "ждёт вашего ответа", "", None
     named = bool(re.search(rf"\b{re.escape(tkt.id)}\b", stuck_text))
     minutes, level = _idle(tkt, runs, state, now)
+    if tkt.status == "blocked":
+        return "stuck", "ждёт CEO", level, minutes
     if tkt.status == "waiting" and not named:
         return "next", _waits_on(tkt), "", None
     if named or (level and tkt.status != "todo"):
         return "stuck" if named else "run", f"стоит {ago(minutes * 60)}" if minutes is not None else "застряло", level or "bad", minutes
     running = (state.get("active_runs") or {}).get(tkt.id) or {}
     phrase = _live_phrase(tkt, str(running.get("role") or ""))
-    return ("next" if phrase == "в очереди" else "run"), phrase, "", minutes
+    if phrase == "в очереди":
+        return "next", f"ждёт {after}" if after else phrase, "", minutes
+    return "run", phrase, "", minutes
 
 
 def _hold(ask: dict | None, fix: dict | None, rows: list) -> str:
@@ -305,9 +320,9 @@ def status_of(gid: str, tickets, state: dict, active: list, owner_items: list, r
     own = sorted((t for t in tickets if t.status != "stopped" and (_of_goal(t, gid) if gid else t.status in T.OPEN_STATUSES)), key=lambda t: t.id)
     done, live = [t for t in own if t.status == "done"], [t for t in own if t.status != "done"]
     owner_ids, stuck_text = {t for t, _ in owner_items}, " ".join(d for _, d, _ in active)
-    rows = []
+    rows, blockers = [], _blockers(plan)
     for tkt in done[-DONE_SHOWN:] + live[:LIST_MAX]:
-        mark, where, level, minutes = _where(tkt, state, owner_ids, stuck_text, runs, now)
+        mark, where, level, minutes = _where(tkt, state, owner_ids, stuck_text, runs, now, blockers.get(tkt.id, ""))
         row = {"ticket": tkt.id, "title": short(str(tkt.header.get("title") or tkt.id)), "mark": mark, "where": where}
         rows.append(({**row, "level": level} if level else row, minutes))
     out = {"rows": [r for r, _ in rows], "more": max(0, len(done) - DONE_SHOWN), "left": _left(plan, [{"ticket": t.id} for t in live]),
