@@ -30,6 +30,8 @@ STATES = ("ok", "owner", "stuck")
 FILTERS = ("all", "ok", "owner", "stuck")  # переключатель страницы: Все | Идёт | Нужен ответ | Застряло
 CLASSES = ("work", "none", "owner", "stuck")
 PLAN_MARKS = ("done", "run", "ask", "stuck", "next")  # ✓ принят · ◐ идёт · ? ждёт слова владельца · ! застряло · ○ впереди
+SILENCE = ("диспетчер не отвечает", "перезапускает CEO")  # файл устарел: что писать и кто чинит (страница читает файл на машине проекта)
+NO_DATA = ("нет данных", "проверяет CEO")  # то же для страницы на сервере: проект присылает файл сам (TK-113), о диспетчере она не знает
 
 
 def plural(n: int, one: str, few: str, many: str) -> str:
@@ -183,14 +185,23 @@ def _unreadable(name: str, now: datetime) -> dict:
             "done_today": [], "queue": [], "day": {}, "plan": []}
 
 
-def normalise(name: str, raw, now: datetime) -> dict:
+def stamp_of(raw):
+    """Время `generated` читаемого `pulse.json` шага 1; не объект, `generated` не время, `state` не из списка или `cells` не список —
+    None (файл не читается). Один разбор для страницы и приёма."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("generated"), str):
+        return None
+    stamp = P.parse_time(raw["generated"], strict=False)
+    return stamp if stamp is not None and raw.get("state") in STATES and isinstance(raw.get("cells"), list) else None
+
+
+def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
     """Один вид проекта: name, state, phrase, now, pause, cells [(класс, запусков)] ×96, idx (текущая клетка), age_s.
     Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated; версия 2 — ещё goal, job, ask, fix, done_today, queue,
     day, plan, cells[].runs; версия 1 их не имеет — карточка без них). Нет файла, `state` не из списка, `cells` не список или
     `generated` не время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после
-    записи — stuck, прежние «сейчас» и пауза убраны. Сутки и клетка — по поясу `generated` (поясу проекта), не сервера."""
-    stamp = P.parse_time(raw.get("generated"), strict=False) if isinstance(raw, dict) and isinstance(raw.get("generated"), str) else None
-    if stamp is None or stamp.tzinfo is None or raw.get("state") not in STATES or not isinstance(raw.get("cells"), list):
+    записи — stuck, прежние «сейчас» и пауза убраны (`silence` — текст и кто чинит). Сутки и клетка — по поясу `generated` (поясу проекта), не сервера."""
+    stamp = stamp_of(raw)
+    if stamp is None:
         return _unreadable(name, now)
     here = now.astimezone(stamp.tzinfo)
     age = max(0, int((now - stamp).total_seconds()))
@@ -207,17 +218,20 @@ def normalise(name: str, raw, now: datetime) -> dict:
         first = view["idx"] + 1 if same_day else 0
         if not same_day:
             view.update(cells=[("none", 0)] * CELLS, runs=[[] for _ in range(CELLS)], why=[""] * CELLS)
-        silent = f"диспетчер не отвечает {ago(age)}"
+        silent = f"{silence[0]} {ago(age)}"
         view.update(state="stuck", phrase=f"Застряло: {name} — {silent}.", now="", pause="", idx=_slot(here), job=None,
-                    fix={"text": silent, "who": "перезапускает CEO"})
+                    fix={"text": silent, "who": silence[1]})
         for i in range(first, view["idx"] + 1):
             view["cells"][i] = ("stuck", 0)
     return view
 
 
-def load_all(root, now: datetime | None = None, fetch=urllib.request.urlopen) -> list:
+def load_all(root, now: datetime | None = None, fetch=urllib.request.urlopen, extra: dict | None = None, silence: tuple = SILENCE) -> list:
+    """Виды проектов: `pulse_projects` из rpv.json, затем `extra` {имя: путь|URL} (присланные на сервер, TK-113), которых там нет."""
     now = now or datetime.now().astimezone()
-    return [normalise(name, read(spec, fetch), now) for name, spec in projects_of(root).items()]
+    configured = projects_of(root)
+    specs = {**configured, **{k: v for k, v in (extra or {}).items() if k not in configured}}
+    return [normalise(name, read(spec, fetch), now, silence) for name, spec in specs.items()]
 
 
 def ask_text(view: dict) -> str:

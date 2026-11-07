@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Пульс (В-38), шаг 2; v2 — TK-105 (В-50, В-51): страница «Пульс» — крошечный сервер на stdlib, один файл.
 
-    pulse_server.py --project <проект> [--host 127.0.0.1] [--port 8787] [--token <ключ>]
+    pulse_server.py --project <проект> [--host 127.0.0.1] [--port 8787] [--token <ключ>] [--inbox <каталог> --write-token <ключ>]
 
 Проекты и откуда читать их `pulse.json` (путь или URL) — ключ `pulse_projects` в `<проект>/.claude/rpv.json`. Страница живёт по
 адресу `/<ключ>/` (ключ — `--token` или переменная PULSE_TOKEN; без ключа сервер не стартует), `/<ключ>/body` — только
 содержимое для автообновления раз в 30 с. Шапка, итоги дня, карточки и подсказки клеток — из pulse.json как есть
 (`dispatcher/pulse_view.py`); макет — docs/pulse-mockup-v2.html. Фильтр и раскрытые карточки живут в браузере (pulse.html).
+
+Сервер без доступа к машинам проектов (TK-113, В-56): `--inbox` — каталог, куда проекты сами присылают свой `pulse.json`
+(`PUT /put/<имя>` с `Authorization: Bearer <ключ записи>`; ключ записи — `--write-token` или PULSE_WRITE_TOKEN, не тот, что открывает
+страницу). Присланные файлы — проекты страницы наравне с `pulse_projects`; молчит проект дольше порога — «нет данных N мин».
 """
 from __future__ import annotations
 
@@ -25,6 +29,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "dispatcher"))
 import pulse_view as V  # noqa: E402
 
+MAX_BODY = 512 * 1024  # байт: pulse.json сутки — десятки КБ (alpha ~65 КБ), больше — не он
+DRAIN = 4 * MAX_BODY  # сколько лишнего тела сбросить перед 413: иначе клиент, ещё пишущий, получит обрыв, а не ответ
+NAME = re.compile(r"[A-Za-z0-9_-]{1,40}")  # имя проекта в пути приёма и имя файла в inbox
 WINDOW = 32      # клеток на широком экране: 8 часов, правый край — текущая клетка
 NARROW = 16      # на телефоне (< 760 px): 4 часа
 PER_HOUR = 4     # 15-минутных клеток в часе
@@ -232,21 +239,72 @@ def page_html(views: list, now: datetime) -> str:
     return (HERE / "pulse.html").read_text(encoding="utf-8").replace("__BODY__", body_html(views, now))
 
 
-def make_handler(project, token: str, fetch=None):
+def inbox_projects(inbox) -> dict:
+    """Присланные проекты {имя: путь к файлу} по алфавиту; каталога нет — {}."""
+    return {f.stem: str(f) for f in sorted(Path(inbox).glob("*.json")) if NAME.fullmatch(f.stem)} if inbox else {}
+
+
+ZONE = re.compile(r"\d:\d\d(\.\d+)?(Z|[+-]\d\d(:?\d\d)?)$")  # пояс после времени суток (дата без времени пояса не имеет)
+
+
+def accept(inbox: Path, name: str, body: bytes) -> tuple:
+    """Принять присланный `pulse.json`: (код, текст). Только читаемый вывод шага 1 (`pulse_view.stamp_of`); пишется целиком и атомарно."""
+    try:
+        data = json.loads(body.decode("utf-8-sig"))
+    except ValueError:
+        return 400, "не JSON"
+    if V.stamp_of(data) is None or not ZONE.search(data["generated"].strip()):  # время без пояса с чужой машины не привязать к её часам
+        return 400, "не pulse.json: нужны generated с поясом, state, cells"
+    inbox.mkdir(parents=True, exist_ok=True)
+    V.P.write_json(inbox / f"{name}.json", data)
+    return 200, "принято"
+
+
+def make_handler(project, token: str, fetch=None, inbox=None, write_token: str = ""):
     kwargs = {"fetch": fetch} if fetch else {}
 
+    def load(now: datetime) -> list:
+        """Проекты страницы; присланные могли прибавиться, поэтому список файлов inbox — на каждый запрос."""
+        return V.load_all(project, now, **kwargs, **({"extra": inbox_projects(inbox), "silence": V.NO_DATA} if inbox else {}))
+
     class Handler(BaseHTTPRequestHandler):
+        timeout = 30  # медленный или зависший клиент не держит поток вечно
+
+        def do_PUT(self):  # noqa: N802
+            parts = self.path.split("?")[0].strip("/").split("/")
+            if not inbox or not write_token or parts[0] != "put":
+                return self._send(404, "text/plain; charset=utf-8", "не найдено")
+            if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {write_token}".encode()):
+                return self._send(401, "text/plain; charset=utf-8", "нужен ключ записи")
+            if len(parts) != 2 or not NAME.fullmatch(parts[1]):
+                return self._send(404, "text/plain; charset=utf-8", "не найдено")
+            length = self.headers.get("Content-Length", "")
+            if not length.isdigit():
+                return self._send(411, "text/plain; charset=utf-8", "нужен Content-Length")
+            if int(length) > MAX_BODY:
+                self._drain(min(int(length), DRAIN))
+                self.close_connection = True
+                return self._send(413, "text/plain; charset=utf-8", "слишком большой")
+            code, text = accept(Path(inbox), parts[1], self.rfile.read(int(length)))
+            self._send(code, "text/plain; charset=utf-8", text)
+
+        do_POST = do_PUT  # noqa: N815
+
         def do_GET(self):  # noqa: N802
             parts = self.path.split("?")[0].strip("/").split("/")
             if not parts or not hmac.compare_digest(parts[0].encode(), token.encode()) or len(parts) > 2:
                 return self._send(404, "text/plain; charset=utf-8", "не найдено")
             now = datetime.now().astimezone()
-            views = V.load_all(project, now, **kwargs)
+            views = load(now)
             if len(parts) == 1:
                 return self._send(200, "text/html; charset=utf-8", page_html(views, now))
             if parts[1] == "body":
                 return self._send(200, "text/html; charset=utf-8", body_html(views, now))
             self._send(404, "text/plain; charset=utf-8", "не найдено")
+
+        def _drain(self, left: int):
+            while left > 0 and (chunk := self.rfile.read(min(left, 65536))):
+                left -= len(chunk)
 
         def _send(self, code: int, kind: str, text: str):
             data = text.encode("utf-8")
@@ -269,14 +327,20 @@ def main(argv=None) -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--token", default=os.environ.get("PULSE_TOKEN", ""))
+    ap.add_argument("--inbox", help="каталог для присланных pulse.json (приём PUT /put/<имя>)")
+    ap.add_argument("--write-token", default=os.environ.get("PULSE_WRITE_TOKEN", ""))
     a = ap.parse_args(argv)
     if not a.token:
         print("[pulse] нужен ключ в пути: --token или PULSE_TOKEN", file=sys.stderr)
         return 2
+    if a.inbox and (not a.write_token or a.write_token == a.token):
+        print("[pulse] с --inbox нужен ключ записи (--write-token или PULSE_WRITE_TOKEN), не равный ключу чтения", file=sys.stderr)
+        return 2
     project = Path(a.project).resolve()
-    if not V.projects_of(project):
+    if not V.projects_of(project) and not a.inbox:
         print(f"[pulse] в {project}/.claude/rpv.json нет pulse_projects — страница будет пустой", file=sys.stderr)
-    ThreadingHTTPServer((a.host, a.port), make_handler(project, a.token)).serve_forever()
+    handler = make_handler(project, a.token, inbox=Path(a.inbox) if a.inbox else None, write_token=a.write_token)
+    ThreadingHTTPServer((a.host, a.port), handler).serve_forever()
     return 0
 
 
