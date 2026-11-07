@@ -4740,12 +4740,30 @@ class DeadWaitReleaseTests(unittest.TestCase):
     def accept(self, path, text="[итог: accept] ПРИНЯТО PR #1@abc1234"):
         T.append_log(path, "judge", text, now=self.now)
 
-    def test_wait_on_done_ticket_without_accepted_result_is_released_to_owner(self):
+    def test_wait_on_done_ticket_closed_by_ceo_as_not_done_is_released_to_owner(self):
         target = self.mk(status="done", reviewer="judge")
-        T.append_log(target, "ceo", "[итог: done] закрыто без ревью", now=self.now)
+        T.append_log(target, "ceo", "[итог: done] результат: x.md (закрыто без ревью) — НЕ СДЕЛАНО, закрыт CEO", now=self.now)
         path = self.mk(f"ticket:{T.read_ticket(target).id}")
         self.release(path)
         self.assert_released(path, "закрыт без принятого результата")
+
+    def test_wait_on_done_ticket_without_positive_sign_of_rejection_is_normal_wake(self):
+        """Не принят — только по положительному признаку: нет записи «принять» в формате — не признак (приёмка Судьи в
+        логах бывает свободным текстом), закрытие CEO без «не сделано» — тоже."""
+        free_text = self.mk(status="done", reviewer="judge")
+        T.append_log(free_text, "judge", "ПРИНЯТО (круг 3): голова abc1234", now=self.now)
+        ceo_closed = self.mk(status="done", reviewer="judge")
+        T.append_log(ceo_closed, "ceo", "[итог: done] результат: x.md (закрыто без ревью)", now=self.now)
+        no_log = self.mk(status="done", reviewer="judge")
+        returned_then_accepted = self.mk(status="done", reviewer="judge")
+        T.append_log(returned_then_accepted, "judge", "[итог: return] не держится", now=self.now)
+        T.append_log(returned_then_accepted, "judge", "Принято (b533e6b)", now=self.now)
+        not_done_but_judge_accepted = self.mk(status="done", reviewer="judge")
+        T.append_log(not_done_but_judge_accepted, "judge", "[итог: accept] ПРИНЯТО PR #3@abc1234", now=self.now)
+        T.append_log(not_done_but_judge_accepted, "ceo", "[итог: done] результат: x.md — НЕ СДЕЛАНО в части 2", now=self.now)
+        for target in (free_text, ceo_closed, no_log, returned_then_accepted, not_done_but_judge_accepted):
+            tid = T.read_ticket(target).id
+            self.assertEqual(W.dead_reason(f"ticket:{tid}", W.project_where()), "", tid)
 
     def test_wait_on_done_ticket_after_return_and_ceo_close_is_released(self):
         target = self.mk(status="done", reviewer="judge")
@@ -4832,6 +4850,33 @@ class DeadWaitReleaseTests(unittest.TestCase):
             self.assertEqual(WATCH.probe_file_writer("data/out.json"), "producer")  # таблицы нет — не снимаем
         here = Path(__file__)
         self.assertEqual(WATCH.probe_file_writer(str(here)), "exists")
+
+    def test_file_writer_probe_matches_path_in_other_form_by_dir_and_short_name(self):
+        """Писатель пишет `/tmp/<каталог>/rc` (Git Bash), ожидание — `C:/Users/<8.3>/…/Temp/<каталог>/rc`: имя `rc` короче
+        4 знаков, но «каталог/имя» совпадает — не dead (замечание Судьи 07.11). Чужой процесс и пустая таблица — как прежде."""
+        raw = "C:/Users/3D6B~1/AppData/Local/Temp/j124p-no-such-dir/rc"
+        live = [(21, 1, 'bash -c "sleep 90; echo 0 > /tmp/j124p-no-such-dir/rc"')]
+        other = [(22, 1, 'bash -c "echo 0 > /tmp/another/rc"')]
+        with mock.patch.object(P, "scan_processes", return_value=live):
+            self.assertEqual(WATCH.probe_file_writer(raw), "producer")
+            self.assertEqual(WATCH.probe_file_writer(raw.replace("/", "\\")), "producer")
+        with mock.patch.object(P, "scan_processes", return_value=other):
+            self.assertEqual(WATCH.probe_file_writer(raw), "dead")
+        with mock.patch.object(P, "scan_processes", return_value=other):
+            self.assertEqual(WATCH.probe_file_writer("rc"), "producer")  # голое короткое имя без каталога не различить — не снимаем
+
+    def test_file_writer_probe_reads_process_table_once_per_pass(self):
+        """Таблица процессов (на Windows — PowerShell CIM) читается раз за проход сторожа, не на каждый `file:`-тикет."""
+        for n in range(3):
+            self.mk(f"file:data/out-{n}.json")
+        calls = []
+
+        def rows():
+            calls.append(1)
+            return [(31, 1, "python train.py")]
+        with mock.patch.object(P, "scan_processes", side_effect=rows):
+            WATCH.triage_waits({}, self.now, probe=lambda *a: "exists", owners_probe=lambda alias: None, link_up=lambda: True)
+        self.assertEqual(len(calls), 1)
 
     def test_wait_stays_when_target_can_still_come(self):
         done = self.mk(status="done", reviewer="judge")

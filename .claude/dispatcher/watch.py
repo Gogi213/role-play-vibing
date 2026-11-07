@@ -187,23 +187,41 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     return out[0]
 
 
-def probe_file_writer(raw: str) -> str:
+def probe_file_writer(raw: str, rows=None) -> str:
     """`file:<путь>` (TK-124, В-61): `exists` — файл лёг; `producer` — файла нет, но в таблице локальных процессов есть
     командная строка с путём или именем файла; `dead` — нет ни файла, ни писателя (задания тикета смотрит `_apply_owned_jobs`).
-    Таблицу процессов не прочитать — `producer`: не видим, значит не снимаем."""
+    Один путь в командной строке выглядит по-разному (диск с коротким именем 8.3, `C:/Users/…`, `/tmp/…` в Git Bash), поэтому
+    сверяем и хвост «каталог/имя» из самого ожидания, а имя короче 4 знаков без каталога (`rc`) не различимо — `producer`.
+    Таблицу процессов не прочитать — `producer`: не видим, значит не снимаем. `rows` — уже прочитанная таблица прохода."""
     path = Path(raw)
     path = path if path.is_absolute() else CFG.PROJECT_ROOT / path
     if path.exists():
         return "exists"
-    rows = P.scan_processes()
+    rows = P.scan_processes() if rows is None else rows
     if not rows:
         return "producer"
 
     def norm(text: str) -> str:
         return text.replace("\\", "/").lower()
-    needles = {norm(raw), norm(str(path))} | ({path.name.lower()} if len(path.name) >= 4 else set())
+    parts = [x for x in norm(raw).split("/") if x]
+    tail = "/".join(parts[-2:]) if len(parts) >= 2 else ""
+    if len(path.name) < 4 and not tail:
+        return "producer"
+    needles = {norm(raw), norm(str(path)), tail} | ({path.name.lower()} if len(path.name) >= 4 else set())
+    needles.discard("")
     me = os.getpid()
     return "producer" if any(pid != me and any(n in norm(cmd) for n in needles) for pid, _, cmd in rows) else "dead"
+
+
+def _pass_file_probe():
+    """Таблицу процессов читаем раз за проход (на Windows это PowerShell CIM) и только когда есть `file:`-ожидание."""
+    box = []
+
+    def probe(raw: str) -> str:
+        if not box:
+            box.append(P.scan_processes())
+        return probe_file_writer(raw, box[0])
+    return probe
 
 
 LINK_PROBES = ["1.1.1.1:443", "8.8.8.8:53"]
@@ -674,7 +692,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         import ci_watch
         run_probe = ci_watch.run_state
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, W._ssh_cmd))
-    c = _Pass(ws, now, probe, job_probe, _fetch_owners(owners_probe), run_probe, link_up, file_probe)  # owners: {алиас: [задания]}
+    c = _Pass(ws, now, probe, job_probe, _fetch_owners(owners_probe), run_probe, link_up, file_probe or _pass_file_probe())  # owners: {алиас: [задания]}
     for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)

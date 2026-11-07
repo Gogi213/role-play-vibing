@@ -67,25 +67,37 @@ def check_wait_for(spec: str, where: Where) -> bool:
 DEAD_CHECK_EVERY_S = 300.0  # проверка «ожидание не наступит» по одному тикету — не чаще раза в 5 мин (число назначено, не измерено)
 
 
-def _accepted(target: T.Ticket, tickets_dir: Path) -> bool:
-    """Результат закрытого тикета принят: у тикета Судьи и тикета без ревьюера (механика, приёмка кодом) — всегда; иначе
-    последний вердикт Судьи в логе (и в архиве `archive/<ID>-log.md`) — «принять»."""
+_RETURN_MARK = "[итог: return]"
+_ACCEPT_WORD = re.compile(r"\[итог: accept\]|(?<!не )(?<!не)(?<!\w)принят", re.IGNORECASE)  # приёмка Судьи и свободным текстом: «ПРИНЯТО (круг 3)»
+
+
+def _closed_unaccepted(target: T.Ticket, tickets_dir: Path) -> bool:
+    """Закрытый `done` тикет без результата — только по положительному признаку, не по отсутствию строки «принято»
+    (в логах приёмка записана по-разному): последняя запись Судьи с `[итог: return]`, после неё нет приёмки; либо CEO
+    закрыл записью `[итог: done]` с «не сделано» и Судья не принимал ни разу. Тикет Судьи и без ревьюера — нет.
+    Лог и архив `archive/<ID>-log.md` вместе; архива не прочитать — не обвиняем."""
     if target.owner == "judge" or target.reviewer not in P.ROLES:
-        return True
-    import report as RP
+        return False
     arch = tickets_dir / T.ARCHIVE_DIRNAME / f"{target.id}-log.md"
+    log = list(target.log)
     try:
         if arch.exists():
-            target.log = T.parse_text("---\nid: x\n---\n\n## Лог\n" + arch.read_text(encoding="utf-8")).log + target.log
+            log = T.parse_text("---\nid: x\n---\n\n## Лог\n" + arch.read_text(encoding="utf-8")).log + log
     except OSError:
-        return True  # архива не прочитать — не знаем, значит не обвиняем
-    verdict = RP.last_verdict(target)
-    return bool(verdict and verdict[0] == "accept")
+        return False
+    judge = [e for e in log if T.author_is(e.author, "judge")]
+    ret = max((i for i, e in enumerate(judge) if _RETURN_MARK in e.text), default=None)
+    if any(_ACCEPT_WORD.search(e.text) for e in judge[(ret + 1 if ret is not None else 0):]):
+        return False
+    if ret is not None:
+        return True
+    return any(T.author_is(e.author, "ceo") and e.text.lstrip().startswith("[итог: done]") and "не сделано" in e.text.lower()
+               for e in log)
 
 
 def dead_reason(spec: str, where: Where, gh=None) -> str:
     """Почему `wait_for` уже не наступит (TK-124, В-61); пусто — может наступить или диспетчер без ssh этого не видит.
-    `ticket:<ID>` — цель остановлена, либо закрыта (`done`) без принятого Судьёй результата (`_accepted`); `merged:`/`ci:` — PR
+    `ticket:<ID>` — цель остановлена, либо закрыта (`done`) без результата по положительному признаку (`_closed_unaccepted`); `merged:`/`ci:` — PR
     закрыт без слияния. Цель `done` с принятым результатом — штатное выполнение (будит владельца). Задания, процессы и файлы
     (`job:`, `host:…`, `ci-run:`, `file:`) ведёт сторож (watch.py): у него ssh и таблица процессов, дубль здесь будил бы зря."""
     parsed = T.parse_wait_for(spec)
@@ -98,8 +110,8 @@ def dead_reason(spec: str, where: Where, gh=None) -> str:
             return ""  # нет файла — вопрос сторожа (счётчик мёртвой цели), не диспетчера
         if target.status == "stopped":
             return f"тикет {parsed[1]} в статусе stopped — результата не будет"
-        if target.status == "done" and not _accepted(target, where.tickets_dir):
-            return f"тикет {parsed[1]} закрыт без принятого результата (вердикта Судьи «принять» в логе нет)"
+        if target.status == "done" and _closed_unaccepted(target, where.tickets_dir):
+            return f"тикет {parsed[1]} закрыт без принятого результата (последний вердикт Судьи — вернуть или CEO: «не сделано»)"
         return ""
     if parsed[0] in ("merged", "ci"):
         import merge_rule
