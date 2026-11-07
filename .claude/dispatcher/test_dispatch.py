@@ -4737,11 +4737,38 @@ class DeadWaitReleaseTests(unittest.TestCase):
         self.release(path)
         self.assert_released(path, "в статусе stopped")
 
-    def test_wait_on_cancelled_ticket_is_released_to_owner(self):
-        target = self.mk(status="cancelled")
+    def accept(self, path, text="[итог: accept] ПРИНЯТО PR #1@abc1234"):
+        T.append_log(path, "judge", text, now=self.now)
+
+    def test_wait_on_done_ticket_without_accepted_result_is_released_to_owner(self):
+        target = self.mk(status="done", reviewer="judge")
+        T.append_log(target, "ceo", "[итог: done] закрыто без ревью", now=self.now)
         path = self.mk(f"ticket:{T.read_ticket(target).id}")
         self.release(path)
-        self.assert_released(path, "в статусе cancelled")
+        self.assert_released(path, "закрыт без принятого результата")
+
+    def test_wait_on_done_ticket_after_return_and_ceo_close_is_released(self):
+        target = self.mk(status="done", reviewer="judge")
+        self.accept(target)
+        T.append_log(target, "judge", "[итог: return] не держится", now=self.now)
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        self.release(path)
+        self.assert_released(path, "закрыт без принятого результата")
+
+    def test_wait_on_done_ticket_with_accepted_result_or_without_review_is_normal_wake(self):
+        accepted = self.mk(status="done", reviewer="judge")
+        self.accept(accepted)
+        mechanical = self.mk(status="done", reviewer="")
+        judge_own = self.mk(status="done", reviewer="judge", owner="judge")
+        archived = self.mk(status="done", reviewer="judge")
+        arch = CFG.TICKETS_DIR / T.ARCHIVE_DIRNAME / f"{T.read_ticket(archived).id}-log.md"
+        arch.parent.mkdir(parents=True, exist_ok=True)
+        arch.write_text("### 2026-11-01T10:00:00+04:00 judge\n[итог: accept] ПРИНЯТО PR #2@def5678\n", encoding="utf-8")
+        for target in (accepted, mechanical, judge_own, archived):
+            path = self.mk(f"ticket:{T.read_ticket(target).id}")
+            self.release(path)
+            self.assertEqual(T.read_ticket(path).status, "waiting", target.stem)
+            self.assertEqual(W.dead_reason(f"ticket:{T.read_ticket(target).id}", W.project_where()), "")
 
     def test_wait_on_pr_closed_without_merge_is_released_to_owner(self):
         path = self.mk("merged:o/r#5", on_met="run something")
@@ -4772,8 +4799,43 @@ class DeadWaitReleaseTests(unittest.TestCase):
         self.assertEqual(D.decide(tkt, {}, self.now).role, "engineer")
         self.assertEqual(W.dead_reason("host:vps:/data/job.json", W.project_where()), "")  # диспетчер своего мнения не имеет
 
+    def triage_file(self, path, probe, times=2):
+        ws = {}
+        for minutes in range(times):
+            WATCH.triage_waits(ws, self.now + timedelta(minutes=minutes), probe=lambda *a: "exists",
+                               owners_probe=lambda alias: None, link_up=lambda: True, file_probe=probe)
+        return T.read_ticket(path), ws
+
+    def test_wait_on_file_without_writer_is_released_by_watch_after_strikes(self):
+        """`file:` без писателя: нет файла и процесса с путём — после DEAD_WAIT_STRIKES проверок ожидание снято, ход владельцу."""
+        path = self.mk("file:data/out.json")
+        tkt, _ = self.triage_file(path, lambda raw: "dead", times=1)
+        self.assertEqual(tkt.status, "waiting")  # одна проверка — ещё не снимаем
+        tkt, _ = self.triage_file(path, lambda raw: "dead")
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("in_progress", ""))
+        self.assertEqual(tkt.log[-1].author, "watch")
+        self.assertIn("её никто не производит", tkt.log[-1].text)
+        self.assertEqual(D.decide(tkt, {}, self.now).role, "engineer")
+
+    def test_wait_on_file_with_live_writer_stays(self):
+        path = self.mk("file:data/out.json")
+        tkt, _ = self.triage_file(path, lambda raw: "producer", times=3)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("waiting", "file:data/out.json"))
+
+    def test_file_writer_probe_sees_process_with_path_or_name(self):
+        rows = [(os.getpid(), 1, "python self data/out.json"), (11, 1, "python train.py --out D:\\x\\data\\out.json"), (12, 1, "notepad")]
+        with mock.patch.object(P, "scan_processes", return_value=rows[:1] + rows[2:]):
+            self.assertEqual(WATCH.probe_file_writer("data/out.json"), "dead")  # свой процесс не в счёт
+        with mock.patch.object(P, "scan_processes", return_value=rows[1:]):
+            self.assertEqual(WATCH.probe_file_writer("data/out.json"), "producer")
+        with mock.patch.object(P, "scan_processes", return_value=[]):
+            self.assertEqual(WATCH.probe_file_writer("data/out.json"), "producer")  # таблицы нет — не снимаем
+        here = Path(__file__)
+        self.assertEqual(WATCH.probe_file_writer(str(here)), "exists")
+
     def test_wait_stays_when_target_can_still_come(self):
-        done = self.mk(status="done")
+        done = self.mk(status="done", reviewer="judge")
+        self.accept(done)
         for spec, gh in ((f"ticket:{T.read_ticket(done).id}", None), ("merged:o/r#7", ("open", False)),
                          ("merged:o/r#8", ("closed", True)), ("ticket:TK-999", None), ("file:x/y.md", None),
                          ("job:gpu1:j1", None)):

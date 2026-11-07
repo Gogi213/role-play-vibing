@@ -147,7 +147,7 @@ def release_dead_wait(path: Path, tkt: T.Ticket, state: dict, now, running, chec
     except (KeyError, ValueError):
         pass
     checked[tkt.id] = {"spec": spec, "at": T.now_iso(now)}
-    if check_wait_for(spec):
+    if T.parse_wait_for(spec)[0] != "ticket" and check_wait_for(spec):  # ticket: — цель done без принятого результата тоже «выполнена»
         return tkt
     why = W.dead_reason(spec, where)
     if not why:

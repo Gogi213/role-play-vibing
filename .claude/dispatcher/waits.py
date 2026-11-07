@@ -67,20 +67,40 @@ def check_wait_for(spec: str, where: Where) -> bool:
 DEAD_CHECK_EVERY_S = 300.0  # проверка «ожидание не наступит» по одному тикету — не чаще раза в 5 мин (число назначено, не измерено)
 
 
+def _accepted(target: T.Ticket, tickets_dir: Path) -> bool:
+    """Результат закрытого тикета принят: у тикета Судьи и тикета без ревьюера (механика, приёмка кодом) — всегда; иначе
+    последний вердикт Судьи в логе (и в архиве `archive/<ID>-log.md`) — «принять»."""
+    if target.owner == "judge" or target.reviewer not in P.ROLES:
+        return True
+    import report as RP
+    arch = tickets_dir / T.ARCHIVE_DIRNAME / f"{target.id}-log.md"
+    try:
+        if arch.exists():
+            target.log = T.parse_text("---\nid: x\n---\n\n## Лог\n" + arch.read_text(encoding="utf-8")).log + target.log
+    except OSError:
+        return True  # архива не прочитать — не знаем, значит не обвиняем
+    verdict = RP.last_verdict(target)
+    return bool(verdict and verdict[0] == "accept")
+
+
 def dead_reason(spec: str, where: Where, gh=None) -> str:
     """Почему `wait_for` уже не наступит (TK-124, В-61); пусто — может наступить или диспетчер без ssh этого не видит.
-    `ticket:<ID>` — цель остановлена или отменена; `merged:`/`ci:` — PR закрыт без слияния. Цель `done` — штатное выполнение
-    (будит владельца), не мёртвое ожидание. Задания и процессы (`job:`, `host:…`, `ci-run:`) ведёт сторож (watch.py): у него ssh и
-    адаптеры заданий, дубль здесь будил бы владельца зря."""
+    `ticket:<ID>` — цель остановлена, либо закрыта (`done`) без принятого Судьёй результата (`_accepted`); `merged:`/`ci:` — PR
+    закрыт без слияния. Цель `done` с принятым результатом — штатное выполнение (будит владельца). Задания, процессы и файлы
+    (`job:`, `host:…`, `ci-run:`, `file:`) ведёт сторож (watch.py): у него ssh и таблица процессов, дубль здесь будил бы зря."""
     parsed = T.parse_wait_for(spec)
     if not parsed:
         return ""
     if parsed[0] == "ticket":
         try:
-            status = T.read_ticket(where.tickets_dir / f"{parsed[1]}.md").status
+            target = T.read_ticket(where.tickets_dir / f"{parsed[1]}.md")
         except Exception:
             return ""  # нет файла — вопрос сторожа (счётчик мёртвой цели), не диспетчера
-        return f"тикет {parsed[1]} в статусе {status} — результата не будет" if status in ("stopped", "cancelled") else ""
+        if target.status == "stopped":
+            return f"тикет {parsed[1]} в статусе stopped — результата не будет"
+        if target.status == "done" and not _accepted(target, where.tickets_dir):
+            return f"тикет {parsed[1]} закрыт без принятого результата (вердикта Судьи «принять» в логе нет)"
+        return ""
     if parsed[0] in ("merged", "ci"):
         import merge_rule
         if merge_rule.closed_unmerged(parsed[1], parsed[2], gh):
