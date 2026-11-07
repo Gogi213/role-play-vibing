@@ -24,6 +24,7 @@ import project_paths as CFG  # noqa: E402
 import routes as R  # noqa: E402
 import signals as SIG  # noqa: E402
 import ticket as T  # noqa: E402
+from test_review_cap_patch import patch_review_cap  # noqa: E402  (TK-129: малый потолок вместо 500 кругов)
 
 TZ = timezone(timedelta(hours=4))
 T0 = datetime(2026, 10, 31, 22, 30, tzinfo=TZ)
@@ -43,6 +44,7 @@ TK074_RETURNS = (
 
 class ReviewCapReplay(unittest.TestCase):
     def setUp(self):
+        patch_review_cap(self)
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
         self._cfg = {k: getattr(CFG, k) for k in ("TICKETS_DIR", "PROJECT_ROOT", "DISPATCHER_DIR", "STATE_FILE", "CEO_INBOX", "CEO_WAKE_LOG")}
