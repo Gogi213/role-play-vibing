@@ -190,7 +190,8 @@ def check_idle(state_dir: Path, now: float, slo_min: float = 10.0) -> tuple:
     m = downtime.total_min(rec)
     detail = (f"{m:.0f} мин из {slo_min:.0f} (готовая работа без исполнителя {rec['idle_s'] / 60:.0f}, "
               f"ожидание без условия {rec['wait_s'] / 60:.0f}, молчание диспетчера {rec['stall_s'] / 60:.0f}, "
-              f"тормоз запусков {rec.get('throttle_s', 0) / 60:.0f}; сумма корзин; пауза лимита вне SLO "
+              f"тормоз запусков {rec.get('throttle_s', 0) / 60:.0f}, влито и не выпущено {rec.get('unreleased_s', 0) / 60:.0f}, "
+              f"CEO не разбужен {rec.get('unwoken_s', 0) / 60:.0f}; сумма корзин; пауза лимита вне SLO "
               f"{rec.get('limit_s', 0) / 60:.0f})")
     return "простой сегодня", (FAIL if m > slo_min else OK), detail
 
