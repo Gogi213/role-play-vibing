@@ -195,6 +195,21 @@ def check_idle(state_dir: Path, now: float, slo_min: float = 10.0) -> tuple:
     return "простой сегодня", (FAIL if m > slo_min else OK), detail
 
 
+def check_ceo_wake(project: Path) -> tuple:
+    """Побудка CEO (TK-120): включена, а `ceo-session.json` нет или `name` пуст — FAIL: сообщения о событиях уходят в пустоту
+    (invoice после 2.0.23 — «ни одного FAIL» при молчащей побудке; rpv — 27 из 27 побудок NOT_FOUND). Имя пишет `/ceo`."""
+    if P.setting("ceo_wake", True, root=project) is False:
+        return "побудка CEO", OFF, "выключена (ceo_wake: false)"
+    try:
+        data = json.loads((project / ".claude" / "dispatcher" / "ceo-session.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    name = " ".join(str((data or {}).get("name") or "").split()) if isinstance(data, dict) else ""
+    if not name:
+        return "побудка CEO", FAIL, "сессия CEO не названа (нет ceo-session.json или name пуст) — в сессии CEO выполните /ceo"
+    return "побудка CEO", OK, f"сессия «{name}»"
+
+
 def check_copies(project: Path, name: str, procs=None) -> tuple | None:
     """Ровно одна копия службы: две — гонка за замок и двойная работа (FAIL); нет копии ловит check_service."""
     n = len(S.find_copies(f"{name}.py", project, procs))
@@ -238,6 +253,7 @@ def run_checks(project: Path, now: float | None = None, installed=scheduler_inst
         rows.append(version_row)
     if sys.platform == "darwin" and (row := check_launchd_path(SV.plist_path(SV.launchd_label(project)))):
         rows.append(row)
+    rows.append(check_ceo_wake(project))
     rows.append(check_idle(sd, now))
     rows += [*check_queue(project, sd), check_worktrees(project), check_notify(), check_errors(sd, now)]
     return [("диспетчер" if r[0] == "dispatch" else "сторож" if r[0] == "watch" else r[0], *r[1:]) for r in rows]

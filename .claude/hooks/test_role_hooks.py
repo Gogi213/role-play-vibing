@@ -418,6 +418,63 @@ class Prompts(unittest.TestCase):
             fh.write("[blocked] TK-3\n")
         self.assertEqual(rm.ceo_inbox_alert(), "[диспетчер] 1 новых в .claude/dispatcher/ceo-inbox.md")
 
+    def test_ceo_hook_lists_what_stands_with_age(self):
+        """TK-120 п.2: вместо числа строк — «TK-N — что — стоит N мин»; ничего не стоит — одна строка «всё идёт»."""
+        tdir = os.path.join(PROJECT, ".claude", "tickets")
+        seen_f = os.path.join(DISP, ".ceo-inbox-seen")
+        for path in (rm.DISPATCHER_CEO_INBOX, seen_f):
+            if os.path.exists(path):
+                os.remove(path)
+        files = []
+
+        def ticket(tid, status, title, updated):
+            path = os.path.join(tdir, f"{tid}.md")
+            files.append(path)
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(f"---\nid: {tid}\ntitle: {title}\nowner: engineer\nstatus: {status}\nreviewer: judge\n"
+                         f"wait_for: \nupdated: {updated}\n---\n\nописание\n\n## Лог\n")
+
+        self.addCleanup(lambda: [os.remove(f) for f in files if os.path.exists(f)])
+        state = {}
+        self.assertEqual(rm.ceo_standing_alert(state), "[диспетчер] всё идёт")
+        self.assertIsNone(rm.ceo_standing_alert(state))      # «всё идёт» — как любая подсказка, не каждое сообщение
+        ticket("TK-901", "needs_owner", "Вопрос владельцу", "2020-01-01T00:00:00+00:00")
+        ticket("TK-902", "blocked", "Сломалось", "2020-01-01T01:00:00+00:00")
+        ticket("TK-903", "in_progress", "Идёт своим ходом", "2020-01-01T00:00:00+00:00")
+        text = rm.ceo_standing_alert(state)
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "[диспетчер] стоит сейчас:")
+        self.assertTrue(re.fullmatch(r"TK-901 — Вопрос владельцу: ждёт ответа владельца — стоит \d+ мин", lines[1]), lines[1])
+        self.assertTrue(re.fullmatch(r"TK-902 — Сломалось: заблокирован — стоит \d+ мин", lines[2]), lines[2])
+        self.assertNotIn("TK-903", text)                    # идущее — не стоящее
+        self.assertEqual(rm.ceo_standing_alert(state), text)  # стоящее показывается каждое сообщение, пока стоит
+        with open(rm.DISPATCHER_CEO_INBOX, "w", encoding="utf-8") as fh:
+            fh.write("[blocked] TK-902 y\n")
+        self.addCleanup(lambda: os.path.exists(rm.DISPATCHER_CEO_INBOX) and os.remove(rm.DISPATCHER_CEO_INBOX))
+        self.assertTrue(rm.ceo_standing_alert(state).endswith("[диспетчер] 1 новых в .claude/dispatcher/ceo-inbox.md"))
+
+    def test_ceo_hook_lists_accepted_not_merged_and_unreleased(self):
+        tdir = os.path.join(PROJECT, ".claude", "tickets")
+        path = os.path.join(tdir, "TK-904.md")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("---\nid: TK-904\ntitle: Принятое\nowner: engineer\nstatus: done\nreviewer: judge\nwait_for: \n"
+                     "pr: 7\nupdated: 2020-01-01T00:00:00+00:00\n---\n\nописание\n\n## Лог\n")
+        files = [path, os.path.join(DISP, "ci-state.json"), os.path.join(DISP, "watch-state.json"),
+                 os.path.join(PROJECT, ".claude", "rpv.json")]
+        self.addCleanup(lambda: [os.remove(f) for f in files if os.path.exists(f)])
+        with open(files[3], "w", encoding="utf-8") as fh:
+            json.dump({"ci_repo": "o/r"}, fh)
+        with open(files[1], "w", encoding="utf-8") as fh:
+            json.dump({"o/r#7": {"state": "success", "closed": False}}, fh)
+        with open(files[2], "w", encoding="utf-8") as fh:
+            json.dump({"notified": {"unreleased:main": {"ts": "2020-01-01T00:00:00+00:00"}}}, fh)
+        lines = rm.ceo_standing_alert({}).splitlines()
+        self.assertTrue(re.fullmatch(r"TK-904 — Принятое: принят, не влит — стоит \d+ мин", lines[1]), lines[1])
+        self.assertTrue(re.fullmatch(r"main — влито, не выпущено — стоит \d+ мин", lines[2]), lines[2])
+        with open(files[1], "w", encoding="utf-8") as fh:
+            json.dump({"o/r#7": {"state": "success", "closed": True}}, fh)   # PR влит — принятое больше не стоит
+        self.assertNotIn("TK-904", rm.ceo_standing_alert({}))
+
     def transcript(self, tokens):
         path = os.path.join(TMP, f"tr-{tokens}.jsonl")
         with open(path, "w", encoding="utf-8") as fh:
