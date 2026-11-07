@@ -5,10 +5,12 @@
 одну строку. События — четыре (EVENT_OF): нужно решение владельца; сломалось или сорван срок; шаг цели принят, следующий не
 определён; цель закрыта. Обычный `done` тикета — не событие. Сессию CEO называет `/ceo`:
 
-    ceo_wake.py [--project <путь>] set --id <id сессии> [--name <имя>]    # `/ceo`: кто CEO
+    ceo_wake.py [--project <путь>] set --id <id сессии> [--name <имя>] [--ref <метка>]    # `/ceo`: кто CEO
     ceo_wake.py [--project <путь>] show
 
-Сессию ищут по имени: `ListAgents` id не показывает, `SendMessage` адресует по имени (TK-110). Доставкой считается только ответ
+Сессию ищут по имени: `ListAgents` id не показывает, `SendMessage` адресует по имени (TK-110). Одноимённых сессий бывает несколько,
+поэтому `/ceo` записывает и метку из `ListAgents` («имя [метка]»): с меткой адрес — «имя [метка]», сессии с другой меткой не подходят;
+без метки поиск по одному имени, `set` печатает ПРЕДУПРЕЖДЕНИЕ (TK-125). Доставкой считается только ответ
 запуска `DELIVERED`; сессия не найдена, `SendMessage` отказал или запуск не вышел — строка в `ceo-inbox.md` и сообщение владельцу
 в Telegram, исключений наружу нет. Запуск идёт в фоне одной очередью: события, пришедшие, пока он занят, уходят одним запуском.
 Режим разрешений запуска — ключ `ceo_wake_mode` (умолчание `bypassPermissions`): он обязан совпадать с режимом сессии CEO, иначе
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 import threading
@@ -62,22 +65,33 @@ def read_session() -> dict:
         d = json.loads(session_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return d if isinstance(d, dict) and (d.get("id") or d.get("name")) else {}
+    return d if isinstance(d, dict) and (d.get("id") or d.get("name") or d.get("ref")) else {}
 
 
-def write_session(sid: str, name: str = "") -> None:
-    """Имя не передано — остаётся прежнее: оно переживает `/clear` (новый id сессии, то же имя в `ListAgents`)."""
+def clean_ref(raw) -> str:
+    """Метка сессии из `ListAgents` («[3fb94d]» → «3fb94d»): без скобок и пробелов, одной строкой."""
+    return re.sub(r"[\s\[\]]+", "", str(raw or ""))
+
+
+def write_session(sid: str, name: str = "", ref: str = "") -> None:
+    """Имя не передано — остаётся прежнее: оно переживает `/clear` (новый id сессии, то же имя в `ListAgents`). Метка (ref)
+    принадлежит одной сессии, после `/clear` она устарела: не передана — стирается, на старую метку побудка не пойдёт (TK-125)."""
     name = " ".join(name.split()) or str(read_session().get("name") or "")
     session_file().parent.mkdir(parents=True, exist_ok=True)
-    session_file().write_text(json.dumps({"id": sid.strip(), "name": name, "at": P.now_iso()}, ensure_ascii=False),
-                              encoding="utf-8")
+    session_file().write_text(json.dumps({"id": sid.strip(), "name": name, "ref": clean_ref(ref), "at": P.now_iso()},
+                                         ensure_ascii=False), encoding="utf-8")
 
 
 def _prompt(session: dict, lines: list) -> str:
-    name, sid = session.get("name"), session.get("id")
-    who = f"с именем {json.dumps(name, ensure_ascii=False)}" if name else f"с идентификатором {json.dumps(sid, ensure_ascii=False)}"
+    name, sid, ref = session.get("name"), session.get("id"), clean_ref(session.get("ref"))
+    if ref:  # два «RPV - CAO» в списке различает только метка (TK-125): адрес — «имя [метка]», на одноимённую не подменять
+        addr = json.dumps(f"{name} [{ref}]" if name else f"[{ref}]", ensure_ascii=False)
+        who, to = f"{addr} (имя и метка вместе; одноимённая сессия с другой меткой — не она)", f"to — {addr}"
+    else:
+        who = f"с именем {json.dumps(name, ensure_ascii=False)}" if name else f"с идентификатором {json.dumps(sid, ensure_ascii=False)}"
+        to = "to — имя сессии"
     return (f"Вызови ListAgents. Найди сессию {who}. Нет такой — выведи ровно {NOT_FOUND} и остановись. Есть — отправь ей через "
-            f"SendMessage (to — имя сессии) ровно одно сообщение, дословно:\n" + "\n".join(lines) + "\n"
+            f"SendMessage ({to}) ровно одно сообщение, дословно:\n" + "\n".join(lines) + "\n"
             f"SendMessage вернул успех — выведи ровно {DELIVERED}. Вернул отказ или ошибку — выведи {FAILED} и причину. "
             "Больше ничего не делай и не пиши.")
 
@@ -204,6 +218,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("set")
     s.add_argument("--id", default="")
     s.add_argument("--name", default="")
+    s.add_argument("--ref", default="")
     sub.add_parser("show")
     a = ap.parse_args(argv)
     try:
@@ -213,15 +228,18 @@ def main(argv=None) -> int:
         return 2
     CFG.configure_project(root)
     if a.cmd == "set":
-        if not (a.id.strip() or a.name.strip()):
-            print("set: нужен --id или --name", file=sys.stderr)
+        if not (a.id.strip() or a.name.strip() or clean_ref(a.ref)):
+            print("set: нужен --id, --name или --ref", file=sys.stderr)
             return 2
-        write_session(a.id, a.name)
+        write_session(a.id, a.name, a.ref)
     session = read_session()
     print(json.dumps(session, ensure_ascii=False))
     if a.cmd == "set" and not session.get("name"):
         print("ПРЕДУПРЕЖДЕНИЕ: имя сессии не записано — побудка не найдёт эту сессию (ListAgents id не показывает). "
-              "Возьми имя из первой строки ListAgents («This session is <имя>») и повтори set с --name.", file=sys.stderr)
+              "Возьми имя из первой строки ListAgents («This session is <имя> [<метка>]») и повтори set с --name.", file=sys.stderr)
+    if a.cmd == "set" and not session.get("ref"):
+        print("ПРЕДУПРЕЖДЕНИЕ: метка сессии не записана — побудка найдёт сессию только по имени и не отличит одноимённую. "
+              "Возьми метку из первой строки ListAgents (в скобках после имени) и повтори set с --ref.", file=sys.stderr)
     return 0
 
 
