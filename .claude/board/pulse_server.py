@@ -30,6 +30,7 @@ sys.path.insert(0, str(HERE.parent / "dispatcher"))
 import pulse_view as V  # noqa: E402
 
 MAX_BODY = 512 * 1024  # байт: pulse.json сутки — десятки КБ (alpha ~65 КБ), больше — не он
+DRAIN = 4 * MAX_BODY  # сколько лишнего тела сбросить перед 413: иначе клиент, ещё пишущий, получит обрыв, а не ответ
 NAME = re.compile(r"[A-Za-z0-9_-]{1,40}")  # имя проекта в пути приёма и имя файла в inbox
 WINDOW = 32      # клеток на широком экране: 8 часов, правый край — текущая клетка
 NARROW = 16      # на телефоне (< 760 px): 4 часа
@@ -267,6 +268,8 @@ def make_handler(project, token: str, fetch=None, inbox=None, write_token: str =
         return V.load_all(project, now, **kwargs, **({"extra": inbox_projects(inbox), "silence": V.NO_DATA} if inbox else {}))
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = 30  # медленный или зависший клиент не держит поток вечно
+
         def do_PUT(self):  # noqa: N802
             parts = self.path.split("?")[0].strip("/").split("/")
             if not inbox or not write_token or parts[0] != "put":
@@ -279,6 +282,8 @@ def make_handler(project, token: str, fetch=None, inbox=None, write_token: str =
             if not length.isdigit():
                 return self._send(411, "text/plain; charset=utf-8", "нужен Content-Length")
             if int(length) > MAX_BODY:
+                self._drain(min(int(length), DRAIN))
+                self.close_connection = True
                 return self._send(413, "text/plain; charset=utf-8", "слишком большой")
             code, text = accept(Path(inbox), parts[1], self.rfile.read(int(length)))
             self._send(code, "text/plain; charset=utf-8", text)
@@ -296,6 +301,10 @@ def make_handler(project, token: str, fetch=None, inbox=None, write_token: str =
             if parts[1] == "body":
                 return self._send(200, "text/html; charset=utf-8", body_html(views, now))
             self._send(404, "text/plain; charset=utf-8", "не найдено")
+
+        def _drain(self, left: int):
+            while left > 0 and (chunk := self.rfile.read(min(left, 65536))):
+                left -= len(chunk)
 
         def _send(self, code: int, kind: str, text: str):
             data = text.encode("utf-8")
