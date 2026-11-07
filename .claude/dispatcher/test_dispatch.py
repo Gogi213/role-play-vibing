@@ -4310,6 +4310,17 @@ class ProjectRootTests(unittest.TestCase):
         os.utime(cfg, ns=(time.time_ns(), time.time_ns() + 2 * 10**9))
         self.assertEqual(P.settings(root), {})
 
+    def test_settings_cache_sees_rewrite_within_same_mtime(self):
+        """TK-116: две записи rpv.json в одну отметку mtime (грубые часы Windows) — вторая читается, не кэш."""
+        root = self.make_project(self.proj / "s2")
+        cfg = root / ".claude" / "rpv.json"
+        cfg.write_text('{"k": 5}', encoding="utf-8")
+        self.assertEqual(P.setting("k", 0, root=root), 5)
+        mtime = cfg.stat().st_mtime_ns
+        cfg.write_text('{"k": "long"}', encoding="utf-8")
+        os.utime(cfg, ns=(mtime, mtime))
+        self.assertEqual(P.setting("k", 0, root=root), "long")
+
     def test_configure_project_moves_all_state_paths_into_project(self):
         import watch as W
         orig = CFG.PROJECT_ROOT
