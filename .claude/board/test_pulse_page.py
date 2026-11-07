@@ -425,6 +425,34 @@ class StatusBlock(PageStates):
         self.assertNotIn("Держит", html)
 
 
+class PhoneFit(unittest.TestCase):
+    """TK-118: на телефоне (390 px) карточка не шире экрана — длинное слово («test_pulse_facts::test_thresholds_follow_rpv_json») в строке
+    «Сделано сегодня» переносится, а не растягивает колонку. Вид проверяется снимком 390 px (docs/reviews/TK-118-pulse-phone.py); здесь —
+    три правила, на которых он держится."""
+
+    css = (HERE / "pulse.html").read_text(encoding="utf-8").split("<style>")[1].split("</style>")[0]
+
+    def rules(self, selector):
+        found = re.findall(r"(?:^|[{}])\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", self.css)
+        self.assertTrue(found, f"правила {selector} нет")
+        return found
+
+    def test_long_words_wrap_in_the_whole_page(self):
+        self.assertIn("overflow-wrap:anywhere", "".join(self.rules(".wrap")))
+
+    def test_card_columns_may_shrink_below_the_longest_word(self):
+        for selector in (".proj summary", ".body"):
+            for rule in self.rules(selector):
+                for track in re.findall(r"grid-template-columns:([^;}]*)", rule):
+                    self.assertNotRegex(re.sub(r"minmax\(0,1fr\)", "", track), r"(?<![\w-])1fr", f"{selector}: колонка 1fr не сжимается ниже слова — minmax(0,1fr)")
+
+    def test_ticket_tag_is_not_torn_apart_by_the_wrapping(self):
+        self.assertIn("white-space:nowrap", "".join(self.rules(".tag")))
+
+    def test_text_of_a_list_row_may_shrink_in_its_flex_row(self):
+        self.assertIn("min-width:0", "".join(self.rules(".body li>span")))
+
+
 class FakeResponse(io.BytesIO):
     def __enter__(self):
         return self
