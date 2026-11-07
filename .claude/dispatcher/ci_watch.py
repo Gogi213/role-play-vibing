@@ -107,7 +107,7 @@ def run_once(repo: str, gh=gh_api) -> list:
             if who:
                 wake(tkt.path, tkt, who, text, repo, pr["number"])
                 woke = who
-        st[key] = {"sha": sha, "state": state, "red": red, "woke": woke}
+        st[key] = {"sha": sha, "state": state, "red": red, "woke": woke, "at": T.now_iso()}
         out.append((pr["number"], sha[:7], state, woke))
     save_state(st)
     return out
