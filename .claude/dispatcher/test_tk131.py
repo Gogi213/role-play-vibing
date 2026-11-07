@@ -1,6 +1,7 @@
 """Тесты TK-131 (E-037): сметание не трогает копию закрытого тикета с ходом роли; приёмка не гоняет проверки в мёртвой копии."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,6 +64,24 @@ class SweepTests(Sandbox):
         self.sweep()
         self.assertFalse(wt.exists())
 
+    def test_run_by_next_keeps_copy_while_role_runs(self):
+        # ход по next: запуск роли чистит next (decide.py), копию сметали во время прогона Судьи — сценарий TK-125
+        self.ticket("TK-009", "done", nxt="judge")
+        wt = self.copy("TK-009")
+        self.ticket("TK-009", "done")                                       # next очищен при запуске
+        with mock.patch.dict(D.RUNNING, {"TK-009": {"role": "judge"}}):
+            self.sweep()
+            self.assertTrue((wt / "a.txt").is_file())
+        self.sweep()                                                        # прогон кончился — копию убирают, как раньше
+        self.assertFalse(wt.exists())
+
+    def test_running_other_ticket_does_not_keep_copy(self):
+        self.ticket("TK-009", "done")
+        wt = self.copy("TK-009")
+        with mock.patch.dict(D.RUNNING, {"TK-010": {"role": "judge"}}):
+            self.sweep()
+        self.assertFalse(wt.exists())
+
     def test_stopped_ticket_with_next_keeps_copy_until_next_is_gone(self):
         self.ticket("TK-009", "stopped", nxt="judge")
         wt = self.copy("TK-009")
@@ -85,6 +104,15 @@ class DeadCopyTests(Sandbox):
         (dead / ".git").write_text("gitdir: x")
         self.assertEqual(E.dead_copy(self.root, "TK-8"), dead)            # остался один .git
         self.assertTrue(wt.exists())
+
+    def test_partly_deleted_copy_is_dead(self):
+        wt = self.copy("TK-6")
+        (wt / ".git").unlink()                                            # «failed to delete»: .git ушёл, файлы остались
+        self.assertTrue((wt / "a.txt").is_file())
+        self.assertEqual(E.dead_copy(self.root, "TK-6"), wt)
+        wt = self.copy("TK-5")
+        shutil.rmtree(self.root / ".git" / "worktrees" / "TK-5")           # служебный каталог git убран, .git и файлы целы
+        self.assertEqual(E.dead_copy(self.root, "TK-5"), wt)
 
     def test_gate_refuses_dead_copy_as_not_checked(self):
         (self.copies / "TK-8").mkdir()
