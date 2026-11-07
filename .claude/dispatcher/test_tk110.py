@@ -98,6 +98,12 @@ class DeliveryTests(Sandbox):
 
 
 class BatchTests(Sandbox):
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(CW, "BACKGROUND", True)  # conftest гасит фон для всех тестов; здесь он и проверяется
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_events_during_a_run_go_in_one_run_and_wake_returns_at_once(self):
         gate, started = threading.Event(), threading.Event()
         runs = []
@@ -141,6 +147,46 @@ class BatchTests(Sandbox):
         self.signal("done")
         CW.wait_idle(2)
         self.assertEqual(self.calls, [])
+
+
+class IsolationTests(Sandbox):
+    """E-028: поток побудки переживает тест; пути, сессия и отправка берутся в момент wake(), а не в момент работы потока."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(CW, "BACKGROUND", True)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_thread_writes_where_wake_was_called_not_where_paths_point_later(self):
+        gate, runs, sends = threading.Event(), [], []
+        CW.write_session("sess-1", "RPV - CAO")
+        live = tempfile.TemporaryDirectory()
+        self.addCleanup(live.cleanup)
+
+        def held(cmd, **kw):
+            runs.append(kw["input"].decode("utf-8"))
+            gate.wait(5)
+            return subprocess.CompletedProcess(cmd, 0, b"NOT_FOUND", b"")
+        mine = CFG.CEO_INBOX
+        with mock.patch.object(CW.haiku_aux.hide, "run", held),                 mock.patch.object(CW.notify, "send", lambda text, **kw: sends.append(kw.get("log_dir")) or True):
+            self.signal(tid="TK-001")           # событие в очереди, поток держит запуск
+            CFG.configure_project(live.name)    # тест кончился: пути снова «настоящие»
+            (Path(live.name) / ".claude" / "dispatcher").mkdir(parents=True)
+            gate.set()
+            CW.wait_idle(10)
+            live_inbox, live_dir = CFG.CEO_INBOX, CFG.DISPATCHER_DIR
+            CFG.configure_project(self.tmp.name)
+        self.assertEqual(len(runs), 1, "сессия читается при wake(): после смены путей поток всё равно шлёт именованной сессии")
+        self.assertIn("[ceo-не-разбужен]", mine.read_text(encoding="utf-8"))
+        self.assertFalse(live_inbox.exists(), "в «настоящий» ceo-inbox.md ничего не попало")
+        self.assertEqual([d for d in sends if d is not None], [mine.parent])
+        self.assertFalse((live_dir / "mechanics.log").exists())
+
+
+class ConftestTests(unittest.TestCase):
+    def test_background_is_off_in_every_test_by_default(self):
+        self.assertFalse(CW.BACKGROUND, "conftest гасит фон побудки: поток не переживает тест и не пишет в живой проект (E-028)")
 
 
 class SessionNameTests(Sandbox):
