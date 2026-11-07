@@ -16,6 +16,7 @@ from pathlib import Path
 
 import probe as probe_mod
 import project as P
+import pulse_push
 import registry as registry_mod
 
 ROLLBACK_AFTER_S = 2 * 3600
@@ -79,6 +80,7 @@ KEYS = {
     "host_mem_reserve": (lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1, "число ≥ 1"),
     "pulse_projects": (lambda v: isinstance(v, dict) and bool(v) and all(_text(k) and _text(x) for k, x in v.items()), "объект {имя проекта: путь к pulse.json или URL}"),
     "pulse_telegram": (lambda v: isinstance(v, bool), "true или false"),
+    "pulse_push": (pulse_push.valid, "объект {url: https://хост:порт, name: имя проекта латиницей, key: ключ записи страницы (16+ знаков)}"),
     "ceo_context_warn": (_int_min, "целое ≥ 1, токены контекста; ниже ceo_context_stop"),
     "ceo_context_stop": (_int_min, "целое ≥ 1, токены контекста; выше ceo_context_warn"),
 }
