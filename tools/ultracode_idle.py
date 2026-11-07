@@ -14,6 +14,7 @@ def main():
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     ev, human, notif, kinds = [], [], [], collections.Counter()
+    bg_start, bg_end, refusal = {}, {}, []
     for line in open(SESS + ".jsonl", encoding="utf-8"):
         try:
             o = json.loads(line)
@@ -24,6 +25,16 @@ def main():
             continue
         t = ts(t)
         ev.append(t)
+        if "disabled Claude subscription access" in line:
+            refusal.append(t)
+        c0 = (o.get("message") or {}).get("content")
+        if isinstance(c0, list):
+            for x in c0:
+                if x.get("type") == "tool_use" and x.get("name") == "Bash" and (x.get("input") or {}).get("run_in_background"):
+                    bg_start[x["id"]] = t
+        mt = re.search(r"<tool-use-id>([^<]+)</tool-use-id>", line) if o.get("type") == "user" and "<task-notification>" in line else None
+        if mt:
+            bg_end[mt.group(1)] = t
         if o.get("type") == "user":
             c = (o.get("message") or {}).get("content")
             txt = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text") if isinstance(c, list) else ""
@@ -58,6 +69,12 @@ def main():
     for i in range(n):
         m = main_act[i] or (i and main_act[i - 1])
         cls.append("работа" if m and not agent_n[i] else "работа+агенты" if m else "ожидание агентов" if agent_n[i] else "простой")
+    # фоновые команды Bash (run_in_background … task-notification): ожидание, не простой
+    bg = [(bg_start[k], bg_end[k]) for k in bg_start if k in bg_end]
+    for s, e in bg:
+        for i in range(max(0, int((s - t0) // 60)), min(n, int((e - t0) // 60) + 1)):
+            if cls[i] == "простой":
+                cls[i] = "ожидание фоновой команды"
     tot = collections.Counter(cls)
     # простои подряд
     idle, i = [], 0
@@ -78,7 +95,26 @@ def main():
     top = [{"c": fmt(s), "по": fmt(e), "мин": m, "реплик_владельца_у_границ": len(h_in(s, e))} for s, e, m in idle[:15]]
     # паузы между репликами владельца и ответ
     hs = sorted(h[0] for h in human)
-    out = {"минут_всего": n, "старт": fmt(t0), "конец": fmt(t1), "классы_мин": dict(tot),
+    # причина каждого простоя >= 10 мин: внешний отказ / реплика владельца на границе / прочее
+    reasons = collections.Counter()
+    rows = []
+    for s, e, m in idle:
+        if m < 10:
+            r = "прочее"
+        elif any(s - 60 <= x <= e + 60 for x in refusal):
+            r = "внешний отказ"
+        elif h_in(s, e):
+            r = "владелец"
+        else:
+            r = "прочее"
+        reasons[r] += m
+        if m >= 10:
+            rows.append({"c": fmt(s), "по": fmt(e), "мин": m, "причина": r})
+    base = n - reasons["внешний отказ"] - reasons["владелец"]
+    out = {"причины_простоя_мин": dict(reasons), "промежутки_>=10мин": rows,
+           "прочее_доля_вне_отказа_и_владельца_%": round(100 * reasons["прочее"] / base, 1), "знаменатель_мин": base,
+           "фоновых_команд_с_уведомлением": len(bg), "фоновых_без_уведомления": len(bg_start) - len(bg),
+           "минут_всего": n, "старт": fmt(t0), "конец": fmt(t1), "классы_мин": dict(tot),
            "доли": {k: round(100 * v / n, 1) for k, v in tot.items()},
            "простоев_подряд_>=10мин": sum(1 for x in idle if x[2] >= 10), "минут_в_них": sum(x[2] for x in idle if x[2] >= 10),
            "простои_топ": top, "реплик_владельца": len(human), "уведомлений_о_завершении": len(notif),

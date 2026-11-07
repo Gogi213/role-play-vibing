@@ -1,15 +1,14 @@
 Тикет: TK-085
-Голова: 0a38cce
+Голова: b7a4c4a
 
-Отчёт критика (Sonnet) по 0a38cce, сжато:
-1. test_no_mechanics возвращён — **держится**: test_tk065.py, те же фразы, что в origin/main, кроме двух Monitor-фраз; все пять живы в templates/roles/ceo.md:7-8.
-2. Перенос charter.sync для «Покрыто решением» — **держится**: test_tk062.py:75-83 = origin/main:test_tk062.py:87-96 без проверки удалённого по заказу правила «Наблюдение держишь».
-3. Monitor нет в docs/img/*.svg, docs/signals.md, commands/ceo.md, templates/roles/ceo.md — **держится**; workflow.svg валидный XML, метка заменена на ceo_wake.py: SendMessage.
-4. Слит main 79eee8a; diff ace7911..0a38cce — только три файла правки — **держится**. origin/main ушёл вперёд (853ba09), merge-tree без конфликтов.
-5. test_tk085 не закрепляет отсутствие Monitor в docs/img — **не хватает** (только grep).
-Упущено: Monitor в докстрингах/сообщениях тестов (test_tk062.py:2, test_signals.py:1,46, test_dispatch.py:1764, test_overseer.py:213, test_tk075.py:1); мёртвая CEO_COMMAND в test_tk062.py:22.
+Отчёт критика (Sonnet), сжато по пунктам:
+1. EVENT_OF = события заказа, done не будит — держится: ceo_wake.py:35 (needs_owner, blocked, auth, due, следующий-не-определён, watch-goal-idle, goal-done), signals.py:57; у каждого вида есть источник. test_tk085 17 passed в копии на b7a4c4a.
+2. Слияние main не потеряло строк — держится: configuration.md, signals.md, templates/roles/ceo.md, commands/ceo.md — убраны только Monitor-строки, тела строк таблицы целы; main 79eee8a вливается без конфликтов.
+3. Удалённые тесты только про Monitor — не держится: test_tk065.py test_no_mechanics удалён целиком, хотя 5 из 7 фраз («Механику не пиши», «PR», «файлы и строки», «пересказ отчётов критика, Инженера, Судьи», ««жду»») живы в templates/roles/ceo.md:7 — правило В-26 больше не проверяется; test_tk062 test_sync_carries_both_rules_into_project_charter удалён вместе с проверкой переноса «**Покрыто решением — делай, не спрашивай:**» (Monitor не касается), импорт charter остался неиспользуемым.
+4. Сессия не найдена/сбой — держится: ceo_wake.py:81,86,103,107,112; без исключений.
+5. Monitor в ceo.md/commands/signals.md — держится; остаток вне заказанных файлов: docs/img/workflow.svg:3,79 («a Monitor wakes the CEO», «Monitor on ceo-wake.log»).
+Упущено (не возврат): побудка синхронна (до 90 с на событие); нет дедупа «ceo-не-разбужен» без ceo-session.json; несовпадение режима разрешений код не видит — пункт живой проверки.
 
-«Не держится» нет.
-Ответ Судьи на 4: gh pr view 199 — MERGEABLE CLEAN, CI зелёный на голове; ветка вливается без конфликтов — не возврат.
-Ответ Судьи на 5: замечаниями, не возврат — заказ п.3 называет устав, команду и signals.md, они закреплены TextTests; комментарии тестов и мёртвая константа не меняют поведения.
-Прогон Судьи в копии на 0a38cce: test_tk065, test_tk062, test_tk085 — все зелёные.
+Ответ Судьи на 3: принял — проверил `git diff origin/main...b7a4c4a -- .claude/dispatcher/test_tk065.py test_tk062.py` сам: оба теста удалены целиком. Вернуть: восстановить test_no_mechanics без двух Monitor-фраз и test_sync_… с проверкой только «Покрыто решением».
+Ответ Судьи на 5 (остаток): `git show b7a4c4a:docs/img/workflow.svg | grep -i monitor` — строки 3 и 79; схема README противоречит заказу п.3 — в тот же возврат (дёшево).
+Ответ Судьи на «упущено»: замечаниями, не возврат — вне заказа; режим разрешений закрывает [вживую] после выпуска (В-37).
