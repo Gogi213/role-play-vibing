@@ -49,6 +49,7 @@ import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402  (CLI — new/comment/start/status)
 from test_tk127 import turns_off  # noqa: E402  (TK-127: прежнее поведение передачи CEO)
+from test_review_cap_patch import patch_review_cap  # noqa: E402  (TK-129: малый потолок вместо 500 кругов)
 
 TZ = timezone(timedelta(hours=4))  # GMT+4 (память проекта)
 
@@ -2598,6 +2599,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertNotIn(path.stem, D.load_state().get("review_returns", {}))
 
     def test_cap_returns_then_resubmit_asks_owner_with_reasons_and_reviewer_is_not_woken(self):
+        patch_review_cap(self)  # TK-129: 500 кругов шли ~40 с
         path = self.review_setup()
         tid = path.stem
         for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
@@ -2623,6 +2625,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(D.RUNNING, {})
 
     def test_below_the_limit_reviewer_is_still_woken(self):
+        patch_review_cap(self)  # TK-129: 500 кругов шли ~40 с
         path = self.review_setup()
         for n in range(1, SIG.MAX_REVIEW_RETURNS):
             self.review_round(path, n, "in_progress")
@@ -2634,6 +2637,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(self.ceo_lines(path.stem), [])
 
     def test_ceo_next_wakes_reviewer_even_over_the_limit_and_counter_keeps_going(self):
+        patch_review_cap(self)  # TK-129: 500 кругов шли ~40 с
         path = self.review_setup()
         for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
@@ -2647,6 +2651,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(self.ceo_lines(path.stem), [])
 
     def test_limit_is_judged_only_after_owner_resubmits_not_on_ceo_or_reviewer_entries(self):
+        patch_review_cap(self)  # TK-129: 500 кругов шли ~40 с
         path = self.review_setup()
         for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
@@ -2662,6 +2667,7 @@ class DispatchRunTests(unittest.TestCase):
     def test_no_escalation_while_owner_run_is_still_going(self):
         """Аудит-3 п.4: на потолке возвратов промежуточная запись владельца ПОСРЕДИ его запуска — не «сдал на ревью»:
         эскалация ждёт конца запуска (тикет в RUNNING), потом срабатывает один раз."""
+        patch_review_cap(self)  # TK-129: 500 кругов шли ~40 с
         path = self.review_setup()
         tid = path.stem
         for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
@@ -2686,6 +2692,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(len(self.ceo_lines(tid, "needs_owner")), 1, self.ceo_lines(tid))
 
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
+        patch_review_cap(self)  # TK-129: 500 кругов шли ~40 с
         path = self.review_setup()
         for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
