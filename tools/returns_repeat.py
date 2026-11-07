@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,7 +51,8 @@ def classify(text):
 
 
 def ts(s):
-    return datetime.fromisoformat(s)
+    d = datetime.fromisoformat(s)
+    return d if d.tzinfo else d.replace(tzinfo=timezone(timedelta(hours=4)))  # записи без пояса — +04:00
 
 
 def parse_ticket(path):
@@ -72,16 +73,27 @@ def parse_ticket(path):
 
 
 def load_tickets():
-    out = {}
+    """тикет + его архив лога (<ID>-log.md, старые записи): склеено по ID, порядок по времени"""
+    parts = defaultdict(dict)
     for proj, root in PROJECTS.items():
         for d in (root / ".claude/tickets", root / ".claude/tickets/archive"):
             for p in sorted(d.glob("*.md")):
-                if p.name.endswith("-log.md"):
-                    continue
+                tid = p.stem[:-4] if p.stem.endswith("-log") else p.stem
                 try:
-                    out[(proj, p.stem)] = (p, parse_ticket(p))
+                    parts[(proj, tid)][p] = parse_ticket(p)
                 except Exception:
                     pass
+    out = {}
+    for key, files in parts.items():
+        seen, ent = set(), []
+        for p, es in files.items():
+            for e in es:
+                k = (e["ts"], e["role"], e["text"][:80])
+                if k not in seen:
+                    seen.add(k)
+                    ent.append(e)
+        ent.sort(key=lambda e: ts(e["ts"]))
+        out[key] = (next(iter(files)), ent)
     return out
 
 
@@ -206,7 +218,7 @@ def analyse():
                 t0 = ts(ent[s[k - 1]]["ts"]) if k else None
                 cost = sum(r["cost"] for r in runs.get((proj, tid), []) if t0 and t0 < r["t"] <= t1) if t0 else None
                 gap = (t1 - t0).total_seconds() / 60 if t0 else None
-                rows.append(dict(n=k + 1, ts=e["ts"], cls=cls, fault=FAULT[cls], fix=fix, cost=cost, gap_min=gap, msg=e["msg"][:220].replace("\n", " ")))
+                rows.append(dict(n=k + 1, ts=e["ts"], cls=cls, fault=FAULT[cls], fix=fix, cost=cost, gap_min=gap, msg=e["msg"][:220].replace("\n", " "), full=e["msg"][:1500]))
             ceil = [x for x in ent if x["role"] == "dispatcher" and "Потолок возвратов" in x["text"]]
             idle = 0.0
             for c in ceil:
@@ -247,10 +259,59 @@ def report(res, n_ret, n_ser1):
     return "\n".join(L)
 
 
+FORMAL = ("форма договора/ярлыки", "конфликт с main", "не закоммичено/не запушено", "тест/CI красный или нестабильный", "продолжай/сдай как есть")
+
+
+def words(s):
+    s = re.sub(r"docs/\S+|[0-9a-f]{7,40}", " ", s.lower())
+    return {w for w in re.findall(r"[a-zа-яё0-9_\-\.]{5,}", s)}
+
+
+def median(v):
+    v = sorted(v)
+    return v[len(v) // 2] if v else 0
+
+
+def report_tables(res, n_ret):
+    L = []
+    rows = [r for t in res for r in t["rows"]]
+    r2 = [r for r in rows if r["n"] >= 2]
+    tot = sum(r["cost"] or 0 for r in r2)
+    L.append("\nТаблица по классам (круги 2+): класс | все в сериях | круги 2+ | $ | доля $ | медиана $ | медиана мин | код/текст/ничего")
+    for cls in [c for c, _ in Counter(r["cls"] for r in rows).most_common()]:
+        a, b = [r for r in rows if r["cls"] == cls], [r for r in r2 if r["cls"] == cls]
+        s = sum(r["cost"] or 0 for r in b)
+        fx = Counter(r["fix"].split(" (")[0] for r in b)
+        L.append(f"  {cls} | {len(a)} ({100*len(a)/len(rows):.0f}%) | {len(b)} | {s:.1f} | {100*s/tot:.0f}% | {median([r['cost'] for r in b if r['cost'] is not None]):.2f} | {median([r['gap_min'] for r in b if r['gap_min'] is not None]):.0f} | {fx['правка кода']}/{fx['только текст/отчёт/коммит']}/{fx['ничего']}")
+    for cls, g in (("формальные (форма, main, коммит, CI, «продолжай»)", FORMAL),):
+        a = [r for r in rows if r["cls"] in g]
+        b = [r for r in r2 if r["cls"] in g]
+        s = sum(r["cost"] or 0 for r in b)
+        L.append(f"Формальные: возвратов в сериях {len(a)} из {len(rows)} ({100*len(a)/len(rows):.0f}%), от всех {n_ret}: {100*len(a)/n_ret:.0f}%; кругов 2+ {len(b)} из {len(r2)} ({100*len(b)/len(r2):.0f}%); $ {s:.1f} из {tot:.1f} ({100*s/tot:.0f}%)")
+    for pj in ("rpv", "alpha"):
+        sel = [r for t in res if t["proj"] == pj for r in t["rows"]]
+        c = Counter(r["cls"] for r in sel)
+        f = sum(v for k, v in c.items() if k in FORMAL)
+        L.append(f"{pj}: n={len(sel)}; " + "; ".join(f"{k} {100*v/len(sel):.0f}%" for k, v in c.most_common(5)) + f"; формальные {100*f/len(sel):.0f}%")
+    L.append("Деньги в хвосте: " + ", ".join(
+        f"серии >={m}: {sum(1 for t in res if len(t['rows'])>=m)} тикетов, ${sum(r['cost'] or 0 for t in res if len(t['rows'])>=m for r in t['rows'] if r['n']>=2):.0f} ({100*sum(r['cost'] or 0 for t in res if len(t['rows'])>=m for r in t['rows'] if r['n']>=2)/tot:.0f}%)" for m in (4, 6)))
+    sh, same = [], 0
+    for t in res:
+        for a, b in zip(t["rows"], t["rows"][1:]):
+            wa, wb = words(a["full"]), words(b["full"])
+            if len(wb) >= 4:
+                x = len(wa & wb) / len(wb)
+                sh.append(x)
+                same += x >= 0.5
+    L.append(f"Соседние пары возвратов: {len(sh)}; делят >=50% слов нового: {same} ({100*same/len(sh):.0f}%); медиана доли слов нового, уже бывших в прежнем: {median(sh):.2f}")
+    return "\n".join(L)
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     res, n_ret, n_ser1 = analyse()
     print(report(res, n_ret, n_ser1))
+    print(report_tables(res, n_ret))
     if "--json" in sys.argv:
         Path(sys.argv[sys.argv.index("--json") + 1]).write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     if "--check" in sys.argv:
