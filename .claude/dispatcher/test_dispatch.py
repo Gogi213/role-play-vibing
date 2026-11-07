@@ -50,6 +50,7 @@ import procs  # noqa: E402
 import project as P  # noqa: E402
 import ticket as T  # noqa: E402
 import tickets as TK  # noqa: E402  (CLI — new/comment/start/status)
+from test_tk127 import turns_off  # noqa: E402  (TK-127: прежнее поведение передачи CEO)
 
 TZ = timezone(timedelta(hours=4))  # GMT+4 (память проекта)
 
@@ -866,15 +867,16 @@ class DispatchRunTests(unittest.TestCase):
         t0 = dt("2026-10-06T12:00:00+04:00")
         p = self.mk("engineer", "waiting", now=t0)
         state = {"ceo_handoffs": {T.read_ticket(p).id: T.now_iso(t0)}}
-        for m in (11, 12, 30):
-            self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=m)).status, "waiting")
-        inbox = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
-        self.assertEqual(inbox.count("[ждёт-ceo]"), 1)
-        self.assertNotIn("[нет-хода]", inbox)
-        T.append_log(p, "ceo", "принято, думаю", now=t0 + timedelta(minutes=31))
-        T.write_header_updates(p, {}, now=t0 + timedelta(minutes=31))  # comment обновляет updated
-        self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=33)).status, "waiting")
-        out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=45))
+        with turns_off():  # TK-127: по умолчанию ход после 10 мин молчания CEO берёт Судья (test_tk127)
+            for m in (11, 12, 30):
+                self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=m)).status, "waiting")
+            inbox = CFG.CEO_INBOX.read_text(encoding="utf-8") if CFG.CEO_INBOX.exists() else ""
+            self.assertEqual(inbox.count("[ждёт-ceo]"), 1)
+            self.assertNotIn("[нет-хода]", inbox)
+            T.append_log(p, "ceo", "принято, думаю", now=t0 + timedelta(minutes=31))
+            T.write_header_updates(p, {}, now=t0 + timedelta(minutes=31))  # comment обновляет updated
+            self.assertEqual(D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=33)).status, "waiting")
+            out = D.enforce_move_invariant(p, T.read_ticket(p), state, t0 + timedelta(minutes=45))
         self.assertEqual(out.status, "in_progress")
         self.assertEqual(state["ceo_handoffs"], {})
 
@@ -1034,7 +1036,7 @@ class DispatchRunTests(unittest.TestCase):
         T.append_log(path, "engineer", "нужно решение", now=t0 + timedelta(seconds=5))
         T.write_header_updates(path, {"next": "ceo"}, now=t0 + timedelta(seconds=5))
         state = D.load_state()
-        with mock.patch.object(T, "write_header_updates", side_effect=RuntimeError("kill")):
+        with turns_off(), mock.patch.object(T, "write_header_updates", side_effect=RuntimeError("kill")):
             with self.assertRaises(RuntimeError):
                 D.handle_next_ceo(path, T.read_ticket(path), state, t0 + timedelta(seconds=6))
         self.assertIn(path.stem, D.load_state().get("ceo_handoffs", {}))
@@ -2295,7 +2297,8 @@ class DispatchRunTests(unittest.TestCase):
                                 now=dt("2026-09-27T12:00:00+04:00"))
         T.write_header_updates(path, {"status": "waiting", "next": "ceo"}, now=dt("2026-09-27T12:00:30+04:00"))
         T.append_log(path, "researcher", "Нужно решение владельца по бюджету.", now=dt("2026-09-27T12:01:00+04:00"))
-        D.tick(now=dt("2026-09-27T12:02:00+04:00"))
+        with turns_off():  # TK-127: по умолчанию ход получает Судья (test_tk127)
+            D.tick(now=dt("2026-09-27T12:02:00+04:00"))
         inbox = CFG.CEO_INBOX.read_text(encoding="utf-8")
         self.assertEqual(inbox.count("[next-ceo]"), 1)
         self.assertIn("решение владельца по бюджету", inbox)

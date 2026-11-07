@@ -527,7 +527,7 @@ class ResultTests(unittest.TestCase):
             self.assertEqual(self.res("judge", "accept", path="review.md", decisions="-", numbers="-",
                                       tail='ceo:"вписать хук в settings.json"'), 0)
         sig.assert_called_once_with(self.tid, "хвост", "вписать хук в settings.json")
-        self.assertIn("хвост CEO: «вписать хук в settings.json»", self.tkt().log[-1].text)
+        self.assertTrue(any("хвост CEO: «вписать хук в settings.json»" in e.text for e in self.tkt().log))  # TK-127: после записи Судьи — «Ход тебе (хвост)"
 
     def test_tail_gate_off_without_registry(self):
         (self.base / "out.md").write_text("x", encoding="utf-8")

@@ -202,7 +202,7 @@ class SessionNameTests(Sandbox):
         self.assertEqual(code, 0)
         session = json.loads(out)
         self.assertEqual((session["id"], session["name"]), ("new", "RPV - CAO"))
-        self.assertEqual(err, "")
+        self.assertNotIn("имя сессии не записано", err)  # про метку предупреждает test_tk125
 
     def test_set_without_any_name_warns(self):
         code, _out, err = self.run_main("set", "--id", "new")

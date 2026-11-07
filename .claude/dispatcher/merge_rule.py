@@ -2,11 +2,16 @@
 голове (`tickets.py accept`) + CI зелёный на ней (ci-state.json; при `has_ci: false` CI не требуется) + GitHub считает PR
 сливаемым. Голова сменилась после вердикта — не вливает. Конфликт — запись и `next` владельцу тикета (не CEO), один раз на голову. База не main (цепочка):
 пока родительский PR открыт — ждёт; родитель влит — переключает базу на main. После слияния — проверка `merged`, запись
-в тикет. Защиту main не ставим (В-193): `sha` в запросе слияния защищает от гонки со сменой головы."""
+в тикет. Защиту main не ставим (В-193): `sha` в запросе слияния защищает от гонки со сменой головы.
+TK-121 (В-58): принят, а CI красный на текущей голове и main впереди ветки — владельцу один раз заказ «слей main, запушь, правок
+не делай» (красный тест мог быть чужим и уже исправлен в main); красный и без отставания от main, либо после заказа красный
+снова — событие CEO `merge-red` «принят, не влит: CI красный N мин». Пока такой PR есть, в merge-state.json стоит свежая
+отметка `accepted_red_at` — её читает счётчик простоя (`downtime.watch_flags`)."""
 from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,6 +23,8 @@ import ticket as T  # noqa: E402
 
 ERR_LIMIT = 3          # подряд сбоев GitHub (5xx, сеть) на одном PR, после которых о нём узнаёт владелец
 _TRANSIENT = re.compile(r"HTTP 5\d\d|timed out|timeout|connection", re.I)
+RED_MARK = "accepted_red_at"   # merge-state.json: когда проход последний раз видел принятый PR с красным CI — счётчик простоя (TK-121)
+RED_KIND = "merge-red"         # вид сигнала CEO (ceo_wake.EVENT_OF): принят, не влит
 
 
 def no_ci() -> bool:
@@ -72,9 +79,9 @@ def _drop_accepted(tkt, pr_number: int) -> None:
             T.write_header_updates(tkt.path, {"accepted": format_accepted(acc)}, stamp_updated=False)
 
 
-def _note(tkt, text: str, wake_owner: bool = False) -> None:
+def _note(tkt, text: str, wake_owner: bool = False, repo: str = "", pr: int = 0) -> None:
     if wake_owner:
-        C.wake(tkt.path, tkt, tkt.owner, text)
+        C.wake(tkt.path, tkt, tkt.owner, text, repo, pr)
     else:
         with T.ticket_lock(tkt.path):
             T.append_log(tkt.path, "merge", text)
@@ -203,6 +210,72 @@ def _report_gh_error(st: dict, key: str, sha: str, tkt, what: str, e: Exception,
         out.append((n, r))
 
 
+def behind_by(repo: str, default: str, sha: str, gh=C.gh_api) -> int:
+    """На сколько коммитов `default` впереди головы `sha` (GitHub compare). Нет поля — 0; сбой GitHub — исключение."""
+    return int(gh(f"repos/{repo}/compare/{default}...{sha}").get("behind_by") or 0)
+
+
+def _emit_ceo(tid: str, kind: str, text: str) -> None:
+    import signals as SIG  # поздно: сигналы тянут побудку CEO, а merge_rule нужен и без неё
+    SIG.append_ceo_inbox(tid, kind, text)
+
+
+def _red_minutes(ci_ent: dict, ent: dict, now: datetime) -> int:
+    """Сколько минут CI красный: от отметки ci_watch о смене состояния (`at`), иначе от первого взгляда этого модуля."""
+    since = P.parse_time(ci_ent.get("at")) or P.parse_time(ent.get("since"))
+    return max(0, int((now - since).total_seconds() // 60)) if since else 0
+
+
+def _tell_ceo(tkt, n: int, sha: str, ci_ent: dict, st: dict, rk: str, now: datetime, emit, tail: str) -> None:
+    """Событие CEO «принят, не влит» — один раз на голову."""
+    ent = st.get(rk) or {}
+    if ent.get("told") == sha:
+        return
+    red = ", ".join(ci_ent.get("red") or []) or "?"
+    emit(tkt.id, RED_KIND, f"принят, не влит: CI красный {_red_minutes(ci_ent, ent, now)} мин — PR #{n} на {sha[:7]} ({red}). {tail}")
+    st[rk] = {**ent, "told": sha}
+
+
+def _red_accepted(gh, repo: str, n: int, sha: str, default: str, tkt, ci_ent: dict, st: dict, out: list, emit, now: datetime) -> None:
+    """Принятый PR на текущей голове, CI красный. Main впереди и заказа ещё не было — заказ владельцу; иначе — CEO."""
+    key, rk = f"{repo}#{n}", f"red:{repo}#{n}"
+    ent = st.get(rk) or {}
+    if not ent.get("since"):
+        ent["since"] = P.now_iso()
+        st[rk] = ent
+    if ent.get("ordered") == sha or ent.get("told") == sha:
+        return
+    if not ent.get("ordered"):
+        try:
+            behind = behind_by(repo, default, sha, gh)
+        except Exception as e:
+            _report_gh_error(st, key, sha, tkt, "сверка с main", e, n, out)
+            return
+        if behind > 0:
+            _note(tkt, f"PR #{n} принят на {sha[:7]}, но CI красный, а {default} впереди ветки на {behind} коммит(ов): слей {default} "
+                       f"в ветку и запушь, правок кода не делай (красный тест мог быть чужим и уже исправлен в {default}). "
+                       f"CI и вердикт на новой голове — заново.", wake_owner=True, repo=repo, pr=n)
+            st[rk] = {**ent, "ordered": sha}
+            out.append((n, "красный CI, main впереди → владельцу: слить main"))
+            return
+    _tell_ceo(tkt, n, sha, ci_ent, st, rk, now, emit,
+              "Слияние main в ветку не требуется или уже было, а CI красный: перезапуск, правка или отказ решает CEO.")
+    out.append((n, "принят, не влит → CEO"))
+
+
+def _red_after_order(n: int, sha: str, repo: str, tkt, ci: dict, st: dict, out: list, emit, now: datetime) -> bool:
+    """Голова сменилась после заказа «слить main» и CI на новой голове красный — CEO. Истина, если PR в этом классе."""
+    key, rk = f"{repo}#{n}", f"red:{repo}#{n}"
+    ent, ci_ent = st.get(rk) or {}, ci.get(key) or {}
+    if not ent.get("ordered") or sha.startswith(ent["ordered"]) or ci_ent.get("sha") != sha or ci_ent.get("state") != "failure":
+        return False
+    before = ent.get("told")
+    _tell_ceo(tkt, n, sha, ci_ent, st, rk, now, emit, "Слили main по заказу, а CI на новой голове красный: решает CEO.")
+    if (st.get(rk) or {}).get("told") != before:
+        out.append((n, "после слияния main CI красный → CEO"))
+    return True
+
+
 def _sweep_pending(gh, repo: str, default: str, tickets: list, st: dict, out: list) -> set:
     """TK-109 п.1/14: PUT без ответа — смотрим PR вне списка open. Возвращает номера влитых."""
     swept = set()
@@ -251,26 +324,29 @@ def _switch_base(gh, repo: str, pr: dict, default: str, tkt, key: str, st: dict,
     out.append((n, f"база {base} → {default}"))
 
 
-def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, open_heads: set, st: dict, out: list) -> None:
+def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, open_heads: set, st: dict, out: list,
+               emit=None, now: "datetime | None" = None) -> bool:
+    """Один открытый PR. Истина — он «принят, не влит из-за красного CI» (отметка для счётчика простоя)."""
     n, sha = pr["number"], pr["head"]["sha"]
+    emit, now = emit or _emit_ceo, now or datetime.now().astimezone()
     tkt = C.ticket_for_pr(pr, tickets)
     if tkt is None or tkt.status not in T.ACTIVE_STATUSES + ("done",):
-        return
+        return False
     acc = accepted_head(tkt, n)
     if not acc or not sha.startswith(acc):
-        return
+        return _red_after_order(n, sha, repo, tkt, ci, st, out, emit, now)
     key = f"{repo}#{n}"
     ci_ok = no_ci() or ((ci.get(key) or {}).get("sha") == sha and (ci.get(key) or {}).get("state") == "success")
     base = pr["base"]["ref"]
     if base != default:
         if ci_ok and base not in open_heads:
             _switch_base(gh, repo, pr, default, tkt, key, st, out)
-        return
+        return False
     try:
         detail = gh(f"repos/{repo}/pulls/{n}")
     except Exception as e:
         _report_gh_error(st, key, sha, tkt, "запрос состояния PR", e, n, out)
-        return
+        return False
     if "errs" in (st.get(key) or {}):
         st.pop(key)
     if detail.get("mergeable") is False:                  # конфликт сообщаем сразу: CI на конфликтной голове не нужен
@@ -279,27 +355,42 @@ def _handle_pr(gh, repo: str, pr: dict, default: str, tickets: list, ci: dict, o
                        f"(CI и вердикт на новой голове — заново).", wake_owner=True)
             st[key] = {"conflict": sha, "base": default}
             out.append((n, "конфликт → владельцу"))
-        return
+        return False
+    ci_ent = ci.get(key) or {}
+    if not no_ci() and ci_ent.get("sha") == sha and ci_ent.get("state") == "failure":
+        _red_accepted(gh, repo, n, sha, default, tkt, ci_ent, st, out, emit, now)
+        return True
     if not ci_ok or detail.get("mergeable") is None:
-        return
+        return False
     merged_resp = _put_merge(gh, repo, n, sha, tkt, key, st, out)
     if merged_resp is None:
-        return
+        return False
     st.pop(key, None)
+    st.pop(f"red:{key}", None)
     _after_merge(gh, repo, n, sha, default, tkt, merged_resp, st, out)
+    return False
 
 
-def merge_once(repo: str, gh=C.gh_api) -> list:
+def merge_once(repo: str, gh=C.gh_api, emit=None) -> list:
     """Один проход по открытым PR. Возвращает [(PR, что сделано)]."""
     st, out = _load(), []
+    now = datetime.now().astimezone()
     tickets = _read_tickets()
     default = gh(f"repos/{repo}")["default_branch"]
     prs = gh(f"repos/{repo}/pulls?state=open&per_page=100")
     open_heads = {p["head"]["ref"] for p in prs}
     ci = C.load_state()
     swept = _sweep_pending(gh, repo, default, tickets, st, out)
+    flagged = False
     for pr in prs:
         if pr["number"] not in swept:
-            _handle_pr(gh, repo, pr, default, tickets, ci, open_heads, st, out)
+            flagged = _handle_pr(gh, repo, pr, default, tickets, ci, open_heads, st, out, emit, now) or flagged
+    open_keys = {f"red:{repo}#{p['number']}" for p in prs}
+    for k in [k for k in st if k.startswith(f"red:{repo}#") and k not in open_keys]:  # PR закрыт или влит — заказ и отметки забыты
+        st.pop(k)
+    if flagged:
+        st[RED_MARK] = T.now_iso(now)
+    else:
+        st.pop(RED_MARK, None)
     _save(st)
     return out

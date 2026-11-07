@@ -108,6 +108,17 @@ class UpdateOrder(unittest.TestCase):
         self.assertIn("простой", doc[2])
         self.assertIn(DOCTOR_FAIL, next(r for r in rows if r[0] == "doctor, вывод")[2])
 
+    def test_ceo_wake_fail_is_named_in_update_table(self):
+        """TK-120 п.1: побудка CEO без названной сессии — FAIL doctor, и /rpv-update называет его, а не «ни одного FAIL»."""
+        with tempfile.TemporaryDirectory() as tmp:
+            row = D.check_ceo_wake(Path(tmp))
+        self.assertEqual(row[1], D.FAIL)
+        f = Fake(doctor=(1, D.render([row])))
+        rows, _ = _update(f, ref="В-13")
+        doc = next(r for r in rows if r[0] == "doctor")
+        self.assertEqual(doc[1], D.FAIL)
+        self.assertIn("побудка CEO", doc[2])
+
     def test_plugin_update_failure_stops_before_services(self):
         f = Fake(fail_on="update")
         rows, _ = _update(f, ref="В-13")
