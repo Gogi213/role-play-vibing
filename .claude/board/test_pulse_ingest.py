@@ -74,7 +74,8 @@ class AcceptTests(IngestServer):
         good = self.ok_data()
         for body in (b"not json", b"[1, 2]", b"{}", json.dumps(dict(good, state="boom")).encode(), json.dumps(dict(good, cells="x")).encode(),
                      json.dumps({k: v for k, v in good.items() if k != "generated"}).encode(),
-                     json.dumps(dict(good, generated="2026-11-07T13:00:00")).encode()):  # время без пояса
+                     json.dumps(dict(good, generated="2026-11-07T13:00:00")).encode(),  # время без пояса
+                     json.dumps(dict(good, generated="2026-11-07")).encode()):  # дата без времени: «-07» не пояс
             self.assertEqual(self.put("rpv", body)[0], 400, body[:40])
         self.assertFalse(self.inbox.exists())
 

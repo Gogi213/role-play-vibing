@@ -243,13 +243,16 @@ def inbox_projects(inbox) -> dict:
     return {f.stem: str(f) for f in sorted(Path(inbox).glob("*.json")) if NAME.fullmatch(f.stem)} if inbox else {}
 
 
+ZONE = re.compile(r"\d:\d\d(\.\d+)?(Z|[+-]\d\d(:?\d\d)?)$")  # пояс после времени суток (дата без времени пояса не имеет)
+
+
 def accept(inbox: Path, name: str, body: bytes) -> tuple:
     """Принять присланный `pulse.json`: (код, текст). Только читаемый вывод шага 1 (`pulse_view.stamp_of`); пишется целиком и атомарно."""
     try:
         data = json.loads(body.decode("utf-8-sig"))
     except ValueError:
         return 400, "не JSON"
-    if V.stamp_of(data) is None:
+    if V.stamp_of(data) is None or not ZONE.search(data["generated"].strip()):  # время без пояса с чужой машины не привязать к её часам
         return 400, "не pulse.json: нужны generated с поясом, state, cells"
     inbox.mkdir(parents=True, exist_ok=True)
     V.P.write_json(inbox / f"{name}.json", data)

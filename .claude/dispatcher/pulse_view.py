@@ -186,15 +186,12 @@ def _unreadable(name: str, now: datetime) -> dict:
 
 
 def stamp_of(raw):
-    """Время `generated` (с поясом) читаемого `pulse.json` шага 1; не объект, нет времени с поясом, `state` не из списка или
-    `cells` не список — None (файл не читается). Один разбор для страницы и приёма."""
+    """Время `generated` читаемого `pulse.json` шага 1; не объект, `generated` не время, `state` не из списка или `cells` не список —
+    None (файл не читается). Один разбор для страницы и приёма."""
     if not isinstance(raw, dict) or not isinstance(raw.get("generated"), str):
         return None
-    try:
-        stamp = datetime.fromisoformat(raw["generated"].strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return stamp if stamp.tzinfo is not None and raw.get("state") in STATES and isinstance(raw.get("cells"), list) else None
+    stamp = P.parse_time(raw["generated"], strict=False)
+    return stamp if stamp is not None and raw.get("state") in STATES and isinstance(raw.get("cells"), list) else None
 
 
 def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
