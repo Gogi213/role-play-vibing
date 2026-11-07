@@ -178,6 +178,142 @@ class PlanTests(FactsBase):
         self.assertNotIn("plan", F.facts({}, self.read(), [], [], self.now))
 
 
+class StatusTests(FactsBase):
+    """TK-117 (В-57): блок «Статус» раскрытой карточки — таблица Задача | Что | Где сейчас, «Осталось», «Держит»."""
+
+    def status(self, state=None, active=(), owner=(), runs=(), plan=None, ask=None, fix=None, gid="G-001", at=None):
+        return F.status_of(gid, self.read(), state or {}, list(active), list(owner), list(runs), at or self.now, plan or [], ask, fix)
+
+    def where(self, **kw):
+        return [(r["ticket"], r["where"], r["mark"], r.get("level", "")) for r in self.status(**kw)["rows"]]
+
+    def test_short_title_drops_service_prefix_and_cuts_by_word(self):
+        self.assertEqual(F.short("Хвост TK-112: нестабильный test"), "Нестабильный test")
+        self.assertEqual(F.short("TK-5 — выпуск"), "Выпуск")
+        long = F.short("Правка настроек для проверки длинного заголовка тикета, который не влезает")
+        self.assertLessEqual(len(long), F.SHORT)
+        self.assertTrue(long.endswith("…") and not long.endswith(" …"), long)
+        self.assertEqual(F.short("Пульс: таблица", 40), "Пульс: таблица", "тематический префикс — не служебный")
+        self.assertEqual(F.short("x" * 60, 10), "X" + "x" * 8 + "…", "слова нет — режем по знакам")
+
+    def test_rows_are_tickets_of_the_goal_only_and_titles_are_short(self):
+        a = self.ticket(status="in_progress", title="Хвост TK-081: " + "слово " * 12)
+        self.ticket(ref="G-002", status="in_progress", title="Чужой")
+        self.ticket(status="stopped", title="Остановлен")
+        rows = self.status()["rows"]
+        self.assertEqual([r["ticket"] for r in rows], [a])
+        self.assertTrue(rows[0]["title"].startswith("Слово слово") and len(rows[0]["title"]) <= F.SHORT)
+
+    def test_step_ticket_without_goal_ref_line_still_belongs_to_the_goal(self):
+        tid = self.ticket(ref="", status="in_progress", desc="Шаг 1 из 2 цели G-001.")
+        self.assertEqual([r["ticket"] for r in self.status()["rows"]], [tid])
+
+    def test_accepted_is_grey_with_time_or_day(self):
+        today = self.ticket(status="done", accepted_at=self.now - timedelta(hours=2))
+        old = self.ticket(status="done", accepted_at=self.now - timedelta(days=1))
+        self.assertEqual(self.where(), [(today, "принят 10:00", "done", ""), (old, "принят вчера", "done", "")])
+
+    def test_more_than_three_accepted_keeps_last_three_and_counts_the_rest(self):
+        ids = [self.ticket(status="done", accepted_at=self.now) for _ in range(5)]
+        got = self.status()
+        self.assertEqual([r["ticket"] for r in got["rows"]], ids[-3:])
+        self.assertEqual(got["more"], 2)
+        self.ticket(status="done", accepted_at=self.now)
+        self.assertEqual(self.status()["more"], 3)
+
+    def test_three_accepted_are_all_shown(self):
+        for _ in range(3):
+            self.ticket(status="done", accepted_at=self.now)
+        got = self.status()
+        self.assertEqual((len(got["rows"]), got["more"]), (3, 0))
+
+    def test_who_holds_the_ticket(self):
+        eng = self.ticket(status="in_progress")
+        judge = self.ticket(status="in_review", owner="judge")
+        todo = self.ticket(status="todo")
+        state = {"active_runs": {eng: {"role": "engineer", "started": T.now_iso(self.now)}}}
+        self.assertEqual(self.where(state=state), [(eng, "Инженер делает", "run", ""), (judge, "у Судьи", "run", ""), (todo, "в очереди", "next", "")])
+
+    def test_engineer_after_judge_return(self):
+        tid = self.ticket(status="in_progress")
+        self.log(tid, "judge", "[итог: return] PR #1@abcdef0 — не хватает теста", self.now)
+        self.assertEqual(self.where()[0][:2], (tid, "Инженер правит после возврата"))
+
+    def test_waits_on_ticket_from_wait_for_and_other_forms(self):
+        base = "Ссылка на задачу владельца: G-001\n"
+        ids = [T.read_ticket(T.create_ticket(self.tickets_dir, "engineer", title, "judge", base, spec, self.now, status="waiting")).id
+               for title, spec in (("ждёт", "ticket:TK-005"), ("слияние", "merged:o/r#5"), ("файл", "file:/tmp/x"))]
+        self.assertEqual(self.where(at=self.now + timedelta(hours=2)), [(ids[0], "ждёт TK-005", "next", ""), (ids[1], "ждёт слияния", "next", ""),
+                                                                       (ids[2], "ждёт результата", "next", "")], "ожидание не «стоит»")
+
+    def test_asks_owner(self):
+        tid = self.ticket(status="needs_owner")
+        self.assertEqual(self.where(owner=[(tid, "ответить")]), [(tid, "ждёт вашего ответа", "ask", "")])
+        self.assertEqual(self.where()[0][1], "ждёт вашего ответа", "needs_owner и без списка владельца")
+
+    def test_stands_after_thresholds_and_queue_does_not_stand(self):
+        tid = self.ticket(status="in_progress")
+        queued = self.ticket(status="todo")
+        for minutes, level in [(14, ""), (15, "warn"), (29, "warn"), (30, "bad")]:
+            self.log(tid, "engineer", f"заметка {minutes}", self.now - timedelta(minutes=minutes))
+            row = self.where()[0]
+            self.assertEqual((row[1], row[3]), (f"стоит {minutes} мин" if level else "Инженер делает", level), minutes)
+        self.assertEqual(self.where()[1], (queued, "в очереди", "next", ""))
+
+    def test_named_by_a_reason_is_stuck(self):
+        tid = self.ticket(status="in_progress")
+        reason = ("loop", f"{tid}: возвращён Судьёй 2 раз", T.now_iso(self.now))
+        self.assertEqual(self.where(active=[reason]), [(tid, "застряло", "stuck", "bad")], "движения не найдено — без числа")
+        self.log(tid, "engineer", "заметка", self.now - timedelta(minutes=3))
+        self.assertEqual(self.where(active=[reason]), [(tid, "стоит 3 мин", "stuck", "bad")])
+        self.assertEqual(self.where(active=[("loop", "TK-0010: чужой", T.now_iso(self.now))])[0][2], "run", "TK-001 не часть TK-0010")
+
+    def test_without_goal_open_tickets_of_the_project(self):
+        a = self.ticket(ref="", status="in_progress")
+        b = self.ticket(ref="G-002", status="todo")
+        self.ticket(ref="", status="done", accepted_at=self.now)
+        self.assertEqual([r["ticket"] for r in self.status(gid="")["rows"]], [a, b])
+
+    def test_left_is_open_steps_of_the_plan_else_ticket_numbers(self):
+        steps = [{"mark": m, "n": i, "title": t} for i, (m, t) in enumerate([("done", "Готов"), ("run", "Делаем"), ("next", "Потом")], 1)]
+        self.ticket(status="in_progress")
+        self.assertEqual(self.status(plan=steps)["left"], "Делаем, Потом")
+        a, b = self.ticket(status="todo"), self.ticket(status="todo")
+        self.assertEqual(self.status()["left"].split(", ")[-2:], [a, b])
+        many = [{"mark": "next", "n": i, "title": f"Шаг {i}"} for i in range(1, 8)]
+        self.assertEqual(self.status(plan=many)["left"], "Шаг 1, Шаг 2, Шаг 3, Шаг 4 и ещё 3")
+
+    def test_hold_question_then_stuck_then_longest_without_movement(self):
+        a, b = self.ticket(status="in_progress"), self.ticket(status="in_progress")
+        self.log(a, "engineer", "заметка", self.now - timedelta(minutes=20))
+        self.log(b, "engineer", "заметка", self.now - timedelta(minutes=40))
+        ask, fix = {"ticket": "TK-077", "question": "?"}, {"text": "диспетчер молчит 23 мин", "who": "x"}
+        self.assertEqual(self.status(ask=ask, fix=fix)["hold"], "ваш ответ по TK-077")
+        self.assertEqual(self.status(fix=fix)["hold"], "диспетчер молчит 23 мин")
+        self.assertEqual(self.status()["hold"], f"{b} стоит 40 мин")
+
+    def test_no_hold_while_everything_moves(self):
+        self.ticket(status="in_progress")
+        self.assertEqual(self.status()["hold"], "")
+
+    def test_nothing_to_show_is_none(self):
+        self.assertIsNone(self.status())
+        self.ticket(ref="G-002", status="in_progress")
+        self.assertIsNone(self.status())
+
+    def test_facts_put_status_next_to_plan_without_changing_plan(self):
+        tid = self.ticket(status="in_progress", desc="Шаг 1 из 2 цели G-001.")
+        out = F.facts({}, self.read(), [], [], self.now)
+        self.assertEqual([r["ticket"] for r in out["status"]["rows"]], [tid])
+        self.assertEqual(out["plan"][0]["ticket"], tid)
+
+    def test_facts_without_goal_use_open_tickets(self):
+        tid = self.ticket(ref="", status="in_progress")
+        out = F.facts({}, self.read(), [], [], self.now)
+        self.assertNotIn("plan", out)
+        self.assertEqual([r["ticket"] for r in out["status"]["rows"]], [tid])
+
+
 class DayTests(FactsBase):
     def test_accepted_today_returns_and_queue(self):
         yesterday = self.now - timedelta(days=1)

@@ -134,6 +134,35 @@ class FieldsTests(unittest.TestCase):
         self.assertEqual((v["state"], v["job"], v["goal"]["id"], v["day"]), ("stuck", None, "G-1", {"accepted": 2}))
 
 
+class StatusTests(unittest.TestCase):
+    """TK-117 (В-57): поле status — таблица «Статус» раскрытой карточки."""
+
+    ROWS = [{"ticket": "TK-1", "title": "Схема", "mark": "done", "where": "принят 10:00"},
+            {"ticket": "TK-2", "title": "Загрузчик", "mark": "run", "where": "стоит 23 мин", "level": "warn"}]
+
+    def test_rows_more_left_hold(self):
+        v = view("a", status={"rows": self.ROWS, "more": 2, "left": "Загрузчик", "hold": "TK-2 стоит 23 мин"})["status"]
+        self.assertEqual(v["rows"], [dict(self.ROWS[0], level=""), self.ROWS[1]])
+        self.assertEqual((v["more"], v["left"], v["hold"]), (2, "Загрузчик", "TK-2 стоит 23 мин"))
+
+    def test_no_field_or_junk_is_empty(self):
+        empty = {"rows": [], "more": 0, "left": "", "hold": ""}
+        for junk in (None, "мусор", [], {"rows": "x", "more": -1, "left": 5}):
+            self.assertEqual(V.normalise("a", raw(**({} if junk is None else {"status": junk})), NOW)["status"], empty, junk)
+        self.assertEqual(V.normalise("a", None, NOW)["status"], empty, "пульс не читается")
+
+    def test_bad_rows_and_levels_are_dropped(self):
+        rows = [{"ticket": "TK-1", "title": "A", "mark": "???"}, {"ticket": "TK-2", "title": " ", "mark": "run"}, "x", {"mark": "run"},
+                {"ticket": "TK-3", "title": "B", "mark": "next", "where": "ждёт TK-2", "level": "красный"}]
+        self.assertEqual(view("a", status={"rows": rows})["status"]["rows"], [{"ticket": "TK-3", "title": "B", "mark": "next", "where": "ждёт TK-2", "level": ""}])
+
+    def test_stale_keeps_accepted_and_left_drops_now_and_hold(self):
+        old = raw(at=NOW - timedelta(minutes=30), status={"rows": self.ROWS, "left": "Выпуск", "hold": "TK-2 стоит 23 мин"})
+        v = V.normalise("a", old, NOW)["status"]
+        self.assertEqual((v["rows"][0]["where"], v["rows"][1]["where"], v["rows"][1]["level"]), ("принят 10:00", "", ""))
+        self.assertEqual((v["left"], v["hold"]), ("Выпуск", ""))
+
+
 class AgoTests(unittest.TestCase):
     def test_boundaries(self):
         for seconds, want in [(-5, "меньше минуты"), (0, "меньше минуты"), (59, "меньше минуты"), (60, "1 мин"), (59 * 60, "59 мин"),

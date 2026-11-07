@@ -294,47 +294,12 @@ def row(mark, n=0, title="Заголовок", **kw):
 
 
 class PlanBlock(PageStates):
-    """TK-108 (В-53, правка владельца): «План цели» — первый блок раскрытой карточки, слева колонка времени; в свёрнутой —
-    только «шаг N из M» и метка-таймер перед строкой «что сейчас». Страница только читает `plan` из pulse.json."""
-
-    def plan_lines(self, plan, **kw):
-        html = self.render(dict(self.ok_data(), plan=plan), **kw)
-        block = re.search(r'<ul class="plan">(.*?)</ul>', html, re.S)
-        self.assertTrue(block, "план есть в карточке")
-        body = html.split('<div class="body">')[1]
-        self.assertTrue(body.startswith('<div class="planbox"><h4>План цели</h4>'), "первым блоком раскрытой карточки")
-        self.assertNotIn('class="plan"', html.split("</summary>")[0], "в свёрнутой карточке списка плана нет")
-        return html, [re.sub(r"\|+", "|", H.unescape(re.sub(r"<[^>]+>", "|", li))).strip("|") for li in re.findall(r"<li.*?</li>", block.group(1), re.S)]
+    """TK-108 (В-53, правка владельца): в свёрнутой карточке — «шаг N из M» и метка-таймер перед строкой «что сейчас»; плана в
+    карточке нет (раскрытая — блок «Статус», TK-117). Страница только читает `plan` из pulse.json."""
 
     def pill(self, html):
         found = re.search(r'<div class="now-line[^"]*">(?:<span class="pill ?([^"]*)"[^>]*>(.*?)</span>)?', html)
         return (found.group(1), found.group(2)) if found and found.group(2) else None
-
-    def test_five_marks_time_column_left_then_step_and_role_ticket(self):
-        _, lines = self.plan_lines([
-            row("done", 1, "Схема", at="19:03", ticket="TK-1"),
-            row("run", 2, "Загрузчик", who="Инженер", ticket="TK-2", idle="3 мин", level=""),
-            row("ask", 3, "Фьючерсы или спот", waiting="45 мин", ticket="TK-3"),
-            row("stuck", 4, "Закачка", who="Инженер", ticket="TK-4", idle="47 мин", level="bad"),
-            row("next", 5, "Сверка")])
-        self.assertEqual(lines, ["✓|принят 19:03|Шаг 1 · Схема", "◐|3 мин назад|Шаг 2 · Загрузчик|Инженер · TK-2",
-                                 "?|ждёт 45 мин|Шаг 3 · Фьючерсы или спот|ждёт вашего ответа · TK-3", "!|стоит 47 мин|Шаг 4 · Закачка|Инженер · TK-4",
-                                 "○|впереди|Шаг 5 · Сверка"])
-
-    def test_stand_colours_follow_level_and_move_is_grey(self):
-        html, lines = self.plan_lines([row("run", 1, idle="14 мин", level=""), row("run", 2, idle="15 мин", level="warn"), row("run", 3, idle="31 мин", level="bad")])
-        self.assertEqual(re.findall(r'<span class="age ([^"]*)">', html), ["", "warn", "bad"])
-        self.assertEqual([x.split("|")[1] for x in lines], ["14 мин назад", "стоит 15 мин", "стоит 31 мин"])
-
-    def test_just_now_and_wait_are_not_coloured(self):
-        html, lines = self.plan_lines([row("run", 1, idle="меньше минуты", level=""), row("ask", 2, waiting="2 ч 10 мин", level="bad")])
-        self.assertEqual(lines[0].split("|")[1], "только что")
-        self.assertEqual(lines[1].split("|")[1], "ждёт 2 ч 10 мин")
-        self.assertEqual(re.findall(r'<span class="age ([^"]*)">', html), ["", ""])
-
-    def test_plan_without_step_numbers_lists_titles_only(self):
-        _, lines = self.plan_lines([row("run", 0, "Правка", who="Судья", ticket="TK-9", idle="1 мин", level="")])
-        self.assertEqual(lines[0], "◐|1 мин назад|Правка|Судья · TK-9")
 
     def test_collapsed_card_has_timer_before_the_now_line(self):
         plan = [row("done", 1), row("run", 2, who="Инженер", ticket="TK-2", idle="3 мин", level=""), row("next", 3)]
@@ -361,31 +326,103 @@ class PlanBlock(PageStates):
         data["plan"] = [row("run", 1, ticket="TK-2", idle="3 мин", level="")]
         self.assertIn("TK-2 · 25 мин", self.render(data), "разные числа — обе остаются")
 
-    def test_no_plan_no_block_no_timer_and_card_as_before(self):
+    def test_no_plan_no_timer_and_card_as_before(self):
         for data in (self.ok_data(), dict(self.ok_data(), plan="мусор")):
             html = self.render(data)
             self.assertNotIn('class="plan"', html)
             self.assertNotIn('class="pill', html)
 
-    def test_bad_rows_are_dropped_and_texts_escaped(self):
-        html, lines = self.plan_lines([row("done", 1, "<b>x</b>", at="1"), row("???", 2), {"mark": "run", "n": 3}, "мусор", row("next", True)])
-        self.assertNotIn("<b>x</b>", html)
-        self.assertEqual(len(lines), 2, "чужая отметка, без названия, не объект — не строки")
+    def test_plan_is_not_a_list_in_the_card_any_more(self):
+        html = self.render(dict(self.ok_data(), plan=[row("done", 1), row("run", 2, ticket="TK-2", idle="3 мин", level="")]))
+        self.assertNotIn('class="plan"', html)
+        self.assertNotIn("План цели", html)
 
-    def test_stale_file_keeps_steps_but_drops_times_and_timer(self):
+    def test_stale_file_drops_timer(self):
         raw = dict(self.ok_data(), plan=[row("run", 1, who="Инженер", ticket="TK-2", idle="3 мин", level="warn")])
         old = self.at + timedelta(minutes=30)
         html = S.body_html([V.normalise("rpv", raw, old)], old)
-        self.assertIn("Шаг 1 · Заголовок", html)
         self.assertNotIn("назад", html)
         self.assertNotIn("стоит", html)
         self.assertNotIn('class="pill', html)
 
-    def test_step_numbers_of_goal_and_list_match(self):
+    def test_step_numbers_of_goal_come_from_the_file(self):
         goal = {"id": "G-1", "title": "Цель", "step": 2, "steps": 3}
         html = self.render(dict(self.ok_data(), goal=goal, plan=[row("done", 1), row("run", 2), row("next", 3)]))
         self.assertIn("шаг 2 из 3", html)
-        self.assertEqual(len(re.findall(r"<li class=\"[dros w]+\"><span class=\"ic\">", html)), 3)
+
+
+def srow(mark, ticket="TK-1", title="Заголовок", where="", **kw):
+    return dict({"ticket": ticket, "title": title, "mark": mark, "where": where}, **kw)
+
+
+class StatusBlock(PageStates):
+    """TK-117 (В-57): «Статус» — первый блок раскрытой карточки: таблица Задача | Что | Где сейчас, принятые серым, «Осталось · Держит».
+    Страница только читает `status` из pulse.json."""
+
+    def block(self, status, **kw):
+        html = self.render(dict(self.ok_data(), status=status), **kw)
+        body = html.split('<div class="body">')[1]
+        self.assertTrue(body.startswith('<div class="planbox"><h4>Статус</h4>'), "первым блоком раскрытой карточки")
+        self.assertNotIn('<table class="st"', html.split("</summary>")[0], "в свёрнутой карточке таблицы нет")
+        return html, body.split("</div>")[0]
+
+    def lines(self, block):
+        rows = re.findall(r"<tr.*?</tr>", block.split("<tbody>")[1], re.S)
+        return [re.sub(r"\|+", "|", H.unescape(re.sub(r"<[^>]+>", "|", r))).strip("|") for r in rows]
+
+    def test_table_columns_rows_and_classes(self):
+        html, block = self.block({"rows": [srow("done", "TK-1", "Схема", "принят 19:03"), srow("run", "TK-2", "Загрузчик", "Инженер делает"),
+                                           srow("ask", "TK-3", "Фьючерсы", "ждёт вашего ответа"), srow("stuck", "TK-4", "Закачка", "стоит 47 мин", level="bad"),
+                                           srow("next", "TK-5", "Сверка", "ждёт TK-4")], "left": "Закачка, Сверка"})
+        self.assertIn("<th>Задача</th><th>Что</th><th>Где сейчас</th>", block)
+        self.assertEqual(self.lines(block), ["TK-1|Схема|принят 19:03", "TK-2|Загрузчик|Инженер делает", "TK-3|Фьючерсы|ждёт вашего ответа",
+                                             "TK-4|Закачка|стоит 47 мин", "TK-5|Сверка|ждёт TK-4"])
+        self.assertEqual(re.findall(r'<tr class="(\w)">', block), ["d", "r", "o", "s", "w"])
+        self.assertEqual(re.findall(r'<td class="where ([^"]*)">', block), ["", "", "", "bad", ""])
+
+    def test_warn_level_colours_the_where_cell(self):
+        _, block = self.block({"rows": [srow("run", where="стоит 15 мин", level="warn")]})
+        self.assertIn('<td class="where warn">стоит 15 мин</td>', block)
+
+    def test_left_and_hold_under_the_table(self):
+        _, block = self.block({"rows": [srow("run")], "left": "принять TK-105, выпустить", "hold": "ваш ответ по TK-105"})
+        self.assertIn('<p class="left">Осталось: принять TK-105, выпустить · <b>Держит:</b> ваш ответ по TK-105</p>', block)
+        _, block = self.block({"rows": [srow("run")], "left": "Выпуск"})
+        self.assertIn('<p class="left">Осталось: Выпуск</p>', block)
+        self.assertNotIn("Держит", block)
+
+    def test_more_accepted_is_one_line_first(self):
+        _, block = self.block({"rows": [srow("done", "TK-4", where="принят 10:00")], "more": 5})
+        self.assertEqual(self.lines(block), ["принято ещё 5", "TK-4|Заголовок|принят 10:00"])
+
+    def test_only_left_still_shows_the_block(self):
+        _, block = self.block({"rows": [], "left": "Шаг один"})
+        self.assertNotIn("<table", block)
+        self.assertIn("Осталось: Шаг один", block)
+
+    def test_no_status_no_block_and_no_old_plan_block(self):
+        for data in (self.ok_data(), dict(self.ok_data(), status="мусор"), dict(self.ok_data(), status={"rows": [], "left": ""}),
+                     dict(self.ok_data(), plan=[row("run", 1, ticket="TK-2", idle="3 мин", level="")])):
+            html = self.render(data)
+            self.assertNotIn("<h4>Статус</h4>", html)
+            self.assertNotIn("План цели", html)
+
+    def test_bad_rows_are_dropped_and_texts_escaped(self):
+        html, block = self.block({"rows": [srow("done", "TK-1", "<b>x</b>", "<i>y</i>"), srow("???", "TK-2"), {"mark": "run", "title": ""}, "мусор",
+                                           srow("next", "TK-3", "Верная")], "left": "<u>z</u>", "hold": "<s>h</s>"})
+        for raw_tag in ("<b>x</b>", "<i>y</i>", "<u>z</u>", "<s>h</s>"):
+            self.assertNotIn(raw_tag, html)
+        self.assertEqual(len(self.lines(block)), 2, "чужая отметка, без названия, не объект — не строки")
+
+    def test_stale_file_keeps_accepted_and_left_but_drops_now_and_hold(self):
+        status = {"rows": [srow("done", "TK-1", where="принят 10:00"), srow("run", "TK-2", where="Инженер делает", level="warn")],
+                  "left": "Выпуск", "hold": "TK-2 стоит 23 мин"}
+        old = self.at + timedelta(minutes=30)
+        html = S.body_html([V.normalise("rpv", dict(self.ok_data(), status=status), old)], old)
+        self.assertIn("принят 10:00", html)
+        self.assertIn("Осталось: Выпуск", html)
+        self.assertNotIn("Инженер делает", html)
+        self.assertNotIn("Держит", html)
 
 
 class FakeResponse(io.BytesIO):

@@ -144,8 +144,7 @@ def now_line(view: dict) -> str:
     return (f'<div class="now-line {KIND[state]}">{pill}{escape(main)}' + (f'<span class="who">{escape(who)}</span>' if who else "") + button + "</div>")
 
 
-PLAN_ICON = {"done": "✓", "run": "◐", "ask": "?", "stuck": "!", "next": "○"}
-PLAN_CLASS = {"done": "d", "run": "r", "ask": "o", "stuck": "s", "next": "w"}
+PLAN_CLASS = {"done": "d", "run": "r", "ask": "o", "stuck": "s", "next": "w"}  # класс строки таблицы «Статус»
 LIVE = ("run", "ask", "stuck")  # отметки текущего шага: у него есть метка-таймер
 
 
@@ -166,24 +165,19 @@ def timer(row: dict) -> tuple:
     return ("только что" if idle == "меньше минуты" else f"{idle} назад"), ""
 
 
-def plan_sub(row: dict) -> str:
-    """Вторая строка шага: «Роль · TK-N»; у вопроса владельцу — «ждёт вашего ответа · TK-N»."""
-    if row["mark"] == "ask":
-        return " · ".join(x for x in ("ждёт вашего ответа", row["ticket"]) if x)
-    return " · ".join(x for x in (row["who"], row["ticket"]) if x) if row["mark"] in ("run", "stuck") else ""
-
-
-def plan_html(view: dict) -> str:
-    """«План цели» первым блоком раскрытой карточки: значок, слева колонка времени, шаг и подстрока. Плана нет — ничего."""
-    items = []
-    for row in view["plan"]:
-        label, color = timer(row)
-        title = f'Шаг {row["n"]} · {row["title"]}' if row["n"] else row["title"]
-        sub = plan_sub(row)
-        items.append(f'<li class="{PLAN_CLASS[row["mark"]]}"><span class="ic">{PLAN_ICON[row["mark"]]}</span>'
-                     f'<span class="age {color}">{escape(label)}</span>'
-                     f'<span><span class="t">{escape(title)}</span>' + (f'<span class="sub">{escape(sub)}</span>' if sub else "") + "</span></li>")
-    return f'<div class="planbox"><h4>План цели</h4><ul class="plan">{"".join(items)}</ul></div>' if items else ""
+def status_html(view: dict) -> str:
+    """Блок «Статус» первым в раскрытой карточке (TK-117): таблица Задача | Что | Где сейчас, принятые серым («принято ещё N» — свёрнутые
+    сверх трёх), под ней «Осталось: … · Держит: …». Данные — из `status` файла как есть; нет ни строк, ни «Осталось» — ничего."""
+    st = view["status"]
+    rows = [f'<tr class="d"><td></td><td colspan="2">принято ещё {st["more"]}</td></tr>'] if st["more"] else []
+    rows += [f'<tr class="{PLAN_CLASS[r["mark"]]}"><td class="tk">{escape(r["ticket"])}</td><td>{escape(r["title"])}</td>'
+             f'<td class="where {r["level"]}">{escape(r["where"])}</td></tr>' for r in st["rows"]]
+    table = (f'<table class="st"><thead><tr><th>Задача</th><th>Что</th><th>Где сейчас</th></tr></thead><tbody>{"".join(rows)}</tbody></table>'
+             if rows else "")
+    left = f'Осталось: {escape(st["left"])}' if st["left"] else ""
+    hold = f'<b>Держит:</b> {escape(st["hold"])}' if st["hold"] else ""
+    line = f'<p class="left">{" · ".join(x for x in (left, hold) if x)}</p>' if left or hold else ""
+    return f'<div class="planbox"><h4>Статус</h4>{table}{line}</div>' if table or line else ""
 
 
 def pill_html(view: dict) -> tuple:
@@ -211,7 +205,7 @@ def card(view: dict, end: int) -> str:
     return (f'<details class="proj" data-n="{escape(view["name"], quote=True)}" data-s="{view["state"]}"><summary>'
             f'<div><div class="name">{escape(view["name"])}</div>{goal_html(view)}</div>'
             f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}</summary>'
-            f'<div class="body">{plan_html(view)}<div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
+            f'<div class="body">{status_html(view)}<div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
             f'<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто", False)}</ul></div></div></details>')
 
 
