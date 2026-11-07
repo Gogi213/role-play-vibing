@@ -63,7 +63,7 @@ class MergeWithoutCi(MergeRuleBase):
     def merges(self, value, ci_state):
         C.save_state({f"{REPO}#7": {"sha": SHA, "state": ci_state}} if ci_state else {})
         with mock.patch.object(M.P, "settings", return_value={"ci_repo": REPO} | ({} if value is None else {"has_ci": value})):
-            return self.run_m()
+            return M.merge_once(REPO, gh=self.gh, emit=lambda *a: None)
 
     def test_no_ci_merges_on_verdict_alone(self):
         for state in (None, "pending", "failure"):
@@ -74,8 +74,11 @@ class MergeWithoutCi(MergeRuleBase):
 
     def test_default_and_true_still_need_green_ci(self):
         for value in (None, True):
-            for state in (None, "pending", "failure"):
+            for state in (None, "pending"):
                 self.assertEqual(self.merges(value, state), [], (value, state))
+            # TK-121: красный на принятой голове не влит, но и не молчит — событие CEO (подробно в test_tk121.py)
+            self.assertEqual(self.merges(value, "failure"), [(7, "принят, не влит → CEO")], value)
+            M._save({})  # событие — раз на голову: следующему значению настройки заводим чистую память
         self.assertEqual(self.put(), [])
 
     def test_no_ci_still_needs_verdict_on_current_head(self):
