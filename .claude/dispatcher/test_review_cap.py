@@ -28,7 +28,8 @@ import ticket as T  # noqa: E402
 TZ = timezone(timedelta(hours=4))
 T0 = datetime(2026, 10, 31, 22, 30, tzinfo=TZ)
 
-# причины возвратов Судьи в TK-074 (первые слова записей `[итог: return]`): 6 возвратов по существу и 7-й «пересдай той же головой»
+# причины возвратов Судьи в TK-074 (первые слова записей `[итог: return]`): 6 возвратов по существу и 7-й «пересдай той же головой»;
+# возвратов до потолка больше (SIG.MAX_REVIEW_RETURNS), причины идут по кругу
 TK074_RETURNS = (
     "Ложный отказ на «Осталось: ничего. Следующий шаг…»",
     "Ложный отказ: «Только что прогнал тесты», «Отложенных пунктов нет»",
@@ -77,7 +78,7 @@ class ReviewCapReplay(unittest.TestCase):
         self.assertEqual(D.decide(tkt, self.state, self.clock, lambda s: False).role, "judge")
         T.write_header_updates(self.path, {"next": ""}, now=self.clock)  # tick съедает next при запуске
         n = len([e for e in tkt.log if e.author == "judge"])
-        self.result("judge", "return", f"проверка: docs/reviews/r{n}.md — {TK074_RETURNS[n]}")
+        self.result("judge", "return", f"проверка: docs/reviews/r{n}.md — {TK074_RETURNS[n % len(TK074_RETURNS)]}")
         F._count_review_return(self.state, tkt.id, T.read_ticket(self.path), "judge", {"status_at_launch": "in_review"}, True)
 
     def engineer_resubmits(self, n):
@@ -92,15 +93,15 @@ class ReviewCapReplay(unittest.TestCase):
     def test_cap_fires_after_second_return_even_though_result_pr_sets_next_judge(self):
         self.result("engineer", "pr", "PR #184@sha0")
         self.ci()
-        for n in range(2):
+        for n in range(SIG.MAX_REVIEW_RETURNS):
             tkt, decision = self.tick()
             self.assertEqual((tkt.status, decision.role), ("in_review", "judge"), f"до потолка Судья получает круг {n + 1}")
             self.judge_returns()
             self.engineer_resubmits(n + 1)
-        self.assertEqual(SIG._review_returns(self.state, self.path.stem), 2)
+        self.assertEqual(SIG._review_returns(self.state, self.path.stem), SIG.MAX_REVIEW_RETURNS)
         self.assertEqual(T.read_ticket(self.path).next_role, "judge", "result pr поставил next: judge — потолок не за ним")
         tkt, decision = self.tick()
-        self.assertEqual(tkt.status, "needs_owner", "после 2-го возврата — вопрос владельцу, не тихое закрытие")
+        self.assertEqual(tkt.status, "needs_owner", "после возврата на потолке — вопрос владельцу, не тихое закрытие")
         self.assertIsNone(decision)
         entry = tkt.log[-1]
         self.assertEqual(entry.author, "dispatcher")
@@ -111,7 +112,7 @@ class ReviewCapReplay(unittest.TestCase):
 
     def test_escalation_is_not_repeated_and_counter_restarts_after_the_owner_answers(self):
         self.result("engineer", "pr", "PR #184@sha0")
-        for n in range(2):
+        for n in range(SIG.MAX_REVIEW_RETURNS):
             self.ci()
             self.judge_returns()
             self.engineer_resubmits(n + 1)
@@ -122,9 +123,9 @@ class ReviewCapReplay(unittest.TestCase):
         self.assertNotIn(self.path.stem, self.state.get("review_returns", {}), "ответ владельца — новая серия возвратов")
 
     def _to_cap(self):
-        """Два возврата и третья сдача: тикет на пороге потолка, `next: judge` от `result pr`."""
+        """MAX_REVIEW_RETURNS возвратов и сдача после них: тикет на пороге потолка, `next: judge` от `result pr`."""
         self.result("engineer", "pr", "PR #184@sha0")
-        for n in range(2):
+        for n in range(SIG.MAX_REVIEW_RETURNS):
             self.ci()
             self.judge_returns()
             self.engineer_resubmits(n + 1)
