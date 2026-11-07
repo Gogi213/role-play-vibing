@@ -8,10 +8,13 @@
 start, присмотр и doctor всё равно идут, синк уставов пропущен. Итог — одна таблица `OK/FAIL/—`, любой FAIL doctor
 назван как есть. Сессия Claude Code остаётся на старой версии, пока её не перезапустят: об этом последняя строка (версия сессии — по
 `CLAUDE_PLUGIN_ROOT`; нет переменной или версия иная — просьба перезапустить, «уже на» — только при совпадении).
+`claude plugin update` идёт из каталога проекта: для local/project-установки он ищет запись по cwd, из чужого каталога
+«обновляет» другую и печатает «уже последняя» (TK-132). Версия после обновления ниже последней в marketplace — FAIL, не «уже последняя».
 Код возврата 0 — все шаги OK, 1 — есть FAIL, 2 — проект не найден."""
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -42,10 +45,29 @@ def install_entry(project: Path) -> dict | None:
     return PV.plugin_entry(project, MARKETPLACE)
 
 
-def run_cmd(cmd: list, timeout: float) -> tuple:
+def marketplace_version(config_dir=None) -> str:
+    """Последняя версия плагина в клоне marketplace (`known_marketplaces.json` → `.claude-plugin/marketplace.json`); нет — "?"."""
+    cfg = Path(config_dir or PV.claude_dir()) / "plugins"
+    try:
+        loc = json.loads((cfg / "known_marketplaces.json").read_text(encoding="utf-8"))[MARKETPLACE]["installLocation"]
+        plugins = json.loads((Path(loc) / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))["plugins"]
+        return str(next(p["version"] for p in plugins if p.get("name") == MARKETPLACE))
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
+        return "?"
+
+
+def _ver(v: str) -> tuple:
+    """Версия «2.0.24» → (2, 0, 24); не число или "?" — None (сравнивать нечем)."""
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except ValueError:
+        return None
+
+
+def run_cmd(cmd: list, timeout: float, cwd=None) -> tuple:
     """(код возврата, вывод); не запустилась или зависла — код 127 и причина."""
     try:
-        r = hide.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        r = hide.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, cwd=cwd)
     except (OSError, subprocess.SubprocessError) as e:
         return 127, f"{type(e).__name__}: {e}"
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
@@ -61,7 +83,7 @@ def _fail_names(out: str) -> str:
 
 
 def update(project: Path, run=run_cmd, installed=install_entry, ref: str = "",
-           python: str = sys.executable, claude: str = "claude") -> tuple:
+           python: str = sys.executable, claude: str = "claude", latest=marketplace_version) -> tuple:
     """(строки таблицы, версия после обновления). Сбой обновления самого плагина — дальше не идём."""
     rows = []
 
@@ -74,7 +96,7 @@ def update(project: Path, run=run_cmd, installed=install_entry, ref: str = "",
     scope = ["--scope", before["scope"]] if before.get("scope") else []
     if not step("marketplace", *run([claude, "plugin", "marketplace", "update", MARKETPLACE], 300)):
         return rows, old
-    if not step("плагин", *run([claude, "plugin", "update", PLUGIN, *scope], 300)):
+    if not step("плагин", *run([claude, "plugin", "update", PLUGIN, *scope], 300, cwd=str(project))):
         return rows, old
     after = installed(project) or {}
     new, root = str(after.get("version") or "?"), Path(str(after.get("installPath") or ""))
@@ -82,7 +104,13 @@ def update(project: Path, run=run_cmd, installed=install_entry, ref: str = "",
     if not (code / "start.py").is_file():
         rows.append(("плагин", FAIL, f"нет {code / 'start.py'} — установка {new} не найдена в installed_plugins.json"))
         return rows, new
-    rows[-1] = ("плагин", OK, f"{old} → {new}" if new != old else f"уже последняя версия {new}")
+    newest = latest()
+    if _ver(new) and _ver(newest) and _ver(new) < _ver(newest):
+        how = f" --scope {before['scope']}" if before.get("scope") else ""
+        rows[-1] = ("плагин", FAIL, f"установлена {new}, в marketplace {newest} — не обновился (запись: "
+                                    f"{before.get('scope') or 'user'}); руками из {project}: claude plugin update {PLUGIN}{how}")
+    else:
+        rows[-1] = ("плагин", OK, f"{old} → {new}" if new != old else f"уже последняя версия {new}")
     proj = ["--project", str(project)]
     step("start", *run([python, str(code / "start.py"), *proj], 120), "диспетчер и сторож запущены из " + new)
     step("присмотр ОС", *run([python, str(code / "supervise.py"), "--install", *proj], 120), "перезаписан из " + new)
