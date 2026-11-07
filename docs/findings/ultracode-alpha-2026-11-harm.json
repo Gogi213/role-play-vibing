@@ -1,0 +1,171 @@
+{
+ "repeats": {
+  "audit2-part1": {
+   "fail_subscription": {
+    "runs": [
+     "wf_76c14898-44d"
+    ],
+    "usd": 6.7
+   },
+   "session_end": {
+    "runs": [
+     "wf_0c487f8f-d4e"
+    ],
+    "usd": 48.6
+   },
+   "ok": {
+    "runs": [
+     "wf_a77afef5-1ce"
+    ],
+    "usd": 134.1
+   },
+   "wasted_usd": 55.3
+  },
+  "w4-selection-r3": {
+   "fail_subscription": {
+    "runs": [
+     "wf_9880e983-503"
+    ],
+    "usd": 3.4
+   },
+   "session_end": {
+    "runs": [
+     "wf_68156710-484"
+    ],
+    "usd": 17.8
+   },
+   "ok": {
+    "runs": [
+     "wf_d49143c7-91f"
+    ],
+    "usd": 53.5
+   },
+   "wasted_usd": 21.2
+  },
+  "conv": {
+   "owner_correction": {
+    "runs": [
+     "wf_15f6c1f0-233",
+     "wf_aca0fb5c-83d",
+     "wf_b5d1ee09-036"
+    ],
+    "usd": 7.2
+   },
+   "ok": {
+    "runs": [
+     "wf_6ef18a76-09b"
+    ],
+    "usd": 68.9
+   },
+   "wasted_usd": 7.2
+  }
+ },
+ "mechanical": {
+  "закачка 9 бирж": {
+   "runs": [
+    "wf_5e6d75ae-e11"
+   ],
+   "usd": 32.3
+  },
+  "закачка Gate": {
+   "runs": [
+    "wf_e3b20a00-8e4"
+   ],
+   "usd": 20.5
+  },
+  "история стакана (10 агентов, оборвано)": {
+   "runs": [
+    "wf_2ea5ea76-098"
+   ],
+   "usd": 14.9
+  },
+  "PGO-сборка (агент aebcd4a7b1343103e)": {
+   "usd": 9.5
+  }
+ },
+ "long_agents": {
+  "count": 6,
+  "usd": 186.3,
+  "top": [
+   {
+    "id": "ac08ed7a7ef3dda52",
+    "wf": "wf_dfe7f9c5-110",
+    "calls": 295,
+    "usd": 48.1,
+    "maxctx": 699166,
+    "first": "2026-11-06T15:32:49.814Z",
+    "last": "2026-11-06T20:14:56.938Z",
+    "desc": "K: ядро и PGO"
+   },
+   {
+    "id": "a132d16bbb8d418d0",
+    "wf": "wf_dfe7f9c5-110",
+    "calls": 219,
+    "usd": 41.6,
+    "maxctx": 758159,
+    "first": "2026-11-06T20:15:02.688Z",
+    "last": "2026-11-06T21:55:44.258Z",
+    "desc": "S: пересчёт отбора"
+   },
+   {
+    "id": "ac09b1316bbfa5b53",
+    "wf": "wf_dfe7f9c5-110",
+    "calls": 170,
+    "usd": 27.4,
+    "maxctx": 600623,
+    "first": "2026-11-06T21:55:49.267Z",
+    "last": "2026-11-06T22:50:01.096Z",
+    "desc": "F: подготовка F8"
+   },
+   {
+    "id": "a76467047c49bc561",
+    "wf": "wf_295063d9-0e2",
+    "calls": 180,
+    "usd": 25.5,
+    "maxctx": 519445,
+    "first": "2026-11-06T14:22:39.765Z",
+    "last": "2026-11-06T15:15:51.938Z",
+    "desc": "audit2:M3-f8-chain"
+   },
+   {
+    "id": "a57074ecc3b6b640b",
+    "wf": "wf_3303296c-dbf",
+    "calls": 170,
+    "usd": 22.8,
+    "maxctx": 445022,
+    "first": "2026-11-05T01:12:01.366Z",
+    "last": "2026-11-05T01:56:10.542Z",
+    "desc": "code:atr"
+   },
+   {
+    "id": "ab89cb69e456682fd",
+    "wf": "wf_dfe7f9c5-110",
+    "calls": 171,
+    "usd": 21.0,
+    "maxctx": 494700,
+    "first": "2026-11-06T22:50:07.048Z",
+    "last": "2026-11-06T23:34:04.101Z",
+    "desc": "R: предсчётная ревизия"
+   }
+  ]
+ },
+ "bypass": {
+  "commits_since_start": 117,
+  "by_prefix": {
+   "[Исследователь]": 30,
+   "[Инженер]": 47,
+   "[Судья]": 2,
+   "[R4]": 1,
+   "[GW]": 3,
+   "[R]": 1,
+   "[C]": 1,
+   "[W]": 1,
+   "[G1]": 1,
+   "[CEO]": 25,
+   "(без префикса роли)": 5
+  },
+  "runs_log_lines_from_2026-11-05": 13,
+  "runs_log_last": "2026-11-05T01:02:46+04:00"
+ },
+ "repeats_wasted_usd": 83.7
+}

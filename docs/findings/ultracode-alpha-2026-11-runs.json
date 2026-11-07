@@ -1,0 +1,1614 @@
+{
+ "runs": {
+  "wf_0d56026b-205": {
+   "name": "early-phase-direction",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 24700,
+   "result_head": "{\"dAn\": {\"headline\": \"Окно на вход есть, но направления нет. Воспламеняется 14,4 % сигналов на тесте (13,5 % на фите, остальные ≈ 86 % не воспламеняются за 1440 мин). Среди воспламенившихся медиана времени до воспламенения 234 мин (95 % ИД 185–300; квартили 22 и 717), окно ≥ 15 / 30 / 60 мин у 81 / 72 / 66 % воспламенившихся (11,7 / 10,4 / 9,6 % от всех сигналов); распределение стабильно между 2025 и 2026 (разность долей ≤ 1,8 п.п. при x = 60, ранговая корреляция 0,91–0,97). Вход после воспламенения по знаку импульса минусовой: у стороны +1 −42…−55 bps за 4–6 ч (5 правил из 9 и общий пул подтв",
+   "mtime": 1793881720.6386847
+  },
+  "wf_1571306d-57d": {
+   "name": "pumponset-exits",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 5895,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_1571306d-57d-1\", \"head\": \"015502d8a00a06c4a252b420addf909552a0f71a\", \"files\": [\"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_1571306d-57d-1\\\\src\\\\pumponset\\\\exits.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_1571306d-57d-1\\\\src\\\\pumponset\\\\exits_tests.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_1571306d-57d-1\\\\src\\\\pumponset\\\\verdict\\\\exits_stage.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_1571306d-57d-1\\\\src\\\\pumponset\\\\run.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktree",
+   "mtime": 1793839384.1235979
+  },
+  "wf_15f6c1f0-233": {
+   "name": "xdl9-conv",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "error",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 4,
+   "result_head": "null",
+   "mtime": 1794010213.66717
+  },
+  "wf_170e810f-af5": {
+   "name": "xdl9-audit",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 162279,
+   "result_head": "{\"confirmed\": [{\"id\": \"F-01\", \"severity\": \"blocker\", \"kind\": \"method\", \"where\": \"src/statarb/kernel.rs:245 (beta_z: s.n < min_obs.max(2) -> NaN), kernel.rs:544 (z.is_finite() && ...), docs/research/P-37-params-2026-11-06.csv (строка min_obs,=W), P-37 §13 Н9\", \"claim\": \"min_obs = W (равно окну) делает z определённым только когда в последних W минутах НЕТ ни одной дыры у обеих ног; после любой дыры z = NaN ещё W минут, и в это время правило выхода и стоп выключены (остаётся только max_hold).\", \"evidence\": \"Окно хранит ровно W минут, n ≤ W, поэтому условие n ≥ min_obs = W означает «ни одной дыры»",
+   "mtime": 1793924337.3023088
+  },
+  "wf_1ef2794c-c9a": {
+   "name": "xdl9-fixes-w3",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 20526,
+   "result_head": "{\"kern\": {\"done\": true, \"summary\": \"Задача K выполнена на ветке tk493-xdl9 (в origin не пушил). Что добавлено, всё по умолчанию выключено:\\n- F-02: флаг --rearm (run и bench; kernel, multi и reference одним правилом). После выхода по стопу или сроку вход в ту же сторону закрыт, пока |z| >= entry_z. Причина выхода (rule/stop/timeout) и beta_in пишутся в конец сделок при --trades-ext. С --rule funding флаг отклоняется.\\n- F-01: счётчики eval, z_def, pos_z_nan, noentry_window, rearm_blocked считаются в ядре и выводятся в новый --ext-out.\\n- F-03: в --ext-out добавлены bps валового номинала 1+|β|Σ",
+   "mtime": 1793929707.3710926
+  },
+  "wf_295063d9-0e2": {
+   "name": "xdl9-audit2-part2",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 139928,
+   "result_head": "{\"confirmed\": [{\"id\": \"M1-01\", \"severity\": \"major\", \"kind\": \"method\", \"where\": \"docs/research/P-37-statarb-xdl9-probe.md:310 (§14 п.6 iii), :342 (r3 п.), :9; P-37-params ключи trading_window_read_before_params, report_independence_warning; audit_confirmed.md (F-01, F-02, F-06 реплики); коммиты 2f70b614 (04:44), 58af894f (04:32)\", \"claim\": \"Утверждение «торговое окно до params читалось один раз (runx)» неполно: реплики слепого аудита №1 (≈04:20, до r3 04:44) считали сделки и net bps на 35 сутках 01.10–04.11 (включая торговое окно), эти числа вошли в подтверждённые находки, на которых основаны р",
+   "mtime": 1793978783.3625684
+  },
+  "wf_295a375b-8c1": {
+   "name": "xdl9-conv-window-prep",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 14440,
+   "result_head": "{\"gw\": {\"done\": true, \"summary\": \"GW выполнен: B1 и B2 закрыты, окно не читалось, токен не создавался. На Deck нет ни go_window.token, ни window_reads.log, ни window_preflight.log.\\n\\nЧТО СДЕЛАНО (ветка tk493-xdl9, три коммита, в origin не пушил):\\n- Ресурсы (B1). Раннер перед захватом токена проверяет токен без захвата, K0 и params, затем префлайт: свободно ≥ 10 ГиБ на диске выходов, C2_HOME и ~; память ≥ 1760 МиБ × (потоки + 1); потоки ≤ ядер. Снимок df/free/loadavg пишется в window_preflight.log и в preflight.json. При нехватке код 75, токен не тронут. После прогона раннер удаляет кэш рядов",
+   "mtime": 1794038933.0068796
+  },
+  "wf_2ea5ea76-098": {
+   "name": "xdl9-orderbook-history",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "error",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 4,
+   "result_head": "null",
+   "mtime": 1794049345.302079
+  },
+  "wf_3303296c-dbf": {
+   "name": "pumponset-exits-atr",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 6798,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_3303296c-dbf-1\", \"head\": \"8eabe661\", \"files\": [\"src/pumponset/exits.rs\", \"src/pumponset/exits_tests.rs\", \"src/pumponset/verdict/exits_stage.rs\", \"src/pumponset/dump.rs\", \"src/pumponset/dump_tests.rs\", \"src/pumponset/run.rs\", \"docs/research/P-35-exits.md\", \"docs/findings/pumponset-run-spec-2026-11-05.md\"], \"tests_status\": \"green\", \"tests_summary\": \"VPS (CHECK_HOST=vps VPS_TAG=-atr), `test pumponset` на итоговом дереве: 139 passed, 0 failed, 1 ignored (было ≈125). `clippy --release --all-targets -D warnings`: чисто. `car",
+   "mtime": 1793844334.0942638
+  },
+  "wf_4b3c4026-7ce": {
+   "name": "xdl9-conv-census",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "error",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 4,
+   "result_head": "null",
+   "mtime": 1794049345.166708
+  },
+  "wf_53d3afc1-13b": {
+   "name": "xdl9-conv-r3",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 36442,
+   "result_head": "{\"p3\": {\"done\": true, \"summary\": \"Правила окна r3 записаны и закоммичены: коммит d351a715, ветка tk493-xdl9, в origin не пушил. В коммите два файла: docs/research/P-38-convergence-xdl9.md (новый §17 с R3.1–R3.8 плюс пометки «[r3]» в тексте r2) и новый docs/research/P-38-params-r3-2026-11-07.csv. CSV проверен: 54 строки, в каждой 5 полей, дублей ключей нет, в блобах только LF. Окно не читалось, Deck и панели не открывались, токен и --go-window не создавались. Чужие правки (conv_guard.py, gate.py, gate_manifest.py) в коммит не попали.\\n\\n**Что записано**\\n\\n| Пункт | Содержание |\\n|---|---|\\n| R",
+   "mtime": 1794032153.1257222
+  },
+  "wf_59ed7cc7-63e": {
+   "name": "pump-dependencies-analysis",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 25173,
+   "result_head": "[{\"headline\": \"Слабый лонг — не «сигнал знает только величину хода», а отрицательные база и добавка плюс форма «памп→разворот». База даёт примерно 50–80% убытка, медиана добавки лонга отрицательна и подтверждена на тесте. Большие ходы вверх у лонга случаются (медиана mfe ≈ 3A), но вниз случаются чаще. У шорта величины ходов симметричны, добавка на фите неотличима от 0, а плюс 2026 формально не подтверждён. Метка ep_running содержит будущее, причиной слабого лонга её считать нельзя.\", \"findings\": [{\"claim\": \"Величина хода после входа около гауссова эталона (σ за час = A), повышенная волатильнос",
+   "mtime": 1793846996.317263
+  },
+  "wf_59f7ac06-130": {
+   "name": "ignition-analysis-v2",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 21351,
+   "result_head": "[{\"headline\": \"Направление в момент воспламенения предсказуемо слабо и почти целиком одним признаком — «против часового импульса r_w»: на тесте AUC «против импульса» 0,59–0,60 на 60/240/1440 мин (подтверждено, Холм по 71 проверке ≤ 0,0095, 10 из 10 месяцев); логистическая модель на 35 признаках не лучше (AUC 0,516 / 0,558 / 0,620; выигрыш над наивным правилом не подтверждён нигде). Вероятность направления деньгами не стала: безусловные лонг и шорт (8 проверок), вход по прогнозу (12 правил) и нога «шорт после часового роста» (чистыми +8 / +16 / +31 / +50 bps на 60/240/720/1440 мин, интервал 144",
+   "mtime": 1793892993.5341983
+  },
+  "wf_5e6d75ae-e11": {
+   "name": "xdl-downloaders",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 81613,
+   "result_head": "[{\"exchange\": \"Binance USD-M (fapi.binance.com) и Aster (fapi.asterdex.com) — один скрипт, --exchange binance|aster\", \"script_path\": \"C:/Users/3D6B~1/AppData/Local/Temp/claude/C--visual-projects-alpha/215df875-21c0-4c0b-b79d-964caf0deaca/scratchpad/xdl/binance_aster.py (проверочный скрипт рядом: .../xdl/check_out.py)\", \"status\": \"ready\", \"contracts_total\": 1427, \"contracts_by_class\": \"Binance 808 (в окне, на 05.11): crypto 571, equity 188, etf 34, metal 7 (XAU XAG XPT XPD COPPER + токены PAXG XAUT), energy 3 (CL BZ NATGAS), fx 1 (USDBRL), other 4 (pre-IPO: OPENAI ANTHROPIC MOONSHOT OURA). Стат",
+   "mtime": 1793902476.0860567
+  },
+  "wf_5fbe7101-2db": {
+   "name": "xdl9-wave2",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 47726,
+   "result_head": "{\"kern\": {\"green\": true, \"status\": \"Готово. Подкоманда run допилена по пунктам (a)-(g). Зелёные четыре проверки на VPS отдельными командами: test (1240 passed, 7 ignored), clippy -D warnings --all-targets, fmt, check-sprawl. lint-gate красный и известен: 1262 > 836, число срабатываний не изменилось (1262 до правок и после). Релизный бинарь лежит на Deck и запускается, --help показывает все новые флаги. Байт в байт с tk486 на реальных данных подтверждено, фандинг и оценка открытых позиций сверены независимым пересчётом без ядра.\", \"done\": [\"(a) флаги --delay-x, --rule z|funding, --funding-k, --",
+   "mtime": 1793927172.8350027
+  },
+  "wf_6023efed-f2b": {
+   "name": "xdl9-video-audit",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 103267,
+   "result_head": "{\"reads\": [{\"done\": true, \"video\": \"Видео 1 «Foundations 2», канал Arbitrage Services (25,6 тыс. подписчиков), опубликовано 01.11.2026, 20:01, 5 236 просмотров, https://www.youtube.com/watch?v=juh-5WL7Tik (совпадает с П-37 «видео 1, 01.11.2026»). Это обзор «как сейчас с арбитражем», а НЕ разбор метода фьючерсного сканера: главы — негатив 0:00, доходность по направлениям 2:59, гонконгские акции Binance×Bitget 5:40, закрытие бирж 11:28, DeFi и фандинг 13:37, итоги 18:40. Про фьючерсный сканер автор сказал «будет следующее видео» [19:41]. Прочитаны transcript.md и slides_index.md целиком и открыт",
+   "mtime": 1794047518.0558636
+  },
+  "wf_6a5b5ed1-122": {
+   "name": "xdl9-conv-explore",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "error",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 4,
+   "result_head": "null",
+   "mtime": 1794049345.024507
+  },
+  "wf_6ef18a76-09b": {
+   "name": "xdl9-conv",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 69709,
+   "result_head": "{\"p\": {\"done\": true, \"commit\": \"35001148\", \"summary\": \"П-38 r2 записан и закоммичен (35001148, ветка tk493-xdl9, в origin не пушил). Окно, панели, выходы F8 и Deck не открывал; читал только тексты критиков и код portfolio.py / cell_status.py.\\n- Замечания: 39 (финансы 25, статистика 14). Принято 30, принято частично 9, отклонено целиком 0. Внутри «частично» отклонено 8 пунктов с причиной: net-критерий для потолка, фильтр по обороту заполнения, измерение пола Q3 / L_s / N_stop, календари KR/JP/EU, пилот на тиках, исключение s_stop=inf, сжатие HL по классу, почасовые корзины σ. Таблица «замечани",
+   "mtime": 1794021274.0362587
+  },
+  "wf_72af6ee7-d60": {
+   "name": "pumponset-simple-returns",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 5630,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_72af6ee7-d60-1\", \"head\": \"1c1469fc\", \"files\": [\"src/pumponset/trade.rs\", \"src/pumponset/exits.rs\", \"src/pumponset/dump.rs\", \"src/pumponset/ignitions.rs\", \"src/pumponset/control.rs\", \"src/pumponset/exits_tests.rs\", \"src/pumponset/dump_tests.rs\", \"src/pumponset/ignitions_tests.rs\", \"src/pumponset/run_tests.rs\", \"src/pumponset/play_tests.rs\", \"docs/findings/pumponset-run-spec-2026-11-05.md\", \"docs/research/P-35-exits.md\"], \"tests_status\": \"green\", \"tests_summary\": \"VPS, дерево -sr: test pumponset (release) 228 passed / 0 ",
+   "mtime": 1793889968.611864
+  },
+  "wf_76c14898-44d": {
+   "name": "xdl9-audit2-part1",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 58,
+   "result_head": "{\"confirmed\": [], \"refuted\": [], \"minor\": [], \"clean\": []}",
+   "mtime": 1793929942.1925113
+  },
+  "wf_77affd8d-49d": {
+   "name": "pumponset-dump",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 6091,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_77affd8d-49d-1\", \"head\": \"3f9c2d0e2bbf6ba76c7fd3e6b141df54c482a1d9\", \"files\": [\"src/pumponset/dump.rs (новый)\", \"src/pumponset/dump_tests.rs (новый, 8 тестов)\", \"src/pumponset/control.rs (c2a_moments_with; c2a_with стал обёрткой)\", \"src/pumponset/run.rs (флаг dump_triggers, поле Run.dump, Work.dumped, 3 точки вызова)\", \"src/pumponset/run_tests.rs (одна строка dump_triggers: false в args)\", \"src/pumponset/mod.rs (pub mod dump; mod dump_tests)\", \"docs/findings/pumponset-run-spec-2026-11-05.md (раздел triggers)\"], \"tests_",
+   "mtime": 1793841028.2632406
+  },
+  "wf_87997c9e-406": {
+   "name": "statarb-2mo-plan",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 127891,
+   "result_head": "{\"plan\": {\"plan_md\": \"# Итоговый план (r2): тест стат-арбитража G-021 на 9 биржах, 01.10-04.11.2026 UTC\\n\\nСоставлен 06.11 после критики r1. Ничего не правил, не собирал и не запускал. Пометки «[ИЗМ]» и «[НОВОЕ]» отмечают отличия от r1. Три факта критика проверил по веткам, остальные записаны со ссылкой на критика:\\n- `open_at_end` не считается в PnL: tk479-statarb:src/statarb/kernel.rs:164, 537. Счётчики `entry_deferred` и `exit_deferred` лежат там же, строки 156, 158, 364, 398.\\n- `form` берёт все `.sap` каталога: tk486-speed:src/statarb/form.rs:102.\\n- ADF в `eg.rs` идёт с лагом 0 и без кон",
+   "mtime": 1793911746.2034056
+  },
+  "wf_8cd5f6cc-b6e": {
+   "name": "xdl9-wave1",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 64779,
+   "result_head": "{\"data\": {\"status\": \"F1 (ворота данных G1, G1b) выполнен по данным и скриптам. Проверено 9 бирж, Bitget докачался и вошёл. Отчёт `docs/findings/xdl9-data-gate-2026-11-06.md` НА ДИСК НЕ ЗАПИСАН: инструмент Write отказал («Subagents should return findings as text, not write report files»), а системное правило запрещает писать report/findings .md. Полный текст отчёта ниже. Родителю нужно записать его в этот путь и закоммитить. Скрипты, README и малые таблицы закоммичены (b3ceb4ca, b9511b4a на ветке tk493-xdl9).\\n\\n===== ОТЧЁТ (markdown, предназначен для docs/findings/xdl9-data-gate-2026-11-06.md)",
+   "mtime": 1793916182.7514436
+  },
+  "wf_97a3b6d9-208": {
+   "name": "xdl9-conv-types-stat",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 16457,
+   "result_head": "{\"a\": {\"done\": true, \"report_path\": \"C:/visual projects/alpha/.claude/worktrees/TK-493/docs/findings/xdl9-conv-types-stat-2026-11-07.md (таблицы и скрипты: docs/research/P-39-types-stat-2026-11-07/, результаты results/*.csv; сделки и эпизоды на Deck ~/xdl9/c2t/out/ts_tables.npz)\", \"commit\": \"511b6060 (отчёт, таблицы, скрипты); предрегистрация правил типов до чтения исходов: 527f63c8 и 97b88698 (границы терцилей по формированию)\", \"row_a\": \"ПОДТВЕРЖДЕНО СТАТИСТИКОЙ. Серии abs(s-b)>=theta длиной 1 мин: 83,1-89,4 % (theta 10..160, 28 ячеек, формирование); на трёх ячейках отчёта подсказок 82,7/89,",
+   "mtime": 1794047956.621773
+  },
+  "wf_9880e983-503": {
+   "name": "xdl9-w4-selection-r3",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 63,
+   "result_head": "{\"assetFix\": null, \"protoFix\": null, \"sel\": null, \"ctrl\": null}",
+   "mtime": 1793929930.1544528
+  },
+  "wf_a226d344-f95": {
+   "name": "xdl9-conv-window-report",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 12767,
+   "result_head": "{\"rep\": {\"done\": true, \"report_path\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\TK-493\\\\docs\\\\findings\\\\xdl9-conv-window-2026-11-07.md\", \"commit\": \"2f09b713 (ветка tk493-xdl9, в origin не пушили); данные — C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\TK-493\\\\docs\\\\research\\\\P-38-window-2026-11-07\\\\ (55 файлов, ≈ 0,98 МБ)\", \"headline\": \"Крипта, окно 15.10–04.11 (21 сутки, 5 830 пар), один прогон, хэши выходов сверены с SHA256.txt без расхождений. Оба варианта — «не подтверждено» (Холм не пройден, условия 2 и 3 R3.3 не выполнены).\\nV1 (Q5 вкл, T 1440): 588 сделок, 126 активов; gross 17",
+   "mtime": 1794042611.0691388
+  },
+  "wf_a77afef5-1ce": {
+   "name": "xdl9-audit2-part1",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 156780,
+   "result_head": "{\"confirmed\": [{\"id\": \"L1-01\", \"severity\": \"major\", \"kind\": \"method\", \"where\": \"tools/compute/statarb/xdl9/d2_diff_funding.py:20-31 (docstring «второй порядок»), diff_series():89-124, k=bisect_left:112; P-37 §5 D2, params d2_rule_series\", \"claim\": \"Ряд d = r_Y − Σr_X(привязанные к метке Y) точен только при равных сетках выплат. При неравных (в том числе когда биржа в середине окна меняет интервал 8 ч → 1 ч у экстремальных ставок) начисление D2 ядром расходится с точным двухногим начислением на единицы и десятки bps на сделку при круге 12,6 bps. Вывод docstring «погрешность ≈ 1e-3 bps» верен ли",
+   "mtime": 1793979022.9398184
+  },
+  "wf_aca0fb5c-83d": {
+   "name": "xdl9-conv",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "error",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 4,
+   "result_head": "null",
+   "mtime": 1794010756.9127724
+  },
+  "wf_b5d1ee09-036": {
+   "name": "xdl9-conv",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "error",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 4,
+   "result_head": "null",
+   "mtime": 1794011047.9403784
+  },
+  "wf_cc42e25f-104": {
+   "name": "pumponset-blind-audit",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 15803,
+   "result_head": "[{\"verdict\": \"match\", \"summary\": \"Check A (episodes) matches the core exactly. I wrote an independent detector from protocol §2 and tk435-windows.py, working in ln-moves with a brute-force numba move search and a greedy non-overlap pass. It was run on the full history of the two contracts, then filtered to the test period and the universe. Result: 403 episodes of the core match my 403 episodes one-to-one. All 20 counts by (contract, di, sign) agree. t0 and t_end are identical on all 403. mv differs by at most 8.9e-16 in absolute terms (max relative 1.4e-14, against a tolerance of 1e-9). The wi",
+   "mtime": 1793836707.918758
+  },
+  "wf_d49143c7-91f": {
+   "name": "xdl9-w4-selection-r3",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 24994,
+   "result_head": "{\"assetFix\": {\"done\": true, \"summary\": \"Задача A (D-01 и хвосты F5) выполнена и доведена до коммитов. Торговое окно не читалось, Rust-код и бинарь счёта не менялись. Результаты:\\n\\n1. **Единая функция классификации.** `tools/compute/statarb/xdl9/asset_class.py` вызывают и `asset_lib.py`, и `panels_xdl9.py`. Признак пред-листинга берётся из первичных полей: Bybit PreLaunch и isPreListing, Binance PREMARKET, OKX ruleType=pre_market, Aster pre-launch. Сверх списка r3 добавлены Kraken Pre-IPO и Hyperliquid preipo (назначено без Судьи, подтвердить). Ключ приватных базы исключает базу на всех биржах",
+   "mtime": 1793974807.529687
+  },
+  "wf_d7c93a02-03d": {
+   "name": "ignition-analysis",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 19116,
+   "result_head": "[{\"headline\": \"Направление при воспламенении предсказуемо слабо и только от ~4 ч: AUC замороженной логит-модели на тесте 2026 = 0,557 [0,535; 0,586] (h=240) и 0,599 [0,564; 0,644] (h=1440), подтверждено по Холму (K=68); на h=60 нет (0,516 [0,469; 0,552]). Сигнал почти весь — разворот против часового импульса r_w (AUC знака r_w = 0,41 на тесте, 0,46 на фите), перекос толпы устойчивой добавки не даёт (подтверждено лишь изменение top-trader count за час). Безусловные лонг/шорт на тесте не подтверждены (шорт h=1440: +88 [−9; 162] bps, Холм p=1,0), знак 2025 года на коротких горизонтах не воспроизв",
+   "mtime": 1793886663.8929012
+  },
+  "wf_daf88851-d53": {
+   "name": "pumponset-v2-fixes",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 22967,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_daf88851-d53-1\", \"head\": \"1a256fb2e297e73e13ea8ea468b739cc1a3d44b4\", \"files\": [\"src/pumponset/exits.rs\", \"src/pumponset/verdict/exits_stage.rs\", \"src/pumponset/exits_tests.rs\", \"src/pumponset/run.rs\", \"src/pumponset/dump.rs\", \"src/pumponset/run_tests.rs\", \"src/pumponset/dump_tests.rs\", \"src/pumponset/play_tests.rs\", \"docs/research/P-35-exits.md\", \"docs/findings/pumponset-run-spec-2026-11-05.md\"], \"tests_status\": \"green\", \"tests_summary\": \"VPS (-va): `test pumponset` в release и `testdbg pumponset` (debug-assertions + o",
+   "mtime": 1793877070.3923297
+  },
+  "wf_dfe7f9c5-110": {
+   "name": "xdl9-w5-fixes",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 41601,
+   "result_head": "{\"proto\": {\"done\": true, \"summary\": \"Задача P сделана и закоммичена (f47ae17c, уточнение aee2f572, ветка tk493-xdl9). Решения CEO D1, D2, D4, D7, D8, D9, D17, D18, D19 и тексты D5(i)(iii)(iv)(v), D6, D10–D16 внесены в П-37 r3.2. D3, D20 и D21 записаны для полноты, исполняют другие задачи. Таблица «r3.2» стоит в начале П-37: 27 строк, находка → решение → где применено, метки Н52–Н69. Старшинство источников и приведение расхождений А-01…А-27 — новый §19. Реестр, params, журнал, EXPERIMENTS и P-33 обновлены. Значения отбора в params не менялись, торговое окно не читалось, счёт F8 не запускался.\",",
+   "mtime": 1794008044.1589308
+  },
+  "wf_e1f2a18f-2af": {
+   "name": "pumponset-sample-filter",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 8841,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_e1f2a18f-2af-1\", \"head\": \"5dc78562\", \"files\": [\"src/pumponset/play.rs\", \"src/pumponset/play_tests.rs\", \"src/pumponset/cache.rs\", \"src/pumponset/control.rs\", \"src/pumponset/dump.rs\", \"src/pumponset/run.rs\", \"src/pumponset/mod.rs\", \"src/pumponset/tests.rs\", \"src/pumponset/run_tests.rs\", \"src/pumponset/dump_tests.rs\", \"src/pumponset/exits_tests.rs\", \"docs/findings/pumponset-run-spec-2026-11-05.md\"], \"tests_status\": \"green\", \"tests_summary\": \"VPS (CHECK_HOST=vps, тег -sf): `test pumponset` release — 150 passed, 0 failed, 1",
+   "mtime": 1793844652.4120052
+  },
+  "wf_e3b20a00-8e4": {
+   "name": "xdl9-gate-download",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 8687,
+   "result_head": "{\"done\": true, \"ready\": true, \"summary\": \"Gate скачан и проверен, маркер ~/xdl9/gate_ready создан (проверки пройдены, исключений нет). Окно 01.10 00:00 – 04.11 23:59 UTC (50 400 минут). 1 072 контракта: 597 крипта, 439 акции/ETF, 18 индексов, 12 металлов, 3 энергия, 3 фиат. 19 881 344 строки свечей, 156 547 выплат фандинга, 1 072 панели .sap (52,6 млн минут, 804 МБ). Закачка на Deck: 661 с, 4 291 REST-запрос, 0 ответов 429 и других HTTP-ошибок; сырьё 191 МБ свечей и 5 МБ фандинга, плюс 165 МБ исходного архива. Свод sha256 панелей 70e999f440c428e0…; две независимые закачки дали одинаковый. Комм",
+   "mtime": 1794015073.4291766
+  },
+  "wf_e7d9e801-ccd": {
+   "name": "pumponset-run-verdict",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 24118,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:/visual projects/alpha/.claude/worktrees/wf_e7d9e801-ccd-1\", \"head\": \"c4d478479a7591e9736de6081d66eae238c0eaf8\", \"files\": [\"src/pumponset/trade.rs\", \"src/pumponset/agg.rs\", \"src/pumponset/run.rs\", \"src/pumponset/run_tests.rs\", \"src/pumponset/episodes.rs\", \"src/pumponset/params.rs\"], \"tests_status\": \"red\", \"tests_summary\": \"Модуль pumponset на VPS (release): 64 прошло, 1 красный, 1 ignored. Все 12 тестов run_tests зелёные, в том числе в debug с overflow-checks. Красный тест — pumponset::feat_tests::sigma_is_population_std_of_minute_returns, это ядро (feat), его я не т",
+   "mtime": 1793832295.673419
+  },
+  "wf_ed51a2df-1e5": {
+   "name": "xdl9-f10",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 81774,
+   "result_head": "{\"ver\": {\"done\": true, \"verdict_ok\": true, \"summary\": \"Полнота: 744/744 единиц с .done (rc=0), .fail пуст, sha256 списка, params, протокола и бинаря равны f8_expected.env; 5 298 файлов выходов без нулевых и обрезанных, 745 логов без слов об ошибках.\\nКлетки: 145 = A1 6 + A2 8 + B1 14 + C1 2 + D2 115, ровно как «торгуется» в params-cells; cells.csv (30 строк) и CLI D2 (163 единицы: k, hold_payments) совпали с params без расхождений.\\nconsistency.csv: 145 строк, все три сверки зелёные, примечаний нет; мой пересчёт совпал, плюс 0 расхождений по (задание, сутки) между jobday и trades.csv.\\nИнвариа",
+   "mtime": 1794011911.1691537
+  },
+  "wf_ee184859-d77": {
+   "name": "xdl9-hints",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 34750,
+   "result_head": "{\"a\": {\"done\": true, \"summary\": \"Крипта, подсказки H2–H6, ТОЛЬКО формирование 01.10–14.10 (14 суток, вне семьи, не вердикт). Торговое окно не читалось (панель читается ровно 20 160 минут). В основном прогоне F8 подсказки не проверены, потому что C1 торгуется 1 клеткой из 345; здесь они измерены напрямую по абсолютному спреду. Расчёт на Deck: 1 335 общих крипто-пар (BingX×Bitget 441, Binance×Aster 404, Binance×BingX 490) + 2 пары BROCCOLI вне протокола, сетка θ = 10/20/40/80/160 bps целиком.\\n1) BRETT (BingX×Bitget): max |s − медиана| 74,8 bps, θ≥80 эпизодов нет. LAB (Binance×Aster): max 73,5, ",
+   "mtime": 1794011023.467028
+  },
+  "wf_f11b12a4-35f": {
+   "name": "pumponset-ignitions",
+   "keys": [
+    "runId",
+    "timestamp",
+    "taskId",
+    "script",
+    "scriptPath",
+    "result",
+    "agentCount",
+    "logs",
+    "durationMs",
+    "summary",
+    "workflowName",
+    "status",
+    "startTime",
+    "phases",
+    "defaultModel",
+    "workflowProgress",
+    "totalTokens",
+    "totalToolCalls"
+   ],
+   "result_len": 6298,
+   "result_head": "[{\"coder\": {\"worktree\": \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_f11b12a4-35f-1\", \"head\": \"21e98d7563b7100affe8f706231de12b08615a53\", \"files\": [\"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_f11b12a4-35f-1\\\\src\\\\pumponset\\\\ignitions.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_f11b12a4-35f-1\\\\src\\\\pumponset\\\\ignitions_tests.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_f11b12a4-35f-1\\\\src\\\\pumponset\\\\dump.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_f11b12a4-35f-1\\\\src\\\\pumponset\\\\run.rs\", \"C:\\\\visual projects\\\\alpha\\\\.claude\\\\worktrees\\\\wf_f1",
+   "mtime": 1793884745.392847
+  }
+ },
+ "owner": [
+  {
+   "line": 3,
+   "ts": "2026-11-04T21:22:32.085Z",
+   "text": "продолжи. расскажи какой план. утвержу его и поедешь"
+  },
+  {
+   "line": 14,
+   "ts": "2026-11-04T21:22:32.093Z",
+   "text": "# Workflow authoring reference\n\nA workflow structures work across many agents — to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial checks before committing), or to take on scale one context can't hold (migrations, audits, broad sweeps). The script is where you encode that structure: what fans out, what verifies, what synthesizes.\n\nWhen you do call it, the right move is often **hybrid**: scout inline first (list the files, find the channels, scope the diff) to discover the work-list, then call Workflow to pipeline over it. You don't need to know the shape before the *task* — only before the *orchestration step*.\n\nCommon single-phas"
+  },
+  {
+   "line": 89,
+   "ts": "2026-11-04T21:27:13.957Z",
+   "text": "воркфлоу дефолтный какой обычно должен быть в клод коде\n\nа так да. плаги выключен.\nсвечи закачиваем.\nна основании свечей, объема/открытого интереса фандинга выясняем где стартовал памп, ориентировочно, и предполагаем могли ли мы зайти в него на раннем этапе в инвест и что бы это дало\n\nколичество одновременных позиций роли не играет. фандинг на самом деле глогбально роли не играет, но может пригодится\n\nприступай. нужно быстро делать и быстрый алгоритмы"
+  },
+  {
+   "line": 892,
+   "ts": "2026-11-04T23:07:51.436Z",
+   "text": "долго до результатов?"
+  },
+  {
+   "line": 905,
+   "ts": "2026-11-04T23:10:59.232Z",
+   "text": "у меня нет прежних данных по пампам. а если и есть то я не знаю на сколько они валидны"
+  },
+  {
+   "line": 1068,
+   "ts": "2026-11-04T23:30:04.625Z",
+   "text": "3 30"
+  },
+  {
+   "line": 1099,
+   "ts": "2026-11-04T23:36:44.924Z",
+   "text": "ты уже можешь показать результат на графиках?"
+  },
+  {
+   "line": 1132,
+   "ts": "2026-11-04T23:41:46.915Z",
+   "text": "а нахуя мне выход через 6 часов? чтобы что? выходить надо в прибыль и искать точки максимальной прибыли. \n\nграфики надо по каждой монете с пампом а не статистические"
+  },
+  {
+   "line": 1395,
+   "ts": "2026-11-05T00:07:41.462Z",
+   "text": "добавь в артефакт рубильников еще\n\nстоп лос\nтейк\n\nтрейлинг тейк с параметрами"
+  },
+  {
+   "line": 1454,
+   "ts": "2026-11-05T00:15:32.334Z",
+   "text": "выясни почему это в лонговом сценарии и также\n\nна каждое правило сигнала выясни лучшие гиперпараметры стопа, трейлинга и отката трейлинга\n\nи зависит ли это от атр\n\nтакже добавь круглые числа посмотри зависит ли от них что то\n\nот перехода часов и дней"
+  },
+  {
+   "line": 1828,
+   "ts": "2026-11-05T01:13:49.999Z",
+   "text": "вот такие лонги не должны быть в выборке. это не пампы а откупы после события какого то\n\nи убери мусор из монет типап crv, ldo, btc, eth, ltc и все прочее у чего не было высокой волатильности, или что является тяжем. я думаю что то что мы ищем - мы ищем не предпамп - а первую фазу монеты инплей\n\nдля меня нижний порог высокой волатильности это натр за 30 1м периодов >=1"
+  },
+  {
+   "line": 1830,
+   "ts": "2026-11-05T01:13:49.999Z",
+   "text": "[Image: source: C:\\Users\\3D6B~1\\AppData\\Local\\Temp\\claude\\C--visual-projects-alpha\\215df875-21c0-4c0b-b79d-964caf0deaca\\images\\1.png]"
+  },
+  {
+   "line": 2364,
+   "ts": "2026-11-05T10:07:32.709Z",
+   "text": "мне кажется  ты либо где то пиздишь либо маловато параметров"
+  },
+  {
+   "line": 2591,
+   "ts": "2026-11-05T11:49:03.135Z",
+   "text": "че там"
+  },
+  {
+   "line": 2772,
+   "ts": "2026-11-05T13:35:20.702Z",
+   "text": "нуче"
+  },
+  {
+   "line": 3061,
+   "ts": "2026-11-05T16:50:36.487Z",
+   "text": "слушай помнишь задачу на статарб\n\nнам хватит 2 терабайта?\n\nтакой сервер допустим\n\n<pasted_content id=\"0cb8\">\nLocation:\nSeattle,\nUnited States\nCPU:\nIntel\nXeon L5520\n2.27GHz\n4c/8t\nPassMark Benchmark:\n2274\nRAM:\n48 GB DDR3\nBandwidth:\n30 TB @ 1 Gbps\nBase IP Amount:\n5\nPrice:\n+ $31.99 /mo\nSetup Fee:\n+ $0.00\nPort Speed:\n1 Gbps\n+ $0.00 /mo\nIPv6:\n/64 (Native)\n+ $0.00 /mo\nBackup:\nBackup Storage [NFS / FTP] -- 100 GiB\n+ $0.00 /mo\nMain Storage:\n2x 1 TB (HDD SATA)\n+ $0.00 /mo\nQuantity:\nx 1\nBilling Cycle:\nMonthly\nSub Total:\n+ $31.99\n</pasted_content id=\"0cb8\">\n"
+  },
+  {
+   "line": 3093,
+   "ts": "2026-11-05T16:52:56.430Z",
+   "text": "а эти"
+  },
+  {
+   "line": 3095,
+   "ts": "2026-11-05T16:52:56.430Z",
+   "text": "[Image: source: C:\\Users\\3D6B~1\\AppData\\Local\\Temp\\claude\\C--visual-projects-alpha\\215df875-21c0-4c0b-b79d-964caf0deaca\\images\\2.png]"
+  },
+  {
+   "line": 3122,
+   "ts": "2026-11-05T16:54:57.499Z",
+   "text": "а мы можем из софии пропинговать бингикс?"
+  },
+  {
+   "line": 3142,
+   "ts": "2026-11-05T16:55:19.279Z",
+   "text": "с трассировкой"
+  },
+  {
+   "line": 3166,
+   "ts": "2026-11-05T16:55:51.174Z",
+   "text": "если надо ставь трейсраут не страшно щас вечерние часы никто не пользуется продуктами"
+  },
+  {
+   "line": 3190,
+   "ts": "2026-11-05T16:58:42.172Z",
+   "text": "ну выясняй че это за гео и где сидит бингикс"
+  },
+  {
+   "line": 3238,
+   "ts": "2026-11-05T17:18:26.449Z",
+   "text": "мыж где то тестили байбит?"
+  },
+  {
+   "line": 3276,
+   "ts": "2026-11-05T17:23:15.388Z",
+   "text": "так\n\nдавай сделаем тест стат арбитража но на двух месяцах.\n\nтекущий и прошлый\n\nбиржи\nбинанс\nбайбит\nокекс\nбинг икс\nбитгет\nкракен\nастер и второй забыл как зовут его ликвид какой то чтоли?"
+  },
+  {
+   "line": 3327,
+   "ts": "2026-11-05T17:24:30.606Z",
+   "text": "удали только датасеты пампов с деки\n\nи также мы делаем статарб всего\n\nи крипты и акций и металлов и всего что можно поторговать на биржах"
+  },
+  {
+   "line": 3376,
+   "ts": "2026-11-05T17:26:25.631Z",
+   "text": "думаю что из типа ликвида надо добавить еще вариатионал и альфа икс"
+  },
+  {
+   "line": 3465,
+   "ts": "2026-11-05T17:56:39.628Z",
+   "text": "короткий статус дай по всем биржам"
+  },
+  {
+   "line": 3521,
+   "ts": "2026-11-05T19:16:32.707Z",
+   "text": "Нуче"
+  },
+  {
+   "line": 3540,
+   "ts": "2026-11-05T19:17:39.614Z",
+   "text": "Скачано 2 гигабайта? Ты на приколе?"
+  },
+  {
+   "line": 3562,
+   "ts": "2026-11-05T19:40:29.438Z",
+   "text": "Ну то есть загрузка завершена и проведидирована верно? А работать с этими массивами можем? Ты говоришь у кракена дырки у когг то еще что то"
+  },
+  {
+   "line": 3575,
+   "ts": "2026-11-05T19:41:43.656Z",
+   "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<tools-used-before-summary>Agent, Artifact, Bash, Edit, Grep, Monitor, Read, ToolSearch, WebSearch, Workflow, Write, mcp__visualize__read_me, mcp__visualize__show_widget</tools-used-before-summary>\nSummary:\n1. Primary Request and Intent:\n   - Earlier (completed): execute the plan \"докачка Bybit, оптимизация алгоритмов, прогон пампов\" for G-017 (pumps/early phase) fast with a fast Rust algorithm; find where pumps start from candles/volume/OI/funding and whether an early entry could be made and what it would yield; exits in profit with stop/ta"
+  },
+  {
+   "line": 3702,
+   "ts": "2026-11-05T20:13:30.917Z",
+   "text": "Ты де в редиме ультракод. Зули ты не сделал план и молча проебываешь задачи????"
+  },
+  {
+   "line": 3754,
+   "ts": "2026-11-05T20:25:55.533Z",
+   "text": "Вот так нахуй"
+  },
+  {
+   "line": 3764,
+   "ts": "2026-11-05T20:40:28.387Z",
+   "text": "Сколько это по времени"
+  },
+  {
+   "line": 3960,
+   "ts": "2026-11-05T21:34:44.045Z",
+   "text": "краткий статус логлайном дай"
+  },
+  {
+   "line": 4010,
+   "ts": "2026-11-05T21:45:16.929Z",
+   "text": "сколькол волн и сколько времени на первую"
+  },
+  {
+   "line": 4030,
+   "ts": "2026-11-05T21:49:04.523Z",
+   "text": "дай агента который поище что то связанное с арбитражом тут\n\n\nC:\\visual projects\\trans"
+  },
+  {
+   "line": 4049,
+   "ts": "2026-11-05T21:49:20.377Z",
+   "text": "возможно это скорректирует нашу картину"
+  },
+  {
+   "line": 4073,
+   "ts": "2026-11-05T21:55:05.860Z",
+   "text": "ну то есть базовую базу откуда искать и найдём видео даёт. кайф"
+  },
+  {
+   "line": 4178,
+   "ts": "2026-11-05T22:58:40.966Z",
+   "text": "почему долго так"
+  },
+  {
+   "line": 4201,
+   "ts": "2026-11-05T23:02:09.258Z",
+   "text": "где то еще есть ошибки? есть скрипты или алгоритмы что нужно сильно прокачать?"
+  },
+  {
+   "line": 4252,
+   "ts": "2026-11-05T23:57:46.065Z",
+   "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<tools-used-before-summary>Agent, Artifact, Bash, Edit, Grep, Monitor, Read, ToolSearch, WebSearch, Workflow, Write, mcp__visualize__read_me, mcp__visualize__show_widget</tools-used-before-summary>\nSummary:\n1. Primary Request and Intent:\n   - The main task is the G-021 stat-arb test on 9 exchanges (Binance, Bybit, OKX, BingX, Bitget, Kraken, Aster, Hyperliquid, Lighter) over 35 days of 1-minute candles (01.10–04.11.2026 UTC). The scope is all tradables: crypto, stocks, ETFs, indices, metals, energy, FX. Fees are as on Bybit (В-88). The owner"
+  },
+  {
+   "line": 4401,
+   "ts": "2026-11-06T00:29:01.331Z",
+   "text": "как исправишь сделай еще один дип дайв аудит\n\nи тоже исправь че найдешь"
+  },
+  {
+   "line": 4590,
+   "ts": "2026-11-06T09:32:44.603Z",
+   "text": "продолжаем. статус дай"
+  },
+  {
+   "line": 4654,
+   "ts": "2026-11-06T09:36:07.850Z",
+   "text": "везде где можно ускоряйся"
+  },
+  {
+   "line": 4678,
+   "ts": "2026-11-06T09:42:47.188Z",
+   "text": "в алгоритмах тоже прокачал?"
+  },
+  {
+   "line": 4710,
+   "ts": "2026-11-06T10:18:28.301Z",
+   "text": "почему комп парализован буквально? что происходит тут?"
+  },
+  {
+   "line": 4764,
+   "ts": "2026-11-06T12:23:20.924Z",
+   "text": "The app was quit while you were working. Please continue from where you left off."
+  },
+  {
+   "line": 4891,
+   "ts": "2026-11-06T13:42:50.508Z",
+   "text": "ты че дурак блять? нахуй ты мне все ресурсы сожрал? пришлось комп перезагружать"
+  },
+  {
+   "line": 4926,
+   "ts": "2026-11-06T13:58:27.314Z",
+   "text": "зачем ты это тут вообще запускаешь у тебя есть мощный дек"
+  },
+  {
+   "line": 4953,
+   "ts": "2026-11-06T14:04:44.327Z",
+   "text": "ну установи хули"
+  },
+  {
+   "line": 5074,
+   "ts": "2026-11-06T14:48:32.333Z",
+   "text": "ну че идет процесс?"
+  },
+  {
+   "line": 5096,
+   "ts": "2026-11-06T15:10:15.945Z",
+   "text": "дек можно как кайф грузить. этот нельзя сильно"
+  },
+  {
+   "line": 5297,
+   "ts": "2026-11-06T18:19:05.457Z",
+   "text": "Статус"
+  },
+  {
+   "line": 5311,
+   "ts": "2026-11-06T16:28:17.311Z",
+   "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<tools-used-before-summary>Agent, Artifact, Bash, Edit, Grep, ListAgents, Monitor, PowerShell, Read, ReadNotifications, SendMessage, ToolSearch, WebSearch, Workflow, Write, mcp__visualize__read_me, mcp__visualize__show_widget</tools-used-before-summary>\nSummary:\n1. Primary Request and Intent:\n   - Main task (TK-493, G-021, owner's order В-99): a stat-arb test on 8 minute-candle exchanges. These are Binance, Bybit, OKX, BingX, Bitget, Kraken, Aster and Lighter. Hyperliquid has only 15-minute candles and is out of the test. The span is 35 days"
+  },
+  {
+   "line": 5409,
+   "ts": "2026-11-06T18:24:52.626Z",
+   "text": "Что да торговый счет"
+  },
+  {
+   "line": 5439,
+   "ts": "2026-11-06T19:21:55.486Z",
+   "text": "Что такое торговый счет"
+  },
+  {
+   "line": 5456,
+   "ts": "2026-11-06T19:22:42.970Z",
+   "text": "То есть это все равно тестовый счет?"
+  },
+  {
+   "line": 5469,
+   "ts": "2026-11-06T20:57:34.554Z",
+   "text": "Когда сделаешь"
+  },
+  {
+   "line": 5498,
+   "ts": "2026-11-06T21:30:55.779Z",
+   "text": "а почему так долго?"
+  },
+  {
+   "line": 5515,
+   "ts": "2026-11-06T21:58:23.043Z",
+   "text": "я спрашиваю не почему много этапов а почему долго"
+  },
+  {
+   "line": 5525,
+   "ts": "2026-11-06T21:58:50.514Z",
+   "text": "а нахуй собирать на впс собирай на деке"
+  },
+  {
+   "line": 5597,
+   "ts": "2026-11-06T22:01:41.531Z",
+   "text": "rfr vj;yj rfxtcndtyyj rhfnyj ekexibnm ghjwtccbyu"
+  },
+  {
+   "line": 5613,
+   "ts": "2026-11-06T22:25:06.202Z",
+   "text": "не я написал как можно ускорить все качетсвенно"
+  },
+  {
+   "line": 5623,
+   "ts": "2026-11-06T22:37:11.730Z",
+   "text": "мне нужны цифры и короткие статусы а не длинная хуйня"
+  },
+  {
+   "line": 5647,
+   "ts": "2026-11-06T23:09:12.256Z",
+   "text": "ecrjhzqcz"
+  },
+  {
+   "line": 5748,
+   "ts": "2026-11-06T23:15:24.227Z",
+   "text": "поставь че нужно это ебаный линукс же"
+  },
+  {
+   "line": 5994,
+   "ts": "2026-11-06T23:58:12.443Z",
+   "text": "непонятно написал. в тупую напиши предварительно где что торгуется"
+  },
+  {
+   "line": 6021,
+   "ts": "2026-11-07T00:03:27.533Z",
+   "text": "как это ничего?))) в видосе же были подсказки что торговать ты прикалываешься?"
+  },
+  {
+   "line": 6124,
+   "ts": "2026-11-07T00:07:23.830Z",
+   "text": "начни со схождений, ты с хуйни какой то начал"
+  },
+  {
+   "line": 6169,
+   "ts": "2026-11-07T00:09:48.624Z",
+   "text": "гейт тоже добавляй параллельно скачивание поставь. ну и занимайся сперва схождением потом всем остальным"
+  },
+  {
+   "line": 6234,
+   "ts": "2026-11-07T00:14:22.585Z",
+   "text": "логика какая то для схождения есть? план есть?"
+  },
+  {
+   "line": 6256,
+   "ts": "2026-11-07T00:18:27.198Z",
+   "text": "да но \n\n-если разошлось например на 10% это причина для входа? а на 2%? \n-если получился стоп то перезаход есть? \n-когда кончается сценарий чтобы зайти заново?\n\n\nкороче не хватает каких то статистических приколов и методов и просто концепции стратегии\n\nпродолжай"
+  },
+  {
+   "line": 6465,
+   "ts": "2026-11-07T02:26:46.157Z",
+   "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<tools-used-before-summary>Agent, Artifact, Bash, Edit, Grep, ListAgents, Monitor, PowerShell, Read, ReadNotifications, SendMessage, TaskStop, ToolSearch, WebSearch, Workflow, Write, mcp__visualize__read_me, mcp__visualize__show_widget</tools-used-before-summary>\nSummary:\n1. Primary Request and Intent:\n   - Main task (TK-493, G-021, owner order В-99): stat-arb test on 8 minute-candle exchanges (Binance, Bybit, OKX, BingX, Bitget, Kraken, Aster, Lighter; Hyperliquid 15-min only, out of test), 35 days 01.10–04.11.2026 UTC; formation 01–14.10 ("
+  },
+  {
+   "line": 6800,
+   "ts": "2026-11-07T07:13:14.810Z",
+   "text": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<tools-used-before-summary>Agent, Artifact, Bash, Edit, Grep, ListAgents, Monitor, PowerShell, Read, ReadNotifications, SendMessage, TaskStop, ToolSearch, WebSearch, Workflow, Write, mcp__visualize__read_me, mcp__visualize__show_widget</tools-used-before-summary>\nSummary:\n1. Primary Request and Intent:\n   - Main task (TK-493, G-021, owner order В-99): stat-arb test on 8 minute-candle exchanges (Binance, Bybit, OKX, BingX, Bitget, Kraken, Aster, Lighter; Hyperliquid out), 35 days 01.10–04.11.2026 UTC; formation days 2465–2478 (01–14.10), trad"
+  },
+  {
+   "line": 7046,
+   "ts": "2026-11-07T09:18:10.121Z",
+   "text": "Статус"
+  },
+  {
+   "line": 7060,
+   "ts": "2026-11-07T09:19:34.160Z",
+   "text": "Правильно понимаю что за что бы ты ни брался там будет минус?"
+  },
+  {
+   "line": 7076,
+   "ts": "2026-11-07T09:20:42.890Z",
+   "text": "Причем тут пампы и смарт мани?"
+  },
+  {
+   "line": 7085,
+   "ts": "2026-11-07T09:21:40.050Z",
+   "text": "У меня стойкое ощущение сто ты специально методологически делаешь так чтобы невозможнл было нацти альфу"
+  },
+  {
+   "line": 7101,
+   "ts": "2026-11-07T09:23:44.569Z",
+   "text": "Ты идиот?"
+  },
+  {
+   "line": 7122,
+   "ts": "2026-11-07T09:25:33.196Z",
+   "text": "Обоснуй мне свою методику. Как ты собирался вытащить прибыль?"
+  },
+  {
+   "line": 7143,
+   "ts": "2026-11-07T09:26:57.996Z",
+   "text": "Сколько ты времени на это потратил и сколько еще потоатишь до реальной методики))))"
+  },
+  {
+   "line": 7165,
+   "ts": "2026-11-07T09:30:48.365Z",
+   "text": "Методику расписывай"
+  },
+  {
+   "line": 7181,
+   "ts": "2026-11-07T09:34:40.511Z",
+   "text": "Из пункта 1 нужно все статистически оьосновать. Почему"
+  },
+  {
+   "line": 7206,
+   "ts": "2026-11-07T10:07:21.688Z",
+   "text": "Ты брал во внимание текст и скрины из папки?"
+  },
+  {
+   "line": 7271,
+   "ts": "2026-11-07T10:11:45.476Z",
+   "text": "Что еще за клоз свечи"
+  },
+  {
+   "line": 7280,
+   "ts": "2026-11-07T10:13:54.281Z",
+   "text": "А ты имеешь в виду что нет динамики внутри минуты и ты зацепился за close\n\nА кто из текущих бирж отдают стаканы"
+  },
+  {
+   "line": 7387,
+   "ts": "2026-11-07T10:49:17.130Z",
+   "text": "это нахуй? - У меня потолок T ≤ 24 ч\nэто нахуй? - У меня один вход тейкером.\nты не ответил на вопрос кто из текущих бирж отдают стаканы. ясен хуй я не про вебсокет спрашивал дебил. мы же не бота делаем мы рассматриваем контекст ИСТОРИИ"
+  },
+  {
+   "line": 7423,
+   "ts": "2026-11-07T11:02:19.402Z",
+   "text": "останавливаемся"
+  },
+  {
+   "line": 7488,
+   "ts": "2026-11-07T11:03:47.706Z",
+   "text": "правильно понимаю что ты за день сжег 30% недельного лимита, хотя в йелом мог бы и не сжигать и результат был бы такой же?"
+  },
+  {
+   "line": 7497,
+   "ts": "2026-11-07T11:04:13.161Z",
+   "text": "ты мудак?"
+  }
+ ],
+ "cost_keys": [
+  "price_assumption",
+  "main",
+  "by_run",
+  "by_phase",
+  "by_agent",
+  "agents_by_hour_usd",
+  "agents_total",
+  "tok_kind_usd",
+  "runs_vs_scripts"
+ ],
+ "groups": {
+  "Пампы": {
+   "runs": 13,
+   "usd": 275.5111443,
+   "ids": [
+    "wf_0d56026b-205",
+    "wf_1571306d-57d",
+    "wf_3303296c-dbf",
+    "wf_59ed7cc7-63e",
+    "wf_59f7ac06-130",
+    "wf_72af6ee7-d60",
+    "wf_77affd8d-49d",
+    "wf_cc42e25f-104",
+    "wf_d7c93a02-03d",
+    "wf_daf88851-d53",
+    "wf_e1f2a18f-2af",
+    "wf_e7d9e801-ccd",
+    "wf_f11b12a4-35f"
+   ]
+  },
+  "Данные и план статарба": {
+   "runs": 4,
+   "usd": 111.5338065,
+   "ids": [
+    "wf_5e6d75ae-e11",
+    "wf_87997c9e-406",
+    "wf_8cd5f6cc-b6e",
+    "wf_e3b20a00-8e4"
+   ]
+  },
+  "Аудиты": {
+   "runs": 3,
+   "usd": 299.8276272,
+   "ids": [
+    "wf_170e810f-af5",
+    "wf_295063d9-0e2",
+    "wf_a77afef5-1ce"
+   ]
+  },
+  "Правки по аудитам и волны": {
+   "runs": 4,
+   "usd": 342.46375950000004,
+   "ids": [
+    "wf_1ef2794c-c9a",
+    "wf_5fbe7101-2db",
+    "wf_d49143c7-91f",
+    "wf_dfe7f9c5-110"
+   ]
+  },
+  "Схождения": {
+   "runs": 8,
+   "usd": 284.88771869999994,
+   "ids": [
+    "wf_295a375b-8c1",
+    "wf_53d3afc1-13b",
+    "wf_6023efed-f2b",
+    "wf_6ef18a76-09b",
+    "wf_97a3b6d9-208",
+    "wf_a226d344-f95",
+    "wf_ed51a2df-1e5",
+    "wf_ee184859-d77"
+   ]
+  },
+  "Оборванные и пустые": {
+   "runs": 10,
+   "usd": 147.14973360000002,
+   "ids": [
+    "wf_0c487f8f-d4e",
+    "wf_15f6c1f0-233",
+    "wf_2ea5ea76-098",
+    "wf_4b3c4026-7ce",
+    "wf_68156710-484",
+    "wf_6a5b5ed1-122",
+    "wf_76c14898-44d",
+    "wf_9880e983-503",
+    "wf_aca0fb5c-83d",
+    "wf_b5d1ee09-036"
+   ]
+  },
+  "Вне прогона": {
+   "runs": 1,
+   "usd": 23.172430799999997,
+   "ids": [
+    "(вне прогона)"
+   ]
+  }
+ },
+ "groups_summary": {
+  "total_usd": 1484.5462205999997,
+  "used_usd": 1038.7129119,
+  "lost_usd": 422.66087790000006,
+  "out_of_run_usd": 23.172430799999997,
+  "used_pct": 69.96837804620122,
+  "lost_pct": 28.470711927660687,
+  "out_of_run_pct": 1.5609100261381246
+ }
+}

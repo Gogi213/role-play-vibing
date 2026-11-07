@@ -1,0 +1,97 @@
+{
+ "audits": {
+  "wf_170e810f-af5": {
+   "name": "audit (4 аудитора + скептики)",
+   "usd": 65.4,
+   "confirmed": 15,
+   "refuted": 6,
+   "minor": 25,
+   "can_change_results": 13,
+   "major_after_skeptic": 7,
+   "ids_kept_major": [
+    "F-01",
+    "F-02",
+    "F-06",
+    "M-01",
+    "M-02",
+    "M-10",
+    "P-02"
+   ]
+  },
+  "wf_295063d9-0e2": {
+   "name": "audit2-part2",
+   "usd": 100.2,
+   "confirmed": 13,
+   "refuted": 0,
+   "minor": 32,
+   "can_change_results": 7,
+   "major_after_skeptic": 5,
+   "ids_kept_major": [
+    "M3-01",
+    "M3-02",
+    "M3-03",
+    "M3-04",
+    "M4-01"
+   ]
+  },
+  "wf_a77afef5-1ce": {
+   "name": "audit2-part1",
+   "usd": 134.1,
+   "confirmed": 12,
+   "refuted": 0,
+   "minor": 34,
+   "can_change_results": 12,
+   "major_after_skeptic": 4,
+   "ids_kept_major": [
+    "L3-01",
+    "L6-01",
+    "L6-02",
+    "L6-03"
+   ]
+  }
+ },
+ "blind_pumponset": {
+  "run": "wf_cc42e25f-104",
+  "usd": 5.1,
+  "verdicts": [
+   "match",
+   "match"
+  ],
+  "bugs_suspected": [
+   0,
+   0
+  ]
+ },
+ "video": {
+  "run": "wf_6023efed-f2b",
+  "usd": 14.3,
+  "reads": 3,
+  "syn_chars": 15606
+ },
+ "audits_total": {
+  "usd": 299.7,
+  "confirmed": 40,
+  "changes": 32,
+  "kept_major": 16,
+  "refuted": 6,
+  "minor": 91,
+  "usd_per_confirmed": 7.5,
+  "usd_per_kept_major": 18.7,
+  "skeptic_checked": 46,
+  "skeptic_downgraded": 24
+ },
+ "call_cap": {
+  "100": {
+   "agents_over": 26,
+   "usd_beyond_cap": 212.7
+  },
+  "150": {
+   "agents_over": 6,
+   "usd_beyond_cap": 62.3
+  },
+  "200": {
+   "agents_over": 2,
+   "usd_beyond_cap": 24.9
+  }
+ }
+}

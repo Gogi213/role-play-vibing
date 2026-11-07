@@ -1,0 +1,6220 @@
+{
+ "price_assumption": {
+  "in": 3.0,
+  "out": 15.0,
+  "cw1h": 6.0,
+  "cw5m": 3.75,
+  "cr": 0.3
+ },
+ "main": {
+  "calls": 664,
+  "tok": {
+   "in": 1322,
+   "out": 943065,
+   "cw1h": 5716206,
+   "cw5m": 0,
+   "cr": 239816730
+  },
+  "usd": 120.392196,
+  "models": {
+   "claude-sonnet-5-5": 661,
+   "<synthetic>": 3
+  },
+  "hours": {
+   "2026-11-04T21": 6.121955099999999,
+   "2026-11-04T22": 0.9836115,
+   "2026-11-04T23": 8.699068800000001,
+   "2026-11-05T00": 7.0328787,
+   "2026-11-05T01": 5.5978065,
+   "2026-11-05T02": 6.7809825,
+   "2026-11-05T10": 4.747471200000001,
+   "2026-11-05T11": 8.1604473,
+   "2026-11-05T12": 1.1598111,
+   "2026-11-05T13": 3.5658051,
+   "2026-11-05T14": 2.1513105,
+   "2026-11-05T15": 2.3819780999999995,
+   "2026-11-05T16": 8.817531,
+   "2026-11-05T17": 8.1805956,
+   "2026-11-05T18": 1.0480802999999999,
+   "2026-11-05T19": 7.5567842999999995,
+   "2026-11-05T20": 1.7031272999999998,
+   "2026-11-05T21": 1.0239918,
+   "2026-11-05T22": 1.2634037999999999,
+   "2026-11-05T23": 0.2863194,
+   "2026-11-06T00": 1.4345523,
+   "2026-11-06T01": 1.4380722,
+   "2026-11-06T09": 1.8990417,
+   "2026-11-06T10": 0.272637,
+   "2026-11-06T12": 2.2245093,
+   "2026-11-06T13": 0.6014703,
+   "2026-11-06T14": 1.8183036,
+   "2026-11-06T15": 2.4277340999999995,
+   "2026-11-06T18": 0.9640305,
+   "2026-11-06T19": 0.0985407,
+   "2026-11-06T20": 0.6844758000000001,
+   "2026-11-06T21": 0.5757315,
+   "2026-11-06T22": 0.2716389,
+   "2026-11-06T23": 3.6321318,
+   "2026-11-07T00": 4.0537757999999995,
+   "2026-11-07T01": 0.14619809999999997,
+   "2026-11-07T03": 1.6295229,
+   "2026-11-07T06": 1.9177956,
+   "2026-11-07T08": 1.2205496999999998,
+   "2026-11-07T09": 2.5270637999999996,
+   "2026-11-07T10": 2.3052579,
+   "2026-11-07T11": 0.9862025999999999
+  }
+ },
+ "by_run": {
+  "(вне прогона)": {
+   "agents": 6,
+   "calls": 177,
+   "tok": {
+    "in": 364,
+    "out": 315646,
+    "cw1h": 1257512,
+    "cw5m": 0,
+    "cr": 36305256
+   },
+   "usd": 23.172430799999997,
+   "meta": {
+    "name": null,
+    "start": null,
+    "dur_min": null,
+    "status": null,
+    "agentCount": null,
+    "totalTokens": null
+   }
+  },
+  "wf_0c487f8f-d4e": {
+   "agents": 6,
+   "calls": 421,
+   "tok": {
+    "in": 846,
+    "out": 553422,
+    "cw1h": 1802938,
+    "cw5m": 0,
+    "cr": 98165600
+   },
+   "usd": 48.571176,
+   "meta": {
+    "name": null,
+    "start": null,
+    "dur_min": null,
+    "status": null,
+    "agentCount": null,
+    "totalTokens": null
+   }
+  },
+  "wf_0d56026b-205": {
+   "agents": 4,
+   "calls": 175,
+   "tok": {
+    "in": 352,
+    "out": 376047,
+    "cw1h": 945254,
+    "cw5m": 0,
+    "cr": 39486866
+   },
+   "usd": 23.159344799999996,
+   "meta": {
+    "name": "early-phase-direction",
+    "start": "2026-11-05T12:28:40.622Z",
+    "dur_min": 37.4,
+    "status": "completed",
+    "agentCount": 4,
+    "totalTokens": 1022367
+   }
+  },
+  "wf_1571306d-57d": {
+   "agents": 2,
+   "calls": 117,
+   "tok": {
+    "in": 236,
+    "out": 264929,
+    "cw1h": 680909,
+    "cw5m": 0,
+    "cr": 34692621
+   },
+   "usd": 18.467883299999997,
+   "meta": {
+    "name": "pumponset-exits",
+    "start": "2026-11-05T00:43:04.047Z",
+    "dur_min": 59.4,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 680940
+   }
+  },
+  "wf_15f6c1f0-233": {
+   "agents": 1,
+   "calls": 15,
+   "tok": {
+    "in": 30,
+    "out": 9186,
+    "cw1h": 221022,
+    "cw5m": 0,
+    "cr": 2181912
+   },
+   "usd": 2.1185856000000003,
+   "meta": {
+    "name": "xdl9-conv",
+    "start": "2026-11-07T00:10:13.654Z",
+    "dur_min": 1.6,
+    "status": "killed",
+    "agentCount": 1,
+    "totalTokens": 221028
+   }
+  },
+  "wf_170e810f-af5": {
+   "agents": 25,
+   "calls": 565,
+   "tok": {
+    "in": 1130,
+    "out": 923280,
+    "cw1h": 3551796,
+    "cw5m": 0,
+    "cr": 100916127
+   },
+   "usd": 65.4382041,
+   "meta": {
+    "name": "xdl9-audit",
+    "start": "2026-11-06T00:18:57.282Z",
+    "dur_min": 76.1,
+    "status": "completed",
+    "agentCount": 25,
+    "totalTokens": 4317976
+   }
+  },
+  "wf_1ef2794c-c9a": {
+   "agents": 4,
+   "calls": 316,
+   "tok": {
+    "in": 634,
+    "out": 555784,
+    "cw1h": 1316172,
+    "cw5m": 0,
+    "cr": 87438943
+   },
+   "usd": 42.4673769,
+   "meta": {
+    "name": "xdl9-fixes-w3",
+    "start": "2026-11-06T01:48:27.361Z",
+    "dur_min": 86.4,
+    "status": "completed",
+    "agentCount": 4,
+    "totalTokens": 1392955
+   }
+  },
+  "wf_295063d9-0e2": {
+   "agents": 17,
+   "calls": 814,
+   "tok": {
+    "in": 1628,
+    "out": 1158792,
+    "cw1h": 3652700,
+    "cw5m": 0,
+    "cr": 203139728
+   },
+   "usd": 100.24488240000001,
+   "meta": {
+    "name": "xdl9-audit2-part2",
+    "start": "2026-11-06T15:26:23.341Z",
+    "dur_min": 63.9,
+    "status": "completed",
+    "agentCount": 17,
+    "totalTokens": 4305145
+   }
+  },
+  "wf_295a375b-8c1": {
+   "agents": 2,
+   "calls": 230,
+   "tok": {
+    "in": 460,
+    "out": 422058,
+    "cw1h": 940821,
+    "cw5m": 0,
+    "cr": 78819848
+   },
+   "usd": 35.6231304,
+   "meta": {
+    "name": "xdl9-conv-window-prep",
+    "start": "2026-11-07T08:08:53.004Z",
+    "dur_min": 110.5,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 979310
+   }
+  },
+  "wf_2ea5ea76-098": {
+   "agents": 7,
+   "calls": 210,
+   "tok": {
+    "in": 420,
+    "out": 148090,
+    "cw1h": 839092,
+    "cw5m": 0,
+    "cr": 25329506
+   },
+   "usd": 14.856013800000001,
+   "meta": {
+    "name": "xdl9-orderbook-history",
+    "start": "2026-11-07T11:02:25.275Z",
+    "dur_min": 12.2,
+    "status": "killed",
+    "agentCount": 10,
+    "totalTokens": 1032804
+   }
+  },
+  "wf_3303296c-dbf": {
+   "agents": 2,
+   "calls": 211,
+   "tok": {
+    "in": 422,
+    "out": 291173,
+    "cw1h": 659564,
+    "cw5m": 0,
+    "cr": 64998429
+   },
+   "usd": 27.8257737,
+   "meta": {
+    "name": "pumponset-exits-atr",
+    "start": "2026-11-05T02:05:34.089Z",
+    "dur_min": 53.7,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 736542
+   }
+  },
+  "wf_4b3c4026-7ce": {
+   "agents": 2,
+   "calls": 120,
+   "tok": {
+    "in": 240,
+    "out": 283877,
+    "cw1h": 657685,
+    "cw5m": 0,
+    "cr": 28443460
+   },
+   "usd": 16.738023,
+   "meta": {
+    "name": "xdl9-conv-census",
+    "start": "2026-11-07T11:02:25.159Z",
+    "dur_min": 29.6,
+    "status": "killed",
+    "agentCount": 2,
+    "totalTokens": 696318
+   }
+  },
+  "wf_53d3afc1-13b": {
+   "agents": 5,
+   "calls": 516,
+   "tok": {
+    "in": 1034,
+    "out": 1048882,
+    "cw1h": 2442376,
+    "cw5m": 0,
+    "cr": 179915788
+   },
+   "usd": 84.3653244,
+   "meta": {
+    "name": "xdl9-conv-r3",
+    "start": "2026-11-07T06:15:53.128Z",
+    "dur_min": 178.0,
+    "status": "completed",
+    "agentCount": 5,
+    "totalTokens": 2519353
+   }
+  },
+  "wf_59ed7cc7-63e": {
+   "agents": 3,
+   "calls": 100,
+   "tok": {
+    "in": 204,
+    "out": 367181,
+    "cw1h": 709265,
+    "cw5m": 0,
+    "cr": 16696241
+   },
+   "usd": 14.772789300000001,
+   "meta": {
+    "name": "pump-dependencies-analysis",
+    "start": "2026-11-05T02:49:56.311Z",
+    "dur_min": 19.9,
+    "status": "completed",
+    "agentCount": 3,
+    "totalTokens": 786372
+   }
+  },
+  "wf_59f7ac06-130": {
+   "agents": 2,
+   "calls": 98,
+   "tok": {
+    "in": 198,
+    "out": 247323,
+    "cw1h": 485566,
+    "cw5m": 0,
+    "cr": 16561763
+   },
+   "usd": 11.592363899999999,
+   "meta": {
+    "name": "ignition-analysis-v2",
+    "start": "2026-11-05T15:36:33.489Z",
+    "dur_min": 36.2,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 524085
+   }
+  },
+  "wf_5e6d75ae-e11": {
+   "agents": 7,
+   "calls": 278,
+   "tok": {
+    "in": 558,
+    "out": 685386,
+    "cw1h": 1386394,
+    "cw5m": 0,
+    "cr": 45812762
+   },
+   "usd": 32.3446566,
+   "meta": {
+    "name": "xdl-downloaders",
+    "start": "2026-11-05T18:14:36.066Z",
+    "dur_min": 42.4,
+    "status": "completed",
+    "agentCount": 7,
+    "totalTokens": 1617771
+   }
+  },
+  "wf_5fbe7101-2db": {
+   "agents": 7,
+   "calls": 624,
+   "tok": {
+    "in": 1250,
+    "out": 1176305,
+    "cw1h": 2734368,
+    "cw5m": 0,
+    "cr": 177865963
+   },
+   "usd": 87.4143219,
+   "meta": {
+    "name": "xdl9-wave2",
+    "start": "2026-11-06T01:06:12.828Z",
+    "dur_min": 180.7,
+    "status": "completed",
+    "agentCount": 7,
+    "totalTokens": 2926458
+   }
+  },
+  "wf_6023efed-f2b": {
+   "agents": 4,
+   "calls": 102,
+   "tok": {
+    "in": 208,
+    "out": 270255,
+    "cw1h": 781974,
+    "cw5m": 0,
+    "cr": 18371271
+   },
+   "usd": 14.257674300000001,
+   "meta": {
+    "name": "xdl9-video-audit",
+    "start": "2026-11-07T10:31:58.055Z",
+    "dur_min": 23.5,
+    "status": "completed",
+    "agentCount": 4,
+    "totalTokens": 859482
+   }
+  },
+  "wf_68156710-484": {
+   "agents": 2,
+   "calls": 131,
+   "tok": {
+    "in": 262,
+    "out": 255791,
+    "cw1h": 675712,
+    "cw5m": 0,
+    "cr": 33075248
+   },
+   "usd": 17.814497399999997,
+   "meta": {
+    "name": null,
+    "start": null,
+    "dur_min": null,
+    "status": null,
+    "agentCount": null,
+    "totalTokens": null
+   }
+  },
+  "wf_6a5b5ed1-122": {
+   "agents": 2,
+   "calls": 184,
+   "tok": {
+    "in": 368,
+    "out": 440784,
+    "cw1h": 975868,
+    "cw5m": 0,
+    "cr": 64705063
+   },
+   "usd": 31.8795909,
+   "meta": {
+    "name": "xdl9-conv-explore",
+    "start": "2026-11-07T11:02:25.007Z",
+    "dur_min": 97.2,
+    "status": "killed",
+    "agentCount": 2,
+    "totalTokens": 975888
+   }
+  },
+  "wf_6ef18a76-09b": {
+   "agents": 7,
+   "calls": 384,
+   "tok": {
+    "in": 768,
+    "out": 1138923,
+    "cw1h": 2389975,
+    "cw5m": 0,
+    "cr": 124771601
+   },
+   "usd": 68.8574793,
+   "meta": {
+    "name": "xdl9-conv",
+    "start": "2026-11-07T03:14:34.033Z",
+    "dur_min": 170.2,
+    "status": "completed",
+    "agentCount": 7,
+    "totalTokens": 2581677
+   }
+  },
+  "wf_72af6ee7-d60": {
+   "agents": 2,
+   "calls": 150,
+   "tok": {
+    "in": 302,
+    "out": 179681,
+    "cw1h": 673410,
+    "cw5m": 0,
+    "cr": 43058057
+   },
+   "usd": 19.653998100000003,
+   "meta": {
+    "name": "pumponset-simple-returns",
+    "start": "2026-11-05T14:46:08.600Z",
+    "dur_min": 53.7,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 711989
+   }
+  },
+  "wf_76c14898-44d": {
+   "agents": 6,
+   "calls": 57,
+   "tok": {
+    "in": 102,
+    "out": 24276,
+    "cw1h": 769449,
+    "cw5m": 0,
+    "cr": 5840694
+   },
+   "usd": 6.7333482,
+   "meta": {
+    "name": "xdl9-audit2-part1",
+    "start": "2026-11-06T01:52:22.186Z",
+    "dur_min": 1.1,
+    "status": "completed",
+    "agentCount": 6,
+    "totalTokens": 962143
+   }
+  },
+  "wf_77affd8d-49d": {
+   "agents": 2,
+   "calls": 113,
+   "tok": {
+    "in": 226,
+    "out": 266741,
+    "cw1h": 572361,
+    "cw5m": 0,
+    "cr": 35248122
+   },
+   "usd": 18.010395600000003,
+   "meta": {
+    "name": "pumponset-dump",
+    "start": "2026-11-05T01:10:28.257Z",
+    "dur_min": 51.7,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 649358
+   }
+  },
+  "wf_87997c9e-406": {
+   "agents": 7,
+   "calls": 149,
+   "tok": {
+    "in": 298,
+    "out": 356989,
+    "cw1h": 1171107,
+    "cw5m": 0,
+    "cr": 23563175
+   },
+   "usd": 19.4513235,
+   "meta": {
+    "name": "statarb-2mo-plan",
+    "start": "2026-11-05T20:49:06.193Z",
+    "dur_min": 34.4,
+    "status": "completed",
+    "agentCount": 7,
+    "totalTokens": 1324623
+   }
+  },
+  "wf_8cd5f6cc-b6e": {
+   "agents": 5,
+   "calls": 374,
+   "tok": {
+    "in": 750,
+    "out": 474515,
+    "cw1h": 1397126,
+    "cw5m": 0,
+    "cr": 79275458
+   },
+   "usd": 39.285368399999996,
+   "meta": {
+    "name": "xdl9-wave1",
+    "start": "2026-11-05T22:03:02.724Z",
+    "dur_min": 72.1,
+    "status": "completed",
+    "agentCount": 5,
+    "totalTokens": 1397209
+   }
+  },
+  "wf_97a3b6d9-208": {
+   "agents": 2,
+   "calls": 187,
+   "tok": {
+    "in": 374,
+    "out": 385013,
+    "cw1h": 920695,
+    "cw5m": 0,
+    "cr": 54715277
+   },
+   "usd": 27.715070100000002,
+   "meta": {
+    "name": "xdl9-conv-types-stat",
+    "start": "2026-11-07T10:39:16.618Z",
+    "dur_min": 63.4,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 920709
+   }
+  },
+  "wf_9880e983-503": {
+   "agents": 3,
+   "calls": 27,
+   "tok": {
+    "in": 48,
+    "out": 25482,
+    "cw1h": 344686,
+    "cw5m": 0,
+    "cr": 3203134
+   },
+   "usd": 3.4114302000000003,
+   "meta": {
+    "name": "xdl9-w4-selection-r3",
+    "start": "2026-11-06T01:52:10.149Z",
+    "dur_min": 2.2,
+    "status": "completed",
+    "agentCount": 3,
+    "totalTokens": 383089
+   }
+  },
+  "wf_a226d344-f95": {
+   "agents": 2,
+   "calls": 134,
+   "tok": {
+    "in": 268,
+    "out": 262204,
+    "cw1h": 712754,
+    "cw5m": 0,
+    "cr": 29379566
+   },
+   "usd": 17.024257799999997,
+   "meta": {
+    "name": "xdl9-conv-window-report",
+    "start": "2026-11-07T09:10:11.070Z",
+    "dur_min": 35.1,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 712769
+   }
+  },
+  "wf_a77afef5-1ce": {
+   "agents": 18,
+   "calls": 1091,
+   "tok": {
+    "in": 2190,
+    "out": 1803356,
+    "cw1h": 4756851,
+    "cw5m": 0,
+    "cr": 261821749
+   },
+   "usd": 134.1445407,
+   "meta": {
+    "name": "xdl9-audit2-part1",
+    "start": "2026-11-06T15:30:22.924Z",
+    "dur_min": 185.3,
+    "status": "completed",
+    "agentCount": 18,
+    "totalTokens": 5371295
+   }
+  },
+  "wf_aca0fb5c-83d": {
+   "agents": 1,
+   "calls": 30,
+   "tok": {
+    "in": 60,
+    "out": 46646,
+    "cw1h": 227076,
+    "cw5m": 0,
+    "cr": 5656286
+   },
+   "usd": 3.7592117999999997,
+   "meta": {
+    "name": "xdl9-conv",
+    "start": "2026-11-07T00:19:16.900Z",
+    "dur_min": 8.4,
+    "status": "killed",
+    "agentCount": 1,
+    "totalTokens": 265423
+   }
+  },
+  "wf_b5d1ee09-036": {
+   "agents": 1,
+   "calls": 11,
+   "tok": {
+    "in": 22,
+    "out": 3323,
+    "cw1h": 134508,
+    "cw5m": 0,
+    "cr": 1369659
+   },
+   "usd": 1.2678567,
+   "meta": {
+    "name": "xdl9-conv",
+    "start": "2026-11-07T00:24:07.929Z",
+    "dur_min": 4.3,
+    "status": "killed",
+    "agentCount": 1,
+    "totalTokens": 172843
+   }
+  },
+  "wf_cc42e25f-104": {
+   "agents": 2,
+   "calls": 52,
+   "tok": {
+    "in": 104,
+    "out": 92930,
+    "cw1h": 290623,
+    "cw5m": 0,
+    "cr": 6640100
+   },
+   "usd": 5.13003,
+   "meta": {
+    "name": "pumponset-blind-audit",
+    "start": "2026-11-04T23:58:27.905Z",
+    "dur_min": 37.5,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 329169
+   }
+  },
+  "wf_d49143c7-91f": {
+   "agents": 3,
+   "calls": 358,
+   "tok": {
+    "in": 716,
+    "out": 618606,
+    "cw1h": 1373834,
+    "cw5m": 0,
+    "cr": 119790378
+   },
+   "usd": 53.461355399999995,
+   "meta": {
+    "name": "xdl9-w4-selection-r3",
+    "start": "2026-11-06T14:20:07.518Z",
+    "dur_min": 115.0,
+    "status": "completed",
+    "agentCount": 3,
+    "totalTokens": 1450653
+   }
+  },
+  "wf_d7c93a02-03d": {
+   "agents": 2,
+   "calls": 80,
+   "tok": {
+    "in": 168,
+    "out": 263859,
+    "cw1h": 565002,
+    "cw5m": 0,
+    "cr": 13800061
+   },
+   "usd": 11.4884193,
+   "meta": {
+    "name": "ignition-analysis",
+    "start": "2026-11-05T13:51:03.881Z",
+    "dur_min": 24.1,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 565054
+   }
+  },
+  "wf_daf88851-d53": {
+   "agents": 5,
+   "calls": 350,
+   "tok": {
+    "in": 704,
+    "out": 612160,
+    "cw1h": 1647495,
+    "cw5m": 0,
+    "cr": 109318221
+   },
+   "usd": 51.864948299999995,
+   "meta": {
+    "name": "pumponset-v2-fixes",
+    "start": "2026-11-05T11:11:10.376Z",
+    "dur_min": 61.4,
+    "status": "completed",
+    "agentCount": 5,
+    "totalTokens": 1763108
+   }
+  },
+  "wf_dfe7f9c5-110": {
+   "agents": 6,
+   "calls": 985,
+   "tok": {
+    "in": 1970,
+    "out": 1488844,
+    "cw1h": 3168888,
+    "cw5m": 0,
+    "cr": 392562691
+   },
+   "usd": 159.12070530000003,
+   "meta": {
+    "name": "xdl9-w5-fixes",
+    "start": "2026-11-06T23:34:04.152Z",
+    "dur_min": 481.3,
+    "status": "completed",
+    "agentCount": 6,
+    "totalTokens": 3361012
+   }
+  },
+  "wf_e1f2a18f-2af": {
+   "agents": 2,
+   "calls": 162,
+   "tok": {
+    "in": 324,
+    "out": 306118,
+    "cw1h": 674841,
+    "cw5m": 0,
+    "cr": 46287944
+   },
+   "usd": 22.5281712,
+   "meta": {
+    "name": "pumponset-sample-filter",
+    "start": "2026-11-05T02:10:52.407Z",
+    "dur_min": 54.6,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 751856
+   }
+  },
+  "wf_e3b20a00-8e4": {
+   "agents": 1,
+   "calls": 142,
+   "tok": {
+    "in": 284,
+    "out": 234215,
+    "cw1h": 493241,
+    "cw5m": 0,
+    "cr": 46596450
+   },
+   "usd": 20.452458,
+   "meta": {
+    "name": "xdl9-gate-download",
+    "start": "2026-11-07T01:31:13.432Z",
+    "dur_min": 80.3,
+    "status": "completed",
+    "agentCount": 1,
+    "totalTokens": 493246
+   }
+  },
+  "wf_e7d9e801-ccd": {
+   "agents": 5,
+   "calls": 225,
+   "tok": {
+    "in": 454,
+    "out": 616390,
+    "cw1h": 1342424,
+    "cw5m": 0,
+    "cr": 57689236
+   },
+   "usd": 34.6085268,
+   "meta": {
+    "name": "pumponset-run-verdict",
+    "start": "2026-11-04T22:44:55.660Z",
+    "dur_min": 70.0,
+    "status": "completed",
+    "agentCount": 5,
+    "totalTokens": 1458192
+   }
+  },
+  "wf_ed51a2df-1e5": {
+   "agents": 4,
+   "calls": 209,
+   "tok": {
+    "in": 418,
+    "out": 436021,
+    "cw1h": 1158593,
+    "cw5m": 0,
+    "cr": 47709437
+   },
+   "usd": 27.8059581,
+   "meta": {
+    "name": "xdl9-f10",
+    "start": "2026-11-07T00:38:31.160Z",
+    "dur_min": 51.8,
+    "status": "completed",
+    "agentCount": 4,
+    "totalTokens": 1158619
+   }
+  },
+  "wf_ee184859-d77": {
+   "agents": 2,
+   "calls": 64,
+   "tok": {
+    "in": 128,
+    "out": 223159,
+    "cw1h": 460179,
+    "cw5m": 0,
+    "cr": 10433271
+   },
+   "usd": 9.238824300000001,
+   "meta": {
+    "name": "xdl9-hints",
+    "start": "2026-11-07T00:23:43.461Z",
+    "dur_min": 18.4,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 498485
+   }
+  },
+  "wf_f11b12a4-35f": {
+   "agents": 2,
+   "calls": 117,
+   "tok": {
+    "in": 234,
+    "out": 215746,
+    "cw1h": 568408,
+    "cw5m": 0,
+    "cr": 32537200
+   },
+   "usd": 16.4085,
+   "meta": {
+    "name": "pumponset-ignitions",
+    "start": "2026-11-05T13:19:05.381Z",
+    "dur_min": 49.1,
+    "status": "completed",
+    "agentCount": 2,
+    "totalTokens": 645402
+   }
+  }
+ },
+ "by_phase": {
+  "None | None": {
+   "agents": 6,
+   "calls": 177,
+   "tok": {
+    "in": 364,
+    "out": 315646,
+    "cw1h": 1257512,
+    "cw5m": 0,
+    "cr": 36305256
+   },
+   "usd": 23.172430799999997
+  },
+  "wf_0c487f8f-d4e | None": {
+   "agents": 6,
+   "calls": 421,
+   "tok": {
+    "in": 846,
+    "out": 553422,
+    "cw1h": 1802938,
+    "cw5m": 0,
+    "cr": 98165600
+   },
+   "usd": 48.571176
+  },
+  "wf_0d56026b-205 | Work": {
+   "agents": 4,
+   "calls": 175,
+   "tok": {
+    "in": 352,
+    "out": 376047,
+    "cw1h": 945254,
+    "cw5m": 0,
+    "cr": 39486866
+   },
+   "usd": 23.159344799999996
+  },
+  "wf_1571306d-57d | Write": {
+   "agents": 1,
+   "calls": 91,
+   "tok": {
+    "in": 184,
+    "out": 204073,
+    "cw1h": 439154,
+    "cw5m": 0,
+    "cr": 30373002
+   },
+   "usd": 14.808471599999999
+  },
+  "wf_1571306d-57d | Review": {
+   "agents": 1,
+   "calls": 26,
+   "tok": {
+    "in": 52,
+    "out": 60856,
+    "cw1h": 241755,
+    "cw5m": 0,
+    "cr": 4319619
+   },
+   "usd": 3.6594117
+  },
+  "wf_15f6c1f0-233 | Протокол": {
+   "agents": 1,
+   "calls": 15,
+   "tok": {
+    "in": 30,
+    "out": 9186,
+    "cw1h": 221022,
+    "cw5m": 0,
+    "cr": 2181912
+   },
+   "usd": 2.1185856000000003
+  },
+  "wf_170e810f-af5 | Проверка": {
+   "agents": 21,
+   "calls": 339,
+   "tok": {
+    "in": 678,
+    "out": 413655,
+    "cw1h": 2025781,
+    "cw5m": 0,
+    "cr": 36668730
+   },
+   "usd": 29.362164
+  },
+  "wf_170e810f-af5 | Поиск": {
+   "agents": 4,
+   "calls": 226,
+   "tok": {
+    "in": 452,
+    "out": 509625,
+    "cw1h": 1526015,
+    "cw5m": 0,
+    "cr": 64247397
+   },
+   "usd": 36.07604009999999
+  },
+  "wf_1ef2794c-c9a | Исправления": {
+   "agents": 3,
+   "calls": 263,
+   "tok": {
+    "in": 528,
+    "out": 478327,
+    "cw1h": 1059861,
+    "cw5m": 0,
+    "cr": 77929462
+   },
+   "usd": 36.91449359999999
+  },
+  "wf_1ef2794c-c9a | Проверка": {
+   "agents": 1,
+   "calls": 53,
+   "tok": {
+    "in": 106,
+    "out": 77457,
+    "cw1h": 256311,
+    "cw5m": 0,
+    "cr": 9509481
+   },
+   "usd": 5.5528832999999995
+  },
+  "wf_295063d9-0e2 | Проверка": {
+   "agents": 13,
+   "calls": 333,
+   "tok": {
+    "in": 666,
+    "out": 451229,
+    "cw1h": 1927311,
+    "cw5m": 0,
+    "cr": 48203444
+   },
+   "usd": 32.7953322
+  },
+  "wf_295063d9-0e2 | Аудит": {
+   "agents": 4,
+   "calls": 481,
+   "tok": {
+    "in": 962,
+    "out": 707563,
+    "cw1h": 1725389,
+    "cw5m": 0,
+    "cr": 154936284
+   },
+   "usd": 67.44955019999999
+  },
+  "wf_295a375b-8c1 | Подготовка": {
+   "agents": 1,
+   "calls": 130,
+   "tok": {
+    "in": 260,
+    "out": 256591,
+    "cw1h": 496178,
+    "cw5m": 0,
+    "cr": 48169804
+   },
+   "usd": 21.2776542
+  },
+  "wf_295a375b-8c1 | Ревизия": {
+   "agents": 1,
+   "calls": 100,
+   "tok": {
+    "in": 200,
+    "out": 165467,
+    "cw1h": 444643,
+    "cw5m": 0,
+    "cr": 30650044
+   },
+   "usd": 14.345476199999998
+  },
+  "wf_2ea5ea76-098 | Поиск": {
+   "agents": 7,
+   "calls": 210,
+   "tok": {
+    "in": 420,
+    "out": 148090,
+    "cw1h": 839092,
+    "cw5m": 0,
+    "cr": 25329506
+   },
+   "usd": 14.856013800000001
+  },
+  "wf_3303296c-dbf | Review": {
+   "agents": 1,
+   "calls": 41,
+   "tok": {
+    "in": 82,
+    "out": 66369,
+    "cw1h": 253087,
+    "cw5m": 0,
+    "cr": 8274520
+   },
+   "usd": 4.996659
+  },
+  "wf_3303296c-dbf | Write": {
+   "agents": 1,
+   "calls": 170,
+   "tok": {
+    "in": 340,
+    "out": 224804,
+    "cw1h": 406477,
+    "cw5m": 0,
+    "cr": 56723909
+   },
+   "usd": 22.829114699999998
+  },
+  "wf_4b3c4026-7ce | Переписи": {
+   "agents": 2,
+   "calls": 120,
+   "tok": {
+    "in": 240,
+    "out": 283877,
+    "cw1h": 657685,
+    "cw5m": 0,
+    "cr": 28443460
+   },
+   "usd": 16.738023
+  },
+  "wf_53d3afc1-13b | Правила и код": {
+   "agents": 3,
+   "calls": 242,
+   "tok": {
+    "in": 484,
+    "out": 605149,
+    "cw1h": 1331024,
+    "cw5m": 0,
+    "cr": 81450987
+   },
+   "usd": 41.50012709999999
+  },
+  "wf_53d3afc1-13b | Ревизия": {
+   "agents": 1,
+   "calls": 137,
+   "tok": {
+    "in": 274,
+    "out": 229790,
+    "cw1h": 625475,
+    "cw5m": 0,
+    "cr": 54635051
+   },
+   "usd": 23.591037299999996
+  },
+  "wf_53d3afc1-13b | Перекалибровка": {
+   "agents": 1,
+   "calls": 137,
+   "tok": {
+    "in": 276,
+    "out": 213943,
+    "cw1h": 485877,
+    "cw5m": 0,
+    "cr": 43829750
+   },
+   "usd": 19.27416
+  },
+  "wf_59ed7cc7-63e | Analyse": {
+   "agents": 3,
+   "calls": 100,
+   "tok": {
+    "in": 204,
+    "out": 367181,
+    "cw1h": 709265,
+    "cw5m": 0,
+    "cr": 16696241
+   },
+   "usd": 14.772789300000001
+  },
+  "wf_59f7ac06-130 | Analyse": {
+   "agents": 2,
+   "calls": 98,
+   "tok": {
+    "in": 198,
+    "out": 247323,
+    "cw1h": 485566,
+    "cw5m": 0,
+    "cr": 16561763
+   },
+   "usd": 11.592363899999999
+  },
+  "wf_5e6d75ae-e11 | Write": {
+   "agents": 7,
+   "calls": 278,
+   "tok": {
+    "in": 558,
+    "out": 685386,
+    "cw1h": 1386394,
+    "cw5m": 0,
+    "cr": 45812762
+   },
+   "usd": 32.3446566
+  },
+  "wf_5fbe7101-2db | Параллельно": {
+   "agents": 4,
+   "calls": 296,
+   "tok": {
+    "in": 592,
+    "out": 662840,
+    "cw1h": 1477523,
+    "cw5m": 0,
+    "cr": 79281289
+   },
+   "usd": 42.593900700000006
+  },
+  "wf_5fbe7101-2db | Гейты и отбор": {
+   "agents": 2,
+   "calls": 236,
+   "tok": {
+    "in": 474,
+    "out": 422107,
+    "cw1h": 907340,
+    "cw5m": 0,
+    "cr": 75412032
+   },
+   "usd": 34.4006766
+  },
+  "wf_5fbe7101-2db | Сверка": {
+   "agents": 1,
+   "calls": 92,
+   "tok": {
+    "in": 184,
+    "out": 91358,
+    "cw1h": 349505,
+    "cw5m": 0,
+    "cr": 23172642
+   },
+   "usd": 10.4197446
+  },
+  "wf_6023efed-f2b | Чтение": {
+   "agents": 3,
+   "calls": 51,
+   "tok": {
+    "in": 106,
+    "out": 173067,
+    "cw1h": 435367,
+    "cw5m": 0,
+    "cr": 6628895
+   },
+   "usd": 7.1971935
+  },
+  "wf_6023efed-f2b | Сверка": {
+   "agents": 1,
+   "calls": 51,
+   "tok": {
+    "in": 102,
+    "out": 97188,
+    "cw1h": 346607,
+    "cw5m": 0,
+    "cr": 11742376
+   },
+   "usd": 7.0604808
+  },
+  "wf_68156710-484 | None": {
+   "agents": 2,
+   "calls": 131,
+   "tok": {
+    "in": 262,
+    "out": 255791,
+    "cw1h": 675712,
+    "cw5m": 0,
+    "cr": 33075248
+   },
+   "usd": 17.814497399999997
+  },
+  "wf_6a5b5ed1-122 | Протокол П-39": {
+   "agents": 1,
+   "calls": 54,
+   "tok": {
+    "in": 108,
+    "out": 154857,
+    "cw1h": 393673,
+    "cw5m": 0,
+    "cr": 12441045
+   },
+   "usd": 8.4175305
+  },
+  "wf_6a5b5ed1-122 | Счёт поиска": {
+   "agents": 1,
+   "calls": 130,
+   "tok": {
+    "in": 260,
+    "out": 285927,
+    "cw1h": 582195,
+    "cw5m": 0,
+    "cr": 52264018
+   },
+   "usd": 23.4620604
+  },
+  "wf_6ef18a76-09b | Протокол": {
+   "agents": 4,
+   "calls": 71,
+   "tok": {
+    "in": 142,
+    "out": 450102,
+    "cw1h": 941380,
+    "cw5m": 0,
+    "cr": 15084069
+   },
+   "usd": 16.925456699999998
+  },
+  "wf_6ef18a76-09b | Калибровка": {
+   "agents": 1,
+   "calls": 149,
+   "tok": {
+    "in": 298,
+    "out": 231448,
+    "cw1h": 498963,
+    "cw5m": 0,
+    "cr": 52580765
+   },
+   "usd": 22.2406215
+  },
+  "wf_6ef18a76-09b | Ревизия": {
+   "agents": 1,
+   "calls": 90,
+   "tok": {
+    "in": 180,
+    "out": 209939,
+    "cw1h": 516724,
+    "cw5m": 0,
+    "cr": 31996495
+   },
+   "usd": 15.8489175
+  },
+  "wf_6ef18a76-09b | Код": {
+   "agents": 1,
+   "calls": 74,
+   "tok": {
+    "in": 148,
+    "out": 247434,
+    "cw1h": 432908,
+    "cw5m": 0,
+    "cr": 25110272
+   },
+   "usd": 13.8424836
+  },
+  "wf_72af6ee7-d60 | Write": {
+   "agents": 1,
+   "calls": 106,
+   "tok": {
+    "in": 214,
+    "out": 138738,
+    "cw1h": 446767,
+    "cw5m": 0,
+    "cr": 36241607
+   },
+   "usd": 15.634796099999999
+  },
+  "wf_72af6ee7-d60 | Review": {
+   "agents": 1,
+   "calls": 44,
+   "tok": {
+    "in": 88,
+    "out": 40943,
+    "cw1h": 226643,
+    "cw5m": 0,
+    "cr": 6816450
+   },
+   "usd": 4.019202
+  },
+  "wf_76c14898-44d | Аудит": {
+   "agents": 6,
+   "calls": 57,
+   "tok": {
+    "in": 102,
+    "out": 24276,
+    "cw1h": 769449,
+    "cw5m": 0,
+    "cr": 5840694
+   },
+   "usd": 6.7333482
+  },
+  "wf_77affd8d-49d | Review": {
+   "agents": 1,
+   "calls": 23,
+   "tok": {
+    "in": 46,
+    "out": 45060,
+    "cw1h": 160724,
+    "cw5m": 0,
+    "cr": 3251196
+   },
+   "usd": 2.6157407999999998
+  },
+  "wf_77affd8d-49d | Write": {
+   "agents": 1,
+   "calls": 90,
+   "tok": {
+    "in": 180,
+    "out": 221681,
+    "cw1h": 411637,
+    "cw5m": 0,
+    "cr": 31996926
+   },
+   "usd": 15.3946548
+  },
+  "wf_87997c9e-406 | Разведка": {
+   "agents": 4,
+   "calls": 136,
+   "tok": {
+    "in": 272,
+    "out": 212524,
+    "cw1h": 780197,
+    "cw5m": 0,
+    "cr": 22068642
+   },
+   "usd": 14.490450599999999
+  },
+  "wf_87997c9e-406 | План": {
+   "agents": 1,
+   "calls": 7,
+   "tok": {
+    "in": 14,
+    "out": 67222,
+    "cw1h": 171240,
+    "cw5m": 0,
+    "cr": 925342
+   },
+   "usd": 2.3134146
+  },
+  "wf_87997c9e-406 | Критика": {
+   "agents": 2,
+   "calls": 6,
+   "tok": {
+    "in": 12,
+    "out": 77243,
+    "cw1h": 219670,
+    "cw5m": 0,
+    "cr": 569191
+   },
+   "usd": 2.6474583
+  },
+  "wf_8cd5f6cc-b6e | Параллельно": {
+   "agents": 4,
+   "calls": 313,
+   "tok": {
+    "in": 628,
+    "out": 410171,
+    "cw1h": 1125025,
+    "cw5m": 0,
+    "cr": 66906960
+   },
+   "usd": 32.976687
+  },
+  "wf_8cd5f6cc-b6e | Сверка": {
+   "agents": 1,
+   "calls": 61,
+   "tok": {
+    "in": 122,
+    "out": 64344,
+    "cw1h": 272101,
+    "cw5m": 0,
+    "cr": 12368498
+   },
+   "usd": 6.3086814
+  },
+  "wf_97a3b6d9-208 | Проверка": {
+   "agents": 1,
+   "calls": 79,
+   "tok": {
+    "in": 158,
+    "out": 117670,
+    "cw1h": 320743,
+    "cw5m": 0,
+    "cr": 14961552
+   },
+   "usd": 8.1784476
+  },
+  "wf_97a3b6d9-208 | Обоснование": {
+   "agents": 1,
+   "calls": 108,
+   "tok": {
+    "in": 216,
+    "out": 267343,
+    "cw1h": 599952,
+    "cw5m": 0,
+    "cr": 39753725
+   },
+   "usd": 19.5366225
+  },
+  "wf_9880e983-503 | Отбор": {
+   "agents": 1,
+   "calls": 1,
+   "tok": {
+    "in": 0,
+    "out": 0,
+    "cw1h": 0,
+    "cw5m": 0,
+    "cr": 0
+   },
+   "usd": 0.0
+  },
+  "wf_9880e983-503 | Основа": {
+   "agents": 2,
+   "calls": 26,
+   "tok": {
+    "in": 48,
+    "out": 25482,
+    "cw1h": 344686,
+    "cw5m": 0,
+    "cr": 3203134
+   },
+   "usd": 3.4114302000000003
+  },
+  "wf_a226d344-f95 | Сверка": {
+   "agents": 1,
+   "calls": 73,
+   "tok": {
+    "in": 146,
+    "out": 126084,
+    "cw1h": 338049,
+    "cw5m": 0,
+    "cr": 15497079
+   },
+   "usd": 8.5691157
+  },
+  "wf_a226d344-f95 | Отчёт": {
+   "agents": 1,
+   "calls": 61,
+   "tok": {
+    "in": 122,
+    "out": 136120,
+    "cw1h": 374705,
+    "cw5m": 0,
+    "cr": 13882487
+   },
+   "usd": 8.4551421
+  },
+  "wf_a77afef5-1ce | Проверка": {
+   "agents": 12,
+   "calls": 489,
+   "tok": {
+    "in": 980,
+    "out": 747660,
+    "cw1h": 2195893,
+    "cw5m": 0,
+    "cr": 81967949
+   },
+   "usd": 48.9835827
+  },
+  "wf_a77afef5-1ce | Аудит": {
+   "agents": 6,
+   "calls": 602,
+   "tok": {
+    "in": 1210,
+    "out": 1055696,
+    "cw1h": 2560958,
+    "cw5m": 0,
+    "cr": 179853800
+   },
+   "usd": 85.160958
+  },
+  "wf_aca0fb5c-83d | Протокол": {
+   "agents": 1,
+   "calls": 30,
+   "tok": {
+    "in": 60,
+    "out": 46646,
+    "cw1h": 227076,
+    "cw5m": 0,
+    "cr": 5656286
+   },
+   "usd": 3.7592117999999997
+  },
+  "wf_b5d1ee09-036 | Протокол": {
+   "agents": 1,
+   "calls": 11,
+   "tok": {
+    "in": 22,
+    "out": 3323,
+    "cw1h": 134508,
+    "cw5m": 0,
+    "cr": 1369659
+   },
+   "usd": 1.2678567
+  },
+  "wf_cc42e25f-104 | Audit": {
+   "agents": 2,
+   "calls": 52,
+   "tok": {
+    "in": 104,
+    "out": 92930,
+    "cw1h": 290623,
+    "cw5m": 0,
+    "cr": 6640100
+   },
+   "usd": 5.13003
+  },
+  "wf_d49143c7-91f | Основа": {
+   "agents": 1,
+   "calls": 98,
+   "tok": {
+    "in": 196,
+    "out": 130526,
+    "cw1h": 363854,
+    "cw5m": 0,
+    "cr": 23613874
+   },
+   "usd": 11.225764199999999
+  },
+  "wf_d49143c7-91f | Контроли": {
+   "agents": 1,
+   "calls": 125,
+   "tok": {
+    "in": 250,
+    "out": 247455,
+    "cw1h": 503151,
+    "cw5m": 0,
+    "cr": 46750567
+   },
+   "usd": 20.756651100000003
+  },
+  "wf_d49143c7-91f | Отбор": {
+   "agents": 1,
+   "calls": 135,
+   "tok": {
+    "in": 270,
+    "out": 240625,
+    "cw1h": 506829,
+    "cw5m": 0,
+    "cr": 49425937
+   },
+   "usd": 21.478940100000003
+  },
+  "wf_d7c93a02-03d | Analyse": {
+   "agents": 2,
+   "calls": 80,
+   "tok": {
+    "in": 168,
+    "out": 263859,
+    "cw1h": 565002,
+    "cw5m": 0,
+    "cr": 13800061
+   },
+   "usd": 11.4884193
+  },
+  "wf_daf88851-d53 | Write": {
+   "agents": 2,
+   "calls": 247,
+   "tok": {
+    "in": 496,
+    "out": 431741,
+    "cw1h": 951623,
+    "cw5m": 0,
+    "cr": 91204386
+   },
+   "usd": 39.548656799999996
+  },
+  "wf_daf88851-d53 | Review": {
+   "agents": 2,
+   "calls": 65,
+   "tok": {
+    "in": 130,
+    "out": 131847,
+    "cw1h": 535544,
+    "cw5m": 0,
+    "cr": 12196170
+   },
+   "usd": 8.85021
+  },
+  "wf_daf88851-d53 | Fix": {
+   "agents": 1,
+   "calls": 38,
+   "tok": {
+    "in": 78,
+    "out": 48572,
+    "cw1h": 160328,
+    "cw5m": 0,
+    "cr": 5917665
+   },
+   "usd": 3.4660815
+  },
+  "wf_dfe7f9c5-110 | Отбор": {
+   "agents": 1,
+   "calls": 219,
+   "tok": {
+    "in": 438,
+    "out": 343752,
+    "cw1h": 719753,
+    "cw5m": 0,
+    "cr": 107019298
+   },
+   "usd": 41.5819014
+  },
+  "wf_dfe7f9c5-110 | Основа": {
+   "agents": 3,
+   "calls": 425,
+   "tok": {
+    "in": 850,
+    "out": 665850,
+    "cw1h": 1430624,
+    "cw5m": 0,
+    "cr": 168620992
+   },
+   "usd": 69.1603416
+  },
+  "wf_dfe7f9c5-110 | Ревизия": {
+   "agents": 1,
+   "calls": 171,
+   "tok": {
+    "in": 342,
+    "out": 185642,
+    "cw1h": 456294,
+    "cw5m": 0,
+    "cr": 51463744
+   },
+   "usd": 20.9625432
+  },
+  "wf_dfe7f9c5-110 | F8": {
+   "agents": 1,
+   "calls": 170,
+   "tok": {
+    "in": 340,
+    "out": 293600,
+    "cw1h": 562217,
+    "cw5m": 0,
+    "cr": 65458657
+   },
+   "usd": 27.415919099999996
+  },
+  "wf_e1f2a18f-2af | Write": {
+   "agents": 1,
+   "calls": 118,
+   "tok": {
+    "in": 236,
+    "out": 231594,
+    "cw1h": 437697,
+    "cw5m": 0,
+    "cr": 38060965
+   },
+   "usd": 17.5190895
+  },
+  "wf_e1f2a18f-2af | Review": {
+   "agents": 1,
+   "calls": 44,
+   "tok": {
+    "in": 88,
+    "out": 74524,
+    "cw1h": 237144,
+    "cw5m": 0,
+    "cr": 8226979
+   },
+   "usd": 5.009081699999999
+  },
+  "wf_e3b20a00-8e4 | Gate": {
+   "agents": 1,
+   "calls": 142,
+   "tok": {
+    "in": 284,
+    "out": 234215,
+    "cw1h": 493241,
+    "cw5m": 0,
+    "cr": 46596450
+   },
+   "usd": 20.452458
+  },
+  "wf_e7d9e801-ccd | Review": {
+   "agents": 2,
+   "calls": 34,
+   "tok": {
+    "in": 68,
+    "out": 143601,
+    "cw1h": 427561,
+    "cw5m": 0,
+    "cr": 4667787
+   },
+   "usd": 6.1199211
+  },
+  "wf_e7d9e801-ccd | Write": {
+   "agents": 2,
+   "calls": 157,
+   "tok": {
+    "in": 318,
+    "out": 437041,
+    "cw1h": 787118,
+    "cw5m": 0,
+    "cr": 48504880
+   },
+   "usd": 25.830741
+  },
+  "wf_e7d9e801-ccd | Fix": {
+   "agents": 1,
+   "calls": 34,
+   "tok": {
+    "in": 68,
+    "out": 35748,
+    "cw1h": 127745,
+    "cw5m": 0,
+    "cr": 4516569
+   },
+   "usd": 2.6578647
+  },
+  "wf_ed51a2df-1e5 | Критик": {
+   "agents": 1,
+   "calls": 47,
+   "tok": {
+    "in": 94,
+    "out": 111202,
+    "cw1h": 275238,
+    "cw5m": 0,
+    "cr": 9634034
+   },
+   "usd": 6.209950199999999
+  },
+  "wf_ed51a2df-1e5 | Сверка": {
+   "agents": 2,
+   "calls": 150,
+   "tok": {
+    "in": 300,
+    "out": 285507,
+    "cw1h": 730185,
+    "cw5m": 0,
+    "cr": 36705170
+   },
+   "usd": 19.676166
+  },
+  "wf_ed51a2df-1e5 | Отчёт": {
+   "agents": 1,
+   "calls": 12,
+   "tok": {
+    "in": 24,
+    "out": 39312,
+    "cw1h": 153170,
+    "cw5m": 0,
+    "cr": 1370233
+   },
+   "usd": 1.9198419
+  },
+  "wf_ee184859-d77 | Формирование": {
+   "agents": 2,
+   "calls": 64,
+   "tok": {
+    "in": 128,
+    "out": 223159,
+    "cw1h": 460179,
+    "cw5m": 0,
+    "cr": 10433271
+   },
+   "usd": 9.238824300000001
+  },
+  "wf_f11b12a4-35f | Review": {
+   "agents": 1,
+   "calls": 26,
+   "tok": {
+    "in": 52,
+    "out": 53631,
+    "cw1h": 183630,
+    "cw5m": 0,
+    "cr": 4124048
+   },
+   "usd": 3.1436154
+  },
+  "wf_f11b12a4-35f | Write": {
+   "agents": 1,
+   "calls": 91,
+   "tok": {
+    "in": 182,
+    "out": 162115,
+    "cw1h": 384778,
+    "cw5m": 0,
+    "cr": 28413152
+   },
+   "usd": 13.2648846
+  }
+ },
+ "by_agent": {
+  "a325b08b3666c4f47": {
+   "wf": null,
+   "label": null,
+   "phase": null,
+   "calls": 1,
+   "usd": 0.458838,
+   "maxctx": 76464,
+   "first": "2026-11-06T09:33:16.938Z",
+   "last": "2026-11-06T09:33:16.938Z",
+   "desc": "Проба доступа, модель по умолчанию",
+   "models": {
+    "claude-sonnet-5-5": 1
+   },
+   "tok": {
+    "in": 2,
+    "out": 4,
+    "cw1h": 76462,
+    "cw5m": 0,
+    "cr": 0
+   }
+  },
+  "a5524a160f0fedd0d": {
+   "wf": null,
+   "label": null,
+   "phase": null,
+   "calls": 1,
+   "usd": 0.464208,
+   "maxctx": 77239,
+   "first": "2026-11-06T09:33:01.292Z",
+   "last": "2026-11-06T09:33:01.292Z",
+   "desc": "Проба доступа субагентов",
+   "models": {
+    "claude-haiku-5-5": 1
+   },
+   "tok": {
+    "in": 2,
+    "out": 52,
+    "cw1h": 77237,
+    "cw5m": 0,
+    "cr": 0
+   }
+  },
+  "a6d079583b43eeea9": {
+   "wf": null,
+   "label": null,
+   "phase": null,
+   "calls": 67,
+   "usd": 9.5131506,
+   "maxctx": 367329,
+   "first": "2026-11-04T22:46:25.158Z",
+   "last": "2026-11-04T23:06:57.085Z",
+   "desc": "Fix run.rs observability and verdict minors",
+   "models": {
+    "claude-sonnet-5-5": 67
+   },
+   "tok": {
+    "in": 142,
+    "out": 130966,
+    "cw1h": 367327,
+    "cw5m": 0,
+    "cr": 17814242
+   }
+  },
+  "a938c67f568f3b666": {
+   "wf": null,
+   "label": null,
+   "phase": null,
+   "calls": 13,
+   "usd": 0.9278649,
+   "maxctx": 94037,
+   "first": "2026-11-05T21:49:19.116Z",
+   "last": "2026-11-05T21:51:40.472Z",
+   "desc": "Search trans folder for arbitrage material",
+   "models": {
+    "claude-sonnet-5-5": 13
+   },
+   "tok": {
+    "in": 26,
+    "out": 9455,
+    "cw1h": 94035,
+    "cw5m": 0,
+    "cr": 739173
+   }
+  },
+  "adb01143ab80beed3": {
+   "wf": null,
+   "label": null,
+   "phase": null,
+   "calls": 12,
+   "usd": 2.3559282,
+   "maxctx": 161763,
+   "first": "2026-11-05T17:24:11.506Z",
+   "last": "2026-11-05T17:29:35.074Z",
+   "desc": "Summarize statarb core and protocol state",
+   "models": {
+    "claude-haiku-5-5": 12
+   },
+   "tok": {
+    "in": 24,
+    "out": 70915,
+    "cw1h": 161761,
+    "cw5m": 0,
+    "cr": 1071884
+   }
+  },
+  "aebcd4a7b1343103e": {
+   "wf": null,
+   "label": null,
+   "phase": null,
+   "calls": 83,
+   "usd": 9.4524411,
+   "maxctx": 287486,
+   "first": "2026-11-06T09:36:45.803Z",
+   "last": "2026-11-06T12:59:16.447Z",
+   "desc": "PGO-сборка ядра xdl9 заранее",
+   "models": {
+    "claude-sonnet-5-5": 83
+   },
+   "tok": {
+    "in": 168,
+    "out": 104254,
+    "cw1h": 480690,
+    "cw5m": 0,
+    "cr": 16679957
+   }
+  },
+  "a22512967ed7b9c9a": {
+   "wf": "wf_0c487f8f-d4e",
+   "label": null,
+   "phase": null,
+   "calls": 82,
+   "usd": 10.156031399999998,
+   "maxctx": 381308,
+   "first": "2026-11-06T09:33:29.678Z",
+   "last": "2026-11-06T10:22:42.183Z",
+   "desc": "audit2:L1-regress",
+   "models": {
+    "claude-sonnet-5-5": 82
+   },
+   "tok": {
+    "in": 164,
+    "out": 91689,
+    "cw1h": 381306,
+    "cw5m": 0,
+    "cr": 21641228
+   }
+  },
+  "a274a0307e1de61e7": {
+   "wf": "wf_0c487f8f-d4e",
+   "label": null,
+   "phase": null,
+   "calls": 79,
+   "usd": 9.0016647,
+   "maxctx": 349864,
+   "first": "2026-11-06T09:33:34.333Z",
+   "last": "2026-11-06T10:23:06.504Z",
+   "desc": "audit2:L4-data-semantics",
+   "models": {
+    "claude-sonnet-5-5": 79
+   },
+   "tok": {
+    "in": 160,
+    "out": 102280,
+    "cw1h": 311333,
+    "cw5m": 0,
+    "cr": 18663289
+   }
+  },
+  "a5f0e7dec87cbee0b": {
+   "wf": "wf_0c487f8f-d4e",
+   "label": null,
+   "phase": null,
+   "calls": 73,
+   "usd": 7.0638945,
+   "maxctx": 296077,
+   "first": "2026-11-06T09:33:36.776Z",
+   "last": "2026-11-06T10:22:09.086Z",
+   "desc": "audit2:L3-funding",
+   "models": {
+    "claude-sonnet-5-5": 73
+   },
+   "tok": {
+    "in": 148,
+    "out": 72575,
+    "cw1h": 257546,
+    "cw5m": 0,
+    "cr": 14765165
+   }
+  },
+  "ad0816495cef9f25b": {
+   "wf": "wf_0c487f8f-d4e",
+   "label": null,
+   "phase": null,
+   "calls": 54,
+   "usd": 8.0615478,
+   "maxctx": 368764,
+   "first": "2026-11-06T09:33:37.085Z",
+   "last": "2026-11-06T10:22:35.407Z",
+   "desc": "audit2:L5-stats-e2e",
+   "models": {
+    "claude-sonnet-5-5": 54
+   },
+   "tok": {
+    "in": 108,
+    "out": 105410,
+    "cw1h": 330233,
+    "cw5m": 0,
+    "cr": 14995586
+   }
+  },
+  "af478593d450e2487": {
+   "wf": "wf_0c487f8f-d4e",
+   "label": null,
+   "phase": null,
+   "calls": 64,
+   "usd": 7.6406085,
+   "maxctx": 317999,
+   "first": "2026-11-06T09:33:33.317Z",
+   "last": "2026-11-06T10:21:40.635Z",
+   "desc": "audit2:L2-kernel-fuzz",
+   "models": {
+    "claude-sonnet-5-5": 64
+   },
+   "tok": {
+    "in": 128,
+    "out": 100604,
+    "cw1h": 279468,
+    "cw5m": 0,
+    "cr": 14847855
+   }
+  },
+  "aff75495a69fe7749": {
+   "wf": "wf_0c487f8f-d4e",
+   "label": null,
+   "phase": null,
+   "calls": 69,
+   "usd": 6.647429099999999,
+   "maxctx": 281583,
+   "first": "2026-11-06T09:33:36.662Z",
+   "last": "2026-11-06T10:22:36.125Z",
+   "desc": "audit2:L6-traps",
+   "models": {
+    "claude-sonnet-5-5": 69
+   },
+   "tok": {
+    "in": 138,
+    "out": 80864,
+    "cw1h": 243052,
+    "cw5m": 0,
+    "cr": 13252477
+   }
+  },
+  "a09cf88e99701626d": {
+   "wf": "wf_0d56026b-205",
+   "label": "analyse:E",
+   "phase": "Work",
+   "calls": 24,
+   "usd": 3.48399,
+   "maxctx": 208318,
+   "first": "2026-11-05T11:51:33.019Z",
+   "last": "2026-11-05T12:13:16.328Z",
+   "desc": "analyse:E",
+   "models": {
+    "claude-sonnet-5-5": 24
+   },
+   "tok": {
+    "in": 50,
+    "out": 97432,
+    "cw1h": 169811,
+    "cw5m": 0,
+    "cr": 3344980
+   }
+  },
+  "a74a4abfb10e9e370": {
+   "wf": "wf_0d56026b-205",
+   "label": "review:dumpfeat",
+   "phase": "Work",
+   "calls": 23,
+   "usd": 2.420238,
+   "maxctx": 183654,
+   "first": "2026-11-05T12:23:59.199Z",
+   "last": "2026-11-05T12:28:40.569Z",
+   "desc": "review:dumpfeat",
+   "models": {
+    "claude-sonnet-5-5": 23
+   },
+   "tok": {
+    "in": 46,
+    "out": 27966,
+    "cw1h": 183652,
+    "cw5m": 0,
+    "cr": 2995660
+   }
+  },
+  "ab2585a338e2b9896": {
+   "wf": "wf_0d56026b-205",
+   "label": "code:dumpfeat",
+   "phase": "Work",
+   "calls": 97,
+   "usd": 12.4695219,
+   "maxctx": 382490,
+   "first": "2026-11-05T11:51:35.230Z",
+   "last": "2026-11-05T12:23:53.986Z",
+   "desc": "code:dumpfeat",
+   "models": {
+    "claude-sonnet-5-5": 97
+   },
+   "tok": {
+    "in": 194,
+    "out": 133915,
+    "cw1h": 343945,
+    "cw5m": 0,
+    "cr": 27988483
+   }
+  },
+  "acda7b803c395c42e": {
+   "wf": "wf_0d56026b-205",
+   "label": "analyse:D",
+   "phase": "Work",
+   "calls": 31,
+   "usd": 4.7855949,
+   "maxctx": 247848,
+   "first": "2026-11-05T11:51:26.337Z",
+   "last": "2026-11-05T12:13:28.012Z",
+   "desc": "analyse:D",
+   "models": {
+    "claude-sonnet-5-5": 31
+   },
+   "tok": {
+    "in": 62,
+    "out": 116734,
+    "cw1h": 247846,
+    "cw5m": 0,
+    "cr": 5157743
+   }
+  },
+  "a6f075bf08a5c66ca": {
+   "wf": "wf_1571306d-57d",
+   "label": "code:exits",
+   "phase": "Write",
+   "calls": 91,
+   "usd": 14.808471599999999,
+   "maxctx": 439156,
+   "first": "2026-11-04T23:44:12.548Z",
+   "last": "2026-11-05T00:34:41.526Z",
+   "desc": "code:exits",
+   "models": {
+    "claude-sonnet-5-5": 91
+   },
+   "tok": {
+    "in": 184,
+    "out": 204073,
+    "cw1h": 439154,
+    "cw5m": 0,
+    "cr": 30373002
+   }
+  },
+  "ab8adcf5d0e4728ad": {
+   "wf": "wf_1571306d-57d",
+   "label": "review:exits",
+   "phase": "Review",
+   "calls": 26,
+   "usd": 3.6594117,
+   "maxctx": 241757,
+   "first": "2026-11-05T00:34:55.890Z",
+   "last": "2026-11-05T00:43:03.979Z",
+   "desc": "review:exits",
+   "models": {
+    "claude-sonnet-5-5": 26
+   },
+   "tok": {
+    "in": 52,
+    "out": 60856,
+    "cw1h": 241755,
+    "cw5m": 0,
+    "cr": 4319619
+   }
+  },
+  "a70ca6f501c0f62c1": {
+   "wf": "wf_15f6c1f0-233",
+   "label": "П-38 протокол и params",
+   "phase": "Протокол",
+   "calls": 15,
+   "usd": 2.1185856000000003,
+   "maxctx": 221024,
+   "first": "2026-11-07T00:08:41.130Z",
+   "last": "2026-11-07T00:10:08.478Z",
+   "desc": "П-38 протокол и params",
+   "models": {
+    "claude-sonnet-5-5": 15
+   },
+   "tok": {
+    "in": 30,
+    "out": 9186,
+    "cw1h": 221022,
+    "cw5m": 0,
+    "cr": 2181912
+   }
+  },
+  "a03f97a7d2f1a7ffb": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка D-01",
+   "phase": "Проверка",
+   "calls": 19,
+   "usd": 1.3993761,
+   "maxctx": 126846,
+   "first": "2026-11-05T23:51:37.103Z",
+   "last": "2026-11-05T23:58:08.168Z",
+   "desc": "проверка D-01",
+   "models": {
+    "claude-sonnet-5-5": 19
+   },
+   "tok": {
+    "in": 38,
+    "out": 18493,
+    "cw1h": 88544,
+    "cw5m": 0,
+    "cr": 1968677
+   }
+  },
+  "a0862d50aa7ce344e": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-06",
+   "phase": "Проверка",
+   "calls": 13,
+   "usd": 1.186878,
+   "maxctx": 120820,
+   "first": "2026-11-06T00:01:53.985Z",
+   "last": "2026-11-06T00:10:46.536Z",
+   "desc": "проверка M-06",
+   "models": {
+    "claude-sonnet-5-5": 13
+   },
+   "tok": {
+    "in": 26,
+    "out": 20109,
+    "cw1h": 82518,
+    "cw5m": 0,
+    "cr": 1300190
+   }
+  },
+  "a3bf2870b9e8bf3a2": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-05",
+   "phase": "Проверка",
+   "calls": 11,
+   "usd": 0.9388326,
+   "maxctx": 111532,
+   "first": "2026-11-06T00:01:32.604Z",
+   "last": "2026-11-06T00:08:33.920Z",
+   "desc": "проверка M-05",
+   "models": {
+    "claude-sonnet-5-5": 11
+   },
+   "tok": {
+    "in": 22,
+    "out": 13074,
+    "cw1h": 73230,
+    "cw5m": 0,
+    "cr": 1010922
+   }
+  },
+  "a4b9efb700d29f918": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-04",
+   "phase": "Проверка",
+   "calls": 10,
+   "usd": 0.9609915,
+   "maxctx": 114786,
+   "first": "2026-11-05T23:59:09.303Z",
+   "last": "2026-11-06T00:06:56.230Z",
+   "desc": "проверка M-04",
+   "models": {
+    "claude-sonnet-5-5": 10
+   },
+   "tok": {
+    "in": 20,
+    "out": 14940,
+    "cw1h": 76484,
+    "cw5m": 0,
+    "cr": 926425
+   }
+  },
+  "a4bd8249a70af2129": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка F-06",
+   "phase": "Проверка",
+   "calls": 23,
+   "usd": 1.9212057,
+   "maxctx": 147309,
+   "first": "2026-11-05T23:45:30.299Z",
+   "last": "2026-11-06T00:04:51.716Z",
+   "desc": "проверка F-06",
+   "models": {
+    "claude-sonnet-5-5": 23
+   },
+   "tok": {
+    "in": 46,
+    "out": 30698,
+    "cw1h": 109007,
+    "cw5m": 0,
+    "cr": 2688519
+   }
+  },
+  "a58274df0ef4cb712": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка F-02",
+   "phase": "Проверка",
+   "calls": 22,
+   "usd": 1.5332762999999998,
+   "maxctx": 130376,
+   "first": "2026-11-05T23:45:24.786Z",
+   "last": "2026-11-05T23:54:28.960Z",
+   "desc": "проверка F-02",
+   "models": {
+    "claude-sonnet-5-5": 22
+   },
+   "tok": {
+    "in": 44,
+    "out": 20021,
+    "cw1h": 92074,
+    "cw5m": 0,
+    "cr": 2267951
+   }
+  },
+  "a5b92b48d88ed37b2": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка P-01",
+   "phase": "Проверка",
+   "calls": 18,
+   "usd": 1.8659625,
+   "maxctx": 166528,
+   "first": "2026-11-06T00:09:27.959Z",
+   "last": "2026-11-06T00:16:07.048Z",
+   "desc": "проверка P-01",
+   "models": {
+    "claude-sonnet-5-5": 18
+   },
+   "tok": {
+    "in": 36,
+    "out": 25704,
+    "cw1h": 128226,
+    "cw5m": 0,
+    "cr": 2369795
+   }
+  },
+  "a70250d2c847f1756": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка D-02",
+   "phase": "Проверка",
+   "calls": 31,
+   "usd": 2.74215,
+   "maxctx": 180691,
+   "first": "2026-11-05T23:52:03.678Z",
+   "last": "2026-11-06T00:11:18.597Z",
+   "desc": "проверка D-02",
+   "models": {
+    "claude-sonnet-5-5": 31
+   },
+   "tok": {
+    "in": 62,
+    "out": 45220,
+    "cw1h": 142389,
+    "cw5m": 0,
+    "cr": 4031100
+   }
+  },
+  "a7f454a3947030cf3": {
+   "wf": "wf_170e810f-af5",
+   "label": "аудит методики и статистики",
+   "phase": "Поиск",
+   "calls": 43,
+   "usd": 7.1834541,
+   "maxctx": 339549,
+   "first": "2026-11-05T23:03:01.035Z",
+   "last": "2026-11-05T23:31:01.601Z",
+   "desc": "аудит методики и статистики",
+   "models": {
+    "claude-sonnet-5-5": 43
+   },
+   "tok": {
+    "in": 86,
+    "out": 130735,
+    "cw1h": 339547,
+    "cw5m": 0,
+    "cr": 10616297
+   }
+  },
+  "a85a97466fe021fce": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка D-03",
+   "phase": "Проверка",
+   "calls": 11,
+   "usd": 1.1363424,
+   "maxctx": 137842,
+   "first": "2026-11-05T23:54:33.355Z",
+   "last": "2026-11-05T23:59:02.576Z",
+   "desc": "проверка D-03",
+   "models": {
+    "claude-sonnet-5-5": 11
+   },
+   "tok": {
+    "in": 22,
+    "out": 14159,
+    "cw1h": 99540,
+    "cw5m": 0,
+    "cr": 1088838
+   }
+  },
+  "aa73db5cb96418593": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-02",
+   "phase": "Проверка",
+   "calls": 14,
+   "usd": 1.0544082,
+   "maxctx": 113529,
+   "first": "2026-11-05T23:58:17.525Z",
+   "last": "2026-11-06T00:05:12.708Z",
+   "desc": "проверка M-02",
+   "models": {
+    "claude-sonnet-5-5": 14
+   },
+   "tok": {
+    "in": 28,
+    "out": 13960,
+    "cw1h": 75227,
+    "cw5m": 0,
+    "cr": 1311874
+   }
+  },
+  "ab3ca826af1af2f4f": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка F-05",
+   "phase": "Проверка",
+   "calls": 12,
+   "usd": 0.9112506,
+   "maxctx": 108199,
+   "first": "2026-11-05T23:45:29.975Z",
+   "last": "2026-11-05T23:51:19.711Z",
+   "desc": "проверка F-05",
+   "models": {
+    "claude-sonnet-5-5": 12
+   },
+   "tok": {
+    "in": 24,
+    "out": 10783,
+    "cw1h": 69897,
+    "cw5m": 0,
+    "cr": 1100172
+   }
+  },
+  "ab8eefe6624d0a879": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-09",
+   "phase": "Проверка",
+   "calls": 16,
+   "usd": 1.5146745,
+   "maxctx": 145325,
+   "first": "2026-11-06T00:07:09.351Z",
+   "last": "2026-11-06T00:14:02.975Z",
+   "desc": "проверка M-09",
+   "models": {
+    "claude-sonnet-5-5": 16
+   },
+   "tok": {
+    "in": 32,
+    "out": 19823,
+    "cw1h": 107023,
+    "cw5m": 0,
+    "cr": 1916985
+   }
+  },
+  "abe37bfa2a467adf2": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-10",
+   "phase": "Проверка",
+   "calls": 17,
+   "usd": 1.6979876999999999,
+   "maxctx": 139524,
+   "first": "2026-11-06T00:08:43.608Z",
+   "last": "2026-11-06T00:18:57.218Z",
+   "desc": "проверка M-10",
+   "models": {
+    "claude-sonnet-5-5": 17
+   },
+   "tok": {
+    "in": 34,
+    "out": 36478,
+    "cw1h": 101222,
+    "cw5m": 0,
+    "cr": 1811279
+   }
+  },
+  "abf532e2c0a30362a": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-08",
+   "phase": "Проверка",
+   "calls": 11,
+   "usd": 0.9327591,
+   "maxctx": 114456,
+   "first": "2026-11-06T00:05:40.328Z",
+   "last": "2026-11-06T00:09:28.266Z",
+   "desc": "проверка M-08",
+   "models": {
+    "claude-sonnet-5-5": 11
+   },
+   "tok": {
+    "in": 22,
+    "out": 11343,
+    "cw1h": 76154,
+    "cw5m": 0,
+    "cr": 1018747
+   }
+  },
+  "ac79fdbc6e81fd716": {
+   "wf": "wf_170e810f-af5",
+   "label": "аудит скорости (что прокачать)",
+   "phase": "Поиск",
+   "calls": 48,
+   "usd": 6.7567721999999995,
+   "maxctx": 346982,
+   "first": "2026-11-05T23:03:00.960Z",
+   "last": "2026-11-05T23:24:24.170Z",
+   "desc": "аудит скорости (что прокачать)",
+   "models": {
+    "claude-sonnet-5-5": 48
+   },
+   "tok": {
+    "in": 96,
+    "out": 105796,
+    "cw1h": 346980,
+    "cw5m": 0,
+    "cr": 10292214
+   }
+  },
+  "ac86e93e5ddbb204c": {
+   "wf": "wf_170e810f-af5",
+   "label": "аудит скриптов данных",
+   "phase": "Поиск",
+   "calls": 90,
+   "usd": 15.8013624,
+   "maxctx": 525977,
+   "first": "2026-11-05T23:03:00.422Z",
+   "last": "2026-11-05T23:45:09.391Z",
+   "desc": "аудит скриптов данных",
+   "models": {
+    "claude-sonnet-5-5": 90
+   },
+   "tok": {
+    "in": 180,
+    "out": 174223,
+    "cw1h": 525975,
+    "cw5m": 0,
+    "cr": 33438758
+   }
+  },
+  "aca7261d06943b3ed": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-03",
+   "phase": "Проверка",
+   "calls": 6,
+   "usd": 0.7141644,
+   "maxctx": 108894,
+   "first": "2026-11-05T23:58:34.784Z",
+   "last": "2026-11-06T00:01:06.195Z",
+   "desc": "проверка M-03",
+   "models": {
+    "claude-sonnet-5-5": 6
+   },
+   "tok": {
+    "in": 12,
+    "out": 9242,
+    "cw1h": 70592,
+    "cw5m": 0,
+    "cr": 506488
+   }
+  },
+  "ad2d877831b6fb3ca": {
+   "wf": "wf_170e810f-af5",
+   "label": "аудит ядра (корректность)",
+   "phase": "Поиск",
+   "calls": 45,
+   "usd": 6.334451400000001,
+   "maxctx": 313515,
+   "first": "2026-11-05T23:02:59.559Z",
+   "last": "2026-11-05T23:25:12.944Z",
+   "desc": "аудит ядра (корректность)",
+   "models": {
+    "claude-sonnet-5-5": 45
+   },
+   "tok": {
+    "in": 90,
+    "out": 98871,
+    "cw1h": 313513,
+    "cw5m": 0,
+    "cr": 9900128
+   }
+  },
+  "ae48d172a5b6fe5e1": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка F-03",
+   "phase": "Проверка",
+   "calls": 21,
+   "usd": 1.4700642,
+   "maxctx": 127188,
+   "first": "2026-11-05T23:45:28.057Z",
+   "last": "2026-11-05T23:54:19.021Z",
+   "desc": "проверка F-03",
+   "models": {
+    "claude-sonnet-5-5": 21
+   },
+   "tok": {
+    "in": 42,
+    "out": 19434,
+    "cw1h": 88886,
+    "cw5m": 0,
+    "cr": 2150374
+   }
+  },
+  "ae87e59662e7ec41e": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-07",
+   "phase": "Проверка",
+   "calls": 13,
+   "usd": 1.1647101000000002,
+   "maxctx": 129643,
+   "first": "2026-11-06T00:05:23.080Z",
+   "last": "2026-11-06T00:09:10.892Z",
+   "desc": "проверка M-07",
+   "models": {
+    "claude-sonnet-5-5": 13
+   },
+   "tok": {
+    "in": 26,
+    "out": 14558,
+    "cw1h": 91341,
+    "cw5m": 0,
+    "cr": 1327387
+   }
+  },
+  "aed88097f6173bb0c": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка P-02",
+   "phase": "Проверка",
+   "calls": 19,
+   "usd": 1.6382202,
+   "maxctx": 153336,
+   "first": "2026-11-06T00:09:38.508Z",
+   "last": "2026-11-06T00:16:14.947Z",
+   "desc": "проверка P-02",
+   "models": {
+    "claude-sonnet-5-5": 19
+   },
+   "tok": {
+    "in": 38,
+    "out": 19898,
+    "cw1h": 115034,
+    "cw5m": 0,
+    "cr": 2164774
+   }
+  },
+  "aef165b367d767ca3": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка F-01",
+   "phase": "Проверка",
+   "calls": 19,
+   "usd": 1.8663126,
+   "maxctx": 145105,
+   "first": "2026-11-05T23:45:18.704Z",
+   "last": "2026-11-05T23:58:26.686Z",
+   "desc": "проверка F-01",
+   "models": {
+    "claude-sonnet-5-5": 19
+   },
+   "tok": {
+    "in": 38,
+    "out": 23732,
+    "cw1h": 145103,
+    "cw5m": 0,
+    "cr": 2132002
+   }
+  },
+  "aef6b8c5802d42070": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка F-04",
+   "phase": "Проверка",
+   "calls": 17,
+   "usd": 1.366605,
+   "maxctx": 136188,
+   "first": "2026-11-05T23:45:27.813Z",
+   "last": "2026-11-05T23:51:55.714Z",
+   "desc": "проверка F-04",
+   "models": {
+    "claude-sonnet-5-5": 17
+   },
+   "tok": {
+    "in": 34,
+    "out": 15508,
+    "cw1h": 97886,
+    "cw5m": 0,
+    "cr": 1821890
+   }
+  },
+  "af359ddba83c9f4c2": {
+   "wf": "wf_170e810f-af5",
+   "label": "проверка M-01",
+   "phase": "Проверка",
+   "calls": 16,
+   "usd": 1.3459922999999998,
+   "maxctx": 133706,
+   "first": "2026-11-05T23:54:36.949Z",
+   "last": "2026-11-06T00:01:24.424Z",
+   "desc": "проверка M-01",
+   "models": {
+    "claude-sonnet-5-5": 16
+   },
+   "tok": {
+    "in": 32,
+    "out": 16478,
+    "cw1h": 95404,
+    "cw5m": 0,
+    "cr": 1754341
+   }
+  },
+  "a06b9fdb26b2b8b3b": {
+   "wf": "wf_1ef2794c-c9a",
+   "label": "P: протокол r3",
+   "phase": "Исправления",
+   "calls": 76,
+   "usd": 11.374560899999999,
+   "maxctx": 411760,
+   "first": "2026-11-06T00:22:12.877Z",
+   "last": "2026-11-06T00:46:22.697Z",
+   "desc": "P: протокол r3",
+   "models": {
+    "claude-sonnet-5-5": 76
+   },
+   "tok": {
+    "in": 152,
+    "out": 168557,
+    "cw1h": 373398,
+    "cw5m": 0,
+    "cr": 22017873
+   }
+  },
+  "a131a5999615f5d05": {
+   "wf": "wf_1ef2794c-c9a",
+   "label": "K: ядро",
+   "phase": "Исправления",
+   "calls": 142,
+   "usd": 20.860280399999997,
+   "maxctx": 501873,
+   "first": "2026-11-06T00:22:08.755Z",
+   "last": "2026-11-06T01:30:44.196Z",
+   "desc": "K: ядро",
+   "models": {
+    "claude-sonnet-5-5": 142
+   },
+   "tok": {
+    "in": 284,
+    "out": 226428,
+    "cw1h": 501871,
+    "cw5m": 0,
+    "cr": 48172608
+   }
+  },
+  "a378ad53add9d462d": {
+   "wf": "wf_1ef2794c-c9a",
+   "label": "Проверка ядра",
+   "phase": "Проверка",
+   "calls": 53,
+   "usd": 5.5528832999999995,
+   "maxctx": 256313,
+   "first": "2026-11-06T01:30:48.927Z",
+   "last": "2026-11-06T01:48:27.320Z",
+   "desc": "Проверка ядра",
+   "models": {
+    "claude-sonnet-5-5": 53
+   },
+   "tok": {
+    "in": 106,
+    "out": 77457,
+    "cw1h": 256311,
+    "cw5m": 0,
+    "cr": 9509481
+   }
+  },
+  "ae7cdd54ca347cb9f": {
+   "wf": "wf_1ef2794c-c9a",
+   "label": "S: статистика",
+   "phase": "Исправления",
+   "calls": 45,
+   "usd": 4.6796523,
+   "maxctx": 222954,
+   "first": "2026-11-06T00:22:12.166Z",
+   "last": "2026-11-06T00:45:15.012Z",
+   "desc": "S: статистика",
+   "models": {
+    "claude-sonnet-5-5": 45
+   },
+   "tok": {
+    "in": 92,
+    "out": 83342,
+    "cw1h": 184592,
+    "cw5m": 0,
+    "cr": 7738981
+   }
+  },
+  "a0e64c03710853e25": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M2-02",
+   "phase": "Проверка",
+   "calls": 21,
+   "usd": 2.398713,
+   "maxctx": 189485,
+   "first": "2026-11-06T14:50:26.684Z",
+   "last": "2026-11-06T14:58:10.883Z",
+   "desc": "skeptic:M2-02",
+   "models": {
+    "claude-sonnet-5-5": 21
+   },
+   "tok": {
+    "in": 42,
+    "out": 46162,
+    "cw1h": 151170,
+    "cw5m": 0,
+    "cr": 2663790
+   }
+  },
+  "a3c0e5f55994eb371": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M4-06",
+   "phase": "Проверка",
+   "calls": 13,
+   "usd": 1.3404684,
+   "maxctx": 141807,
+   "first": "2026-11-06T14:58:34.812Z",
+   "last": "2026-11-06T15:02:22.116Z",
+   "desc": "skeptic:M4-06",
+   "models": {
+    "claude-sonnet-5-5": 13
+   },
+   "tok": {
+    "in": 26,
+    "out": 19093,
+    "cw1h": 103492,
+    "cw5m": 0,
+    "cr": 1443478
+   }
+  },
+  "a4ded02f983c92af2": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M4-04",
+   "phase": "Проверка",
+   "calls": 27,
+   "usd": 3.1179593999999997,
+   "maxctx": 235759,
+   "first": "2026-11-06T14:54:58.591Z",
+   "last": "2026-11-06T15:00:18.634Z",
+   "desc": "skeptic:M4-04",
+   "models": {
+    "claude-sonnet-5-5": 27
+   },
+   "tok": {
+    "in": 54,
+    "out": 30813,
+    "cw1h": 197444,
+    "cw5m": 0,
+    "cr": 4903128
+   }
+  },
+  "a4eba19a1b74e7df8": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M1-01",
+   "phase": "Проверка",
+   "calls": 29,
+   "usd": 3.3851796,
+   "maxctx": 231813,
+   "first": "2026-11-06T15:00:14.291Z",
+   "last": "2026-11-06T15:07:12.140Z",
+   "desc": "skeptic:M1-01",
+   "models": {
+    "claude-sonnet-5-5": 29
+   },
+   "tok": {
+    "in": 58,
+    "out": 41432,
+    "cw1h": 193498,
+    "cw5m": 0,
+    "cr": 5341792
+   }
+  },
+  "a57e05731e66be980": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M3-03",
+   "phase": "Проверка",
+   "calls": 21,
+   "usd": 1.836045,
+   "maxctx": 154978,
+   "first": "2026-11-06T15:16:04.379Z",
+   "last": "2026-11-06T15:22:16.271Z",
+   "desc": "skeptic:M3-03",
+   "models": {
+    "claude-sonnet-5-5": 21
+   },
+   "tok": {
+    "in": 42,
+    "out": 23941,
+    "cw1h": 116663,
+    "cw5m": 0,
+    "cr": 2589420
+   }
+  },
+  "a5acc661190f87e68": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M3-01",
+   "phase": "Проверка",
+   "calls": 44,
+   "usd": 3.5533355999999996,
+   "maxctx": 194058,
+   "first": "2026-11-06T15:16:02.067Z",
+   "last": "2026-11-06T15:25:40.460Z",
+   "desc": "skeptic:M3-01",
+   "models": {
+    "claude-sonnet-5-5": 44
+   },
+   "tok": {
+    "in": 88,
+    "out": 49600,
+    "cw1h": 155743,
+    "cw5m": 0,
+    "cr": 6248712
+   }
+  },
+  "a5be40cb072b1daf0": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M2-01",
+   "phase": "Проверка",
+   "calls": 27,
+   "usd": 3.10095,
+   "maxctx": 208817,
+   "first": "2026-11-06T14:50:26.970Z",
+   "last": "2026-11-06T15:00:59.798Z",
+   "desc": "skeptic:M2-01",
+   "models": {
+    "claude-sonnet-5-5": 27
+   },
+   "tok": {
+    "in": 54,
+    "out": 54725,
+    "cw1h": 170502,
+    "cw5m": 0,
+    "cr": 4189670
+   }
+  },
+  "a61cd718d9b73d24d": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M4-03",
+   "phase": "Проверка",
+   "calls": 28,
+   "usd": 2.6637804,
+   "maxctx": 190524,
+   "first": "2026-11-06T14:54:48.745Z",
+   "last": "2026-11-06T15:00:05.310Z",
+   "desc": "skeptic:M4-03",
+   "models": {
+    "claude-sonnet-5-5": 28
+   },
+   "tok": {
+    "in": 56,
+    "out": 32507,
+    "cw1h": 152209,
+    "cw5m": 0,
+    "cr": 4209178
+   }
+  },
+  "a7365383477ba7c9a": {
+   "wf": "wf_295063d9-0e2",
+   "label": "audit2:M2-selection",
+   "phase": "Аудит",
+   "calls": 86,
+   "usd": 11.621344800000001,
+   "maxctx": 423035,
+   "first": "2026-11-06T14:22:39.228Z",
+   "last": "2026-11-06T14:50:16.475Z",
+   "desc": "audit2:M2-selection",
+   "models": {
+    "claude-sonnet-5-5": 86
+   },
+   "tok": {
+    "in": 172,
+    "out": 158395,
+    "cw1h": 384504,
+    "cw5m": 0,
+    "cr": 23126266
+   }
+  },
+  "a76467047c49bc561": {
+   "wf": "wf_295063d9-0e2",
+   "label": "audit2:M3-f8-chain",
+   "phase": "Аудит",
+   "calls": 180,
+   "usd": 25.458066,
+   "maxctx": 519445,
+   "first": "2026-11-06T14:22:39.765Z",
+   "last": "2026-11-06T15:15:51.938Z",
+   "desc": "audit2:M3-f8-chain",
+   "models": {
+    "claude-sonnet-5-5": 180
+   },
+   "tok": {
+    "in": 360,
+    "out": 214005,
+    "cw1h": 480914,
+    "cw5m": 0,
+    "cr": 64538090
+   }
+  },
+  "a7c50cc66c7b421d4": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M4-01",
+   "phase": "Проверка",
+   "calls": 26,
+   "usd": 2.7379137,
+   "maxctx": 199469,
+   "first": "2026-11-06T14:51:41.217Z",
+   "last": "2026-11-06T14:58:22.052Z",
+   "desc": "skeptic:M4-01",
+   "models": {
+    "claude-sonnet-5-5": 26
+   },
+   "tok": {
+    "in": 52,
+    "out": 39707,
+    "cw1h": 161154,
+    "cw5m": 0,
+    "cr": 3917429
+   }
+  },
+  "a8afc8b14f601b83c": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M3-02",
+   "phase": "Проверка",
+   "calls": 24,
+   "usd": 1.9020972,
+   "maxctx": 153474,
+   "first": "2026-11-06T15:16:01.693Z",
+   "last": "2026-11-06T15:19:52.398Z",
+   "desc": "skeptic:M3-02",
+   "models": {
+    "claude-sonnet-5-5": 24
+   },
+   "tok": {
+    "in": 48,
+    "out": 20718,
+    "cw1h": 115159,
+    "cw5m": 0,
+    "cr": 3000764
+   }
+  },
+  "a99129a9ac87b5506": {
+   "wf": "wf_295063d9-0e2",
+   "label": "audit2:M4-consistency",
+   "phase": "Аудит",
+   "calls": 97,
+   "usd": 14.1852963,
+   "maxctx": 470645,
+   "first": "2026-11-06T14:22:41.191Z",
+   "last": "2026-11-06T14:51:33.642Z",
+   "desc": "audit2:M4-consistency",
+   "models": {
+    "claude-sonnet-5-5": 97
+   },
+   "tok": {
+    "in": 194,
+    "out": 168315,
+    "cw1h": 432114,
+    "cw5m": 0,
+    "cr": 30224351
+   }
+  },
+  "aaedf3660da68c4fb": {
+   "wf": "wf_295063d9-0e2",
+   "label": "audit2:M1-forensics",
+   "phase": "Аудит",
+   "calls": 118,
+   "usd": 16.1848431,
+   "maxctx": 466388,
+   "first": "2026-11-06T14:22:33.823Z",
+   "last": "2026-11-06T14:54:52.555Z",
+   "desc": "audit2:M1-forensics",
+   "models": {
+    "claude-sonnet-5-5": 118
+   },
+   "tok": {
+    "in": 236,
+    "out": 166848,
+    "cw1h": 427857,
+    "cw5m": 0,
+    "cr": 37047577
+   }
+  },
+  "ac2fff43bed142bf0": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M3-04",
+   "phase": "Проверка",
+   "calls": 38,
+   "usd": 3.0839982000000004,
+   "maxctx": 179283,
+   "first": "2026-11-06T15:16:04.777Z",
+   "last": "2026-11-06T15:26:23.281Z",
+   "desc": "skeptic:M3-04",
+   "models": {
+    "claude-sonnet-5-5": 38
+   },
+   "tok": {
+    "in": 76,
+    "out": 47496,
+    "cw1h": 140968,
+    "cw5m": 0,
+    "cr": 5085074
+   }
+  },
+  "ae335be757348a420": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M4-02",
+   "phase": "Проверка",
+   "calls": 18,
+   "usd": 1.379112,
+   "maxctx": 131465,
+   "first": "2026-11-06T14:51:43.941Z",
+   "last": "2026-11-06T14:54:37.501Z",
+   "desc": "skeptic:M4-02",
+   "models": {
+    "claude-sonnet-5-5": 18
+   },
+   "tok": {
+    "in": 36,
+    "out": 16300,
+    "cw1h": 93150,
+    "cw5m": 0,
+    "cr": 1918680
+   }
+  },
+  "ae7d86660cc5d7d23": {
+   "wf": "wf_295063d9-0e2",
+   "label": "skeptic:M4-05",
+   "phase": "Проверка",
+   "calls": 17,
+   "usd": 2.2957797,
+   "maxctx": 214474,
+   "first": "2026-11-06T14:58:17.987Z",
+   "last": "2026-11-06T15:02:25.904Z",
+   "desc": "skeptic:M4-05",
+   "models": {
+    "claude-sonnet-5-5": 17
+   },
+   "tok": {
+    "in": 34,
+    "out": 28735,
+    "cw1h": 176159,
+    "cw5m": 0,
+    "cr": 2692329
+   }
+  },
+  "a1faebd667cdd2a60": {
+   "wf": "wf_295a375b-8c1",
+   "label": "GW подготовка окна",
+   "phase": "Подготовка",
+   "calls": 130,
+   "usd": 21.2776542,
+   "maxctx": 534638,
+   "first": "2026-11-07T06:18:27.593Z",
+   "last": "2026-11-07T07:25:46.948Z",
+   "desc": "GW подготовка окна",
+   "models": {
+    "claude-sonnet-5-5": 130
+   },
+   "tok": {
+    "in": 260,
+    "out": 256591,
+    "cw1h": 496178,
+    "cw5m": 0,
+    "cr": 48169804
+   }
+  },
+  "a49b02a456311204a": {
+   "wf": "wf_295a375b-8c1",
+   "label": "R4 дельта-ревизия",
+   "phase": "Ревизия",
+   "calls": 100,
+   "usd": 14.345476199999998,
+   "maxctx": 444645,
+   "first": "2026-11-07T07:25:51.458Z",
+   "last": "2026-11-07T08:08:52.967Z",
+   "desc": "R4 дельта-ревизия",
+   "models": {
+    "claude-sonnet-5-5": 100
+   },
+   "tok": {
+    "in": 200,
+    "out": 165467,
+    "cw1h": 444643,
+    "cw5m": 0,
+    "cr": 30650044
+   }
+  },
+  "a1e3651389f7d634c": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "Bybit (linear USDT perps)",
+   "phase": "Поиск",
+   "calls": 14,
+   "usd": 1.0202502,
+   "maxctx": 115156,
+   "first": "2026-11-07T10:50:19.363Z",
+   "last": "2026-11-07T10:54:20.374Z",
+   "desc": "Bybit (linear USDT perps)",
+   "models": {
+    "claude-sonnet-5-5": 14
+   },
+   "tok": {
+    "in": 28,
+    "out": 11591,
+    "cw1h": 76425,
+    "cw5m": 0,
+    "cr": 1292504
+   }
+  },
+  "a3411d174991d5b01": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "Binance (USD-M futures)",
+   "phase": "Поиск",
+   "calls": 21,
+   "usd": 1.4715159,
+   "maxctx": 113581,
+   "first": "2026-11-07T10:50:15.572Z",
+   "last": "2026-11-07T11:02:12.770Z",
+   "desc": "Binance (USD-M futures)",
+   "models": {
+    "claude-sonnet-5-5": 21
+   },
+   "tok": {
+    "in": 42,
+    "out": 12576,
+    "cw1h": 113579,
+    "cw5m": 0,
+    "cr": 2004253
+   }
+  },
+  "a41b09e57d582f6f7": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "Сторонние провайдеры",
+   "phase": "Поиск",
+   "calls": 45,
+   "usd": 4.0527162,
+   "maxctx": 231088,
+   "first": "2026-11-07T10:50:15.186Z",
+   "last": "2026-11-07T11:02:21.500Z",
+   "desc": "Сторонние провайдеры",
+   "models": {
+    "claude-sonnet-5-5": 45
+   },
+   "tok": {
+    "in": 90,
+    "out": 37774,
+    "cw1h": 231086,
+    "cw5m": 0,
+    "cr": 6997734
+   }
+  },
+  "a576ae7e097329e30": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "Bitget (USDT-M futures)",
+   "phase": "Поиск",
+   "calls": 50,
+   "usd": 2.9860917000000002,
+   "maxctx": 162450,
+   "first": "2026-11-07T10:50:19.803Z",
+   "last": "2026-11-07T11:02:03.690Z",
+   "desc": "Bitget (USDT-M futures)",
+   "models": {
+    "claude-sonnet-5-5": 50
+   },
+   "tok": {
+    "in": 100,
+    "out": 29123,
+    "cw1h": 123719,
+    "cw5m": 0,
+    "cr": 6022109
+   }
+  },
+  "ac727b83ea4e622f3": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "Kraken (Futures, PF_* perpetuals)",
+   "phase": "Поиск",
+   "calls": 7,
+   "usd": 0.6710615999999999,
+   "maxctx": 110422,
+   "first": "2026-11-07T11:00:45.067Z",
+   "last": "2026-11-07T11:01:37.865Z",
+   "desc": "Kraken (Futures, PF_* perpetuals)",
+   "models": {
+    "claude-sonnet-5-5": 7
+   },
+   "tok": {
+    "in": 14,
+    "out": 4552,
+    "cw1h": 71691,
+    "cw5m": 0,
+    "cr": 575312
+   }
+  },
+  "ad7024d2b6a394829": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "BingX (USDT perpetual futures)",
+   "phase": "Поиск",
+   "calls": 43,
+   "usd": 2.8568559,
+   "maxctx": 166028,
+   "first": "2026-11-07T10:50:19.514Z",
+   "last": "2026-11-07T11:00:41.904Z",
+   "desc": "BingX (USDT perpetual futures)",
+   "models": {
+    "claude-sonnet-5-5": 43
+   },
+   "tok": {
+    "in": 86,
+    "out": 34041,
+    "cw1h": 127297,
+    "cw5m": 0,
+    "cr": 5274003
+   }
+  },
+  "add3b1b4ea800bfbf": {
+   "wf": "wf_2ea5ea76-098",
+   "label": "OKX (SWAP)",
+   "phase": "Поиск",
+   "calls": 30,
+   "usd": 1.7975222999999998,
+   "maxctx": 134026,
+   "first": "2026-11-07T10:50:17.826Z",
+   "last": "2026-11-07T11:00:23.948Z",
+   "desc": "OKX (SWAP)",
+   "models": {
+    "claude-sonnet-5-5": 30
+   },
+   "tok": {
+    "in": 60,
+    "out": 18433,
+    "cw1h": 95295,
+    "cw5m": 0,
+    "cr": 3163591
+   }
+  },
+  "a131832a05b624b61": {
+   "wf": "wf_3303296c-dbf",
+   "label": "review:atr",
+   "phase": "Review",
+   "calls": 41,
+   "usd": 4.996659,
+   "maxctx": 291509,
+   "first": "2026-11-05T01:56:14.901Z",
+   "last": "2026-11-05T02:05:34.056Z",
+   "desc": "review:atr",
+   "models": {
+    "claude-sonnet-5-5": 41
+   },
+   "tok": {
+    "in": 82,
+    "out": 66369,
+    "cw1h": 253087,
+    "cw5m": 0,
+    "cr": 8274520
+   }
+  },
+  "a57074ecc3b6b640b": {
+   "wf": "wf_3303296c-dbf",
+   "label": "code:atr",
+   "phase": "Write",
+   "calls": 170,
+   "usd": 22.829114699999998,
+   "maxctx": 445022,
+   "first": "2026-11-05T01:12:01.366Z",
+   "last": "2026-11-05T01:56:10.542Z",
+   "desc": "code:atr",
+   "models": {
+    "claude-sonnet-5-5": 170
+   },
+   "tok": {
+    "in": 340,
+    "out": 224804,
+    "cw1h": 406477,
+    "cw5m": 0,
+    "cr": 56723909
+   }
+  },
+  "a1de2893a9af4dceb": {
+   "wf": "wf_4b3c4026-7ce",
+   "label": "T2 фандинг",
+   "phase": "Переписи",
+   "calls": 68,
+   "usd": 9.7599576,
+   "maxctx": 394777,
+   "first": "2026-11-07T10:32:58.660Z",
+   "last": "2026-11-07T10:56:38.945Z",
+   "desc": "T2 фандинг",
+   "models": {
+    "claude-sonnet-5-5": 68
+   },
+   "tok": {
+    "in": 136,
+    "out": 162184,
+    "cw1h": 356154,
+    "cw5m": 0,
+    "cr": 17299552
+   }
+  },
+  "a334022d463882eac": {
+   "wf": "wf_4b3c4026-7ce",
+   "label": "T1 хвосты",
+   "phase": "Переписи",
+   "calls": 52,
+   "usd": 6.9780654,
+   "maxctx": 301533,
+   "first": "2026-11-07T10:32:56.564Z",
+   "last": "2026-11-07T10:57:35.056Z",
+   "desc": "T1 хвосты",
+   "models": {
+    "claude-sonnet-5-5": 52
+   },
+   "tok": {
+    "in": 104,
+    "out": 121693,
+    "cw1h": 301531,
+    "cw5m": 0,
+    "cr": 11143908
+   }
+  },
+  "a91611ebb4528094c": {
+   "wf": "wf_53d3afc1-13b",
+   "label": "W раннер окна",
+   "phase": "Правила и код",
+   "calls": 113,
+   "usd": 20.6421012,
+   "maxctx": 578081,
+   "first": "2026-11-07T03:18:01.106Z",
+   "last": "2026-11-07T04:07:51.154Z",
+   "desc": "W раннер окна",
+   "models": {
+    "claude-sonnet-5-5": 113
+   },
+   "tok": {
+    "in": 226,
+    "out": 289808,
+    "cw1h": 539621,
+    "cw5m": 0,
+    "cr": 43521924
+   }
+  },
+  "accff710d0b545015": {
+   "wf": "wf_53d3afc1-13b",
+   "label": "R независимая дельта-ревизия",
+   "phase": "Ревизия",
+   "calls": 137,
+   "usd": 23.591037299999996,
+   "maxctx": 625477,
+   "first": "2026-11-07T05:28:56.731Z",
+   "last": "2026-11-07T06:15:53.092Z",
+   "desc": "R независимая дельта-ревизия",
+   "models": {
+    "claude-sonnet-5-5": 137
+   },
+   "tok": {
+    "in": 274,
+    "out": 229790,
+    "cw1h": 625475,
+    "cw5m": 0,
+    "cr": 54635051
+   }
+  },
+  "ad7c5b88f2890b243": {
+   "wf": "wf_53d3afc1-13b",
+   "label": "P3 протокол r3",
+   "phase": "Правила и код",
+   "calls": 36,
+   "usd": 5.2036953,
+   "maxctx": 282033,
+   "first": "2026-11-07T03:17:58.705Z",
+   "last": "2026-11-07T03:28:40.900Z",
+   "desc": "P3 протокол r3",
+   "models": {
+    "claude-sonnet-5-5": 36
+   },
+   "tok": {
+    "in": 72,
+    "out": 85449,
+    "cw1h": 282031,
+    "cw5m": 0,
+    "cr": 7431861
+   }
+  },
+  "af7e7615a7a00e6fc": {
+   "wf": "wf_53d3afc1-13b",
+   "label": "G1 Gate в C2",
+   "phase": "Правила и код",
+   "calls": 93,
+   "usd": 15.6543306,
+   "maxctx": 509374,
+   "first": "2026-11-07T03:17:59.020Z",
+   "last": "2026-11-07T03:57:43.468Z",
+   "desc": "G1 Gate в C2",
+   "models": {
+    "claude-sonnet-5-5": 93
+   },
+   "tok": {
+    "in": 186,
+    "out": 229892,
+    "cw1h": 509372,
+    "cw5m": 0,
+    "cr": 30497202
+   }
+  },
+  "aff6bdeaa022076a3": {
+   "wf": "wf_53d3afc1-13b",
+   "label": "C перекалибровка с Gate",
+   "phase": "Перекалибровка",
+   "calls": 137,
+   "usd": 19.27416,
+   "maxctx": 524337,
+   "first": "2026-11-07T04:07:54.826Z",
+   "last": "2026-11-07T05:28:50.596Z",
+   "desc": "C перекалибровка с Gate",
+   "models": {
+    "claude-sonnet-5-5": 137
+   },
+   "tok": {
+    "in": 276,
+    "out": 213943,
+    "cw1h": 485877,
+    "cw5m": 0,
+    "cr": 43829750
+   }
+  },
+  "a93be37a4fc4a24a0": {
+   "wf": "wf_59ed7cc7-63e",
+   "label": "analyse:B",
+   "phase": "Analyse",
+   "calls": 38,
+   "usd": 5.1169122,
+   "maxctx": 260100,
+   "first": "2026-11-05T02:30:07.835Z",
+   "last": "2026-11-05T02:49:56.273Z",
+   "desc": "analyse:B",
+   "models": {
+    "claude-sonnet-5-5": 38
+   },
+   "tok": {
+    "in": 76,
+    "out": 126889,
+    "cw1h": 221576,
+    "cw5m": 0,
+    "cr": 6279644
+   }
+  },
+  "aaa501223f0b1d5c9": {
+   "wf": "wf_59ed7cc7-63e",
+   "label": "analyse:C",
+   "phase": "Analyse",
+   "calls": 32,
+   "usd": 4.6995825,
+   "maxctx": 263721,
+   "first": "2026-11-05T02:30:09.466Z",
+   "last": "2026-11-05T02:47:25.380Z",
+   "desc": "analyse:C",
+   "models": {
+    "claude-sonnet-5-5": 32
+   },
+   "tok": {
+    "in": 66,
+    "out": 115501,
+    "cw1h": 225197,
+    "cw5m": 0,
+    "cr": 5385625
+   }
+  },
+  "ab8444a6bb1a7f243": {
+   "wf": "wf_59ed7cc7-63e",
+   "label": "analyse:A",
+   "phase": "Analyse",
+   "calls": 30,
+   "usd": 4.9562946,
+   "maxctx": 262494,
+   "first": "2026-11-05T02:30:06.174Z",
+   "last": "2026-11-05T02:47:32.730Z",
+   "desc": "analyse:A",
+   "models": {
+    "claude-sonnet-5-5": 30
+   },
+   "tok": {
+    "in": 62,
+    "out": 124791,
+    "cw1h": 262492,
+    "cw5m": 0,
+    "cr": 5030972
+   }
+  },
+  "a5d57d9bffd00e027": {
+   "wf": "wf_59f7ac06-130",
+   "label": "analyse:G2",
+   "phase": "Analyse",
+   "calls": 39,
+   "usd": 5.052073200000001,
+   "maxctx": 260780,
+   "first": "2026-11-05T15:00:32.447Z",
+   "last": "2026-11-05T15:32:12.830Z",
+   "desc": "analyse:G2",
+   "models": {
+    "claude-sonnet-5-5": 39
+   },
+   "tok": {
+    "in": 78,
+    "out": 119727,
+    "cw1h": 222273,
+    "cw5m": 0,
+    "cr": 6407654
+   }
+  },
+  "aeda9eda0dab03d12": {
+   "wf": "wf_59f7ac06-130",
+   "label": "analyse:F2",
+   "phase": "Analyse",
+   "calls": 59,
+   "usd": 6.540290699999999,
+   "maxctx": 263295,
+   "first": "2026-11-05T15:00:29.490Z",
+   "last": "2026-11-05T15:36:33.281Z",
+   "desc": "analyse:F2",
+   "models": {
+    "claude-sonnet-5-5": 59
+   },
+   "tok": {
+    "in": 120,
+    "out": 127596,
+    "cw1h": 263293,
+    "cw5m": 0,
+    "cr": 10154109
+   }
+  },
+  "a220b0f2b958b2540": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:hyperliquid",
+   "phase": "Write",
+   "calls": 27,
+   "usd": 3.6509508,
+   "maxctx": 220551,
+   "first": "2026-11-05T17:47:55.674Z",
+   "last": "2026-11-05T18:14:35.995Z",
+   "desc": "xdl:hyperliquid",
+   "models": {
+    "claude-sonnet-5-5": 27
+   },
+   "tok": {
+    "in": 54,
+    "out": 89263,
+    "cw1h": 182003,
+    "cw5m": 0,
+    "cr": 4066086
+   }
+  },
+  "a3d138168a171dffc": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:bitget",
+   "phase": "Write",
+   "calls": 37,
+   "usd": 4.6688352,
+   "maxctx": 235358,
+   "first": "2026-11-05T17:32:26.925Z",
+   "last": "2026-11-05T17:54:36.939Z",
+   "desc": "xdl:bitget",
+   "models": {
+    "claude-sonnet-5-5": 37
+   },
+   "tok": {
+    "in": 74,
+    "out": 111009,
+    "cw1h": 196810,
+    "cw5m": 0,
+    "cr": 6075394
+   }
+  },
+  "a51f5a618a37014e3": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:kraken_lighter",
+   "phase": "Write",
+   "calls": 59,
+   "usd": 6.166237199999999,
+   "maxctx": 263953,
+   "first": "2026-11-05T17:32:29.354Z",
+   "last": "2026-11-05T18:09:48.570Z",
+   "desc": "xdl:kraken_lighter",
+   "models": {
+    "claude-sonnet-5-5": 59
+   },
+   "tok": {
+    "in": 118,
+    "out": 118202,
+    "cw1h": 225405,
+    "cw5m": 0,
+    "cr": 10134744
+   }
+  },
+  "a54bd3c38b6b68532": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:bingx",
+   "phase": "Write",
+   "calls": 38,
+   "usd": 4.5532986,
+   "maxctx": 235446,
+   "first": "2026-11-05T17:32:23.543Z",
+   "last": "2026-11-05T17:50:07.575Z",
+   "desc": "xdl:bingx",
+   "models": {
+    "claude-sonnet-5-5": 38
+   },
+   "tok": {
+    "in": 78,
+    "out": 97755,
+    "cw1h": 196898,
+    "cw5m": 0,
+    "cr": 6351172
+   }
+  },
+  "a648bc254299cc6f6": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:bybit",
+   "phase": "Write",
+   "calls": 33,
+   "usd": 3.4322570999999997,
+   "maxctx": 194872,
+   "first": "2026-11-05T17:32:26.569Z",
+   "last": "2026-11-05T17:49:52.847Z",
+   "desc": "xdl:bybit",
+   "models": {
+    "claude-sonnet-5-5": 33
+   },
+   "tok": {
+    "in": 66,
+    "out": 71983,
+    "cw1h": 156324,
+    "cw5m": 0,
+    "cr": 4714567
+   }
+  },
+  "a78c75683c754fa70": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:okx",
+   "phase": "Write",
+   "calls": 29,
+   "usd": 3.5573772000000004,
+   "maxctx": 208523,
+   "first": "2026-11-05T17:32:26.349Z",
+   "last": "2026-11-05T17:47:51.739Z",
+   "desc": "xdl:okx",
+   "models": {
+    "claude-sonnet-5-5": 29
+   },
+   "tok": {
+    "in": 58,
+    "out": 84409,
+    "cw1h": 169975,
+    "cw5m": 0,
+    "cr": 4237394
+   }
+  },
+  "ac4e3327a9dd398cf": {
+   "wf": "wf_5e6d75ae-e11",
+   "label": "xdl:binance_aster",
+   "phase": "Write",
+   "calls": 55,
+   "usd": 6.3157005,
+   "maxctx": 258981,
+   "first": "2026-11-05T17:32:20.331Z",
+   "last": "2026-11-05T18:05:18.081Z",
+   "desc": "xdl:binance_aster",
+   "models": {
+    "claude-sonnet-5-5": 55
+   },
+   "tok": {
+    "in": 110,
+    "out": 112765,
+    "cw1h": 258979,
+    "cw5m": 0,
+    "cr": 10233405
+   }
+  },
+  "a4947091ffb8f18f9": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "F5 таблица активов",
+   "phase": "Параллельно",
+   "calls": 96,
+   "usd": 14.136797399999999,
+   "maxctx": 493088,
+   "first": "2026-11-05T22:22:55.104Z",
+   "last": "2026-11-05T22:54:27.304Z",
+   "desc": "F5 таблица активов",
+   "models": {
+    "claude-sonnet-5-5": 96
+   },
+   "tok": {
+    "in": 192,
+    "out": 211977,
+    "cw1h": 454693,
+    "cw5m": 0,
+    "cr": 27428028
+   }
+  },
+  "a6798b4797e63578e": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "F7 отбор пар",
+   "phase": "Гейты и отбор",
+   "calls": 138,
+   "usd": 21.192658799999997,
+   "maxctx": 538279,
+   "first": "2026-11-05T23:30:26.104Z",
+   "last": "2026-11-06T00:36:30.406Z",
+   "desc": "F7 отбор пар",
+   "models": {
+    "claude-sonnet-5-5": 138
+   },
+   "tok": {
+    "in": 276,
+    "out": 245176,
+    "cw1h": 499884,
+    "cw5m": 0,
+    "cr": 48382956
+   }
+  },
+  "aa6416e4c5b370588": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "F6 гейты ядра",
+   "phase": "Гейты и отбор",
+   "calls": 98,
+   "usd": 13.2080178,
+   "maxctx": 445851,
+   "first": "2026-11-05T23:30:23.378Z",
+   "last": "2026-11-06T00:16:22.464Z",
+   "desc": "F6 гейты ядра",
+   "models": {
+    "claude-sonnet-5-5": 98
+   },
+   "tok": {
+    "in": 198,
+    "out": 176931,
+    "cw1h": 407456,
+    "cw5m": 0,
+    "cr": 27029076
+   }
+  },
+  "ab438354536d1f15a": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "F4 панели .sap",
+   "phase": "Параллельно",
+   "calls": 60,
+   "usd": 7.3702106999999994,
+   "maxctx": 325110,
+   "first": "2026-11-05T22:05:41.519Z",
+   "last": "2026-11-05T22:29:34.813Z",
+   "desc": "F4 панели .sap",
+   "models": {
+    "claude-sonnet-5-5": 60
+   },
+   "tok": {
+    "in": 120,
+    "out": 113445,
+    "cw1h": 286715,
+    "cw5m": 0,
+    "cr": 13159619
+   }
+  },
+  "ad92a049a3650e17a": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "K1 допил run",
+   "phase": "Параллельно",
+   "calls": 79,
+   "usd": 12.5423955,
+   "maxctx": 412195,
+   "first": "2026-11-05T22:05:39.590Z",
+   "last": "2026-11-05T23:30:17.807Z",
+   "desc": "K1 допил run",
+   "models": {
+    "claude-sonnet-5-5": 79
+   },
+   "tok": {
+    "in": 158,
+    "out": 209314,
+    "cw1h": 412193,
+    "cw5m": 0,
+    "cr": 23096845
+   }
+  },
+  "ada7265bcf132c5b1": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "сверка волны 2",
+   "phase": "Сверка",
+   "calls": 92,
+   "usd": 10.4197446,
+   "maxctx": 349507,
+   "first": "2026-11-06T00:36:36.682Z",
+   "last": "2026-11-06T01:06:12.779Z",
+   "desc": "сверка волны 2",
+   "models": {
+    "claude-sonnet-5-5": 92
+   },
+   "tok": {
+    "in": 184,
+    "out": 91358,
+    "cw1h": 349505,
+    "cw5m": 0,
+    "cr": 23172642
+   }
+  },
+  "af1bf20ed47716912": {
+   "wf": "wf_5fbe7101-2db",
+   "label": "П-37 r2",
+   "phase": "Параллельно",
+   "calls": 61,
+   "usd": 8.5444971,
+   "maxctx": 362317,
+   "first": "2026-11-05T22:05:49.663Z",
+   "last": "2026-11-05T22:22:50.012Z",
+   "desc": "П-37 r2",
+   "models": {
+    "claude-sonnet-5-5": 61
+   },
+   "tok": {
+    "in": 122,
+    "out": 128104,
+    "cw1h": 323922,
+    "cw5m": 0,
+    "cr": 15596797
+   }
+  },
+  "a701715da7d84ed40": {
+   "wf": "wf_6023efed-f2b",
+   "label": "Читатель vid2",
+   "phase": "Чтение",
+   "calls": 18,
+   "usd": 2.8033767000000003,
+   "maxctx": 185453,
+   "first": "2026-11-07T10:08:34.964Z",
+   "last": "2026-11-07T10:18:15.025Z",
+   "desc": "Читатель vid2",
+   "models": {
+    "claude-sonnet-5-5": 18
+   },
+   "tok": {
+    "in": 36,
+    "out": 81042,
+    "cw1h": 146711,
+    "cw5m": 0,
+    "cr": 2357909
+   }
+  },
+  "a79f4e4975845e8ce": {
+   "wf": "wf_6023efed-f2b",
+   "label": "Читатель vid1",
+   "phase": "Чтение",
+   "calls": 25,
+   "usd": 3.0774977999999997,
+   "maxctx": 185229,
+   "first": "2026-11-07T10:08:33.174Z",
+   "last": "2026-11-07T10:16:43.320Z",
+   "desc": "Читатель vid1",
+   "models": {
+    "claude-sonnet-5-5": 25
+   },
+   "tok": {
+    "in": 54,
+    "out": 62194,
+    "cw1h": 185227,
+    "cw5m": 0,
+    "cr": 3443546
+   }
+  },
+  "ab096731b5be42075": {
+   "wf": "wf_6023efed-f2b",
+   "label": "Сверка с протоколами",
+   "phase": "Сверка",
+   "calls": 51,
+   "usd": 7.0604808,
+   "maxctx": 346609,
+   "first": "2026-11-07T10:18:21.173Z",
+   "last": "2026-11-07T10:31:58.016Z",
+   "desc": "Сверка с протоколами",
+   "models": {
+    "claude-sonnet-5-5": 51
+   },
+   "tok": {
+    "in": 102,
+    "out": 97188,
+    "cw1h": 346607,
+    "cw5m": 0,
+    "cr": 11742376
+   }
+  },
+  "af8ad6d77c268c25c": {
+   "wf": "wf_6023efed-f2b",
+   "label": "Читатель root",
+   "phase": "Чтение",
+   "calls": 8,
+   "usd": 1.316319,
+   "maxctx": 142171,
+   "first": "2026-11-07T10:08:35.776Z",
+   "last": "2026-11-07T10:12:12.979Z",
+   "desc": "Читатель root",
+   "models": {
+    "claude-sonnet-5-5": 8
+   },
+   "tok": {
+    "in": 16,
+    "out": 29831,
+    "cw1h": 103429,
+    "cw5m": 0,
+    "cr": 827440
+   }
+  },
+  "a2e67a42f3da399fa": {
+   "wf": "wf_68156710-484",
+   "label": null,
+   "phase": null,
+   "calls": 60,
+   "usd": 9.41751,
+   "maxctx": 386400,
+   "first": "2026-11-06T09:33:31.107Z",
+   "last": "2026-11-06T10:00:31.027Z",
+   "desc": "P2: протокол r3.1",
+   "models": {
+    "claude-sonnet-5-5": 60
+   },
+   "tok": {
+    "in": 120,
+    "out": 151129,
+    "cw1h": 348006,
+    "cw5m": 0,
+    "cr": 16873930
+   }
+  },
+  "a9ed1e4ee11d7eed1": {
+   "wf": "wf_68156710-484",
+   "label": null,
+   "phase": null,
+   "calls": 71,
+   "usd": 8.396987399999999,
+   "maxctx": 327708,
+   "first": "2026-11-06T09:33:27.932Z",
+   "last": "2026-11-06T10:20:39.417Z",
+   "desc": "A: активы, пред-листинг",
+   "models": {
+    "claude-sonnet-5-5": 71
+   },
+   "tok": {
+    "in": 142,
+    "out": 104662,
+    "cw1h": 327706,
+    "cw5m": 0,
+    "cr": 16201318
+   }
+  },
+  "aafbcb6694aa1ca2c": {
+   "wf": "wf_6a5b5ed1-122",
+   "label": "Протокол П-39",
+   "phase": "Протокол П-39",
+   "calls": 54,
+   "usd": 8.4175305,
+   "maxctx": 393675,
+   "first": "2026-11-07T09:25:20.137Z",
+   "last": "2026-11-07T09:45:40.660Z",
+   "desc": "Протокол П-39",
+   "models": {
+    "claude-sonnet-5-5": 54
+   },
+   "tok": {
+    "in": 108,
+    "out": 154857,
+    "cw1h": 393673,
+    "cw5m": 0,
+    "cr": 12441045
+   }
+  },
+  "adc16a12329c03765": {
+   "wf": "wf_6a5b5ed1-122",
+   "label": "Счёт поиска C2",
+   "phase": "Счёт поиска",
+   "calls": 130,
+   "usd": 23.4620604,
+   "maxctx": 582197,
+   "first": "2026-11-07T09:45:45.417Z",
+   "last": "2026-11-07T11:01:19.055Z",
+   "desc": "Счёт поиска C2",
+   "models": {
+    "claude-sonnet-5-5": 130
+   },
+   "tok": {
+    "in": 260,
+    "out": 285927,
+    "cw1h": 582195,
+    "cw5m": 0,
+    "cr": 52264018
+   }
+  },
+  "a21de7e9be2263818": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "П-38 r2 редактор",
+   "phase": "Протокол",
+   "calls": 18,
+   "usd": 5.3083683,
+   "maxctx": 318109,
+   "first": "2026-11-07T00:55:41.562Z",
+   "last": "2026-11-07T01:13:34.693Z",
+   "desc": "П-38 r2 редактор",
+   "models": {
+    "claude-sonnet-5-5": 18
+   },
+   "tok": {
+    "in": 36,
+    "out": 158219,
+    "cw1h": 279778,
+    "cw5m": 0,
+    "cr": 4187691
+   }
+  },
+  "a686900916f3c1b81": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "критик: статистика",
+   "phase": "Протокол",
+   "calls": 9,
+   "usd": 2.0866344,
+   "maxctx": 186245,
+   "first": "2026-11-07T00:45:30.998Z",
+   "last": "2026-11-07T00:53:12.991Z",
+   "desc": "критик: статистика",
+   "models": {
+    "claude-sonnet-5-5": 9
+   },
+   "tok": {
+    "in": 18,
+    "out": 55472,
+    "cw1h": 147924,
+    "cw5m": 0,
+    "cr": 1223188
+   }
+  },
+  "a8519d0d9601e2e61": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "критик: финансы",
+   "phase": "Протокол",
+   "calls": 11,
+   "usd": 2.6373594,
+   "maxctx": 187778,
+   "first": "2026-11-07T00:45:28.981Z",
+   "last": "2026-11-07T00:55:37.623Z",
+   "desc": "критик: финансы",
+   "models": {
+    "claude-sonnet-5-5": 11
+   },
+   "tok": {
+    "in": 22,
+    "out": 72739,
+    "cw1h": 187776,
+    "cw5m": 0,
+    "cr": 1398508
+   }
+  },
+  "a9249458b8a3398a2": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "калибровка на формировании",
+   "phase": "Калибровка",
+   "calls": 149,
+   "usd": 22.2406215,
+   "maxctx": 537294,
+   "first": "2026-11-07T01:49:24.211Z",
+   "last": "2026-11-07T02:37:55.735Z",
+   "desc": "калибровка на формировании",
+   "models": {
+    "claude-sonnet-5-5": 149
+   },
+   "tok": {
+    "in": 298,
+    "out": 231448,
+    "cw1h": 498963,
+    "cw5m": 0,
+    "cr": 52580765
+   }
+  },
+  "a995a882828bd76b5": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "ревизия перед окном",
+   "phase": "Ревизия",
+   "calls": 90,
+   "usd": 15.8489175,
+   "maxctx": 516726,
+   "first": "2026-11-07T02:38:00.661Z",
+   "last": "2026-11-07T03:14:33.989Z",
+   "desc": "ревизия перед окном",
+   "models": {
+    "claude-sonnet-5-5": 90
+   },
+   "tok": {
+    "in": 180,
+    "out": 209939,
+    "cw1h": 516724,
+    "cw5m": 0,
+    "cr": 31996495
+   }
+  },
+  "aac8784ba1bf63fa2": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "П-38 протокол и params",
+   "phase": "Протокол",
+   "calls": 33,
+   "usd": 6.8930945999999995,
+   "maxctx": 364233,
+   "first": "2026-11-07T00:24:24.119Z",
+   "last": "2026-11-07T00:45:25.245Z",
+   "desc": "П-38 протокол и params",
+   "models": {
+    "claude-sonnet-5-5": 33
+   },
+   "tok": {
+    "in": 66,
+    "out": 163672,
+    "cw1h": 325902,
+    "cw5m": 0,
+    "cr": 8274682
+   }
+  },
+  "aac94ce5d3353ffa0": {
+   "wf": "wf_6ef18a76-09b",
+   "label": "код C2 и тесты",
+   "phase": "Код",
+   "calls": 74,
+   "usd": 13.8424836,
+   "maxctx": 471239,
+   "first": "2026-11-07T01:13:39.141Z",
+   "last": "2026-11-07T01:49:19.711Z",
+   "desc": "код C2 и тесты",
+   "models": {
+    "claude-sonnet-5-5": 74
+   },
+   "tok": {
+    "in": 148,
+    "out": 247434,
+    "cw1h": 432908,
+    "cw5m": 0,
+    "cr": 25110272
+   }
+  },
+  "a32e2b005b7ac18bd": {
+   "wf": "wf_72af6ee7-d60",
+   "label": "code:simple-returns",
+   "phase": "Write",
+   "calls": 106,
+   "usd": 15.634796099999999,
+   "maxctx": 485312,
+   "first": "2026-11-05T13:52:50.223Z",
+   "last": "2026-11-05T14:37:19.742Z",
+   "desc": "code:simple-returns",
+   "models": {
+    "claude-sonnet-5-5": 106
+   },
+   "tok": {
+    "in": 214,
+    "out": 138738,
+    "cw1h": 446767,
+    "cw5m": 0,
+    "cr": 36241607
+   }
+  },
+  "aafb7bc1a9782daff": {
+   "wf": "wf_72af6ee7-d60",
+   "label": "review:simple-returns",
+   "phase": "Review",
+   "calls": 44,
+   "usd": 4.019202,
+   "maxctx": 226645,
+   "first": "2026-11-05T14:37:30.857Z",
+   "last": "2026-11-05T14:46:08.555Z",
+   "desc": "review:simple-returns",
+   "models": {
+    "claude-sonnet-5-5": 44
+   },
+   "tok": {
+    "in": 88,
+    "out": 40943,
+    "cw1h": 226643,
+    "cw5m": 0,
+    "cr": 6816450
+   }
+  },
+  "a0448b04f134033dd": {
+   "wf": "wf_76c14898-44d",
+   "label": "audit2:L4-data-semantics",
+   "phase": "Аудит",
+   "calls": 10,
+   "usd": 1.2516398999999998,
+   "maxctx": 179402,
+   "first": "2026-11-06T01:51:24.266Z",
+   "last": "2026-11-06T01:52:02.434Z",
+   "desc": "audit2:L4-data-semantics",
+   "models": {
+    "claude-sonnet-5-5": 9,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 18,
+    "out": 3402,
+    "cw1h": 140871,
+    "cw5m": 0,
+    "cr": 1184433
+   }
+  },
+  "a21ac385039baa1c9": {
+   "wf": "wf_76c14898-44d",
+   "label": "audit2:L1-regress",
+   "phase": "Аудит",
+   "calls": 11,
+   "usd": 1.122591,
+   "maxctx": 127445,
+   "first": "2026-11-06T01:51:20.659Z",
+   "last": "2026-11-06T01:52:10.503Z",
+   "desc": "audit2:L1-regress",
+   "models": {
+    "claude-sonnet-5-5": 10,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 20,
+    "out": 4695,
+    "cw1h": 127443,
+    "cw5m": 0,
+    "cr": 958160
+   }
+  },
+  "a3c59c10e46a3e79f": {
+   "wf": "wf_76c14898-44d",
+   "label": "audit2:L2-kernel-fuzz",
+   "phase": "Аудит",
+   "calls": 8,
+   "usd": 1.0665234,
+   "maxctx": 165493,
+   "first": "2026-11-06T01:51:24.969Z",
+   "last": "2026-11-06T01:52:02.034Z",
+   "desc": "audit2:L2-kernel-fuzz",
+   "models": {
+    "claude-sonnet-5-5": 7,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 14,
+    "out": 3799,
+    "cw1h": 126962,
+    "cw5m": 0,
+    "cr": 825748
+   }
+  },
+  "a4543198a3608c85b": {
+   "wf": "wf_76c14898-44d",
+   "label": "audit2:L3-funding",
+   "phase": "Аудит",
+   "calls": 9,
+   "usd": 1.1104311,
+   "maxctx": 164878,
+   "first": "2026-11-06T01:51:23.254Z",
+   "last": "2026-11-06T01:52:03.858Z",
+   "desc": "audit2:L3-funding",
+   "models": {
+    "claude-sonnet-5-5": 8,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 16,
+    "out": 3801,
+    "cw1h": 126347,
+    "cw5m": 0,
+    "cr": 984287
+   }
+  },
+  "acd4ed1c44a4e683f": {
+   "wf": "wf_76c14898-44d",
+   "label": "audit2:L6-traps",
+   "phase": "Аудит",
+   "calls": 11,
+   "usd": 1.016832,
+   "maxctx": 143579,
+   "first": "2026-11-06T01:51:28.339Z",
+   "last": "2026-11-06T01:52:22.176Z",
+   "desc": "audit2:L6-traps",
+   "models": {
+    "claude-sonnet-5-5": 10,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 20,
+    "out": 5479,
+    "cw1h": 105048,
+    "cw5m": 0,
+    "cr": 1014330
+   }
+  },
+  "ad7d5941f7fbacf3d": {
+   "wf": "wf_76c14898-44d",
+   "label": "audit2:L5-stats-e2e",
+   "phase": "Аудит",
+   "calls": 8,
+   "usd": 1.1653308,
+   "maxctx": 181309,
+   "first": "2026-11-06T01:51:25.888Z",
+   "last": "2026-11-06T01:52:03.145Z",
+   "desc": "audit2:L5-stats-e2e",
+   "models": {
+    "claude-sonnet-5-5": 7,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 14,
+    "out": 3100,
+    "cw1h": 142778,
+    "cw5m": 0,
+    "cr": 873736
+   }
+  },
+  "a7ad6dda8d71376db": {
+   "wf": "wf_77affd8d-49d",
+   "label": "review:dump",
+   "phase": "Review",
+   "calls": 23,
+   "usd": 2.6157407999999998,
+   "maxctx": 199146,
+   "first": "2026-11-05T01:04:13.151Z",
+   "last": "2026-11-05T01:10:28.225Z",
+   "desc": "review:dump",
+   "models": {
+    "claude-sonnet-5-5": 23
+   },
+   "tok": {
+    "in": 46,
+    "out": 45060,
+    "cw1h": 160724,
+    "cw5m": 0,
+    "cr": 3251196
+   }
+  },
+  "af310751e14b85b4b": {
+   "wf": "wf_77affd8d-49d",
+   "label": "code:dump",
+   "phase": "Write",
+   "calls": 90,
+   "usd": 15.3946548,
+   "maxctx": 450182,
+   "first": "2026-11-05T00:18:57.910Z",
+   "last": "2026-11-05T01:04:08.918Z",
+   "desc": "code:dump",
+   "models": {
+    "claude-sonnet-5-5": 90
+   },
+   "tok": {
+    "in": 180,
+    "out": 221681,
+    "cw1h": 411637,
+    "cw5m": 0,
+    "cr": 31996926
+   }
+  },
+  "a0925665b2f850677": {
+   "wf": "wf_87997c9e-406",
+   "label": "отчёты",
+   "phase": "Разведка",
+   "calls": 36,
+   "usd": 3.7550592000000003,
+   "maxctx": 241845,
+   "first": "2026-11-05T20:14:51.193Z",
+   "last": "2026-11-05T20:23:52.691Z",
+   "desc": "отчёты",
+   "models": {
+    "claude-sonnet-5-5": 36
+   },
+   "tok": {
+    "in": 72,
+    "out": 46889,
+    "cw1h": 203503,
+    "cw5m": 0,
+    "cr": 6101634
+   }
+  },
+  "a2f20365b80c2e32a": {
+   "wf": "wf_87997c9e-406",
+   "label": "код",
+   "phase": "Разведка",
+   "calls": 46,
+   "usd": 4.632936,
+   "maxctx": 269889,
+   "first": "2026-11-05T20:14:53.527Z",
+   "last": "2026-11-05T20:24:04.860Z",
+   "desc": "код",
+   "models": {
+    "claude-sonnet-5-5": 46
+   },
+   "tok": {
+    "in": 92,
+    "out": 50534,
+    "cw1h": 231547,
+    "cw5m": 0,
+    "cr": 8284560
+   }
+  },
+  "a89670df15c1a9059": {
+   "wf": "wf_87997c9e-406",
+   "label": "протокол",
+   "phase": "Разведка",
+   "calls": 21,
+   "usd": 2.2405203,
+   "maxctx": 165437,
+   "first": "2026-11-05T20:14:48.106Z",
+   "last": "2026-11-05T20:20:56.100Z",
+   "desc": "протокол",
+   "models": {
+    "claude-sonnet-5-5": 21
+   },
+   "tok": {
+    "in": 42,
+    "out": 30366,
+    "cw1h": 165435,
+    "cw5m": 0,
+    "cr": 2640981
+   }
+  },
+  "a99c462602071416b": {
+   "wf": "wf_87997c9e-406",
+   "label": "данные",
+   "phase": "Разведка",
+   "calls": 33,
+   "usd": 3.8619350999999997,
+   "maxctx": 218054,
+   "first": "2026-11-05T20:14:55.510Z",
+   "last": "2026-11-05T20:29:25.267Z",
+   "desc": "данные",
+   "models": {
+    "claude-sonnet-5-5": 33
+   },
+   "tok": {
+    "in": 66,
+    "out": 84735,
+    "cw1h": 179712,
+    "cw5m": 0,
+    "cr": 5041467
+   }
+  },
+  "aabb7e33d93a2e509": {
+   "wf": "wf_87997c9e-406",
+   "label": "планировщик",
+   "phase": "План",
+   "calls": 7,
+   "usd": 2.3134146,
+   "maxctx": 171242,
+   "first": "2026-11-05T20:32:43.132Z",
+   "last": "2026-11-05T20:39:01.278Z",
+   "desc": "планировщик",
+   "models": {
+    "claude-sonnet-5-5": 7
+   },
+   "tok": {
+    "in": 14,
+    "out": 67222,
+    "cw1h": 171240,
+    "cw5m": 0,
+    "cr": 925342
+   }
+  },
+  "adac2b5213a24a785": {
+   "wf": "wf_87997c9e-406",
+   "label": "правка плана",
+   "phase": "Критика",
+   "calls": 2,
+   "usd": 0.9249234000000001,
+   "maxctx": 97943,
+   "first": "2026-11-05T20:45:03.899Z",
+   "last": "2026-11-05T20:49:06.149Z",
+   "desc": "правка плана",
+   "models": {
+    "claude-sonnet-5-5": 2
+   },
+   "tok": {
+    "in": 4,
+    "out": 35226,
+    "cw1h": 59485,
+    "cw5m": 0,
+    "cr": 132038
+   }
+  },
+  "af3eeebd1a2746e79": {
+   "wf": "wf_87997c9e-406",
+   "label": "критик",
+   "phase": "Критика",
+   "calls": 4,
+   "usd": 1.7225348999999999,
+   "maxctx": 160187,
+   "first": "2026-11-05T20:41:32.377Z",
+   "last": "2026-11-05T20:44:51.747Z",
+   "desc": "критик",
+   "models": {
+    "claude-sonnet-5-5": 4
+   },
+   "tok": {
+    "in": 8,
+    "out": 42017,
+    "cw1h": 160185,
+    "cw5m": 0,
+    "cr": 437153
+   }
+  },
+  "a24ff59e5bed7618b": {
+   "wf": "wf_8cd5f6cc-b6e",
+   "label": "F3 слияние",
+   "phase": "Параллельно",
+   "calls": 79,
+   "usd": 6.381048900000001,
+   "maxctx": 233099,
+   "first": "2026-11-05T20:51:09.892Z",
+   "last": "2026-11-05T21:16:01.575Z",
+   "desc": "F3 слияние",
+   "models": {
+    "claude-sonnet-5-5": 79
+   },
+   "tok": {
+    "in": 160,
+    "out": 59055,
+    "cw1h": 233097,
+    "cw5m": 0,
+    "cr": 13653873
+   }
+  },
+  "aac359f80a39a69f3": {
+   "wf": "wf_8cd5f6cc-b6e",
+   "label": "F0b протокол П-37",
+   "phase": "Параллельно",
+   "calls": 44,
+   "usd": 5.745132900000001,
+   "maxctx": 288867,
+   "first": "2026-11-05T20:51:08.604Z",
+   "last": "2026-11-05T21:05:58.714Z",
+   "desc": "F0b протокол П-37",
+   "models": {
+    "claude-sonnet-5-5": 44
+   },
+   "tok": {
+    "in": 88,
+    "out": 102583,
+    "cw1h": 288865,
+    "cw5m": 0,
+    "cr": 8243113
+   }
+  },
+  "abb2340fb74663cf8": {
+   "wf": "wf_8cd5f6cc-b6e",
+   "label": "F1 ворота данных",
+   "phase": "Параллельно",
+   "calls": 134,
+   "usd": 16.615950299999998,
+   "maxctx": 410553,
+   "first": "2026-11-05T20:51:11.638Z",
+   "last": "2026-11-05T21:39:20.047Z",
+   "desc": "F1 ворота данных",
+   "models": {
+    "claude-sonnet-5-5": 134
+   },
+   "tok": {
+    "in": 268,
+    "out": 204363,
+    "cw1h": 410551,
+    "cw5m": 0,
+    "cr": 36954651
+   }
+  },
+  "ac4702c9c399a5ad6": {
+   "wf": "wf_8cd5f6cc-b6e",
+   "label": "F3a базовые бинари",
+   "phase": "Параллельно",
+   "calls": 56,
+   "usd": 4.2345549,
+   "maxctx": 192514,
+   "first": "2026-11-05T20:51:09.466Z",
+   "last": "2026-11-05T21:04:44.086Z",
+   "desc": "F3a базовые бинари",
+   "models": {
+    "claude-sonnet-5-5": 56
+   },
+   "tok": {
+    "in": 112,
+    "out": 44170,
+    "cw1h": 192512,
+    "cw5m": 0,
+    "cr": 8055323
+   }
+  },
+  "af319839d05e49cb8": {
+   "wf": "wf_8cd5f6cc-b6e",
+   "label": "сверка волны 1",
+   "phase": "Сверка",
+   "calls": 61,
+   "usd": 6.3086814,
+   "maxctx": 272103,
+   "first": "2026-11-05T21:39:27.047Z",
+   "last": "2026-11-05T22:03:02.572Z",
+   "desc": "сверка волны 1",
+   "models": {
+    "claude-sonnet-5-5": 61
+   },
+   "tok": {
+    "in": 122,
+    "out": 64344,
+    "cw1h": 272101,
+    "cw5m": 0,
+    "cr": 12368498
+   }
+  },
+  "a62b57bbbbfca627f": {
+   "wf": "wf_97a3b6d9-208",
+   "label": "Проверка обоснования",
+   "phase": "Проверка",
+   "calls": 79,
+   "usd": 8.1784476,
+   "maxctx": 320745,
+   "first": "2026-11-07T10:22:27.984Z",
+   "last": "2026-11-07T10:39:16.584Z",
+   "desc": "Проверка обоснования",
+   "models": {
+    "claude-sonnet-5-5": 79
+   },
+   "tok": {
+    "in": 158,
+    "out": 117670,
+    "cw1h": 320743,
+    "cw5m": 0,
+    "cr": 14961552
+   }
+  },
+  "acdc557ce88a79b6e": {
+   "wf": "wf_97a3b6d9-208",
+   "label": "Обоснование типов",
+   "phase": "Обоснование",
+   "calls": 108,
+   "usd": 19.5366225,
+   "maxctx": 599954,
+   "first": "2026-11-07T09:35:54.209Z",
+   "last": "2026-11-07T10:22:23.428Z",
+   "desc": "Обоснование типов",
+   "models": {
+    "claude-sonnet-5-5": 108
+   },
+   "tok": {
+    "in": 216,
+    "out": 267343,
+    "cw1h": 599952,
+    "cw5m": 0,
+    "cr": 39753725
+   }
+  },
+  "a3fdc636788760e15": {
+   "wf": "wf_9880e983-503",
+   "label": "S1: отбор r3",
+   "phase": "Отбор",
+   "calls": 1,
+   "usd": 0.0,
+   "maxctx": 0,
+   "first": "2026-11-06T01:52:10.139Z",
+   "last": "2026-11-06T01:52:10.139Z",
+   "desc": "S1: отбор r3",
+   "models": {
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 0,
+    "out": 0,
+    "cw1h": 0,
+    "cw5m": 0,
+    "cr": 0
+   }
+  },
+  "a82acad853126cdbb": {
+   "wf": "wf_9880e983-503",
+   "label": "A: активы, пред-листинг",
+   "phase": "Основа",
+   "calls": 11,
+   "usd": 1.4266731000000001,
+   "maxctx": 151202,
+   "first": "2026-11-06T01:50:02.455Z",
+   "last": "2026-11-06T01:52:09.599Z",
+   "desc": "A: активы, пред-листинг",
+   "models": {
+    "claude-sonnet-5-5": 10,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 20,
+    "out": 14555,
+    "cw1h": 151200,
+    "cw5m": 0,
+    "cr": 1003627
+   }
+  },
+  "a8cb3b1946df8a1a2": {
+   "wf": "wf_9880e983-503",
+   "label": "P2: протокол r3.1",
+   "phase": "Основа",
+   "calls": 15,
+   "usd": 1.9847571000000002,
+   "maxctx": 231880,
+   "first": "2026-11-06T01:50:04.994Z",
+   "last": "2026-11-06T01:51:59.686Z",
+   "desc": "P2: протокол r3.1",
+   "models": {
+    "claude-sonnet-5-5": 14,
+    "<synthetic>": 1
+   },
+   "tok": {
+    "in": 28,
+    "out": 10927,
+    "cw1h": 193486,
+    "cw5m": 0,
+    "cr": 2199507
+   }
+  },
+  "ae764ae53a70104c7": {
+   "wf": "wf_a226d344-f95",
+   "label": "Сверка окна C2",
+   "phase": "Сверка",
+   "calls": 73,
+   "usd": 8.5691157,
+   "maxctx": 338051,
+   "first": "2026-11-07T08:53:08.062Z",
+   "last": "2026-11-07T09:10:11.002Z",
+   "desc": "Сверка окна C2",
+   "models": {
+    "claude-sonnet-5-5": 73
+   },
+   "tok": {
+    "in": 146,
+    "out": 126084,
+    "cw1h": 338049,
+    "cw5m": 0,
+    "cr": 15497079
+   }
+  },
+  "afcbaa13dcc5da8db": {
+   "wf": "wf_a226d344-f95",
+   "label": "Отчёт окна C2",
+   "phase": "Отчёт",
+   "calls": 61,
+   "usd": 8.4551421,
+   "maxctx": 374707,
+   "first": "2026-11-07T08:35:06.396Z",
+   "last": "2026-11-07T08:53:02.157Z",
+   "desc": "Отчёт окна C2",
+   "models": {
+    "claude-sonnet-5-5": 61
+   },
+   "tok": {
+    "in": 122,
+    "out": 136120,
+    "cw1h": 374705,
+    "cw5m": 0,
+    "cr": 13882487
+   }
+  },
+  "a1836dc262d717e1b": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L1-01",
+   "phase": "Проверка",
+   "calls": 41,
+   "usd": 4.745133,
+   "maxctx": 255689,
+   "first": "2026-11-06T13:00:05.532Z",
+   "last": "2026-11-06T13:16:53.240Z",
+   "desc": "skeptic:L1-01",
+   "models": {
+    "claude-sonnet-5-5": 41
+   },
+   "tok": {
+    "in": 82,
+    "out": 70042,
+    "cw1h": 217374,
+    "cw5m": 0,
+    "cr": 7966710
+   }
+  },
+  "a346d11bd59f575c3": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L6-03",
+   "phase": "Проверка",
+   "calls": 28,
+   "usd": 3.0555174,
+   "maxctx": 202358,
+   "first": "2026-11-06T13:54:27.016Z",
+   "last": "2026-11-06T14:02:38.096Z",
+   "desc": "skeptic:L6-03",
+   "models": {
+    "claude-sonnet-5-5": 28
+   },
+   "tok": {
+    "in": 56,
+    "out": 55518,
+    "cw1h": 164043,
+    "cw5m": 0,
+    "cr": 4127738
+   }
+  },
+  "a4dfe18d0a2222369": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L6-04",
+   "phase": "Проверка",
+   "calls": 34,
+   "usd": 2.8640300999999995,
+   "maxctx": 176338,
+   "first": "2026-11-06T13:54:22.710Z",
+   "last": "2026-11-06T14:00:58.641Z",
+   "desc": "skeptic:L6-04",
+   "models": {
+    "claude-sonnet-5-5": 34
+   },
+   "tok": {
+    "in": 68,
+    "out": 44217,
+    "cw1h": 138023,
+    "cw5m": 0,
+    "cr": 4574777
+   }
+  },
+  "a549d80f028879db0": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L6-02",
+   "phase": "Проверка",
+   "calls": 38,
+   "usd": 3.3482955,
+   "maxctx": 194763,
+   "first": "2026-11-06T13:54:20.992Z",
+   "last": "2026-11-06T14:03:09.652Z",
+   "desc": "skeptic:L6-02",
+   "models": {
+    "claude-sonnet-5-5": 38
+   },
+   "tok": {
+    "in": 76,
+    "out": 50773,
+    "cw1h": 156448,
+    "cw5m": 0,
+    "cr": 5492615
+   }
+  },
+  "a65b56e01c215fc77": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L5-03",
+   "phase": "Проверка",
+   "calls": 43,
+   "usd": 4.426403400000001,
+   "maxctx": 233437,
+   "first": "2026-11-06T15:06:52.211Z",
+   "last": "2026-11-06T15:30:22.882Z",
+   "desc": "skeptic:L5-03",
+   "models": {
+    "claude-sonnet-5-5": 43
+   },
+   "tok": {
+    "in": 86,
+    "out": 72507,
+    "cw1h": 195122,
+    "cw5m": 0,
+    "cr": 7226028
+   }
+  },
+  "a6c7ce4f2249184c2": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L4-01",
+   "phase": "Проверка",
+   "calls": 50,
+   "usd": 4.7715336,
+   "maxctx": 238998,
+   "first": "2026-11-06T13:04:27.411Z",
+   "last": "2026-11-06T13:19:18.780Z",
+   "desc": "skeptic:L4-01",
+   "models": {
+    "claude-sonnet-5-5": 50
+   },
+   "tok": {
+    "in": 102,
+    "out": 67576,
+    "cw1h": 200683,
+    "cw5m": 0,
+    "cr": 8511632
+   }
+  },
+  "a6edffca90fdd2c53": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L3-01",
+   "phase": "Проверка",
+   "calls": 53,
+   "usd": 5.298524400000001,
+   "maxctx": 230120,
+   "first": "2026-11-06T12:55:46.776Z",
+   "last": "2026-11-06T13:11:54.624Z",
+   "desc": "skeptic:L3-01",
+   "models": {
+    "claude-sonnet-5-5": 53
+   },
+   "tok": {
+    "in": 106,
+    "out": 85401,
+    "cw1h": 230118,
+    "cw5m": 0,
+    "cr": 8788278
+   }
+  },
+  "a77de03b47352fc69": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L5-01",
+   "phase": "Проверка",
+   "calls": 75,
+   "usd": 7.773723899999999,
+   "maxctx": 293777,
+   "first": "2026-11-06T15:06:48.375Z",
+   "last": "2026-11-06T15:24:50.423Z",
+   "desc": "skeptic:L5-01",
+   "models": {
+    "claude-sonnet-5-5": 75
+   },
+   "tok": {
+    "in": 150,
+    "out": 102742,
+    "cw1h": 255462,
+    "cw5m": 0,
+    "cr": 15664573
+   }
+  },
+  "a786a97346a26597c": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L6-01",
+   "phase": "Проверка",
+   "calls": 41,
+   "usd": 3.8956212000000003,
+   "maxctx": 207183,
+   "first": "2026-11-06T13:54:18.978Z",
+   "last": "2026-11-06T14:05:37.026Z",
+   "desc": "skeptic:L6-01",
+   "models": {
+    "claude-sonnet-5-5": 41
+   },
+   "tok": {
+    "in": 82,
+    "out": 71448,
+    "cw1h": 168868,
+    "cw5m": 0,
+    "cr": 6034824
+   }
+  },
+  "a7d64a632874d8d18": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "audit2:L2-kernel-fuzz",
+   "phase": "Аудит",
+   "calls": 94,
+   "usd": 13.327931099999999,
+   "maxctx": 419415,
+   "first": "2026-11-06T13:19:23.170Z",
+   "last": "2026-11-06T13:54:59.729Z",
+   "desc": "audit2:L2-kernel-fuzz",
+   "models": {
+    "claude-sonnet-5-5": 94
+   },
+   "tok": {
+    "in": 188,
+    "out": 198725,
+    "cw1h": 380884,
+    "cw5m": 0,
+    "cr": 26870627
+   }
+  },
+  "a80f7e7617b549db4": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "audit2:L5-stats-e2e",
+   "phase": "Аудит",
+   "calls": 125,
+   "usd": 18.5003949,
+   "maxctx": 508313,
+   "first": "2026-11-06T13:19:26.518Z",
+   "last": "2026-11-06T15:06:38.326Z",
+   "desc": "audit2:L5-stats-e2e",
+   "models": {
+    "claude-sonnet-5-5": 125
+   },
+   "tok": {
+    "in": 252,
+    "out": 212459,
+    "cw1h": 469782,
+    "cw5m": 0,
+    "cr": 41646873
+   }
+  },
+  "aa55bc03ca730ce92": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "audit2:L6-traps",
+   "phase": "Аудит",
+   "calls": 81,
+   "usd": 11.739660899999999,
+   "maxctx": 430543,
+   "first": "2026-11-06T13:19:26.994Z",
+   "last": "2026-11-06T13:54:12.697Z",
+   "desc": "audit2:L6-traps",
+   "models": {
+    "claude-sonnet-5-5": 81
+   },
+   "tok": {
+    "in": 162,
+    "out": 170229,
+    "cw1h": 392012,
+    "cw5m": 0,
+    "cr": 22778893
+   }
+  },
+  "abd6ce70b45b52d7d": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L5-04",
+   "phase": "Проверка",
+   "calls": 14,
+   "usd": 1.5833028,
+   "maxctx": 148761,
+   "first": "2026-11-06T15:06:49.309Z",
+   "last": "2026-11-06T15:11:10.149Z",
+   "desc": "skeptic:L5-04",
+   "models": {
+    "claude-sonnet-5-5": 14
+   },
+   "tok": {
+    "in": 28,
+    "out": 28778,
+    "cw1h": 110446,
+    "cw5m": 0,
+    "cr": 1629576
+   }
+  },
+  "ad382efa18cae5ec3": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "audit2:L3-funding",
+   "phase": "Аудит",
+   "calls": 93,
+   "usd": 12.6662901,
+   "maxctx": 441700,
+   "first": "2026-11-06T12:25:15.634Z",
+   "last": "2026-11-06T12:55:36.337Z",
+   "desc": "audit2:L3-funding",
+   "models": {
+    "claude-sonnet-5-5": 93
+   },
+   "tok": {
+    "in": 188,
+    "out": 163100,
+    "cw1h": 403169,
+    "cw5m": 0,
+    "cr": 26000707
+   }
+  },
+  "ad60048fa4643050b": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "audit2:L1-regress",
+   "phase": "Аудит",
+   "calls": 92,
+   "usd": 14.2242831,
+   "maxctx": 500299,
+   "first": "2026-11-06T12:25:13.035Z",
+   "last": "2026-11-06T13:00:01.629Z",
+   "desc": "audit2:L1-regress",
+   "models": {
+    "claude-sonnet-5-5": 92
+   },
+   "tok": {
+    "in": 184,
+    "out": 147538,
+    "cw1h": 500297,
+    "cw5m": 0,
+    "cr": 30029597
+   }
+  },
+  "ad940e3b0a06d5bfb": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L5-02",
+   "phase": "Проверка",
+   "calls": 25,
+   "usd": 2.8178319,
+   "maxctx": 210656,
+   "first": "2026-11-06T15:06:51.264Z",
+   "last": "2026-11-06T15:13:46.429Z",
+   "desc": "skeptic:L5-02",
+   "models": {
+    "claude-sonnet-5-5": 25
+   },
+   "tok": {
+    "in": 50,
+    "out": 39614,
+    "cw1h": 172341,
+    "cw5m": 0,
+    "cr": 3964753
+   }
+  },
+  "ae125d44dbeb17e8a": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "skeptic:L5-05",
+   "phase": "Проверка",
+   "calls": 47,
+   "usd": 4.4036655,
+   "maxctx": 225280,
+   "first": "2026-11-06T15:06:47.484Z",
+   "last": "2026-11-06T15:19:16.999Z",
+   "desc": "skeptic:L5-05",
+   "models": {
+    "claude-sonnet-5-5": 47
+   },
+   "tok": {
+    "in": 94,
+    "out": 59044,
+    "cw1h": 186965,
+    "cw5m": 0,
+    "cr": 7986445
+   }
+  },
+  "ae2404f7b613f7cce": {
+   "wf": "wf_a77afef5-1ce",
+   "label": "audit2:L4-data-semantics",
+   "phase": "Аудит",
+   "calls": 117,
+   "usd": 14.702397900000001,
+   "maxctx": 453345,
+   "first": "2026-11-06T12:25:16.580Z",
+   "last": "2026-11-06T13:04:20.920Z",
+   "desc": "audit2:L4-data-semantics",
+   "models": {
+    "claude-sonnet-5-5": 117
+   },
+   "tok": {
+    "in": 236,
+    "out": 163645,
+    "cw1h": 414814,
+    "cw5m": 0,
+    "cr": 32527103
+   }
+  },
+  "a1e0b6f1179cec70f": {
+   "wf": "wf_aca0fb5c-83d",
+   "label": "П-38 протокол и params",
+   "phase": "Протокол",
+   "calls": 30,
+   "usd": 3.7592117999999997,
+   "maxctx": 265407,
+   "first": "2026-11-07T00:10:58.952Z",
+   "last": "2026-11-07T00:17:41.123Z",
+   "desc": "П-38 протокол и params",
+   "models": {
+    "claude-sonnet-5-5": 30
+   },
+   "tok": {
+    "in": 60,
+    "out": 46646,
+    "cw1h": 227076,
+    "cw5m": 0,
+    "cr": 5656286
+   }
+  },
+  "afcc6b8c81f6c5f40": {
+   "wf": "wf_b5d1ee09-036",
+   "label": "П-38 протокол и params",
+   "phase": "Протокол",
+   "calls": 11,
+   "usd": 1.2678567,
+   "maxctx": 172839,
+   "first": "2026-11-07T00:19:55.199Z",
+   "last": "2026-11-07T00:20:46.805Z",
+   "desc": "П-38 протокол и params",
+   "models": {
+    "claude-sonnet-5-5": 11
+   },
+   "tok": {
+    "in": 22,
+    "out": 3323,
+    "cw1h": 134508,
+    "cw5m": 0,
+    "cr": 1369659
+   }
+  },
+  "a218b4f0ef65f1cbc": {
+   "wf": "wf_cc42e25f-104",
+   "label": "audit:episodes",
+   "phase": "Audit",
+   "calls": 23,
+   "usd": 2.2052796,
+   "maxctx": 152534,
+   "first": "2026-11-04T23:21:01.204Z",
+   "last": "2026-11-04T23:40:25.623Z",
+   "desc": "audit:episodes",
+   "models": {
+    "claude-sonnet-5-5": 23
+   },
+   "tok": {
+    "in": 46,
+    "out": 31310,
+    "cw1h": 152532,
+    "cw5m": 0,
+    "cr": 2734332
+   }
+  },
+  "a69b0eadbd1cc01d3": {
+   "wf": "wf_cc42e25f-104",
+   "label": "audit:triggers",
+   "phase": "Audit",
+   "calls": 29,
+   "usd": 2.9247503999999998,
+   "maxctx": 176608,
+   "first": "2026-11-04T23:21:06.035Z",
+   "last": "2026-11-04T23:58:27.846Z",
+   "desc": "audit:triggers",
+   "models": {
+    "claude-sonnet-5-5": 29
+   },
+   "tok": {
+    "in": 58,
+    "out": 61620,
+    "cw1h": 138091,
+    "cw5m": 0,
+    "cr": 3905768
+   }
+  },
+  "a21f45fbeb7a2b375": {
+   "wf": "wf_d49143c7-91f",
+   "label": "A: активы, пред-листинг",
+   "phase": "Основа",
+   "calls": 98,
+   "usd": 11.225764199999999,
+   "maxctx": 363856,
+   "first": "2026-11-06T12:25:11.880Z",
+   "last": "2026-11-06T12:49:30.038Z",
+   "desc": "A: активы, пред-листинг",
+   "models": {
+    "claude-sonnet-5-5": 98
+   },
+   "tok": {
+    "in": 196,
+    "out": 130526,
+    "cw1h": 363854,
+    "cw5m": 0,
+    "cr": 23613874
+   }
+  },
+  "a816b10117debbe12": {
+   "wf": "wf_d49143c7-91f",
+   "label": "S3: контроли и срезы",
+   "phase": "Контроли",
+   "calls": 125,
+   "usd": 20.756651100000003,
+   "maxctx": 541545,
+   "first": "2026-11-06T13:36:52.949Z",
+   "last": "2026-11-06T14:20:07.471Z",
+   "desc": "S3: контроли и срезы",
+   "models": {
+    "claude-sonnet-5-5": 125
+   },
+   "tok": {
+    "in": 250,
+    "out": 247455,
+    "cw1h": 503151,
+    "cw5m": 0,
+    "cr": 46750567
+   }
+  },
+  "ad51b6624b3f2901d": {
+   "wf": "wf_d49143c7-91f",
+   "label": "S1: отбор r3",
+   "phase": "Отбор",
+   "calls": 135,
+   "usd": 21.478940100000003,
+   "maxctx": 545223,
+   "first": "2026-11-06T12:49:38.486Z",
+   "last": "2026-11-06T13:36:47.081Z",
+   "desc": "S1: отбор r3",
+   "models": {
+    "claude-sonnet-5-5": 135
+   },
+   "tok": {
+    "in": 270,
+    "out": 240625,
+    "cw1h": 506829,
+    "cw5m": 0,
+    "cr": 49425937
+   }
+  },
+  "a343eb14946efdeb8": {
+   "wf": "wf_d7c93a02-03d",
+   "label": "analyse:G",
+   "phase": "Analyse",
+   "calls": 41,
+   "usd": 6.124583400000001,
+   "maxctx": 301580,
+   "first": "2026-11-05T13:27:08.279Z",
+   "last": "2026-11-05T13:50:28.811Z",
+   "desc": "analyse:G",
+   "models": {
+    "claude-sonnet-5-5": 41
+   },
+   "tok": {
+    "in": 88,
+    "out": 141407,
+    "cw1h": 301578,
+    "cw5m": 0,
+    "cr": 7312488
+   }
+  },
+  "a8b2e1cb8e41bde5d": {
+   "wf": "wf_d7c93a02-03d",
+   "label": "analyse:F",
+   "phase": "Analyse",
+   "calls": 39,
+   "usd": 5.363835900000001,
+   "maxctx": 263426,
+   "first": "2026-11-05T13:27:08.741Z",
+   "last": "2026-11-05T13:51:03.820Z",
+   "desc": "analyse:F",
+   "models": {
+    "claude-sonnet-5-5": 39
+   },
+   "tok": {
+    "in": 80,
+    "out": 122452,
+    "cw1h": 263424,
+    "cw5m": 0,
+    "cr": 6487573
+   }
+  },
+  "a23e1a7450ae12fc7": {
+   "wf": "wf_daf88851-d53",
+   "label": "code:B",
+   "phase": "Write",
+   "calls": 107,
+   "usd": 14.4297825,
+   "maxctx": 416275,
+   "first": "2026-11-05T10:10:18.224Z",
+   "last": "2026-11-05T10:45:17.362Z",
+   "desc": "code:B",
+   "models": {
+    "claude-sonnet-5-5": 107
+   },
+   "tok": {
+    "in": 216,
+    "out": 146674,
+    "cw1h": 377730,
+    "cw5m": 0,
+    "cr": 33208815
+   }
+  },
+  "a736a7dadecdb7ce8": {
+   "wf": "wf_daf88851-d53",
+   "label": "review:B",
+   "phase": "Review",
+   "calls": 29,
+   "usd": 3.7279805999999995,
+   "maxctx": 240478,
+   "first": "2026-11-05T10:45:24.192Z",
+   "last": "2026-11-05T10:54:11.411Z",
+   "desc": "review:B",
+   "models": {
+    "claude-sonnet-5-5": 29
+   },
+   "tok": {
+    "in": 58,
+    "out": 54731,
+    "cw1h": 240476,
+    "cw5m": 0,
+    "cr": 4879952
+   }
+  },
+  "ace7a2b6e7ab836c4": {
+   "wf": "wf_daf88851-d53",
+   "label": "code:A",
+   "phase": "Write",
+   "calls": 140,
+   "usd": 25.1188743,
+   "maxctx": 573895,
+   "first": "2026-11-05T10:10:09.435Z",
+   "last": "2026-11-05T10:59:35.317Z",
+   "desc": "code:A",
+   "models": {
+    "claude-sonnet-5-5": 140
+   },
+   "tok": {
+    "in": 280,
+    "out": 285067,
+    "cw1h": 573893,
+    "cw5m": 0,
+    "cr": 57995571
+   }
+  },
+  "ae4590843dd4b3310": {
+   "wf": "wf_daf88851-d53",
+   "label": "review:A",
+   "phase": "Review",
+   "calls": 36,
+   "usd": 5.1222294,
+   "maxctx": 333490,
+   "first": "2026-11-05T10:59:39.780Z",
+   "last": "2026-11-05T11:11:10.315Z",
+   "desc": "review:A",
+   "models": {
+    "claude-sonnet-5-5": 36
+   },
+   "tok": {
+    "in": 72,
+    "out": 77116,
+    "cw1h": 295068,
+    "cw5m": 0,
+    "cr": 7316218
+   }
+  },
+  "aea579792a3132fb6": {
+   "wf": "wf_daf88851-d53",
+   "label": "fix:B",
+   "phase": "Fix",
+   "calls": 38,
+   "usd": 3.4660815,
+   "maxctx": 198873,
+   "first": "2026-11-05T10:54:19.221Z",
+   "last": "2026-11-05T11:09:33.442Z",
+   "desc": "fix:B",
+   "models": {
+    "claude-sonnet-5-5": 38
+   },
+   "tok": {
+    "in": 78,
+    "out": 48572,
+    "cw1h": 160328,
+    "cw5m": 0,
+    "cr": 5917665
+   }
+  },
+  "a132d16bbb8d418d0": {
+   "wf": "wf_dfe7f9c5-110",
+   "label": "S: пересчёт отбора",
+   "phase": "Отбор",
+   "calls": 219,
+   "usd": 41.5819014,
+   "maxctx": 758159,
+   "first": "2026-11-06T20:15:02.688Z",
+   "last": "2026-11-06T21:55:44.258Z",
+   "desc": "S: пересчёт отбора",
+   "models": {
+    "claude-sonnet-5-5": 219
+   },
+   "tok": {
+    "in": 438,
+    "out": 343752,
+    "cw1h": 719753,
+    "cw5m": 0,
+    "cr": 107019298
+   }
+  },
+  "a278f6c23264372f2": {
+   "wf": "wf_dfe7f9c5-110",
+   "label": "P: протокол r3.2",
+   "phase": "Основа",
+   "calls": 73,
+   "usd": 12.9901578,
+   "maxctx": 456103,
+   "first": "2026-11-06T15:32:48.925Z",
+   "last": "2026-11-06T15:58:19.717Z",
+   "desc": "P: протокол r3.2",
+   "models": {
+    "claude-sonnet-5-5": 73
+   },
+   "tok": {
+    "in": 146,
+    "out": 207203,
+    "cw1h": 456101,
+    "cw5m": 0,
+    "cr": 23816896
+   }
+  },
+  "a3120178580627841": {
+   "wf": "wf_dfe7f9c5-110",
+   "label": "ST: статистика статуса",
+   "phase": "Основа",
+   "calls": 57,
+   "usd": 8.0842188,
+   "maxctx": 352169,
+   "first": "2026-11-06T15:32:52.215Z",
+   "last": "2026-11-06T15:56:16.847Z",
+   "desc": "ST: статистика статуса",
+   "models": {
+    "claude-sonnet-5-5": 57
+   },
+   "tok": {
+    "in": 114,
+    "out": 135008,
+    "cw1h": 313763,
+    "cw5m": 0,
+    "cr": 13920596
+   }
+  },
+  "ab89cb69e456682fd": {
+   "wf": "wf_dfe7f9c5-110",
+   "label": "R: предсчётная ревизия",
+   "phase": "Ревизия",
+   "calls": 171,
+   "usd": 20.9625432,
+   "maxctx": 494700,
+   "first": "2026-11-06T22:50:07.048Z",
+   "last": "2026-11-06T23:34:04.101Z",
+   "desc": "R: предсчётная ревизия",
+   "models": {
+    "claude-sonnet-5-5": 171
+   },
+   "tok": {
+    "in": 342,
+    "out": 185642,
+    "cw1h": 456294,
+    "cw5m": 0,
+    "cr": 51463744
+   }
+  },
+  "ac08ed7a7ef3dda52": {
+   "wf": "wf_dfe7f9c5-110",
+   "label": "K: ядро и PGO",
+   "phase": "Основа",
+   "calls": 295,
+   "usd": 48.085965,
+   "maxctx": 699166,
+   "first": "2026-11-06T15:32:49.814Z",
+   "last": "2026-11-06T20:14:56.938Z",
+   "desc": "K: ядро и PGO",
+   "models": {
+    "claude-sonnet-5-5": 295
+   },
+   "tok": {
+    "in": 590,
+    "out": 323639,
+    "cw1h": 660760,
+    "cw5m": 0,
+    "cr": 130883500
+   }
+  },
+  "ac09b1316bbfa5b53": {
+   "wf": "wf_dfe7f9c5-110",
+   "label": "F: подготовка F8",
+   "phase": "F8",
+   "calls": 170,
+   "usd": 27.415919099999996,
+   "maxctx": 600623,
+   "first": "2026-11-06T21:55:49.267Z",
+   "last": "2026-11-06T22:50:01.096Z",
+   "desc": "F: подготовка F8",
+   "models": {
+    "claude-sonnet-5-5": 170
+   },
+   "tok": {
+    "in": 340,
+    "out": 293600,
+    "cw1h": 562217,
+    "cw5m": 0,
+    "cr": 65458657
+   }
+  },
+  "a438750588ef58c1b": {
+   "wf": "wf_e1f2a18f-2af",
+   "label": "code:filter",
+   "phase": "Write",
+   "calls": 118,
+   "usd": 17.5190895,
+   "maxctx": 476242,
+   "first": "2026-11-05T01:16:26.983Z",
+   "last": "2026-11-05T02:00:07.162Z",
+   "desc": "code:filter",
+   "models": {
+    "claude-sonnet-5-5": 118
+   },
+   "tok": {
+    "in": 236,
+    "out": 231594,
+    "cw1h": 437697,
+    "cw5m": 0,
+    "cr": 38060965
+   }
+  },
+  "acaeec3b956746d14": {
+   "wf": "wf_e1f2a18f-2af",
+   "label": "review:filter",
+   "phase": "Review",
+   "calls": 44,
+   "usd": 5.009081699999999,
+   "maxctx": 275566,
+   "first": "2026-11-05T02:00:11.174Z",
+   "last": "2026-11-05T02:10:52.376Z",
+   "desc": "review:filter",
+   "models": {
+    "claude-sonnet-5-5": 44
+   },
+   "tok": {
+    "in": 88,
+    "out": 74524,
+    "cw1h": 237144,
+    "cw5m": 0,
+    "cr": 8226979
+   }
+  },
+  "a3d941e81f6c8088f": {
+   "wf": "wf_e3b20a00-8e4",
+   "label": "Gate загрузка",
+   "phase": "Gate",
+   "calls": 142,
+   "usd": 20.452458,
+   "maxctx": 493243,
+   "first": "2026-11-07T00:10:58.184Z",
+   "last": "2026-11-07T01:31:13.393Z",
+   "desc": "Gate загрузка",
+   "models": {
+    "claude-sonnet-5-5": 142
+   },
+   "tok": {
+    "in": 284,
+    "out": 234215,
+    "cw1h": 493241,
+    "cw5m": 0,
+    "cr": 46596450
+   }
+  },
+  "a10fc82e7ad96875c": {
+   "wf": "wf_e7d9e801-ccd",
+   "label": "review:V",
+   "phase": "Review",
+   "calls": 12,
+   "usd": 2.3855295,
+   "maxctx": 200345,
+   "first": "2026-11-04T22:13:55.374Z",
+   "last": "2026-11-04T22:20:58.776Z",
+   "desc": "review:V",
+   "models": {
+    "claude-sonnet-5-5": 12
+   },
+   "tok": {
+    "in": 24,
+    "out": 52337,
+    "cw1h": 200343,
+    "cw5m": 0,
+    "cr": 1327815
+   }
+  },
+  "a9659bdabde713a2f": {
+   "wf": "wf_e7d9e801-ccd",
+   "label": "code:R",
+   "phase": "Write",
+   "calls": 83,
+   "usd": 15.3366126,
+   "maxctx": 476249,
+   "first": "2026-11-04T21:35:11.405Z",
+   "last": "2026-11-04T22:20:10.823Z",
+   "desc": "code:R",
+   "models": {
+    "claude-sonnet-5-5": 83
+   },
+   "tok": {
+    "in": 168,
+    "out": 251756,
+    "cw1h": 476247,
+    "cw5m": 0,
+    "cr": 29007622
+   }
+  },
+  "a9d9bab2e58d67669": {
+   "wf": "wf_e7d9e801-ccd",
+   "label": "review:R",
+   "phase": "Review",
+   "calls": 22,
+   "usd": 3.7343916,
+   "maxctx": 265662,
+   "first": "2026-11-04T22:20:15.125Z",
+   "last": "2026-11-04T22:32:48.613Z",
+   "desc": "review:R",
+   "models": {
+    "claude-sonnet-5-5": 22
+   },
+   "tok": {
+    "in": 44,
+    "out": 91264,
+    "cw1h": 227218,
+    "cw5m": 0,
+    "cr": 3339972
+   }
+  },
+  "ad3e4d2f4beca416a": {
+   "wf": "wf_e7d9e801-ccd",
+   "label": "fix:R",
+   "phase": "Fix",
+   "calls": 34,
+   "usd": 2.6578647,
+   "maxctx": 166362,
+   "first": "2026-11-04T22:32:58.977Z",
+   "last": "2026-11-04T22:44:55.573Z",
+   "desc": "fix:R",
+   "models": {
+    "claude-sonnet-5-5": 34
+   },
+   "tok": {
+    "in": 68,
+    "out": 35748,
+    "cw1h": 127745,
+    "cw5m": 0,
+    "cr": 4516569
+   }
+  },
+  "ae670d6833cc28333": {
+   "wf": "wf_e7d9e801-ccd",
+   "label": "code:V",
+   "phase": "Write",
+   "calls": 74,
+   "usd": 10.4941284,
+   "maxctx": 349488,
+   "first": "2026-11-04T21:35:20.503Z",
+   "last": "2026-11-04T22:13:46.833Z",
+   "desc": "code:V",
+   "models": {
+    "claude-sonnet-5-5": 74
+   },
+   "tok": {
+    "in": 150,
+    "out": 185285,
+    "cw1h": 310871,
+    "cw5m": 0,
+    "cr": 19497258
+   }
+  },
+  "abb88e874da98e79b": {
+   "wf": "wf_ed51a2df-1e5",
+   "label": "критик отчёта",
+   "phase": "Критик",
+   "calls": 47,
+   "usd": 6.209950199999999,
+   "maxctx": 275240,
+   "first": "2026-11-07T00:24:51.960Z",
+   "last": "2026-11-07T00:38:31.111Z",
+   "desc": "критик отчёта",
+   "models": {
+    "claude-sonnet-5-5": 47
+   },
+   "tok": {
+    "in": 94,
+    "out": 111202,
+    "cw1h": 275238,
+    "cw5m": 0,
+    "cr": 9634034
+   }
+  },
+  "ad1d134fffb6e945e": {
+   "wf": "wf_ed51a2df-1e5",
+   "label": "разбор кандидата B1 bingx",
+   "phase": "Сверка",
+   "calls": 63,
+   "usd": 8.4765366,
+   "maxctx": 347755,
+   "first": "2026-11-06T23:46:49.907Z",
+   "last": "2026-11-07T00:20:13.065Z",
+   "desc": "разбор кандидата B1 bingx",
+   "models": {
+    "claude-sonnet-5-5": 63
+   },
+   "tok": {
+    "in": 126,
+    "out": 140104,
+    "cw1h": 347753,
+    "cw5m": 0,
+    "cr": 14293602
+   }
+  },
+  "add6fd3bc755bbb06": {
+   "wf": "wf_ed51a2df-1e5",
+   "label": "сверка выходов F8",
+   "phase": "Сверка",
+   "calls": 87,
+   "usd": 11.1996294,
+   "maxctx": 382434,
+   "first": "2026-11-06T23:46:49.360Z",
+   "last": "2026-11-07T00:07:15.927Z",
+   "desc": "сверка выходов F8",
+   "models": {
+    "claude-sonnet-5-5": 87
+   },
+   "tok": {
+    "in": 174,
+    "out": 145403,
+    "cw1h": 382432,
+    "cw5m": 0,
+    "cr": 22411568
+   }
+  },
+  "afe14942263223d36": {
+   "wf": "wf_ed51a2df-1e5",
+   "label": "отчёт F10",
+   "phase": "Отчёт",
+   "calls": 12,
+   "usd": 1.9198419,
+   "maxctx": 153172,
+   "first": "2026-11-07T00:20:21.422Z",
+   "last": "2026-11-07T00:24:47.435Z",
+   "desc": "отчёт F10",
+   "models": {
+    "claude-sonnet-5-5": 12
+   },
+   "tok": {
+    "in": 24,
+    "out": 39312,
+    "cw1h": 153170,
+    "cw5m": 0,
+    "cr": 1370233
+   }
+  },
+  "a007549a87473b3ea": {
+   "wf": "wf_ee184859-d77",
+   "label": "крипта H2 H3 H6",
+   "phase": "Формирование",
+   "calls": 34,
+   "usd": 5.0532936,
+   "maxctx": 264788,
+   "first": "2026-11-07T00:05:22.516Z",
+   "last": "2026-11-07T00:23:43.405Z",
+   "desc": "крипта H2 H3 H6",
+   "models": {
+    "claude-sonnet-5-5": 34
+   },
+   "tok": {
+    "in": 68,
+    "out": 117107,
+    "cw1h": 264786,
+    "cw5m": 0,
+    "cr": 5692562
+   }
+  },
+  "ad1ef805df288bbdf": {
+   "wf": "wf_ee184859-d77",
+   "label": "HK-акции H1, фандинг H7",
+   "phase": "Формирование",
+   "calls": 30,
+   "usd": 4.1855307,
+   "maxctx": 233685,
+   "first": "2026-11-07T00:05:25.575Z",
+   "last": "2026-11-07T00:18:15.848Z",
+   "desc": "HK-акции H1, фандинг H7",
+   "models": {
+    "claude-sonnet-5-5": 30
+   },
+   "tok": {
+    "in": 60,
+    "out": 106052,
+    "cw1h": 195393,
+    "cw5m": 0,
+    "cr": 4740709
+   }
+  },
+  "a12a9816d95f49863": {
+   "wf": "wf_f11b12a4-35f",
+   "label": "review:ignitions",
+   "phase": "Review",
+   "calls": 26,
+   "usd": 3.1436154,
+   "maxctx": 222052,
+   "first": "2026-11-05T13:11:13.567Z",
+   "last": "2026-11-05T13:19:05.344Z",
+   "desc": "review:ignitions",
+   "models": {
+    "claude-sonnet-5-5": 26
+   },
+   "tok": {
+    "in": 52,
+    "out": 53631,
+    "cw1h": 183630,
+    "cw5m": 0,
+    "cr": 4124048
+   }
+  },
+  "a64ce78aac2a2c192": {
+   "wf": "wf_f11b12a4-35f",
+   "label": "code:ignitions",
+   "phase": "Write",
+   "calls": 91,
+   "usd": 13.2648846,
+   "maxctx": 423323,
+   "first": "2026-11-05T12:30:11.463Z",
+   "last": "2026-11-05T13:11:08.968Z",
+   "desc": "code:ignitions",
+   "models": {
+    "claude-sonnet-5-5": 91
+   },
+   "tok": {
+    "in": 182,
+    "out": 162115,
+    "cw1h": 384778,
+    "cw5m": 0,
+    "cr": 28413152
+   }
+  }
+ },
+ "agents_by_hour_usd": {
+  "2026-11-04T21": 14.8073889,
+  "2026-11-04T22": 26.0284158,
+  "2026-11-04T23": 13.1039943,
+  "2026-11-05T00": 28.5488799,
+  "2026-11-05T01": 45.7565532,
+  "2026-11-05T02": 22.6114884,
+  "2026-11-05T10": 46.266759,
+  "2026-11-05T11": 12.911275199999999,
+  "2026-11-05T12": 26.887243499999997,
+  "2026-11-05T13": 21.1036377,
+  "2026-11-05T14": 15.4062951,
+  "2026-11-05T15": 11.592363899999999,
+  "2026-11-05T17": 30.747687600000003,
+  "2026-11-05T18": 3.9528972,
+  "2026-11-05T20": 32.5980804,
+  "2026-11-05T21": 25.8960846,
+  "2026-11-05T22": 40.8342597,
+  "2026-11-05T23": 72.14984850000002,
+  "2026-11-06T00": 62.82474930000001,
+  "2026-11-06T01": 30.826215599999998,
+  "2026-11-06T09": 53.44818660000001,
+  "2026-11-06T10": 18.3808257,
+  "2026-11-06T12": 62.25270929999999,
+  "2026-11-06T13": 88.11922499999999,
+  "2026-11-06T14": 99.4779753,
+  "2026-11-06T15": 76.7976159,
+  "2026-11-06T16": 10.8699882,
+  "2026-11-06T17": 8.3944545,
+  "2026-11-06T18": 7.1170218,
+  "2026-11-06T19": 5.8330218,
+  "2026-11-06T20": 25.9852641,
+  "2026-11-06T21": 21.576671999999995,
+  "2026-11-06T22": 27.076613099999996,
+  "2026-11-06T23": 31.451681100000002,
+  "2026-11-07T00": 57.01170810000001,
+  "2026-11-07T01": 32.3373231,
+  "2026-11-07T02": 25.0605756,
+  "2026-11-07T03": 46.5274737,
+  "2026-11-07T04": 9.6961032,
+  "2026-11-07T05": 27.4564227,
+  "2026-11-07T06": 22.387867800000002,
+  "2026-11-07T07": 17.3708061,
+  "2026-11-07T08": 14.8989627,
+  "2026-11-07T09": 30.192856199999998,
+  "2026-11-07T10": 76.6777611,
+  "2026-11-07T11": 3.2929880999999996
+ },
+ "agents_total": {
+  "n": 200,
+  "calls": 10855,
+  "tok": {
+   "in": 21756,
+   "out": 19869388,
+   "cw1h": 52530514,
+   "cw5m": 0,
+   "cr": 2904190162
+  },
+  "usd": 1484.5462206
+ },
+ "tok_kind_usd": {
+  "main": {
+   "in": 0.003966,
+   "out": 14.145975,
+   "cw1h": 34.297236,
+   "cw5m": 0.0,
+   "cr": 71.945019
+  },
+  "agents": {
+   "in": 0.065268,
+   "out": 298.04082,
+   "cw1h": 315.183084,
+   "cw5m": 0.0,
+   "cr": 871.2570486000001
+  }
+ },
+ "runs_vs_scripts": [
+  "wf_0d56026b-205",
+  "wf_1571306d-57d",
+  "wf_15f6c1f0-233",
+  "wf_170e810f-af5",
+  "wf_1ef2794c-c9a",
+  "wf_295063d9-0e2",
+  "wf_295a375b-8c1",
+  "wf_2ea5ea76-098",
+  "wf_3303296c-dbf",
+  "wf_4b3c4026-7ce",
+  "wf_53d3afc1-13b",
+  "wf_59ed7cc7-63e",
+  "wf_59f7ac06-130",
+  "wf_5e6d75ae-e11",
+  "wf_5fbe7101-2db",
+  "wf_6023efed-f2b",
+  "wf_6a5b5ed1-122",
+  "wf_6ef18a76-09b",
+  "wf_72af6ee7-d60",
+  "wf_76c14898-44d",
+  "wf_77affd8d-49d",
+  "wf_87997c9e-406",
+  "wf_8cd5f6cc-b6e",
+  "wf_97a3b6d9-208",
+  "wf_9880e983-503",
+  "wf_a226d344-f95",
+  "wf_a77afef5-1ce",
+  "wf_aca0fb5c-83d",
+  "wf_b5d1ee09-036",
+  "wf_cc42e25f-104",
+  "wf_d49143c7-91f",
+  "wf_d7c93a02-03d",
+  "wf_daf88851-d53",
+  "wf_dfe7f9c5-110",
+  "wf_e1f2a18f-2af",
+  "wf_e3b20a00-8e4",
+  "wf_e7d9e801-ccd",
+  "wf_ed51a2df-1e5",
+  "wf_ee184859-d77",
+  "wf_f11b12a4-35f"
+ ]
+}
