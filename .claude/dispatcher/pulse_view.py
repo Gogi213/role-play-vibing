@@ -141,6 +141,22 @@ def _plan(value, stale: bool = False) -> list:
     return out
 
 
+def _status(value, stale: bool = False) -> dict:
+    """Блок «Статус» {rows: [{ticket, title, mark, where, level}], more, left, hold}; строка без названия или с чужой отметкой — не строка.
+    Файл устарел — всё о «сейчас» (где сейчас у непринятых, «Держит») убрано: оно о прошлом; принятое и «Осталось» остаются."""
+    raw = value if isinstance(value, dict) else {}
+    rows = []
+    for item in raw.get("rows") if isinstance(raw.get("rows"), list) else []:
+        if not isinstance(item, dict) or item.get("mark") not in PLAN_MARKS or not _text(item.get("title")):
+            continue
+        row = {k: _text(item.get(k)) for k in ("ticket", "title", "where")}
+        row.update(mark=item["mark"], level=item.get("level") if item.get("level") in ("warn", "bad") else "")
+        if stale and row["mark"] != "done":
+            row.update(where="", level="")
+        rows.append(row)
+    return {"rows": rows, "more": _count(raw.get("more")) or 0, "left": _text(raw.get("left")), "hold": "" if stale else _text(raw.get("hold"))}
+
+
 def _job(value):
     ticket = _text(value.get("ticket")) if isinstance(value, dict) else ""
     return {k: _text(value.get(k)) for k in ("who", "verb", "ticket", "title", "since")} if ticket else None
@@ -182,7 +198,7 @@ def _unreadable(name: str, now: datetime) -> dict:
     return {"name": name, "state": "stuck", "phrase": f"Застряло: {name} — пульс не читается.", "now": "", "pause": "",
             "cells": [("none", 0)] * CELLS, "runs": [[] for _ in range(CELLS)], "why": [""] * CELLS, "idx": _slot(now), "age_s": None,
             "zone": None, "goal": None, "job": None, "ask": None, "fix": {"text": "пульс не читается", "who": "разбирает CEO"},
-            "done_today": [], "queue": [], "day": {}, "plan": []}
+            "done_today": [], "queue": [], "day": {}, "plan": [], "status": _status(None)}
 
 
 def stamp_of(raw):
@@ -197,7 +213,7 @@ def stamp_of(raw):
 def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
     """Один вид проекта: name, state, phrase, now, pause, cells [(класс, запусков)] ×96, idx (текущая клетка), age_s.
     Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated; версия 2 — ещё goal, job, ask, fix, done_today, queue,
-    day, plan, cells[].runs; версия 1 их не имеет — карточка без них). Нет файла, `state` не из списка, `cells` не список или
+    day, plan, status, cells[].runs; версия 1 их не имеет — карточка без них). Нет файла, `state` не из списка, `cells` не список или
     `generated` не время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после
     записи — stuck, прежние «сейчас» и пауза убраны (`silence` — текст и кто чинит). Сутки и клетка — по поясу `generated` (поясу проекта), не сервера."""
     stamp = stamp_of(raw)
@@ -212,7 +228,7 @@ def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
             "zone": stamp.tzinfo, "goal": _goal(raw.get("goal")), "job": _job(raw.get("job")), "ask": _ask(raw.get("ask"), raw, phrase),
             "fix": _fix(raw.get("fix"), phrase), "done_today": _entries(raw.get("done_today"), "time", "ticket", "title"),
             "queue": _entries(raw.get("queue"), "ticket", "title"), "day": _day(raw.get("day")),
-            "plan": _plan(raw.get("plan"), age > STALE_S)}
+            "plan": _plan(raw.get("plan"), age > STALE_S), "status": _status(raw.get("status"), age > STALE_S)}
     if age > STALE_S:
         same_day = stamp.date() == here.date()
         first = view["idx"] + 1 if same_day else 0
