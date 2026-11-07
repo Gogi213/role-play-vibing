@@ -190,11 +190,24 @@ class StatusTests(FactsBase):
     def test_short_title_drops_service_prefix_and_cuts_by_word(self):
         self.assertEqual(F.short("Хвост TK-112: нестабильный test"), "Нестабильный test")
         self.assertEqual(F.short("TK-5 — выпуск"), "Выпуск")
-        long = F.short("Правка настроек для проверки длинного заголовка тикета, который не влезает")
+        long = F.short("Правка настроек для проверки длинного заголовка тикета, который не влезает " * 2)
         self.assertLessEqual(len(long), F.SHORT)
         self.assertTrue(long.endswith("…") and not long.endswith(" …"), long)
         self.assertEqual(F.short("Пульс: таблица", 40), "Пульс: таблица", "тематический префикс — не служебный")
         self.assertEqual(F.short("x" * 60, 10), "X" + "x" * 8 + "…", "слова нет — режем по знакам")
+
+    def test_title_limits_are_120_for_what_and_60_for_left_steps(self):
+        """TK-133 (В-66): заголовок в «Что» не резали до 40 знаков — таблица переносит строкой."""
+        self.assertEqual((F.SHORT, F.LEFT_SHORT), (120, 60))
+        mid = " ".join(["слово"] * 16)  # 95 знаков
+        self.assertEqual(F.short(mid), F.short(mid)[:1].upper() + mid[1:], "95 знаков — без обрезки")
+        self.assertFalse(F.short(mid).endswith("…"))
+        cut = F.short(" ".join(["слово"] * 30))  # 179 знаков
+        self.assertTrue(len(cut) <= 120 and cut.endswith("…") and len(cut) > 100, len(cut))
+        steps = [{"n": 1, "mark": "run", "title": " ".join(["шаг"] * 14)}, {"n": 2, "mark": "next", "title": " ".join(["шаг"] * 30)}]  # 55 и 119 знаков
+        left = self.status(plan=steps)["left"].split(", ")
+        self.assertEqual(len(left[0]), 55, "55 знаков в «Осталось» не режем")
+        self.assertTrue(len(left[1]) <= 60 and left[1].endswith("…") and len(left[1]) > 40, left[1])
 
     def test_rows_are_tickets_of_the_goal_only_and_titles_are_short(self):
         a = self.ticket(status="in_progress", title="Хвост TK-081: " + "слово " * 12)

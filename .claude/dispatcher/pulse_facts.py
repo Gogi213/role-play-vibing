@@ -23,7 +23,7 @@ FIX = {"dispatcher_dead": "перезапускает CEO", "unserved": "раз�
        "merged_unreleased": "решает CEO", "ci_red": "чинит Инженер"}
 ASK_MARK = re.compile(r"\[итог: ask-owner\]\s*(.*?)(?:\s+повод:.*)?$", re.S)
 LIST_MAX = 12
-SHORT, LEFT_SHORT, LEFT_MAX, DONE_SHOWN = 40, 28, 4, 3  # знаков «Что» · знаков шага в «Осталось» · шагов в «Осталось» · принятых строк в таблице
+SHORT, LEFT_SHORT, LEFT_MAX, DONE_SHOWN = 120, 60, 4, 3  # знаков «Что» · знаков шага в «Осталось» · шагов в «Осталось» · принятых строк в таблице
 SERVICE = re.compile(r"^(?:(?:Хвост|Правка|Возврат|Доработка)\s+)?TK-\d+\s*[:—–-]\s*")  # служебный префикс заголовка: «Хвост TK-112: …»
 WAIT_TEXT = {"ticket": "ждёт {1}", "merged": "ждёт слияния", "ci": "ждёт CI", "ci-run": "ждёт CI"}  # по первой части parse_wait_for
 MOVE_WARN_MIN, MOVE_BAD_MIN = 15, 30  # «стоит N мин» жёлтым / красным, минуты (ключи `.claude/rpv.json`, docs/pulse.md)
