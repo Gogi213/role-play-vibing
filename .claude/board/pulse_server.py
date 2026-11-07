@@ -14,6 +14,7 @@ import argparse
 import hmac
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from html import escape
@@ -117,22 +118,79 @@ def safe_link(url: str) -> str:
 
 
 def now_line(view: dict) -> str:
-    """Справа в карточке: что делается / вопрос / причина и кто чинит; ниже «TK-N · длительность»."""
+    """Справа в карточке: метка-таймер, что делается / вопрос / причина и кто чинит; ниже «TK-N · длительность». Число метки в строке не повторяется."""
     state, job, ask, fix = view["state"], view["job"], view["ask"] or {}, view["fix"]
+    pill, span = pill_html(view)
     link = ""
     if state == "owner":
         main, who = ask.get("question", ""), ask.get("ticket", "")
         link = safe_link(ask.get("link", ""))
     elif state == "stuck":
-        main, who = fix["text"], fix["who"]
+        main, who = without(fix["text"], span), fix["who"]
     elif job:
         role = job["who"]
         main = " ".join(x for x in (role, job["verb"] if role else "", job["title"] or job["ticket"]) if x)
-        who = " · ".join(x for x in (job["ticket"], job["since"]) if x)
+        who = " · ".join(x for x in (job["ticket"], "" if job["since"] == span else job["since"]) if x)
     else:
         main, who = view["now"] or "Сейчас тихо", ""
     button = f'<a class="act" href="{escape(link, quote=True)}">Ответить</a>' if link else ""
-    return (f'<div class="now-line {KIND[state]}">{escape(main)}' + (f'<span class="who">{escape(who)}</span>' if who else "") + button + "</div>")
+    return (f'<div class="now-line {KIND[state]}">{pill}{escape(main)}' + (f'<span class="who">{escape(who)}</span>' if who else "") + button + "</div>")
+
+
+PLAN_ICON = {"done": "✓", "run": "◐", "ask": "?", "stuck": "!", "next": "○"}
+PLAN_CLASS = {"done": "d", "run": "r", "ask": "o", "stuck": "s", "next": "w"}
+LIVE = ("run", "ask", "stuck")  # отметки текущего шага: у него есть метка-таймер
+
+
+def timer(row: dict) -> tuple:
+    """Метка-таймер шага (текст, цвет): «принят чч:мм» · «N мин назад» (есть движение) · «стоит N мин» (жёлтая от порога, красная от второго) ·
+    «ждёт N мин» (ответ владельца) · «впереди». Времени нет (файл устарел, источника нет) — пустая метка."""
+    mark, idle = row["mark"], row["idle"]
+    if mark == "done":
+        return (f"принят {row['at']}" if row["at"] else "принят"), ""
+    if mark == "next":
+        return "впереди", ""
+    if mark == "ask":
+        return (f"ждёт {row['waiting']}" if row["waiting"] else ""), ""
+    if not idle:
+        return "", ""
+    if mark == "stuck" or row["level"]:
+        return f"стоит {idle}", row["level"]
+    return ("только что" if idle == "меньше минуты" else f"{idle} назад"), ""
+
+
+def plan_sub(row: dict) -> str:
+    """Вторая строка шага: «Роль · TK-N»; у вопроса владельцу — «ждёт вашего ответа · TK-N»."""
+    if row["mark"] == "ask":
+        return " · ".join(x for x in ("ждёт вашего ответа", row["ticket"]) if x)
+    return " · ".join(x for x in (row["who"], row["ticket"]) if x) if row["mark"] in ("run", "stuck") else ""
+
+
+def plan_html(view: dict) -> str:
+    """«План цели» первым блоком раскрытой карточки: значок, слева колонка времени, шаг и подстрока. Плана нет — ничего."""
+    items = []
+    for row in view["plan"]:
+        label, color = timer(row)
+        title = f'Шаг {row["n"]} · {row["title"]}' if row["n"] else row["title"]
+        sub = plan_sub(row)
+        items.append(f'<li class="{PLAN_CLASS[row["mark"]]}"><span class="ic">{PLAN_ICON[row["mark"]]}</span>'
+                     f'<span class="age {color}">{escape(label)}</span>'
+                     f'<span><span class="t">{escape(title)}</span>' + (f'<span class="sub">{escape(sub)}</span>' if sub else "") + "</span></li>")
+    return f'<div class="planbox"><h4>План цели</h4><ul class="plan">{"".join(items)}</ul></div>' if items else ""
+
+
+def pill_html(view: dict) -> tuple:
+    """Метка-таймер текущего шага плана перед строкой «что сейчас» и её длительность (чтобы строка её не повторяла)."""
+    row = next((r for r in view["plan"] if r["mark"] in LIVE), None)
+    label, color = timer(row) if row else ("", "")
+    if not label:
+        return "", ""
+    return f'<span class="pill {color}" title="последнее движение">{escape(label)}</span>', row["waiting"] if row["mark"] == "ask" else row["idle"]
+
+
+def without(text: str, span: str) -> str:
+    """Строка без длительности `span` в конце («диспетчер молчит 23 мин» → «диспетчер молчит»): число уже в метке."""
+    return re.sub(rf"\s*(?:уже\s+)?{re.escape(span)}$", "", text) if span else text
 
 
 def items_html(items: list, empty: str, with_time: bool) -> str:
@@ -146,7 +204,7 @@ def card(view: dict, end: int) -> str:
     return (f'<details class="proj" data-n="{escape(view["name"], quote=True)}" data-s="{view["state"]}"><summary>'
             f'<div><div class="name">{escape(view["name"])}</div>{goal_html(view)}</div>'
             f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}</summary>'
-            f'<div class="body"><div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
+            f'<div class="body">{plan_html(view)}<div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
             f'<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто", False)}</ul></div></div></details>')
 
 

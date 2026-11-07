@@ -66,6 +66,8 @@ KEYS = {
     "pulse_loop_returns": (_int_min, "целое ≥ 1"),
     "pulse_loop_errors": (_int_min, "целое ≥ 1"),
     "pulse_loop_window_min": (_int_min, "целое ≥ 1"),
+    "pulse_move_warn_min": (_int_min, "целое ≥ 1"),
+    "pulse_move_bad_min": (_int_min, "целое ≥ 1"),
     "has_ci": (lambda v: isinstance(v, bool), "true или false"),
     "ceo_wake": (lambda v: isinstance(v, bool), "true или false"),
     "ceo_wake_mode": (_text, "непустая строка: режим разрешений claude (умолчание bypassPermissions)"),

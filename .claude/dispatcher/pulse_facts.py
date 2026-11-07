@@ -1,5 +1,6 @@
 """Пульс v2 (TK-105, В-50): факты карточки проекта для страницы и Telegram — цель и шаг, кто что делает, вопрос владельцу, причина
-«застряло» по-человечески, сделано сегодня, очередь, итоги дня. Всё из тикетов, целей, `state.json`; нет источника — поля нет."""
+«застряло» по-человечески, сделано сегодня, очередь, итоги дня; план цели по шагам и «нет движения N мин» (TK-108, В-53). Всё из
+тикетов, целей, `state.json`; нет источника — поля нет."""
 from __future__ import annotations
 
 import re
@@ -8,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project as P  # noqa: E402
 import project_paths as CFG  # noqa: E402
 from pulse_view import ago  # noqa: E402 — «3 дня», «2 ч 10 мин»: одна мера у писателя и читателя
 import registry  # noqa: E402
@@ -21,6 +23,7 @@ FIX = {"dispatcher_dead": "перезапускает CEO", "unserved": "раз�
        "merged_unreleased": "решает CEO", "ci_red": "чинит Инженер"}
 ASK_MARK = re.compile(r"\[итог: ask-owner\]\s*(.*?)(?:\s+повод:.*)?$", re.S)
 LIST_MAX = 12
+MOVE_WARN_MIN, MOVE_BAD_MIN = 15, 30  # «стоит N мин» жёлтым / красным, минуты (ключи `.claude/rpv.json`, docs/pulse.md)
 
 
 def _title(tkt) -> str:
@@ -77,13 +80,18 @@ def job_of(state: dict, tickets, now: datetime) -> dict | None:
     return out
 
 
+def _asked(tkt):
+    """(запись, разбор) последней записи `[итог: ask-owner]` тикета или None."""
+    return next(((e, m) for e in reversed(tkt.log) if (m := ASK_MARK.search(e.text.strip()))), None)
+
+
 def ask_of(tickets, owner_items: list, now: datetime) -> dict | None:
     """Первый вопрос владельцу: тикет, вопрос (последняя запись `[итог: ask-owner]`, иначе заголовок тикета), сколько ждёт."""
     for tid, _ in owner_items:
         tkt = next((t for t in tickets if t.id == tid), None)
         if not tkt:
             continue
-        asked = next(((e, m) for e in reversed(tkt.log) if (m := ASK_MARK.search(e.text.strip()))), None)
+        asked = _asked(tkt)
         out = {"ticket": tid, "question": (asked[1].group(1).strip() if asked else "") or _title(tkt)}
         if asked:
             out["since"] = ago((now - asked[0].ts).total_seconds())
@@ -125,16 +133,99 @@ def day_of(tickets, state: dict, now: datetime) -> dict:
                     "queued": len(queue)}}
 
 
-def facts(state: dict, tickets, active: list, owner_items: list, now: datetime) -> dict:
+def move_limits() -> tuple:
+    """(жёлтое от, красное от) минут без движения: ключи rpv.json; не целое ≥ 1 — умолчание. Ключи записаны буквально (docs/configuration.md)."""
+    root = CFG.PROJECT_ROOT
+    got = (P.setting("pulse_move_warn_min", MOVE_WARN_MIN, root=root), P.setting("pulse_move_bad_min", MOVE_BAD_MIN, root=root))
+    return tuple(v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else d for v, d in zip(got, (MOVE_WARN_MIN, MOVE_BAD_MIN)))
+
+
+def _last_move(tkt, runs: list, state: dict):
+    """Позже из последней записи лога тикета, последнего запуска роли (runs.log) и начала идущего запуска; нет ничего — None."""
+    stamps = [tkt.log[-1].ts] if tkt.log else []
+    stamps += [ts for ts, tid, _, _ in runs if tid == tkt.id]
+    try:
+        stamps.append(T.parse_dt(((state.get("active_runs") or {}).get(tkt.id) or {}).get("started") or ""))
+    except ValueError:
+        pass
+    return max(stamps) if stamps else None
+
+
+def _accepted_text(at, now: datetime) -> str:
+    """«19:03» (сегодня) · «вчера» · «07.11»; времени приёмки нет — пусто."""
+    if at is None:
+        return ""
+    days = (now.date() - at.date()).days
+    return f"{at:%H:%M}" if days == 0 else "вчера" if days == 1 else f"{at:%d.%m}"
+
+
+def _plan_row(n: int, title: str, tickets: list, state: dict, owner_ids: set, stuck_text: str, runs: list, now: datetime) -> dict:
+    """Строка плана: mark — done (принят) · run (идёт) · ask (ждёт слова владельца) · stuck (застряло) · next (впереди)."""
+    row = {"mark": "next", "n": n, "title": title}
+    accepted = [t for t in tickets if t.status == "done"]
+    live = [t for t in tickets if t.status != "stopped"]
+    if accepted:
+        tkt = accepted[-1]
+        row.update(mark="done", ticket=tkt.id)
+        if at := _accepted_text(_accepted_at(tkt, now), now):
+            row["at"] = at
+        return row
+    if not tickets:
+        return row
+    tkt = (live or tickets)[-1]
+    running = (state.get("active_runs") or {}).get(tkt.id) or {}
+    row.update(ticket=tkt.id, who=ROLE_RU.get(str(running.get("role") or tkt.owner).strip().lower(), ""))
+    if tkt.id in owner_ids:
+        asked = _asked(tkt)
+        at = asked[0].ts if asked else (tkt.log[-1].ts if tkt.log else None)
+        row["mark"] = "ask"
+        if at:
+            row["waiting"] = ago((now - at).total_seconds())
+        return row
+    row["mark"] = "stuck" if not live or re.search(rf"\b{re.escape(tkt.id)}\b", stuck_text) else "run"
+    if last := _last_move(tkt, runs, state):
+        minutes = max(0, int((now - last).total_seconds() // 60))
+        warn, bad = move_limits()
+        row.update(idle=ago(minutes * 60), level="bad" if minutes >= bad else "warn" if minutes >= warn else "")
+    return row
+
+
+def plan_of(gid: str, tickets, state: dict, active: list, owner_items: list, runs: list, now: datetime) -> list:
+    """План цели владельца по шагам; у цели нет плана (`goal --step`) — открытые тикеты цели тем же списком (без номеров шагов)."""
+    owner_ids, stuck_text = {t for t, _ in owner_items}, " ".join(d for _, d, _ in active)
+    steps = registry.goal_steps(CFG.PROJECT_ROOT, gid)
+    if steps:
+        marked: dict = {}
+        for t in sorted(tickets, key=lambda t: t.id):
+            if (m := STEP_MARK.search(t.description)) and m.group(3) == gid:
+                marked.setdefault(int(m.group(1)), []).append(t)
+        return [_plan_row(s["n"], s["title"], marked.get(s["n"], []), state, owner_ids, stuck_text, runs, now) for s in steps]
+    own = sorted((t for t in tickets if t.status in T.OPEN_STATUSES and _goal_id(t) == gid), key=lambda t: t.id)
+    return [_plan_row(0, _title(t), [t], state, owner_ids, stuck_text, runs, now) for t in own[:LIST_MAX]]
+
+
+def plan_step(plan: list) -> tuple:
+    """(N, M) для «шаг N из M» и полоски — из того же списка: N — первый ещё не принятый шаг (все приняты — последний); без номеров — (0, 0)."""
+    numbered = [r for r in plan if r["n"]]
+    if not numbered:
+        return 0, 0
+    return next((r["n"] for r in numbered if r["mark"] != "done"), numbered[-1]["n"]), len(numbered)
+
+
+def facts(state: dict, tickets, active: list, owner_items: list, now: datetime, runs: list | None = None) -> dict:
     """Поля версии 2 для `pulse.build`; тикеты не прочитались (None) — пусто, ничего не выдумываем."""
     if tickets is None:
         return {}
     job = job_of(state, tickets, now)
     fresh = sorted((t for t in tickets if t.status in T.OPEN_STATUSES), key=lambda t: str(t.header.get("updated") or ""), reverse=True)
     focus = ([job["ticket"]] if job else []) + [t for t, _ in owner_items] + [t.id for t in fresh]
-    out = dict(day_of(tickets, state, now))
-    for key, value in (("goal", goal_card(tickets, focus)), ("job", job), ("ask", ask_of(tickets, owner_items, now)),
-                       ("fix", fix_of(active, now))):
+    out, goal = dict(day_of(tickets, state, now)), goal_card(tickets, focus)
+    if goal and (plan := plan_of(goal["id"], tickets, state, active, owner_items, runs or [], now)):
+        out["plan"] = plan
+        step, steps = plan_step(plan)  # номер и «из M» — из списка плана, а не из отдельной выборки тикетов
+        if steps:
+            goal.update(step=step, steps=steps)
+    for key, value in (("goal", goal), ("job", job), ("ask", ask_of(tickets, owner_items, now)), ("fix", fix_of(active, now))):
         if value:
             out[key] = value
     return out

@@ -246,7 +246,7 @@ def build(state: dict, now: datetime, tickets=None, runs=None) -> dict:
                     (f"запусков нет, в очереди {len(waiting)}" if waiting else "очередь пуста")),
             "pause": _pause(cells, cell_index(now)),
             "reasons": [{"code": c, "detail": d, "since": s} for c, d, s in active], "owner": [{"ticket": t, "action": a} for t, a in owner],
-            "cells": cells, **pulse_facts.facts(state, tickets, active, owner, now)}
+            "cells": cells, **pulse_facts.facts(state, tickets, active, owner, now, runs)}
 
 
 def update(state: dict, now: datetime, written: datetime | None = None) -> dict:
