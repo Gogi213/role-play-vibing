@@ -47,6 +47,18 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system
 .now-line .who{color:var(--mute);font-size:12.5px;display:block}
 .now-line.owner{color:var(--owner-ink)}.now-line.stuck{color:var(--stuck-ink)}
 .act{display:inline-block;margin-top:10px;padding:7px 12px;border-radius:8px;background:var(--owner);color:#2a1d00;font-size:13px;font-weight:600;text-decoration:none}
+.plan{grid-column:1/-1;margin:2px 0 0;padding:10px 0 0;border-top:1px dashed var(--line);list-style:none;font-size:13.5px}
+.plan li{display:grid;grid-template-columns:22px 1fr auto;gap:8px;padding:3px 0;align-items:baseline}
+.plan .ic{font-size:13px;text-align:center}
+.plan .d{color:var(--mute)}.plan .d .t{text-decoration:line-through;text-decoration-color:var(--line)}
+.plan .r .ic{color:var(--c3);display:inline-block;animation:spin 1.2s linear infinite}
+.plan .o .ic{color:var(--owner-ink)}.plan .s .ic{color:var(--stuck-ink)}
+.plan .w{color:var(--mute);opacity:.7}
+.plan .sub{display:block;font-size:12px;color:var(--mute)}
+.plan .age{font-size:12px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
+.plan .age.warn{color:var(--owner-ink)}.plan .age.bad{color:var(--stuck-ink)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.plan .r .ic{animation:none}}
 .body{border-top:1px solid var(--line);padding:14px 20px 18px;display:grid;grid-template-columns:1fr 1fr;gap:24px;font-size:13.5px}
 .body h4{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
 .body ul{margin:0;padding:0;list-style:none}

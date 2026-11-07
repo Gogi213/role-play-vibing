@@ -135,6 +135,45 @@ def now_line(view: dict) -> str:
     return (f'<div class="now-line {KIND[state]}">{escape(main)}' + (f'<span class="who">{escape(who)}</span>' if who else "") + button + "</div>")
 
 
+PLAN_ICON = {"done": "✓", "run": "◐", "ask": "?", "stuck": "!", "next": "○"}
+PLAN_CLASS = {"done": "d", "run": "r", "ask": "o", "stuck": "s", "next": "w"}
+
+
+def plan_sub(row: dict) -> str:
+    """Вторая строка шага: принят · «Роль · TK-N · идёт N мин» · ждёт вашего ответа · «Роль · TK-N»."""
+    if row["mark"] == "done":
+        return f"принят {row['at']}" if row["at"] else "принят"
+    if row["mark"] == "ask":
+        return "ждёт вашего ответа"
+    if row["mark"] == "next":
+        return ""
+    return " · ".join(x for x in (row["who"], row["ticket"], f"идёт {row['since']}" if row["since"] else "") if x)
+
+
+def plan_age(row: dict) -> str:
+    """Справа у шага: «ждёт N мин» · «движение N мин назад» · от порога «без движения N мин» (цвет — level)."""
+    if row["mark"] == "ask":
+        return f"ждёт {row['waiting']}" if row["waiting"] else ""
+    if row["mark"] not in ("run", "stuck") or not row["idle"]:
+        return ""
+    if row["level"]:
+        return f"без движения {row['idle']}"
+    return "движение только что" if row["idle"] == "меньше минуты" else f"движение {row['idle']} назад"
+
+
+def plan_html(view: dict) -> str:
+    """План цели под клетками — всегда на виду (не по нажатию); плана нет — ничего."""
+    items = []
+    for row in view["plan"]:
+        title = f'Шаг {row["n"]} · {row["title"]}' if row["n"] else row["title"]
+        sub = plan_sub(row)
+        level = f" {row['level']}" if row["level"] and row["mark"] != "ask" else ""
+        items.append(f'<li class="{PLAN_CLASS[row["mark"]]}"><span class="ic">{PLAN_ICON[row["mark"]]}</span>'
+                     f'<span><span class="t">{escape(title)}</span>' + (f'<span class="sub">{escape(sub)}</span>' if sub else "")
+                     + f'</span><span class="age{level}">{escape(plan_age(row))}</span></li>')
+    return f'<ul class="plan">{"".join(items)}</ul>' if items else ""
+
+
 def items_html(items: list, empty: str, with_time: bool) -> str:
     if not items:
         return f'<li><span class="mute">{empty}</span></li>'
@@ -145,7 +184,7 @@ def items_html(items: list, empty: str, with_time: bool) -> str:
 def card(view: dict, end: int) -> str:
     return (f'<details class="proj" data-n="{escape(view["name"], quote=True)}" data-s="{view["state"]}"><summary>'
             f'<div><div class="name">{escape(view["name"])}</div>{goal_html(view)}</div>'
-            f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}</summary>'
+            f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}{plan_html(view)}</summary>'
             f'<div class="body"><div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
             f'<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто", False)}</ul></div></div></details>')
 

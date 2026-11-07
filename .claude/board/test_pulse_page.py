@@ -289,6 +289,72 @@ class PageStates(TG.States):
         self.assertEqual(re.findall(r'data-k="(-?\d+)"', html.split('<div class="tl n">')[1])[0], str(self.cur - S.NARROW + 1))
 
 
+def row(mark, n=0, title="Заголовок", **kw):
+    return dict({"mark": mark, "n": n, "title": title}, **kw)
+
+
+class PlanBlock(PageStates):
+    """TK-108 (В-53): план цели под клетками — всегда на виду; страница только читает `plan` из pulse.json."""
+
+    def plan_lines(self, plan, **kw):
+        html = self.render(dict(self.ok_data(), plan=plan), **kw)
+        block = re.search(r'<ul class="plan">(.*?)</ul>', html, re.S)
+        self.assertTrue(block, "план есть в карточке")
+        self.assertLess(html.index('<ul class="plan">'), html.index("</summary>"), "план в шапке карточки, не за нажатием")
+        return html, [re.sub(r"\|+", "|", H.unescape(re.sub(r"<[^>]+>", "|", li))).strip("|") for li in re.findall(r"<li.*?</li>", block.group(1), re.S)]
+
+    def test_five_marks_with_sub_lines_and_ages(self):
+        _, lines = self.plan_lines([
+            row("done", 1, "Схема", at="19:03", ticket="TK-1"),
+            row("run", 2, "Загрузчик", who="Инженер", ticket="TK-2", since="25 мин", idle="3 мин", level=""),
+            row("ask", 3, "Фьючерсы или спот", waiting="45 мин", ticket="TK-3"),
+            row("stuck", 4, "Закачка", who="Инженер", ticket="TK-4", idle="47 мин", level="bad"),
+            row("next", 5, "Сверка")])
+        self.assertEqual(lines, ["✓|Шаг 1 · Схема|принят 19:03", "◐|Шаг 2 · Загрузчик|Инженер · TK-2 · идёт 25 мин|движение 3 мин назад",
+                                 "?|Шаг 3 · Фьючерсы или спот|ждёт вашего ответа|ждёт 45 мин", "!|Шаг 4 · Закачка|Инженер · TK-4|без движения 47 мин",
+                                 "○|Шаг 5 · Сверка"])
+
+    def test_movement_colours_follow_level(self):
+        html, _ = self.plan_lines([row("run", 1, idle="14 мин", level=""), row("run", 2, idle="15 мин", level="warn"), row("run", 3, idle="31 мин", level="bad")])
+        self.assertEqual(re.findall(r'<span class="age([^"]*)">', html), ["", " warn", " bad"])
+        self.assertIn("движение 14 мин назад", html)
+        self.assertIn("без движения 15 мин", html)
+
+    def test_just_now_and_wait_are_not_coloured(self):
+        html, lines = self.plan_lines([row("run", 1, idle="меньше минуты", level=""), row("ask", 2, waiting="2 ч 10 мин", level="bad")])
+        self.assertIn("движение только что", lines[0])
+        self.assertTrue(lines[1].endswith("ждёт 2 ч 10 мин"))
+        self.assertEqual(re.findall(r'<span class="age([^"]*)">', html), ["", ""])
+
+    def test_plan_without_step_numbers_lists_titles_only(self):
+        _, lines = self.plan_lines([row("run", 0, "Правка", who="Судья", ticket="TK-9", idle="1 мин", level="")])
+        self.assertEqual(lines[0], "◐|Правка|Судья · TK-9|движение 1 мин назад")
+
+    def test_no_plan_no_block_and_card_as_before(self):
+        self.assertNotIn('class="plan"', self.render(self.ok_data()))
+        self.assertNotIn('class="plan"', self.render(dict(self.ok_data(), plan="мусор")))
+
+    def test_bad_rows_are_dropped_and_texts_escaped(self):
+        html, lines = self.plan_lines([row("done", 1, "<b>x</b>", at="1"), row("???", 2), {"mark": "run", "n": 3}, "мусор", row("next", True)])
+        self.assertNotIn("<b>x</b>", html)
+        self.assertEqual(len(lines), 2, "чужая отметка, без названия, не объект — не строки")
+
+    def test_stale_file_keeps_steps_but_drops_times(self):
+        raw = dict(self.ok_data(), plan=[row("run", 1, who="Инженер", ticket="TK-2", since="25 мин", idle="3 мин", level="warn")])
+        old = self.at + timedelta(minutes=30)
+        html = S.body_html([V.normalise("rpv", raw, old)], old)
+        self.assertIn("Шаг 1 · Заголовок", html)
+        self.assertNotIn("идёт 25", html)
+        self.assertNotIn("движение", html)
+        self.assertNotIn("без движения", html)
+
+    def test_step_numbers_of_goal_and_list_match(self):
+        goal = {"id": "G-1", "title": "Цель", "step": 2, "steps": 3}
+        html = self.render(dict(self.ok_data(), goal=goal, plan=[row("done", 1), row("run", 2), row("next", 3)]))
+        self.assertIn("шаг 2 из 3", html)
+        self.assertEqual(len(re.findall(r"<li class=\"[dros w]+\"><span class=\"ic\">", html)), 3)
+
+
 class FakeResponse(io.BytesIO):
     def __enter__(self):
         return self

@@ -29,6 +29,7 @@ NO_PROJECTS = "Проектов нет: ключ pulse_projects в rpv.json пу
 STATES = ("ok", "owner", "stuck")
 FILTERS = ("all", "ok", "owner", "stuck")  # переключатель страницы: Все | Идёт | Нужен ответ | Застряло
 CLASSES = ("work", "none", "owner", "stuck")
+PLAN_MARKS = ("done", "run", "ask", "stuck", "next")  # ✓ принят · ◐ идёт · ? ждёт слова владельца · ! застряло · ○ впереди
 
 
 def plural(n: int, one: str, few: str, many: str) -> str:
@@ -123,6 +124,21 @@ def _goal(value):
     return out
 
 
+def _plan(value, stale: bool = False) -> list:
+    """План цели [{mark, n, title, ticket, who, at, since, idle, level, waiting}]; строка без названия или с чужой отметкой — не строка.
+    Файл устарел — времена («идёт», «движение», «ждёт») убраны: они о прошлом."""
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or item.get("mark") not in PLAN_MARKS or not _text(item.get("title")):
+            continue
+        row = {k: _text(item.get(k)) for k in ("title", "ticket", "who", "at", "since", "idle", "waiting")}
+        row.update(mark=item["mark"], n=_count(item.get("n")) or 0, level=item.get("level") if item.get("level") in ("warn", "bad") else "")
+        if stale:
+            row.update(since="", idle="", waiting="", level="")
+        out.append(row)
+    return out
+
+
 def _job(value):
     ticket = _text(value.get("ticket")) if isinstance(value, dict) else ""
     return {k: _text(value.get(k)) for k in ("who", "verb", "ticket", "title", "since")} if ticket else None
@@ -164,13 +180,13 @@ def _unreadable(name: str, now: datetime) -> dict:
     return {"name": name, "state": "stuck", "phrase": f"Застряло: {name} — пульс не читается.", "now": "", "pause": "",
             "cells": [("none", 0)] * CELLS, "runs": [[] for _ in range(CELLS)], "why": [""] * CELLS, "idx": _slot(now), "age_s": None,
             "zone": None, "goal": None, "job": None, "ask": None, "fix": {"text": "пульс не читается", "who": "разбирает CEO"},
-            "done_today": [], "queue": [], "day": {}}
+            "done_today": [], "queue": [], "day": {}, "plan": []}
 
 
 def normalise(name: str, raw, now: datetime) -> dict:
     """Один вид проекта: name, state, phrase, now, pause, cells [(класс, запусков)] ×96, idx (текущая клетка), age_s.
     Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated; версия 2 — ещё goal, job, ask, fix, done_today, queue,
-    day, cells[].runs; версия 1 их не имеет — карточка без них). Нет файла, `state` не из списка, `cells` не список или
+    day, plan, cells[].runs; версия 1 их не имеет — карточка без них). Нет файла, `state` не из списка, `cells` не список или
     `generated` не время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после
     записи — stuck, прежние «сейчас» и пауза убраны. Сутки и клетка — по поясу `generated` (поясу проекта), не сервера."""
     stamp = P.parse_time(raw.get("generated"), strict=False) if isinstance(raw, dict) and isinstance(raw.get("generated"), str) else None
@@ -184,7 +200,8 @@ def normalise(name: str, raw, now: datetime) -> dict:
             "pause": str(raw.get("pause") or ""), "cells": _cells_of(raw), "runs": runs, "why": why, "idx": _slot(stamp), "age_s": age,
             "zone": stamp.tzinfo, "goal": _goal(raw.get("goal")), "job": _job(raw.get("job")), "ask": _ask(raw.get("ask"), raw, phrase),
             "fix": _fix(raw.get("fix"), phrase), "done_today": _entries(raw.get("done_today"), "time", "ticket", "title"),
-            "queue": _entries(raw.get("queue"), "ticket", "title"), "day": _day(raw.get("day"))}
+            "queue": _entries(raw.get("queue"), "ticket", "title"), "day": _day(raw.get("day")),
+            "plan": _plan(raw.get("plan"), age > STALE_S)}
     if age > STALE_S:
         same_day = stamp.date() == here.date()
         first = view["idx"] + 1 if same_day else 0
