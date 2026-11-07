@@ -125,16 +125,16 @@ def _goal(value):
 
 
 def _plan(value, stale: bool = False) -> list:
-    """План цели [{mark, n, title, ticket, who, at, since, idle, level, waiting}]; строка без названия или с чужой отметкой — не строка.
-    Файл устарел — времена («идёт», «движение», «ждёт») убраны: они о прошлом."""
+    """План цели [{mark, n, title, ticket, who, at, idle, level, waiting}]; строка без названия или с чужой отметкой — не строка.
+    Файл устарел — времена («движение», «стоит», «ждёт») убраны: они о прошлом."""
     out = []
     for item in value if isinstance(value, list) else []:
         if not isinstance(item, dict) or item.get("mark") not in PLAN_MARKS or not _text(item.get("title")):
             continue
-        row = {k: _text(item.get(k)) for k in ("title", "ticket", "who", "at", "since", "idle", "waiting")}
+        row = {k: _text(item.get(k)) for k in ("title", "ticket", "who", "at", "idle", "waiting")}
         row.update(mark=item["mark"], n=_count(item.get("n")) or 0, level=item.get("level") if item.get("level") in ("warn", "bad") else "")
         if stale:
-            row.update(since="", idle="", waiting="", level="")
+            row.update(idle="", waiting="", level="")
         out.append(row)
     return out
 

@@ -78,7 +78,7 @@ class PlanTests(FactsBase):
     def plan(self, state=None, active=(), owner=(), runs=(), at=None):
         return F.plan_of("G-001", self.read(), state or {}, list(active), list(owner), list(runs), at or self.now)
 
-    def test_marks_done_run_next_with_accept_time_role_and_duration(self):
+    def test_marks_done_run_next_with_accept_time_and_role(self):
         self.plan_goal()
         self.step(1, status="done", accepted_at=self.now - timedelta(hours=2))
         tid = self.step(2, status="in_progress")
@@ -86,7 +86,7 @@ class PlanTests(FactsBase):
         plan = self.plan(state)
         self.assertEqual([r["mark"] for r in plan], ["done", "run", "next"])
         self.assertEqual((plan[0]["at"], plan[0]["title"]), ("10:00", "Заголовок 1"))
-        self.assertEqual((plan[1]["who"], plan[1]["ticket"], plan[1]["since"]), ("Инженер", tid, "25 мин"))
+        self.assertEqual((plan[1]["who"], plan[1]["ticket"]), ("Инженер", tid))
         self.assertNotIn("ticket", plan[2])
 
     def test_acceptance_yesterday_is_named_so(self):

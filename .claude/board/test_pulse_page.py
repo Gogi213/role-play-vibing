@@ -294,59 +294,92 @@ def row(mark, n=0, title="Заголовок", **kw):
 
 
 class PlanBlock(PageStates):
-    """TK-108 (В-53): план цели под клетками — всегда на виду; страница только читает `plan` из pulse.json."""
+    """TK-108 (В-53, правка владельца): «План цели» — первый блок раскрытой карточки, слева колонка времени; в свёрнутой —
+    только «шаг N из M» и метка-таймер перед строкой «что сейчас». Страница только читает `plan` из pulse.json."""
 
     def plan_lines(self, plan, **kw):
         html = self.render(dict(self.ok_data(), plan=plan), **kw)
         block = re.search(r'<ul class="plan">(.*?)</ul>', html, re.S)
         self.assertTrue(block, "план есть в карточке")
-        self.assertLess(html.index('<ul class="plan">'), html.index("</summary>"), "план в шапке карточки, не за нажатием")
+        body = html.split('<div class="body">')[1]
+        self.assertTrue(body.startswith('<div class="planbox"><h4>План цели</h4>'), "первым блоком раскрытой карточки")
+        self.assertNotIn('class="plan"', html.split("</summary>")[0], "в свёрнутой карточке списка плана нет")
         return html, [re.sub(r"\|+", "|", H.unescape(re.sub(r"<[^>]+>", "|", li))).strip("|") for li in re.findall(r"<li.*?</li>", block.group(1), re.S)]
 
-    def test_five_marks_with_sub_lines_and_ages(self):
+    def pill(self, html):
+        found = re.search(r'<div class="now-line[^"]*">(?:<span class="pill ?([^"]*)"[^>]*>(.*?)</span>)?', html)
+        return (found.group(1), found.group(2)) if found and found.group(2) else None
+
+    def test_five_marks_time_column_left_then_step_and_role_ticket(self):
         _, lines = self.plan_lines([
             row("done", 1, "Схема", at="19:03", ticket="TK-1"),
-            row("run", 2, "Загрузчик", who="Инженер", ticket="TK-2", since="25 мин", idle="3 мин", level=""),
+            row("run", 2, "Загрузчик", who="Инженер", ticket="TK-2", idle="3 мин", level=""),
             row("ask", 3, "Фьючерсы или спот", waiting="45 мин", ticket="TK-3"),
             row("stuck", 4, "Закачка", who="Инженер", ticket="TK-4", idle="47 мин", level="bad"),
             row("next", 5, "Сверка")])
-        self.assertEqual(lines, ["✓|Шаг 1 · Схема|принят 19:03", "◐|Шаг 2 · Загрузчик|Инженер · TK-2 · идёт 25 мин|движение 3 мин назад",
-                                 "?|Шаг 3 · Фьючерсы или спот|ждёт вашего ответа|ждёт 45 мин", "!|Шаг 4 · Закачка|Инженер · TK-4|без движения 47 мин",
-                                 "○|Шаг 5 · Сверка"])
+        self.assertEqual(lines, ["✓|принят 19:03|Шаг 1 · Схема", "◐|3 мин назад|Шаг 2 · Загрузчик|Инженер · TK-2",
+                                 "?|ждёт 45 мин|Шаг 3 · Фьючерсы или спот|ждёт вашего ответа · TK-3", "!|стоит 47 мин|Шаг 4 · Закачка|Инженер · TK-4",
+                                 "○|впереди|Шаг 5 · Сверка"])
 
-    def test_movement_colours_follow_level(self):
-        html, _ = self.plan_lines([row("run", 1, idle="14 мин", level=""), row("run", 2, idle="15 мин", level="warn"), row("run", 3, idle="31 мин", level="bad")])
-        self.assertEqual(re.findall(r'<span class="age([^"]*)">', html), ["", " warn", " bad"])
-        self.assertIn("движение 14 мин назад", html)
-        self.assertIn("без движения 15 мин", html)
+    def test_stand_colours_follow_level_and_move_is_grey(self):
+        html, lines = self.plan_lines([row("run", 1, idle="14 мин", level=""), row("run", 2, idle="15 мин", level="warn"), row("run", 3, idle="31 мин", level="bad")])
+        self.assertEqual(re.findall(r'<span class="age ([^"]*)">', html), ["", "warn", "bad"])
+        self.assertEqual([x.split("|")[1] for x in lines], ["14 мин назад", "стоит 15 мин", "стоит 31 мин"])
 
     def test_just_now_and_wait_are_not_coloured(self):
         html, lines = self.plan_lines([row("run", 1, idle="меньше минуты", level=""), row("ask", 2, waiting="2 ч 10 мин", level="bad")])
-        self.assertIn("движение только что", lines[0])
-        self.assertTrue(lines[1].endswith("ждёт 2 ч 10 мин"))
-        self.assertEqual(re.findall(r'<span class="age([^"]*)">', html), ["", ""])
+        self.assertEqual(lines[0].split("|")[1], "только что")
+        self.assertEqual(lines[1].split("|")[1], "ждёт 2 ч 10 мин")
+        self.assertEqual(re.findall(r'<span class="age ([^"]*)">', html), ["", ""])
 
     def test_plan_without_step_numbers_lists_titles_only(self):
         _, lines = self.plan_lines([row("run", 0, "Правка", who="Судья", ticket="TK-9", idle="1 мин", level="")])
-        self.assertEqual(lines[0], "◐|Правка|Судья · TK-9|движение 1 мин назад")
+        self.assertEqual(lines[0], "◐|1 мин назад|Правка|Судья · TK-9")
 
-    def test_no_plan_no_block_and_card_as_before(self):
-        self.assertNotIn('class="plan"', self.render(self.ok_data()))
-        self.assertNotIn('class="plan"', self.render(dict(self.ok_data(), plan="мусор")))
+    def test_collapsed_card_has_timer_before_the_now_line(self):
+        plan = [row("done", 1), row("run", 2, who="Инженер", ticket="TK-2", idle="3 мин", level=""), row("next", 3)]
+        html = self.render(dict(self.ok_data(), plan=plan))
+        self.assertEqual(self.pill(html), ("", "3 мин назад"))
+        head = html.split("</summary>")[0]
+        self.assertLess(head.index('class="pill'), head.index("Судья проверяет"), "метка слева от строки")
+        stuck = self.render(dict(self.ok_data(), plan=[row("stuck", 1, idle="23 мин", level="warn")]))
+        self.assertEqual(self.pill(stuck), ("warn", "стоит 23 мин"))
+        owner = self.render(dict(self.ok_data(), plan=[row("ask", 1, waiting="5 мин", ticket="TK-3")]))
+        self.assertEqual(self.pill(owner), ("", "ждёт 5 мин"))
+
+    def test_now_line_does_not_repeat_the_number_of_the_timer(self):
+        data = dict(self.ok_data(), state="stuck", fix={"text": "диспетчер молчит 23 мин", "who": "перезапускает CEO"},
+                    plan=[row("stuck", 1, idle="23 мин", level="warn")])
+        line = self.render(data).split("</summary>")[0].split('<div class="now-line')[1]
+        self.assertIn("стоит 23 мин", line)
+        self.assertEqual(line.count("23"), 1, "число — только в метке")
+        self.assertIn("диспетчер молчит<", line)
+        data = dict(self.ok_data(), job={"who": "Инженер", "verb": "делает", "ticket": "TK-2", "title": "Правка", "since": "25 мин"},
+                    plan=[row("run", 1, ticket="TK-2", idle="25 мин", level="warn")])
+        line = self.render(data).split("</summary>")[0].split('<div class="now-line')[1]
+        self.assertEqual(line.count("25 мин"), 1)
+        data["plan"] = [row("run", 1, ticket="TK-2", idle="3 мин", level="")]
+        self.assertIn("TK-2 · 25 мин", self.render(data), "разные числа — обе остаются")
+
+    def test_no_plan_no_block_no_timer_and_card_as_before(self):
+        for data in (self.ok_data(), dict(self.ok_data(), plan="мусор")):
+            html = self.render(data)
+            self.assertNotIn('class="plan"', html)
+            self.assertNotIn('class="pill', html)
 
     def test_bad_rows_are_dropped_and_texts_escaped(self):
         html, lines = self.plan_lines([row("done", 1, "<b>x</b>", at="1"), row("???", 2), {"mark": "run", "n": 3}, "мусор", row("next", True)])
         self.assertNotIn("<b>x</b>", html)
         self.assertEqual(len(lines), 2, "чужая отметка, без названия, не объект — не строки")
 
-    def test_stale_file_keeps_steps_but_drops_times(self):
-        raw = dict(self.ok_data(), plan=[row("run", 1, who="Инженер", ticket="TK-2", since="25 мин", idle="3 мин", level="warn")])
+    def test_stale_file_keeps_steps_but_drops_times_and_timer(self):
+        raw = dict(self.ok_data(), plan=[row("run", 1, who="Инженер", ticket="TK-2", idle="3 мин", level="warn")])
         old = self.at + timedelta(minutes=30)
         html = S.body_html([V.normalise("rpv", raw, old)], old)
         self.assertIn("Шаг 1 · Заголовок", html)
-        self.assertNotIn("идёт 25", html)
-        self.assertNotIn("движение", html)
-        self.assertNotIn("без движения", html)
+        self.assertNotIn("назад", html)
+        self.assertNotIn("стоит", html)
+        self.assertNotIn('class="pill', html)
 
     def test_step_numbers_of_goal_and_list_match(self):
         goal = {"id": "G-1", "title": "Цель", "step": 2, "steps": 3}

@@ -23,7 +23,7 @@ FIX = {"dispatcher_dead": "перезапускает CEO", "unserved": "раз�
        "merged_unreleased": "решает CEO", "ci_red": "чинит Инженер"}
 ASK_MARK = re.compile(r"\[итог: ask-owner\]\s*(.*?)(?:\s+повод:.*)?$", re.S)
 LIST_MAX = 12
-MOVE_WARN_MIN, MOVE_BAD_MIN = 15, 30  # «без движения» жёлтым / красным, минуты (ключи `.claude/rpv.json`, docs/pulse.md)
+MOVE_WARN_MIN, MOVE_BAD_MIN = 15, 30  # «стоит N мин» жёлтым / красным, минуты (ключи `.claude/rpv.json`, docs/pulse.md)
 
 
 def _title(tkt) -> str:
@@ -175,11 +175,6 @@ def _plan_row(n: int, title: str, tickets: list, state: dict, owner_ids: set, st
     tkt = (live or tickets)[-1]
     running = (state.get("active_runs") or {}).get(tkt.id) or {}
     row.update(ticket=tkt.id, who=ROLE_RU.get(str(running.get("role") or tkt.owner).strip().lower(), ""))
-    if running.get("started"):
-        try:
-            row["since"] = ago((now - T.parse_dt(running["started"])).total_seconds())
-        except ValueError:
-            pass
     if tkt.id in owner_ids:
         asked = _asked(tkt)
         at = asked[0].ts if asked else (tkt.log[-1].ts if tkt.log else None)
