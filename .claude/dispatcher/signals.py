@@ -18,9 +18,9 @@ import turn as TURN
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
 # После MAX_REVIEW_RETURNS возвратов тикет, снова сданный на ревью, ревьюеру не отдаётся (`review_limit_hit`, первая строка
 # `decide`): запись dispatcher с причинами возвратов, статус needs_owner — вопрос владельцу, а не тихое закрытие (TK-090, В-36;
-# до этого проверка стояла за `next`, который `result pr` ставит сам, и не срабатывала ни разу). Число 2 НАЗНАЧЕНО
-# владельцем 13.10, не измерено.
-MAX_REVIEW_RETURNS = 2
+# до этого проверка стояла за `next`, который `result pr` ставит сам, и не срабатывала ни разу). 10 назначено владельцем
+# 07.11 (В-60), не измерено; до того было 2 (назначено 13.10).
+MAX_REVIEW_RETURNS = 10
 HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 
 
@@ -168,7 +168,7 @@ def escalate_review_limit(path: Path, tkt: T.Ticket, state: dict, now) -> T.Tick
     found = _return_reasons(tkt, returns)
     reasons = "; ".join(f"{i}) {r}" for i, r in enumerate(found, 1)) or "(записей ревьюера нет)"
     T.append_log(path, "dispatcher",
-                 f"{REVIEW_CAP_MARK} ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд, она снова сдана — третий круг не "
+                 f"{REVIEW_CAP_MARK} ревьюер ({tkt.reviewer}) вернул работу {returns} раз подряд, она снова сдана — очередной круг не "
                  f"запускаю. Причины возвратов: {reasons}. Вопрос владельцу: продолжать (и как), сузить заказ или закрыть.", now=now)
     T.write_header_updates(path, {"status": "needs_owner", "next": ""}, now=now)
     state.setdefault("review_returns", {}).pop(tkt.id, None)
