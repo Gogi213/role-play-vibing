@@ -447,7 +447,7 @@ class TriageWaitsTests(WatchSandbox):
 
     def test_file_form_is_not_orphan(self):
         self._waiting("file:/tmp/rpv-flag")
-        alive = W.triage_waits({}, self.now, probe=lambda *a: "dead")
+        alive = W.triage_waits({}, self.now, probe=lambda *a: "dead", file_probe=lambda raw: "producer")  # писатель файла жив (TK-124)
         self.assertEqual(W.check_orphan_tickets(self.now, alive), [])
 
     def test_missing_ticket_target_is_dead(self):

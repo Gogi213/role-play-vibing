@@ -33,6 +33,8 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import ci_core  # noqa: E402
+import watch as WATCH  # noqa: E402
 import cost as COST  # noqa: E402
 import finish as FIN  # noqa: E402
 import handoff as HO  # noqa: E402
@@ -4682,3 +4684,260 @@ class WaitReconcileTest(unittest.TestCase):
         finally:
             W._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
             W.BLIND = old
+
+
+class DeadWaitReleaseTests(unittest.TestCase):
+    """TK-124 (В-61): ожидание, которое уже не наступит, снимается — `next` владельцу и запись dispatcher; роль решает сама."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self._orig = {k: getattr(CFG, k) for k in ("TICKETS_DIR", "CEO_INBOX", "CEO_WAKE_LOG", "DISPATCHER_DIR", "STATE_FILE")}
+        CFG.TICKETS_DIR = base / "tickets"
+        CFG.CEO_INBOX = base / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = base / "ceo-wake.log"
+        CFG.DISPATCHER_DIR = base
+        CFG.STATE_FILE = base / "state.json"
+        D.RUNNING.clear()
+        self.now = dt("2026-11-07T12:00:00+04:00")
+        self.state = {}
+        self.gh_calls = []
+
+    def tearDown(self):
+        for k, v in self._orig.items():
+            setattr(CFG, k, v)
+        D.RUNNING.clear()
+        self.tmp.cleanup()
+
+    def mk(self, wait_for="", status="waiting", **header):
+        path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="t", status=status, wait_for=wait_for, now=self.now)
+        if header:
+            T.write_header_updates(path, header, now=self.now)
+        return path
+
+    def fake_gh(self, state="closed", merged=False):
+        def gh(api):
+            self.gh_calls.append(api)
+            return {"state": state, "merged": merged}
+        return mock.patch.object(ci_core, "gh_api", gh)
+
+    def release(self, path, now=None, met=False):
+        return HO.release_dead_wait(path, T.read_ticket(path), self.state, now or self.now, D.RUNNING,
+                                    lambda spec: met, W.project_where())
+
+    def assert_released(self, path, fragment):
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for"), tkt.header.get("next")), ("in_progress", "", "engineer"))
+        self.assertEqual(tkt.log[-1].author, "dispatcher")
+        self.assertIn("не наступит", tkt.log[-1].text)
+        self.assertIn(fragment, tkt.log[-1].text)
+        decision = D.decide(tkt, {}, self.now)
+        self.assertEqual((decision.role, decision.reason), ("engineer", "next"))
+
+    def test_wait_on_stopped_ticket_is_released_to_owner(self):
+        target = self.mk(status="stopped")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        self.release(path)
+        self.assert_released(path, "в статусе stopped")
+
+    def accept(self, path, text="[итог: accept] ПРИНЯТО PR #1@abc1234"):
+        T.append_log(path, "judge", text, now=self.now)
+
+    def test_wait_on_done_ticket_closed_by_ceo_as_not_done_is_released_to_owner(self):
+        target = self.mk(status="done", reviewer="judge")
+        T.append_log(target, "ceo", "[итог: done] результат: x.md (закрыто без ревью) — НЕ СДЕЛАНО, закрыт CEO", now=self.now)
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        self.release(path)
+        self.assert_released(path, "закрыт без принятого результата")
+
+    def test_wait_on_done_ticket_without_positive_sign_of_rejection_is_normal_wake(self):
+        """Не принят — только по положительному признаку: нет записи «принять» в формате — не признак (приёмка Судьи в
+        логах бывает свободным текстом), закрытие CEO без «не сделано» — тоже."""
+        free_text = self.mk(status="done", reviewer="judge")
+        T.append_log(free_text, "judge", "ПРИНЯТО (круг 3): голова abc1234", now=self.now)
+        ceo_closed = self.mk(status="done", reviewer="judge")
+        T.append_log(ceo_closed, "ceo", "[итог: done] результат: x.md (закрыто без ревью)", now=self.now)
+        no_log = self.mk(status="done", reviewer="judge")
+        returned_then_accepted = self.mk(status="done", reviewer="judge")
+        T.append_log(returned_then_accepted, "judge", "[итог: return] не держится", now=self.now)
+        T.append_log(returned_then_accepted, "judge", "Принято (b533e6b)", now=self.now)
+        not_done_but_judge_accepted = self.mk(status="done", reviewer="judge")
+        T.append_log(not_done_but_judge_accepted, "judge", "[итог: accept] ПРИНЯТО PR #3@abc1234", now=self.now)
+        T.append_log(not_done_but_judge_accepted, "ceo", "[итог: done] результат: x.md — НЕ СДЕЛАНО в части 2", now=self.now)
+        for target in (free_text, ceo_closed, no_log, returned_then_accepted, not_done_but_judge_accepted):
+            tid = T.read_ticket(target).id
+            self.assertEqual(W.dead_reason(f"ticket:{tid}", W.project_where()), "", tid)
+
+    def test_wait_on_done_ticket_after_return_and_ceo_close_is_released(self):
+        target = self.mk(status="done", reviewer="judge")
+        self.accept(target)
+        T.append_log(target, "judge", "[итог: return] не держится", now=self.now)
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        self.release(path)
+        self.assert_released(path, "закрыт без принятого результата")
+
+    def test_wait_on_done_ticket_with_accepted_result_or_without_review_is_normal_wake(self):
+        accepted = self.mk(status="done", reviewer="judge")
+        self.accept(accepted)
+        mechanical = self.mk(status="done", reviewer="")
+        judge_own = self.mk(status="done", reviewer="judge", owner="judge")
+        archived = self.mk(status="done", reviewer="judge")
+        arch = CFG.TICKETS_DIR / T.ARCHIVE_DIRNAME / f"{T.read_ticket(archived).id}-log.md"
+        arch.parent.mkdir(parents=True, exist_ok=True)
+        arch.write_text("### 2026-11-01T10:00:00+04:00 judge\n[итог: accept] ПРИНЯТО PR #2@def5678\n", encoding="utf-8")
+        for target in (accepted, mechanical, judge_own, archived):
+            path = self.mk(f"ticket:{T.read_ticket(target).id}")
+            self.release(path)
+            self.assertEqual(T.read_ticket(path).status, "waiting", target.stem)
+            self.assertEqual(W.dead_reason(f"ticket:{T.read_ticket(target).id}", W.project_where()), "")
+
+    def test_wait_on_pr_closed_without_merge_is_released_to_owner(self):
+        path = self.mk("merged:o/r#5", on_met="run something")
+        with self.fake_gh("closed", False):
+            self.release(path)
+        self.assert_released(path, "PR #5 в o/r закрыт без слияния")
+        self.assertEqual(T.read_ticket(path).header.get("on_met"), "")
+        self.assertEqual(self.gh_calls, ["repos/o/r/pulls/5"])
+
+    def test_wait_on_ci_of_closed_pr_is_released_to_owner(self):
+        path = self.mk("ci:o/r#6")
+        with self.fake_gh("closed", False):
+            self.release(path)
+        self.assert_released(path, "PR #6")
+
+    def test_wait_on_dead_process_is_released_by_watch_and_owner_is_woken(self):
+        """Процессы и задания ведёт сторож (у него ssh): мёртвая цель после DEAD_WAIT_STRIKES проверок снимает ожидание,
+        диспетчер будит владельца — диспетчер своего ssh-вывода не дублирует."""
+        path = self.mk("host:vps:/data/job.json")
+        ws = {}
+        for minutes in (0, 1):
+            WATCH.triage_waits(ws, self.now + timedelta(minutes=minutes), probe=lambda *a: "dead",
+                               owners_probe=lambda alias: None, link_up=lambda: True)
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("in_progress", ""))
+        self.assertEqual(tkt.log[-1].author, "watch")
+        self.assertIn("её никто не производит", tkt.log[-1].text)
+        self.assertEqual(D.decide(tkt, {}, self.now).role, "engineer")
+        self.assertEqual(W.dead_reason("host:vps:/data/job.json", W.project_where()), "")  # диспетчер своего мнения не имеет
+
+    def triage_file(self, path, probe, times=2):
+        ws = {}
+        for minutes in range(times):
+            WATCH.triage_waits(ws, self.now + timedelta(minutes=minutes), probe=lambda *a: "exists",
+                               owners_probe=lambda alias: None, link_up=lambda: True, file_probe=probe)
+        return T.read_ticket(path), ws
+
+    def test_wait_on_file_without_writer_is_released_by_watch_after_strikes(self):
+        """`file:` без писателя: нет файла и процесса с путём — после DEAD_WAIT_STRIKES проверок ожидание снято, ход владельцу."""
+        path = self.mk("file:data/out.json")
+        tkt, _ = self.triage_file(path, lambda raw: "dead", times=1)
+        self.assertEqual(tkt.status, "waiting")  # одна проверка — ещё не снимаем
+        tkt, _ = self.triage_file(path, lambda raw: "dead")
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("in_progress", ""))
+        self.assertEqual(tkt.log[-1].author, "watch")
+        self.assertIn("её никто не производит", tkt.log[-1].text)
+        self.assertEqual(D.decide(tkt, {}, self.now).role, "engineer")
+
+    def test_wait_on_file_with_live_writer_stays(self):
+        path = self.mk("file:data/out.json")
+        tkt, _ = self.triage_file(path, lambda raw: "producer", times=3)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("waiting", "file:data/out.json"))
+
+    def test_file_writer_probe_sees_process_with_path_or_name(self):
+        rows = [(os.getpid(), 1, "python self data/out.json"), (11, 1, "python train.py --out D:\\x\\data\\out.json"), (12, 1, "notepad")]
+        with mock.patch.object(P, "scan_processes", return_value=rows[:1] + rows[2:]):
+            self.assertEqual(WATCH.probe_file_writer("data/out.json"), "dead")  # свой процесс не в счёт
+        with mock.patch.object(P, "scan_processes", return_value=rows[1:]):
+            self.assertEqual(WATCH.probe_file_writer("data/out.json"), "producer")
+        with mock.patch.object(P, "scan_processes", return_value=[]):
+            self.assertEqual(WATCH.probe_file_writer("data/out.json"), "producer")  # таблицы нет — не снимаем
+        here = Path(__file__)
+        self.assertEqual(WATCH.probe_file_writer(str(here)), "exists")
+
+    def test_file_writer_probe_matches_path_in_other_form_by_dir_and_short_name(self):
+        """Писатель пишет `/tmp/<каталог>/rc` (Git Bash), ожидание — `C:/Users/<8.3>/…/Temp/<каталог>/rc`: имя `rc` короче
+        4 знаков, но «каталог/имя» совпадает — не dead (замечание Судьи 07.11). Чужой процесс и пустая таблица — как прежде."""
+        raw = "C:/Users/3D6B~1/AppData/Local/Temp/j124p-no-such-dir/rc"
+        live = [(21, 1, 'bash -c "sleep 90; echo 0 > /tmp/j124p-no-such-dir/rc"')]
+        other = [(22, 1, 'bash -c "echo 0 > /tmp/another/rc"')]
+        with mock.patch.object(P, "scan_processes", return_value=live):
+            self.assertEqual(WATCH.probe_file_writer(raw), "producer")
+            self.assertEqual(WATCH.probe_file_writer(raw.replace("/", "\\")), "producer")
+        with mock.patch.object(P, "scan_processes", return_value=other):
+            self.assertEqual(WATCH.probe_file_writer(raw), "dead")
+        with mock.patch.object(P, "scan_processes", return_value=other):
+            self.assertEqual(WATCH.probe_file_writer("rc"), "producer")  # голое короткое имя без каталога не различить — не снимаем
+
+    def test_file_writer_probe_reads_process_table_once_per_pass(self):
+        """Таблица процессов (на Windows — PowerShell CIM) читается раз за проход сторожа, не на каждый `file:`-тикет."""
+        for n in range(3):
+            self.mk(f"file:data/out-{n}.json")
+        calls = []
+
+        def rows():
+            calls.append(1)
+            return [(31, 1, "python train.py")]
+        with mock.patch.object(P, "scan_processes", side_effect=rows):
+            WATCH.triage_waits({}, self.now, probe=lambda *a: "exists", owners_probe=lambda alias: None, link_up=lambda: True)
+        self.assertEqual(len(calls), 1)
+
+    def test_wait_stays_when_target_can_still_come(self):
+        done = self.mk(status="done", reviewer="judge")
+        self.accept(done)
+        for spec, gh in ((f"ticket:{T.read_ticket(done).id}", None), ("merged:o/r#7", ("open", False)),
+                         ("merged:o/r#8", ("closed", True)), ("ticket:TK-999", None), ("file:x/y.md", None),
+                         ("job:gpu1:j1", None)):
+            path = self.mk(spec)
+            with self.fake_gh(*gh) if gh else mock.patch.object(ci_core, "gh_api", side_effect=AssertionError("gh не нужен")):
+                self.release(path)
+            tkt = T.read_ticket(path)
+            self.assertEqual((tkt.status, tkt.header.get("wait_for"), tkt.header.get("next") or ""), ("waiting", spec, ""), spec)
+
+    def test_wait_met_condition_is_left_to_normal_wake(self):
+        path = self.mk("merged:o/r#9")
+        with self.fake_gh("closed", False):
+            self.release(path, met=True)
+        self.assertEqual(T.read_ticket(path).status, "waiting")
+        self.assertEqual(self.gh_calls, [])
+
+    def test_wait_untouched_for_running_ticket_or_pending_next_or_flag_off(self):
+        stopped = T.read_ticket(self.mk(status="stopped")).id
+        running, with_next, flag_off = (self.mk(f"ticket:{stopped}") for _ in range(3))
+        T.write_header_updates(with_next, {"next": "judge"}, now=self.now)
+        D.RUNNING[T.read_ticket(running).id] = {}
+        self.release(running)
+        self.release(with_next)
+        real = P.setting
+        with mock.patch.object(P, "setting", lambda key, default=None, root=None: False if key == "release_dead_waits" else real(key, default)):
+            self.release(flag_off)
+        for p in (running, with_next, flag_off):
+            self.assertEqual(T.read_ticket(p).status, "waiting", p.stem)
+
+    def test_wait_dead_check_is_throttled_per_ticket(self):
+        path = self.mk("merged:o/r#5")
+        with self.fake_gh("open", False):
+            self.release(path)
+            self.release(path, self.now + timedelta(minutes=2))
+            self.assertEqual(len(self.gh_calls), 1)
+            self.release(path, self.now + timedelta(seconds=W.DEAD_CHECK_EVERY_S + 1))
+        self.assertEqual(len(self.gh_calls), 2)
+
+    def test_wait_owner_without_role_gets_one_ceo_line_and_ticket_stays(self):
+        target = self.mk(status="stopped")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}", owner="владелец")
+        self.release(path)
+        self.release(path, self.now + timedelta(hours=1))
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.header.get("next") or ""), ("waiting", ""))
+        lines = CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("не наступит", lines[0])
+
+    def test_wait_tick_releases_dead_wait_before_deciding(self):
+        target = self.mk(status="stopped")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        with mock.patch.object(D, "check_wait_for", return_value=False):
+            candidates, _ = D._collect_candidates(self.state, self.now)
+        by_path = {p: dec for p, _, dec in candidates}
+        self.assertEqual((by_path[path].role, by_path[path].reason), ("engineer", "next"))
+        self.assertEqual(T.read_ticket(path).status, "in_progress")

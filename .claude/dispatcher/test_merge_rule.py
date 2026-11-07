@@ -78,6 +78,18 @@ class MergeRuleBase(unittest.TestCase):
 
 
 class MergeRuleTests(MergeRuleBase):
+    def test_closed_unmerged_only_for_closed_pr_without_merge(self):
+        """TK-124: ожидание `merged:`/`ci:` не наступит, только если PR закрыт без слияния; открыт, влит, сбой GitHub — нет."""
+        def fake(state, merged):
+            return lambda path, method="GET", **f: {"state": state, "merged": merged}
+
+        def boom(path, method="GET", **f):
+            raise RuntimeError("HTTP 502")
+        self.assertTrue(M.closed_unmerged("o/r", 5, gh=fake("closed", False)))
+        self.assertFalse(M.closed_unmerged("o/r", 5, gh=fake("open", False)))
+        self.assertFalse(M.closed_unmerged("o/r", 5, gh=fake("closed", True)))
+        self.assertFalse(M.closed_unmerged("o/r", 5, gh=boom))
+
     def test_plugin_repo_pr_is_ordinary_pr(self):
         """CP4: PR в репозиторий самого плагина — обычный PR: те же условия, без проверки версии, тега и автовыпуска."""
         repo = "Gogi213/role-play-vibing"

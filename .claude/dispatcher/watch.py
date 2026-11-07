@@ -187,6 +187,43 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     return out[0]
 
 
+def probe_file_writer(raw: str, rows=None) -> str:
+    """`file:<путь>` (TK-124, В-61): `exists` — файл лёг; `producer` — файла нет, но в таблице локальных процессов есть
+    командная строка с путём или именем файла; `dead` — нет ни файла, ни писателя (задания тикета смотрит `_apply_owned_jobs`).
+    Один путь в командной строке выглядит по-разному (диск с коротким именем 8.3, `C:/Users/…`, `/tmp/…` в Git Bash), поэтому
+    сверяем и хвост «каталог/имя» из самого ожидания, а имя короче 4 знаков без каталога (`rc`) не различимо — `producer`.
+    Таблицу процессов не прочитать — `producer`: не видим, значит не снимаем. `rows` — уже прочитанная таблица прохода."""
+    path = Path(raw)
+    path = path if path.is_absolute() else CFG.PROJECT_ROOT / path
+    if path.exists():
+        return "exists"
+    rows = P.scan_processes() if rows is None else rows
+    if not rows:
+        return "producer"
+
+    def norm(text: str) -> str:
+        return text.replace("\\", "/").lower()
+    parts = [x for x in norm(raw).split("/") if x]
+    tail = "/".join(parts[-2:]) if len(parts) >= 2 else ""
+    if len(path.name) < 4 and not tail:
+        return "producer"
+    needles = {norm(raw), norm(str(path)), tail} | ({path.name.lower()} if len(path.name) >= 4 else set())
+    needles.discard("")
+    me = os.getpid()
+    return "producer" if any(pid != me and any(n in norm(cmd) for n in needles) for pid, _, cmd in rows) else "dead"
+
+
+def _pass_file_probe():
+    """Таблицу процессов читаем раз за проход (на Windows это PowerShell CIM) и только когда есть `file:`-ожидание."""
+    box = []
+
+    def probe(raw: str) -> str:
+        if not box:
+            box.append(P.scan_processes())
+        return probe_file_writer(raw, box[0])
+    return probe
+
+
 LINK_PROBES = ["1.1.1.1:443", "8.8.8.8:53"]
 
 
@@ -203,12 +240,12 @@ def pc_link_up() -> bool:
     return False
 
 
-def _wait_target_state(tkt, probe) -> str:
+def _wait_target_state(tkt, probe, file_probe=None) -> str:
     parsed = T.parse_wait_for(tkt.header.get("wait_for") or "")
     if parsed is None:
         return "invalid"
     if parsed[0] == "file":
-        return "exists"
+        return (file_probe or probe_file_writer)(parsed[1])
     if parsed[0] == "at":  # ожидание по времени: не зависло и не сирота до времени + допуск; позже диспетчер уже обязан был разбудить
         late = datetime.now().astimezone() - parsed[1] > timedelta(minutes=AT_GRACE_MIN)
         return "dead" if late else "exists"
@@ -510,8 +547,9 @@ def _prune_wait_state(ws: dict, alive: set, seen: set, bad_seen: set, empty_seen
 class _Pass:
     """Состояние одного прохода `triage_waits`: кто жив, чьи счётчики видели, состояния заданий и ленивая проверка связи ПК."""
 
-    def __init__(self, ws: dict, now, probe, job_probe, owners: dict, run_probe, link_up):
+    def __init__(self, ws: dict, now, probe, job_probe, owners: dict, run_probe, link_up, file_probe=None):
         self.ws, self.now, self.probe, self.job_probe, self.run_probe = ws, now, probe, job_probe, run_probe
+        self.file_probe = file_probe
         self.owners, self.link_up, self._link = owners, link_up, None
         self.alive, self.seen, self.states, self.empty_seen, self.bad_seen = set(), set(), {}, set(), set()
         self.life = {}  # TK-054: тикет -> wait_for, где в этом проходе виден признак жизни задания (файл wait-alive.json)
@@ -588,7 +626,7 @@ def _settle_target(path: Path, tkt, spec: str, parsed, st: str, c: _Pass) -> Non
 def _triage_target(path: Path, tkt, spec: str, parsed, c: _Pass) -> None:
     """Прочие формы (file:, host:, ticket:): проба цели, ssh-молчание, выполнено, дальше — `_settle_target`."""
     ws = c.ws
-    st = _wait_target_state(tkt, c.probe)
+    st = _wait_target_state(tkt, c.probe, c.file_probe)
     st = _apply_owned_jobs(path, tkt, ws, spec, st, c.owners, c.now)
     if st == "woken":
         return
@@ -642,7 +680,8 @@ def _save_alive(life: dict, now) -> None:
         pass
 
 
-def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up) -> set:
+def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_probe=None, run_probe=None, link_up=pc_link_up,
+                 file_probe=None) -> set:
     """waiting-тикеты: цель wait_for существует или её делает живой юнит/процесс — тикет «жив» (возвращаются его id —
     сторож не зовёт его сиротой). Цель мертва DEAD_WAIT_STRIKES проверок подряд → тикет в in_progress с пустым wait_for и
     записью — диспетчер будит владельца (resume), CEO не нужен; повторно та же цель → тикет Судье (`next: judge`).
@@ -653,7 +692,7 @@ def triage_waits(ws: dict, now, probe=probe_wait_target, job_probe=None, owners_
         import ci_watch
         run_probe = ci_watch.run_state
     job_probe = job_probe or (lambda alias, jid: LW.probe_job(alias, jid, W._ssh_cmd))
-    c = _Pass(ws, now, probe, job_probe, _fetch_owners(owners_probe), run_probe, link_up)  # owners: {алиас: [задания]}
+    c = _Pass(ws, now, probe, job_probe, _fetch_owners(owners_probe), run_probe, link_up, file_probe or _pass_file_probe())  # owners: {алиас: [задания]}
     for path in T.list_tickets(CFG.TICKETS_DIR):
         try:
             tkt = T.read_ticket(path)

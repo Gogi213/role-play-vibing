@@ -718,6 +718,7 @@ def _collect_candidates(state: dict, now) -> tuple:
             notify_due_missed(tkt, state, now)
             notify_done(tkt, state, now)
             notify_wait_for_problem(tkt, state, now)
+            tkt = HO.release_dead_wait(path, tkt, state, now, RUNNING, check_wait_for, W.project_where())  # TK-124: ждёт то, что не наступит
 
             tid = tkt.id
             if tid in RUNNING:

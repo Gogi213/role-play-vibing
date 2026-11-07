@@ -64,6 +64,62 @@ def check_wait_for(spec: str, where: Where) -> bool:
     return _host_wait_met(alias, what, arg)
 
 
+DEAD_CHECK_EVERY_S = 300.0  # проверка «ожидание не наступит» по одному тикету — не чаще раза в 5 мин (число назначено, не измерено)
+
+
+_RETURN_MARK = "[итог: return]"
+_ACCEPT_WORD = re.compile(r"\[итог: accept\]|(?<!не )(?<!не)(?<!\w)принят", re.IGNORECASE)  # приёмка Судьи и свободным текстом: «ПРИНЯТО (круг 3)»
+
+
+def _closed_unaccepted(target: T.Ticket, tickets_dir: Path) -> bool:
+    """Закрытый `done` тикет без результата — только по положительному признаку, не по отсутствию строки «принято»
+    (в логах приёмка записана по-разному): последняя запись Судьи с `[итог: return]`, после неё нет приёмки; либо CEO
+    закрыл записью `[итог: done]` с «не сделано» и Судья не принимал ни разу. Тикет Судьи и без ревьюера — нет.
+    Лог и архив `archive/<ID>-log.md` вместе; архива не прочитать — не обвиняем."""
+    if target.owner == "judge" or target.reviewer not in P.ROLES:
+        return False
+    arch = tickets_dir / T.ARCHIVE_DIRNAME / f"{target.id}-log.md"
+    log = list(target.log)
+    try:
+        if arch.exists():
+            log = T.parse_text("---\nid: x\n---\n\n## Лог\n" + arch.read_text(encoding="utf-8")).log + log
+    except OSError:
+        return False
+    judge = [e for e in log if T.author_is(e.author, "judge")]
+    ret = max((i for i, e in enumerate(judge) if _RETURN_MARK in e.text), default=None)
+    if any(_ACCEPT_WORD.search(e.text) for e in judge[(ret + 1 if ret is not None else 0):]):
+        return False
+    if ret is not None:
+        return True
+    return any(T.author_is(e.author, "ceo") and e.text.lstrip().startswith("[итог: done]") and "не сделано" in e.text.lower()
+               for e in log)
+
+
+def dead_reason(spec: str, where: Where, gh=None) -> str:
+    """Почему `wait_for` уже не наступит (TK-124, В-61); пусто — может наступить или диспетчер без ssh этого не видит.
+    `ticket:<ID>` — цель остановлена, либо закрыта (`done`) без результата по положительному признаку (`_closed_unaccepted`); `merged:`/`ci:` — PR
+    закрыт без слияния. Цель `done` с принятым результатом — штатное выполнение (будит владельца). Задания, процессы и файлы
+    (`job:`, `host:…`, `ci-run:`, `file:`) ведёт сторож (watch.py): у него ssh и таблица процессов, дубль здесь будил бы зря."""
+    parsed = T.parse_wait_for(spec)
+    if not parsed:
+        return ""
+    if parsed[0] == "ticket":
+        try:
+            target = T.read_ticket(where.tickets_dir / f"{parsed[1]}.md")
+        except Exception:
+            return ""  # нет файла — вопрос сторожа (счётчик мёртвой цели), не диспетчера
+        if target.status == "stopped":
+            return f"тикет {parsed[1]} в статусе stopped — результата не будет"
+        if target.status == "done" and _closed_unaccepted(target, where.tickets_dir):
+            return f"тикет {parsed[1]} закрыт без принятого результата (последний вердикт Судьи — вернуть или CEO: «не сделано»)"
+        return ""
+    if parsed[0] in ("merged", "ci"):
+        import merge_rule
+        if merge_rule.closed_unmerged(parsed[1], parsed[2], gh):
+            return f"PR #{parsed[2]} в {parsed[1]} закрыт без слияния"
+    return ""
+
+
 def _other_ticket_done(other_id: str, tickets_dir: Path) -> bool:
     """`wait_for: ticket:<ID>` — ждём, пока другой тикет дойдёт до status: done (судья 27.09, «можно потом»:
     зависимости T-XX жили только прозой TASKS.md, диспетчер их не видел)."""
