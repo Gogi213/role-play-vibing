@@ -13,6 +13,7 @@ import project_paths as CFG
 import project as P
 import registry as R
 import ticket as T
+import turn as TURN
 
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
 # После MAX_REVIEW_RETURNS возвратов тикет, снова сданный на ревью, ревьюеру не отдаётся (`review_limit_hit`, первая строка
@@ -108,11 +109,16 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
         return
     last = tkt.log[-1] if tkt.log else None
     who = f"{last.author}: " if last else ""
+    line = _first_line(last.text if last else "")
+    if TURN.target("next-ceo", tkt):  # TK-127: ход берёт Судья, CEO мяч не держит — метки передачи нет, строка CEO «к сведению»
+        append_ceo_inbox(tkt.id, "next-ceo", f"{who}{line} (к сведению: ход отдан Судье)", now)
+        TURN.give_turn(path, tkt, "next-ceo", f"{who}передал ход CEO: «{line}».", now)
+        return
     # метка — на диск раньше, чем уйдёт `next`: убит диспетчер между ними — метка есть, `next` остался и доставится
     # повторно (строка CEO может задвоиться, но передача не теряется и ожидание роли не станет «без условия»)
     state.setdefault("ceo_handoffs", {})[tkt.id] = T.now_iso(now)  # next съеден тиком при живой роли — её waiting не «без условия»
     CFG.save_state(state)
-    append_ceo_inbox(tkt.id, "next-ceo", f"{who}{_first_line(last.text if last else '')}", now)
+    append_ceo_inbox(tkt.id, "next-ceo", f"{who}{line}", now)
     T.write_header_updates(path, {"next": ""}, now=now, stamp_updated=False)
 
 

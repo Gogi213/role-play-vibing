@@ -733,7 +733,7 @@ def _collect_candidates(state: dict, now) -> tuple:
                 except Exception as e:  # on_met не должен ронять тик; on_met уже очищен — дальше обычный путь
                     print(f"[dispatch] on_met {tid}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
                 tkt = T.read_ticket(path)
-            notify_wait_cycle(tkt, state, now)
+            notify_wait_cycle(tkt, state, now, path)
             decision = decide(tkt, state, now)
             if decision is None:
                 if _waits_without_condition(tkt, now):

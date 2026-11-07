@@ -59,6 +59,7 @@ KEYS = {
     "job_owners_cmd": (_text, "непустая строка"),
     "stray_cmd": (_text, "непустая строка"),
     "hold_alive_waits": (lambda v: isinstance(v, bool), "true или false"),
+    "role_turns": (lambda v: isinstance(v, bool), "true или false"),
     "watch_unreleased": (lambda v: isinstance(v, bool), "true или false"),
     "goal_idle_min": (_int_min, "целое ≥ 1, минуты"),
     "pulse_dead_min": (_int_min, "целое ≥ 1"),
