@@ -679,7 +679,8 @@ def sweep_closed_worktrees() -> None:
         for p in T.list_tickets(CFG.TICKETS_DIR):
             try:
                 t = T.read_ticket(p)
-                status[t.id] = t.status
+                # E-037: у закрытого тикета ждёт ход роли (next) — Судья гоняет договор в его копии, её не сметаем
+                status[t.id] = "in_progress" if t.status in T.CLOSED_STATUSES and (t.header.get("next") or "").strip() else t.status
             except Exception:
                 continue
         for line in WH.sweep(CFG.PROJECT_ROOT, status):

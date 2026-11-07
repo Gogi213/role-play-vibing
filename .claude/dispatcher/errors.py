@@ -488,11 +488,32 @@ def _infra_refusal(root: Path, tid: str, cwd: Path, infra: list, signal) -> str:
     return text
 
 
+def dead_copy(root: Path, tid: str) -> Path | None:
+    """Каталог `.claude/worktrees/<ID>` есть, но живого checkout в нём нет (пуст или недоубран: `git worktree remove` упал на
+    «failed to delete», E-037) — путь к нему; копии нет или она живая — None. Прогон в таком каталоге даёт ложный отказ."""
+    wt = root / ".claude" / "worktrees" / tid
+    if not tid or not wt.is_dir():
+        return None
+    try:
+        live = (wt / ".git").exists() and any(c.name != ".git" for c in wt.iterdir())
+    except OSError:
+        live = False
+    return None if live else wt
+
+
+def dead_copy_refusal(wt: Path) -> str:
+    return (f"каталог копии {wt} пуст или недоубран (нет живого checkout): проверки в нём дали бы ложный отказ. Не проверено, не вина "
+            "работы: создай копию заново (`git worktree add`) и повтори приёмку или убери каталог — тогда приёмка пойдёт в корне "
+            "проекта; запись в тикете не сделана")
+
+
 def gate(root: Path, tid: str = "", signal=None) -> str:
     """Приёмка Судьи: пусто — проверки всех исправленных ошибок зелёные (или их нет), принимать можно; иначе текст отказа:
     регресс (проверка красная) — вернуть работу; «не запустилась» (OSError, таймаут) — не проверено, ждать и повторить, с
     четвёртого раза подряд ещё и `signal` (сигнал CEO). Идут в worktree тикета `.claude/worktrees/<ID>`, если он есть,
     иначе в корне проекта."""
+    if dead := dead_copy(root, tid):
+        return dead_copy_refusal(dead)
     wt = root / ".claude" / "worktrees" / tid
     cwd = wt if tid and wt.is_dir() else root
     infra = []
