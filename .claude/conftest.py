@@ -4,9 +4,12 @@ import atexit
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import pytest
+
+_DISPATCHER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dispatcher")
 
 _PREFIXES = ("RPV_", "ALPHA_")
 _TMP_DIR = tempfile.mkdtemp(prefix="rpv-test-")
@@ -48,3 +51,15 @@ def _isolated_environ():
     yield
     os.environ.clear()
     os.environ.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def _wake_in_foreground(monkeypatch):
+    # поток побудки CEO (ceo_wake) переживает тест и пишет в пути, подменённые уже после него: тесты шлют событие в том же потоке;
+    # тест, проверяющий фон, включает его сам (E-028)
+    if _DISPATCHER not in sys.path:
+        sys.path.insert(0, _DISPATCHER)
+    import ceo_wake
+    monkeypatch.setattr(ceo_wake, "BACKGROUND", False)
+    yield
+    ceo_wake.wait_idle(10)

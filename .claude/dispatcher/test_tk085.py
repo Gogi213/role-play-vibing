@@ -25,7 +25,7 @@ NOW = datetime(2026, 11, 2, 14, 0).astimezone()
 
 class Stub:
     """Заглушка `claude`: считает вызовы; ответ — по умолчанию «сессия найдена»."""
-    def __init__(self, out=b"ok", code=0):
+    def __init__(self, out=b"DELIVERED", code=0):
         self.calls, self.out, self.code = [], out, code
 
     def __call__(self, cmd, **kw):
@@ -43,7 +43,8 @@ class WakeTests(unittest.TestCase):
         (Path(self.tmp.name) / ".claude" / "dispatcher").mkdir(parents=True)
         CW.write_session("sess-1", "CEO главный")
         self.stub, self.sent = Stub(), []
-        for patch in (mock.patch.object(CW.haiku_aux, "_claude", return_value="claude"),
+        for patch in (mock.patch.object(CW, "BACKGROUND", False),  # запуск в том же потоке (фон — в test_tk110.py)
+                      mock.patch.object(CW.haiku_aux, "_claude", return_value="claude"),
                       mock.patch.object(CW.haiku_aux.hide, "run", self.stub),
                       mock.patch.object(CW.notify, "send", lambda text, **kw: self.sent.append(text) or True)):
             patch.start()
@@ -68,7 +69,7 @@ class WakeTests(unittest.TestCase):
         self.assertEqual(cmd[1:3], ["-p", "--model"])
         self.assertIn("bypassPermissions", cmd)
         self.assertEqual(cmd[cmd.index("--allowedTools") + 1], "ListAgents,SendMessage")
-        self.assertIn("sess-1", prompt)
+        self.assertIn("CEO главный", prompt)  # ищут по имени (TK-110)
         self.assertIn("[нужно решение владельца] TK-001 — выбрать вариант", prompt)
 
     def test_session_not_found_goes_to_inbox_and_telegram(self):
