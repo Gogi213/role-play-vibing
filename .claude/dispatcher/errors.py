@@ -44,6 +44,7 @@ FAIL («менять проверку можно только через Суд�
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -392,6 +393,34 @@ def run_before(argv, cwd: Path, sha: str, timeout: float) -> tuple:
         _git(cwd, "worktree", "prune")
 
 
+@contextlib.contextmanager
+def accept_dir(root: Path, tid: str = "", sha: str = ""):
+    """Где гонять проверки приёмки → каталог. Копия тикета `.claude/worktrees/<ID>`, если она есть; иначе — временная копия
+    коммита `sha` (голова PR, на которой вердикт): `git worktree add --detach` в каталоге ОС, на выходе снимается. Приёмка влитого
+    тикета идёт без копии, а корень проекта может стоять на чужой ветке, где файлов правки нет (E-039: «не отслеживается git»).
+    Нет `sha`, git его не знает или копия не создалась — корень проекта, как раньше."""
+    wt = root / ".claude" / "worktrees" / tid
+    if tid and wt.is_dir():
+        yield wt
+        return
+    sha = (sha or "").strip()
+    known = _git(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") if re.fullmatch(r"[0-9a-fA-F]{7,40}", sha) else None
+    if known is None or known.returncode != 0:
+        yield root
+        return
+    base = Path(tempfile.mkdtemp(prefix="rpv-accept-"))
+    tree, added = base / "tree", False
+    try:
+        r = _git(root, "worktree", "add", "--detach", str(tree), sha, timeout=300)
+        added = r is not None and r.returncode == 0
+        yield tree if added else root
+    finally:
+        if added:
+            _git(root, "worktree", "remove", "--force", str(tree))
+        shutil.rmtree(base, ignore_errors=True)
+        _git(root, "worktree", "prune")
+
+
 def _not_merged(cwd: Path, sha: str) -> bool:
     """`fixed_sha` известен git, но не предок головы `cwd`: исправление лежит в невлитой ветке — проверять его здесь нечем и рано.
     Неизвестный коммит или не git — не «не влито» (дальше решает обычная сверка)."""
@@ -510,15 +539,18 @@ def dead_copy_refusal(wt: Path) -> str:
             "проекта; запись в тикете не сделана")
 
 
-def gate(root: Path, tid: str = "", signal=None) -> str:
+def gate(root: Path, tid: str = "", signal=None, sha: str = "") -> str:
     """Приёмка Судьи: пусто — проверки всех исправленных ошибок зелёные (или их нет), принимать можно; иначе текст отказа:
     регресс (проверка красная) — вернуть работу; «не запустилась» (OSError, таймаут) — не проверено, ждать и повторить, с
-    четвёртого раза подряд ещё и `signal` (сигнал CEO). Идут в worktree тикета `.claude/worktrees/<ID>`, если он есть,
-    иначе в корне проекта."""
+    четвёртого раза подряд ещё и `signal` (сигнал CEO). Идут в worktree тикета `.claude/worktrees/<ID>`, если он есть, иначе во
+    временной копии головы PR `sha` (`accept_dir`), нет и её — в корне проекта."""
     if dead := dead_copy(root, tid):
         return dead_copy_refusal(dead)
-    wt = root / ".claude" / "worktrees" / tid
-    cwd = wt if tid and wt.is_dir() else root
+    with accept_dir(root, tid, sha) as cwd:
+        return _gate_in(root, tid, cwd, signal)
+
+
+def _gate_in(root: Path, tid: str, cwd: Path, signal) -> str:
     infra = []
     bad = run_all(root, cwd, infra=infra)
     if not bad:
