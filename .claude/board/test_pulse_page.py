@@ -453,6 +453,14 @@ class PhoneFit(unittest.TestCase):
         self.assertIn("min-width:0", "".join(self.rules(".body li>span")))
 
 
+    def test_status_table_has_vertical_lines_between_columns_but_not_before_the_first(self):
+        self.assertIn("border-left:1px solid var(--line)", "".join(self.rules(".st th")))
+        self.assertIn("border-left:1px solid var(--line)", "".join(self.rules(".st td")))
+        first = "".join(self.rules(".st td:first-child,.st th:first-child"))
+        self.assertIn("border-left:0", first)
+        self.assertIn("padding-left:0", first)
+
+
 class FakeResponse(io.BytesIO):
     def __enter__(self):
         return self

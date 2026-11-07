@@ -54,8 +54,9 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system
 .body li em{font-style:normal;color:var(--mute);min-width:52px}
 .body .planbox{grid-column:1/-1}
 .st{width:100%;border-collapse:collapse;font-size:13.5px}
-.st th{text-align:left;font-weight:500;color:var(--mute);font-size:11.5px;padding:0 10px 6px 0}
-.st td{padding:5px 10px 5px 0;border-top:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.st th{text-align:left;font-weight:500;color:var(--mute);font-size:11.5px;padding:0 10px 6px;border-left:1px solid var(--line)}
+.st td:first-child,.st th:first-child{border-left:0;padding-left:0}
+.st td{padding:5px 10px;border-top:1px solid var(--line);border-left:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
 .st .tk{color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 .st tr.d td,.st tr.w td{color:var(--mute)}
 .st tr.o .where{color:var(--owner-ink)}.st tr.s .where{color:var(--stuck-ink)}

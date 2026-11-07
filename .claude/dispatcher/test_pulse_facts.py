@@ -254,10 +254,21 @@ class StatusTests(FactsBase):
 
     def test_waits_on_ticket_from_wait_for_and_other_forms(self):
         base = "Ссылка на задачу владельца: G-001\n"
-        ids = [T.read_ticket(T.create_ticket(self.tickets_dir, "engineer", title, "judge", base, spec, self.now, status="waiting")).id
-               for title, spec in (("ждёт", "ticket:TK-005"), ("слияние", "merged:o/r#5"), ("файл", "file:/tmp/x"))]
-        self.assertEqual(self.where(at=self.now + timedelta(hours=2)), [(ids[0], "ждёт TK-005", "next", ""), (ids[1], "ждёт слияния", "next", ""),
-                                                                       (ids[2], "ждёт результата", "next", "")], "ожидание не «стоит»")
+        at = (self.now + timedelta(hours=5)).astimezone()
+        forms = (("ticket:TK-005", "ждёт TK-005"), ("merged:o/r#5", "ждёт слияния"), ("ci:o/r#5", "ждёт CI"), ("ci-run:o/r#5", "ждёт CI"),
+                 ("file:/tmp/x", "ждёт файл x"), (r"file:C:\data\out\calc.json", "ждёт файл calc.json"),
+                 ("host:sofia:unit:rpv-pulse", "ждёт процесс rpv-pulse на sofia"), ("host:sofia:/opt/rpv/out.json", "ждёт итог расчёта на sofia"),
+                 ("job:sofia:calc-7", "ждёт задание на sofia"), (f"at:{T.now_iso(at)}", f"ждёт до {at:%d.%m %H:%M}"), ("", "ждёт, не сказано чего"))
+        ids = [T.read_ticket(T.create_ticket(self.tickets_dir, "engineer", f"ждёт {i}", "judge", base, spec, self.now, status="waiting")).id
+               for i, (spec, _) in enumerate(forms)]
+        self.assertEqual(self.where(at=self.now + timedelta(hours=2)), [(tid, text, "next", "") for tid, (_, text) in zip(ids, forms)],
+                         "ожидание не «стоит»; «ждёт результата» нигде нет")
+
+    def test_waits_on_unknown_form_is_not_said_as_a_result(self):
+        tid = self.ticket(status="waiting")
+        path = self.tickets_dir / f"{tid}.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("wait_for: ", "wait_for: что-то странное", 1), encoding="utf-8")
+        self.assertEqual(self.where(), [(tid, "ждёт, не сказано чего", "next", "")])
 
     def test_queued_step_waits_on_nearest_unaccepted_step_before_it(self):
         self.plan_goal()
