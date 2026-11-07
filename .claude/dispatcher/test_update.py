@@ -1,5 +1,6 @@
 """/rpv-update (В-13): порядок шагов с подменённым `claude`; PATH в plist присмотра и проверка doctor (П3)."""
 import io
+import json
 import os
 import plistlib
 import sys
@@ -31,12 +32,14 @@ class Fake:
 
     def __init__(self, old="2.0.9", new="2.1.0", doctor=(0, "OK  всё"), fail_on=None):
         self.cmds, self.version, self.new, self.doctor, self.fail_on = [], old, new, doctor, fail_on
+        self.cwds = {}
 
     def installed(self, project):
         return _entry(self.version)
 
-    def run(self, cmd, timeout):
+    def run(self, cmd, timeout, cwd=None):
         self.cmds.append(cmd)
+        self.cwds[tuple(cmd[1:3])] = cwd
         if self.fail_on and self.fail_on in cmd:
             return 1, "boom\nпровал"
         if "update" in cmd and cmd[1:3] == ["plugin", "update"]:
@@ -57,6 +60,7 @@ class Fake:
 
 def _update(fake, **kw):
     with mock.patch.object(U.Path, "is_file", return_value=True):
+        kw.setdefault("latest", lambda: fake.new)
         return U.update(PROJ, run=fake.run, installed=fake.installed, claude="claude", python="py", **kw)
 
 
@@ -82,6 +86,46 @@ class UpdateOrder(unittest.TestCase):
         _update(f, ref="В-13")
         upd = next(c for c in f.cmds if c[1:3] == ["plugin", "update"])
         self.assertEqual(upd[-2:], ["--scope", "project"])
+
+    def test_local_install_updated_with_scope_local_from_project_dir(self):
+        """TK-132: local-установка со старой версией → `plugin update --scope local` из каталога проекта, синк уставов по смене версии."""
+        f = Fake(old="2.0.20", new="2.0.24")
+        f.installed = lambda project: _entry(f.version, "local", PROJ)
+        rows, new = _update(f, ref="В-13")
+        upd = next(c for c in f.cmds if c[1:3] == ["plugin", "update"])
+        self.assertEqual(upd[-2:], ["--scope", "local"])
+        self.assertEqual(f.cwds[("plugin", "update")], str(PROJ))
+        self.assertEqual(new, "2.0.24")
+        self.assertIn("tickets.py charter", f.steps())
+        self.assertEqual(dict((r[0], r[2]) for r in rows)["плагин"], "2.0.20 → 2.0.24")
+
+    def test_version_below_marketplace_is_fail_not_already_latest(self):
+        """TK-132: версия не сдвинулась, а в marketplace новее — FAIL с версиями и ручной командой, не «уже последняя»."""
+        f = Fake(old="2.0.20", new="2.0.20")
+        f.installed = lambda project: _entry(f.version, "local", PROJ)
+        rows, _ = _update(f, ref="В-13", latest=lambda: "2.0.24")
+        plugin = next(r for r in rows if r[0] == "плагин")
+        self.assertEqual(plugin[1], D.FAIL)
+        for part in ("2.0.20", "2.0.24", "--scope local"):
+            self.assertIn(part, plugin[2])
+        self.assertNotIn("уже последняя", plugin[2])
+
+    def test_unknown_marketplace_version_keeps_already_latest(self):
+        f = Fake(old="2.0.9", new="2.0.9")
+        rows, _ = _update(f, ref="В-13", latest=lambda: "?")
+        self.assertEqual(next(r for r in rows if r[0] == "плагин")[1], D.OK)
+
+    def test_marketplace_version_reads_clone(self):
+        with tempfile.TemporaryDirectory() as d:
+            clone = Path(d) / "marketplaces" / "role-play-vibing"
+            (clone / ".claude-plugin").mkdir(parents=True)
+            (clone / ".claude-plugin" / "marketplace.json").write_text(
+                '{"plugins": [{"name": "other", "version": "9"}, {"name": "role-play-vibing", "version": "2.0.24"}]}')
+            (Path(d) / "plugins").mkdir()
+            self.assertEqual(U.marketplace_version(d), "?")
+            (Path(d) / "plugins" / "known_marketplaces.json").write_text(
+                '{"role-play-vibing": {"installLocation": %s}}' % json.dumps(str(clone)))
+            self.assertEqual(U.marketplace_version(d), "2.0.24")
 
     def test_already_latest_still_checks_services_skips_charter(self):
         f = Fake(old="2.0.9", new="2.0.9")
