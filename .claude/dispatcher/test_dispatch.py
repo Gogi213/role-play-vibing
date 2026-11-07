@@ -2572,8 +2572,8 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
         return calls
 
-    def test_default_review_returns_limit_is_two(self):
-        self.assertEqual(SIG.MAX_REVIEW_RETURNS, 2)  # TK-233: потолок ремонта 2; CP8 — константа
+    def test_default_review_returns_limit_is_ten(self):
+        self.assertEqual(SIG.MAX_REVIEW_RETURNS, 10)  # В-60: 10 назначено владельцем 07.11, не измерено
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
         path = self.review_setup()
@@ -2594,22 +2594,22 @@ class DispatchRunTests(unittest.TestCase):
         self.review_round(path, 2, "in_review", next_role="ceo")
         self.assertNotIn(path.stem, D.load_state().get("review_returns", {}))
 
-    def test_two_returns_then_resubmit_asks_owner_with_reasons_and_reviewer_is_not_woken(self):
+    def test_cap_returns_then_resubmit_asks_owner_with_reasons_and_reviewer_is_not_woken(self):
         path = self.review_setup()
         tid = path.stem
-        for n in (1, 2):
+        for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review", next_role="judge")  # как `result pr`: next: judge — потолок не за ним (TK-090)
-        self.assertEqual(D.load_state()["review_returns"][tid], 2)
+        self.assertEqual(D.load_state()["review_returns"][tid], SIG.MAX_REVIEW_RETURNS)
         calls = self.recording_popen()
         D.tick()
         tkt = T.read_ticket(path)
-        self.assertEqual(calls, [], "ревьюера на третий круг не будим")
+        self.assertEqual(calls, [], "ревьюера на очередной круг не будим")
         self.assertEqual(tkt.status, "needs_owner")  # TK-090: вопрос владельцу с причинами, не тихое закрытие
         self.assertEqual(tkt.log[-1].author, "dispatcher")
         self.assertIn("Потолок возвратов", tkt.log[-1].text)
         self.assertIn("круг 1", tkt.log[-1].text, "причины всех возвратов, не только последнего")
-        self.assertIn("круг 2", tkt.log[-1].text)
+        self.assertIn(f"круг {SIG.MAX_REVIEW_RETURNS}", tkt.log[-1].text)
         self.assertEqual(tkt.next_role, "")
         self.assertEqual(len(self.ceo_lines(tid)), 1, self.ceo_lines(tid))
         self.assertIn("[needs_owner]", self.ceo_lines(tid)[0])
@@ -2621,18 +2621,18 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_below_the_limit_reviewer_is_still_woken(self):
         path = self.review_setup()
-        for n in (1,):
+        for n in range(1, SIG.MAX_REVIEW_RETURNS):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "done")
         calls = self.recording_popen()
         D.tick()
-        self.assertEqual(len(calls), 1, "после одного возврата ревьюер ещё получает второй круг")
+        self.assertEqual(len(calls), 1, "на единицу ниже потолка ревьюер ещё получает круг")
         self.assertEqual(T.read_ticket(path).status, "in_review")
         self.assertEqual(self.ceo_lines(path.stem), [])
 
     def test_ceo_next_wakes_reviewer_even_over_the_limit_and_counter_keeps_going(self):
         path = self.review_setup()
-        for n in (1, 2):
+        for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         tkt = T.read_ticket(path)
@@ -2645,7 +2645,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_limit_is_judged_only_after_owner_resubmits_not_on_ceo_or_reviewer_entries(self):
         path = self.review_setup()
-        for n in (1, 2):
+        for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         T.append_log(path, "ceo", "пока думаю", now=dt("2026-10-03T15:00:00+04:00"))     # последняя запись — CEO
@@ -2657,11 +2657,11 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(T.read_ticket(path).log[-1].author, "ceo")
 
     def test_no_escalation_while_owner_run_is_still_going(self):
-        """Аудит-3 п.4: после 3 возвратов промежуточная запись владельца ПОСРЕДИ его запуска — не «сдал на ревью»:
+        """Аудит-3 п.4: на потолке возвратов промежуточная запись владельца ПОСРЕДИ его запуска — не «сдал на ревью»:
         эскалация ждёт конца запуска (тикет в RUNNING), потом срабатывает один раз."""
         path = self.review_setup()
         tid = path.stem
-        for n in (1, 2):
+        for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])   # запуск владельца ещё идёт
@@ -2684,7 +2684,7 @@ class DispatchRunTests(unittest.TestCase):
 
     def test_ceo_closing_done_at_the_limit_still_gets_the_done_line(self):
         path = self.review_setup()
-        for n in (1, 2):
+        for n in range(1, SIG.MAX_REVIEW_RETURNS + 1):
             self.review_round(path, n, "in_progress")
             self.owner_resubmits(path, n, "in_review")
         self.recording_popen()
