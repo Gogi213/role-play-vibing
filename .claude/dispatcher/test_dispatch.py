@@ -33,6 +33,8 @@ os.environ["CLAUDE_PROJECT_DIR"] = _SANDBOX
 atexit.register(shutil.rmtree, _SANDBOX, True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch as D  # noqa: E402
+import ci_core  # noqa: E402
+import watch as WATCH  # noqa: E402
 import cost as COST  # noqa: E402
 import finish as FIN  # noqa: E402
 import handoff as HO  # noqa: E402
@@ -4679,3 +4681,153 @@ class WaitReconcileTest(unittest.TestCase):
         finally:
             W._WAIT_WATCH.discard(("gpu1", "path", "/data/a.done"))
             W.BLIND = old
+
+
+class DeadWaitReleaseTests(unittest.TestCase):
+    """TK-124 (В-61): ожидание, которое уже не наступит, снимается — `next` владельцу и запись dispatcher; роль решает сама."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self._orig = {k: getattr(CFG, k) for k in ("TICKETS_DIR", "CEO_INBOX", "CEO_WAKE_LOG", "DISPATCHER_DIR", "STATE_FILE")}
+        CFG.TICKETS_DIR = base / "tickets"
+        CFG.CEO_INBOX = base / "ceo-inbox.md"
+        CFG.CEO_WAKE_LOG = base / "ceo-wake.log"
+        CFG.DISPATCHER_DIR = base
+        CFG.STATE_FILE = base / "state.json"
+        D.RUNNING.clear()
+        self.now = dt("2026-11-07T12:00:00+04:00")
+        self.state = {}
+        self.gh_calls = []
+
+    def tearDown(self):
+        for k, v in self._orig.items():
+            setattr(CFG, k, v)
+        D.RUNNING.clear()
+        self.tmp.cleanup()
+
+    def mk(self, wait_for="", status="waiting", **header):
+        path = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title="t", status=status, wait_for=wait_for, now=self.now)
+        if header:
+            T.write_header_updates(path, header, now=self.now)
+        return path
+
+    def fake_gh(self, state="closed", merged=False):
+        def gh(api):
+            self.gh_calls.append(api)
+            return {"state": state, "merged": merged}
+        return mock.patch.object(ci_core, "gh_api", gh)
+
+    def release(self, path, now=None, met=False):
+        return HO.release_dead_wait(path, T.read_ticket(path), self.state, now or self.now, D.RUNNING,
+                                    lambda spec: met, W.project_where())
+
+    def assert_released(self, path, fragment):
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for"), tkt.header.get("next")), ("in_progress", "", "engineer"))
+        self.assertEqual(tkt.log[-1].author, "dispatcher")
+        self.assertIn("не наступит", tkt.log[-1].text)
+        self.assertIn(fragment, tkt.log[-1].text)
+        decision = D.decide(tkt, {}, self.now)
+        self.assertEqual((decision.role, decision.reason), ("engineer", "next"))
+
+    def test_wait_on_stopped_ticket_is_released_to_owner(self):
+        target = self.mk(status="stopped")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        self.release(path)
+        self.assert_released(path, "в статусе stopped")
+
+    def test_wait_on_cancelled_ticket_is_released_to_owner(self):
+        target = self.mk(status="cancelled")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        self.release(path)
+        self.assert_released(path, "в статусе cancelled")
+
+    def test_wait_on_pr_closed_without_merge_is_released_to_owner(self):
+        path = self.mk("merged:o/r#5", on_met="run something")
+        with self.fake_gh("closed", False):
+            self.release(path)
+        self.assert_released(path, "PR #5 в o/r закрыт без слияния")
+        self.assertEqual(T.read_ticket(path).header.get("on_met"), "")
+        self.assertEqual(self.gh_calls, ["repos/o/r/pulls/5"])
+
+    def test_wait_on_ci_of_closed_pr_is_released_to_owner(self):
+        path = self.mk("ci:o/r#6")
+        with self.fake_gh("closed", False):
+            self.release(path)
+        self.assert_released(path, "PR #6")
+
+    def test_wait_on_dead_process_is_released_by_watch_and_owner_is_woken(self):
+        """Процессы и задания ведёт сторож (у него ssh): мёртвая цель после DEAD_WAIT_STRIKES проверок снимает ожидание,
+        диспетчер будит владельца — диспетчер своего ssh-вывода не дублирует."""
+        path = self.mk("host:vps:/data/job.json")
+        ws = {}
+        for minutes in (0, 1):
+            WATCH.triage_waits(ws, self.now + timedelta(minutes=minutes), probe=lambda *a: "dead",
+                               owners_probe=lambda alias: None, link_up=lambda: True)
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.header.get("wait_for")), ("in_progress", ""))
+        self.assertEqual(tkt.log[-1].author, "watch")
+        self.assertIn("её никто не производит", tkt.log[-1].text)
+        self.assertEqual(D.decide(tkt, {}, self.now).role, "engineer")
+        self.assertEqual(W.dead_reason("host:vps:/data/job.json", W.project_where()), "")  # диспетчер своего мнения не имеет
+
+    def test_wait_stays_when_target_can_still_come(self):
+        done = self.mk(status="done")
+        for spec, gh in ((f"ticket:{T.read_ticket(done).id}", None), ("merged:o/r#7", ("open", False)),
+                         ("merged:o/r#8", ("closed", True)), ("ticket:TK-999", None), ("file:x/y.md", None),
+                         ("job:gpu1:j1", None)):
+            path = self.mk(spec)
+            with self.fake_gh(*gh) if gh else mock.patch.object(ci_core, "gh_api", side_effect=AssertionError("gh не нужен")):
+                self.release(path)
+            tkt = T.read_ticket(path)
+            self.assertEqual((tkt.status, tkt.header.get("wait_for"), tkt.header.get("next") or ""), ("waiting", spec, ""), spec)
+
+    def test_wait_met_condition_is_left_to_normal_wake(self):
+        path = self.mk("merged:o/r#9")
+        with self.fake_gh("closed", False):
+            self.release(path, met=True)
+        self.assertEqual(T.read_ticket(path).status, "waiting")
+        self.assertEqual(self.gh_calls, [])
+
+    def test_wait_untouched_for_running_ticket_or_pending_next_or_flag_off(self):
+        stopped = T.read_ticket(self.mk(status="stopped")).id
+        running, with_next, flag_off = (self.mk(f"ticket:{stopped}") for _ in range(3))
+        T.write_header_updates(with_next, {"next": "judge"}, now=self.now)
+        D.RUNNING[T.read_ticket(running).id] = {}
+        self.release(running)
+        self.release(with_next)
+        real = P.setting
+        with mock.patch.object(P, "setting", lambda key, default=None, root=None: False if key == "release_dead_waits" else real(key, default)):
+            self.release(flag_off)
+        for p in (running, with_next, flag_off):
+            self.assertEqual(T.read_ticket(p).status, "waiting", p.stem)
+
+    def test_wait_dead_check_is_throttled_per_ticket(self):
+        path = self.mk("merged:o/r#5")
+        with self.fake_gh("open", False):
+            self.release(path)
+            self.release(path, self.now + timedelta(minutes=2))
+            self.assertEqual(len(self.gh_calls), 1)
+            self.release(path, self.now + timedelta(seconds=W.DEAD_CHECK_EVERY_S + 1))
+        self.assertEqual(len(self.gh_calls), 2)
+
+    def test_wait_owner_without_role_gets_one_ceo_line_and_ticket_stays(self):
+        target = self.mk(status="stopped")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}", owner="владелец")
+        self.release(path)
+        self.release(path, self.now + timedelta(hours=1))
+        tkt = T.read_ticket(path)
+        self.assertEqual((tkt.status, tkt.header.get("next") or ""), ("waiting", ""))
+        lines = CFG.CEO_INBOX.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("не наступит", lines[0])
+
+    def test_wait_tick_releases_dead_wait_before_deciding(self):
+        target = self.mk(status="stopped")
+        path = self.mk(f"ticket:{T.read_ticket(target).id}")
+        with mock.patch.object(D, "check_wait_for", return_value=False):
+            candidates, _ = D._collect_candidates(self.state, self.now)
+        by_path = {p: dec for p, _, dec in candidates}
+        self.assertEqual((by_path[path].role, by_path[path].reason), ("engineer", "next"))
+        self.assertEqual(T.read_ticket(path).status, "in_progress")

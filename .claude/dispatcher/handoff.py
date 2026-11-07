@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -12,6 +13,7 @@ import project_paths as CFG  # noqa: E402
 import project as P  # noqa: E402
 import signals as SIG  # noqa: E402
 import ticket as T  # noqa: E402
+import waits as W  # noqa: E402
 from signals import MAX_REVIEW_RETURNS, WAIT_NOTICE_EVERY, _review_returns  # noqa: E402
 
 
@@ -123,6 +125,47 @@ def enforce_move_invariant(path: Path, tkt: T.Ticket, state: dict, now) -> "T.Ti
     T.append_log(path, "dispatcher", f"инвариант «у открытого тикета есть ход»: {reason} — владелец разбужен "
                  f"(status: in_progress). Следующий ход обязателен: работа / `--next <роль>` / "
                  f"`tickets.py wait <ID> <форма>` / вопрос владельцу.", now=now)
+    return T.read_ticket(path)
+
+
+def release_dead_wait(path: Path, tkt: T.Ticket, state: dict, now, running, check_wait_for, where) -> "T.Ticket":
+    """TK-124 (В-61): `waiting` на то, что уже не наступит (`waits.dead_reason`), не стоит молча — ожидание снимается,
+    `next` = владелец тикета, запись dispatcher «ожидание X не наступит: причина»; роль решает сама. Владельца-роли нет — строка
+    CEO раз на ожидание, тикет не трогаем. Проверка раз в DEAD_CHECK_EVERY_S на тикет; выполненное ожидание не трогаем;
+    `release_dead_waits: false` в rpv.json — прежнее поведение. Свежий тикет, если правили."""
+    if (tkt.status != "waiting" or tkt.next_role or tkt.id in running or path.stem in running
+            or not P.setting("release_dead_waits", True)):
+        return tkt
+    spec = (tkt.header.get("wait_for") or "").strip()
+    if not spec or T.parse_wait_for(spec) is None:
+        return tkt
+    checked = state.setdefault("dead_wait_checked", {})
+    prev = checked.get(tkt.id) or {}
+    try:
+        if prev.get("spec") == spec and now - T.parse_dt(prev["at"]) < timedelta(seconds=W.DEAD_CHECK_EVERY_S):
+            return tkt
+    except (KeyError, ValueError):
+        pass
+    checked[tkt.id] = {"spec": spec, "at": T.now_iso(now)}
+    if check_wait_for(spec):
+        return tkt
+    why = W.dead_reason(spec, where)
+    if not why:
+        return tkt
+    note = f"ожидание `{spec}` не наступит: {why}"
+    if tkt.owner not in P.ROLES:
+        notified = state.setdefault("dead_wait_notified", {})
+        if notified.get(tkt.id) != spec:
+            notified[tkt.id] = spec
+            SIG.append_ceo_inbox(tkt.id, "wait-for", note + " — владельца-роли нет, нужен CEO", now)
+        return tkt
+    with T.ticket_lock(path):
+        cur = T.read_ticket(path)
+        if cur.status != "waiting" or cur.next_role or (cur.header.get("wait_for") or "").strip() != spec:
+            return cur  # пока проверяли, тикет двинулся
+        T.append_log(path, "dispatcher", f"{note}. Ожидание снято, ход владельцу ({tkt.owner}): реши сам — перепоставить "
+                     f"ожидание, обойтись без него или вернуть вопрос.", now=now)
+        T.write_header_updates(path, {"status": "in_progress", "wait_for": "", "on_met": "", "next": tkt.owner}, now=now)
     return T.read_ticket(path)
 
 

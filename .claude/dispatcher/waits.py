@@ -64,6 +64,30 @@ def check_wait_for(spec: str, where: Where) -> bool:
     return _host_wait_met(alias, what, arg)
 
 
+DEAD_CHECK_EVERY_S = 300.0  # проверка «ожидание не наступит» по одному тикету — не чаще раза в 5 мин (число назначено, не измерено)
+
+
+def dead_reason(spec: str, where: Where, gh=None) -> str:
+    """Почему `wait_for` уже не наступит (TK-124, В-61); пусто — может наступить или диспетчер без ssh этого не видит.
+    `ticket:<ID>` — цель остановлена или отменена; `merged:`/`ci:` — PR закрыт без слияния. Цель `done` — штатное выполнение
+    (будит владельца), не мёртвое ожидание. Задания и процессы (`job:`, `host:…`, `ci-run:`) ведёт сторож (watch.py): у него ssh и
+    адаптеры заданий, дубль здесь будил бы владельца зря."""
+    parsed = T.parse_wait_for(spec)
+    if not parsed:
+        return ""
+    if parsed[0] == "ticket":
+        try:
+            status = T.read_ticket(where.tickets_dir / f"{parsed[1]}.md").status
+        except Exception:
+            return ""  # нет файла — вопрос сторожа (счётчик мёртвой цели), не диспетчера
+        return f"тикет {parsed[1]} в статусе {status} — результата не будет" if status in ("stopped", "cancelled") else ""
+    if parsed[0] in ("merged", "ci"):
+        import merge_rule
+        if merge_rule.closed_unmerged(parsed[1], parsed[2], gh):
+            return f"PR #{parsed[2]} в {parsed[1]} закрыт без слияния"
+    return ""
+
+
 def _other_ticket_done(other_id: str, tickets_dir: Path) -> bool:
     """`wait_for: ticket:<ID>` — ждём, пока другой тикет дойдёт до status: done (судья 27.09, «можно потом»:
     зависимости T-XX жили только прозой TASKS.md, диспетчер их не видел)."""

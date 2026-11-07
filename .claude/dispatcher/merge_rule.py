@@ -117,6 +117,16 @@ def merged_done(repo: str, number: int, gh=C.gh_api) -> bool:
         return False
 
 
+def closed_unmerged(repo: str, number: int, gh=None) -> bool:
+    """PR закрыт без слияния: ожидание `merged:`/`ci:` на него уже не наступит (TK-124, В-61). Открыт, влит, не найден
+    (404 разбирает `merged_done`) или сбой GitHub — нет."""
+    try:
+        pr = (gh or C.gh_api)(f"repos/{repo}/pulls/{number}")
+        return pr.get("state") == "closed" and not pr.get("merged")
+    except Exception:
+        return False
+
+
 def merged_pr(repo: str, number: int, gh=None) -> dict:
     """Влитый PR: {"head": sha головы, "base": ветка, куда влит, "default": ветка репозитория по умолчанию}; иначе (не влит, не
     найден, сбой GitHub) пустой словарь."""
