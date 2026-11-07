@@ -194,6 +194,26 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(row[1], D.OK)
             self.assertIn("диспетчер 2.0.9, сторож 2.0.9", row[2])
 
+    def test_ceo_wake_row_fails_without_named_session(self):
+        """TK-120 п.1: побудка включена, а ceo-session.json нет или name пуст — FAIL (в invoice побудка молчала при «ни одного FAIL»)."""
+        row = self.rows()["побудка CEO"]
+        self.assertEqual(row[1], D.FAIL)
+        self.assertIn("/ceo", row[2])
+        (self.sd / "ceo-session.json").write_text(json.dumps({"id": "abc", "name": "  "}), encoding="utf-8")
+        self.assertEqual(self.rows()["побудка CEO"][1], D.FAIL)
+        (self.sd / "ceo-session.json").write_text("{не json", encoding="utf-8")
+        self.assertEqual(self.rows()["побудка CEO"][1], D.FAIL)
+        self.assertEqual(D.main(["--project", str(self.project)]), 1)
+
+    def test_ceo_wake_row_ok_with_name_and_off_when_disabled(self):
+        (self.sd / "ceo-session.json").write_text(json.dumps({"id": "abc", "name": "CEO rpv"}), encoding="utf-8")
+        row = self.rows()["побудка CEO"]
+        self.assertEqual(row[1], D.OK)
+        self.assertIn("CEO rpv", row[2])
+        (self.sd / "ceo-session.json").unlink()
+        (self.project / ".claude" / "rpv.json").write_text(json.dumps({"ceo_wake": False}), encoding="utf-8")
+        self.assertEqual(self.rows()["побудка CEO"][1], D.OFF)
+
 
 if __name__ == "__main__":
     unittest.main()

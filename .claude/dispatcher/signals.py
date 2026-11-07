@@ -13,6 +13,7 @@ import project_paths as CFG
 import project as P
 import registry as R
 import ticket as T
+import turn as TURN
 
 # Пинг-понг ревью (аудит-2): сколько раз ревьюер может вернуть работу владельцу (in_review → вернул → снова in_review).
 # После MAX_REVIEW_RETURNS возвратов тикет, снова сданный на ревью, ревьюеру не отдаётся (`review_limit_hit`, первая строка
@@ -108,11 +109,18 @@ def handle_next_ceo(path: Path, tkt: T.Ticket, state: dict, now) -> None:
         return
     last = tkt.log[-1] if tkt.log else None
     who = f"{last.author}: " if last else ""
+    line = _first_line(last.text if last else "")
+    if TURN.target("next-ceo", tkt) and not review_limit_hit(tkt, state, ignore_next=True):
+        # TK-127: ход берёт Судья, CEO мяч не держит — метки передачи нет, строка CEO «к сведению»; на потолке возвратов Судью
+        # не зовём (ещё круг пинг-понга) — путь прежний: строка CEO, `next` съеден, потолок срабатывает следом
+        append_ceo_inbox(tkt.id, "next-ceo", f"{who}{line} (к сведению: ход отдан Судье)", now)
+        TURN.give_turn(path, tkt, "next-ceo", f"{who}передал ход CEO: «{line}».", now)
+        return
     # метка — на диск раньше, чем уйдёт `next`: убит диспетчер между ними — метка есть, `next` остался и доставится
     # повторно (строка CEO может задвоиться, но передача не теряется и ожидание роли не станет «без условия»)
     state.setdefault("ceo_handoffs", {})[tkt.id] = T.now_iso(now)  # next съеден тиком при живой роли — её waiting не «без условия»
     CFG.save_state(state)
-    append_ceo_inbox(tkt.id, "next-ceo", f"{who}{_first_line(last.text if last else '')}", now)
+    append_ceo_inbox(tkt.id, "next-ceo", f"{who}{line}", now)
     T.write_header_updates(path, {"next": ""}, now=now, stamp_updated=False)
 
 
@@ -132,13 +140,14 @@ REVIEW_AUTO_AUTHORS = AUTO_AUTHORS + ("ci",)  # записи программ (�
 REVIEW_CAP_MARK = "Потолок возвратов:"  # начало записи dispatcher при потолке: по нему `alarms.owner_questions` шлёт вопрос владельцу
 
 
-def review_limit_hit(tkt: T.Ticket, state: dict) -> bool:
+def review_limit_hit(tkt: T.Ticket, state: dict, ignore_next: bool = False) -> bool:
     """Потолок возвратов: тикет снова сдан на ревью (done/in_review при reviewer) после MAX_REVIEW_RETURNS возвратов, последний
     ход — владельца (записи `merge`/`ci` не в счёт), а `next` пуст или стоит на ревьюере (так его ставит `result pr`). Ход CEO или
-    ревьюера — не повод; чужой `next` (владелец позвал CEO или другую роль) потолок не стирает: сработает, когда его съедят."""
+    ревьюера — не повод; чужой `next` (владелец позвал CEO или другую роль) потолок не стирает: сработает, когда его съедят
+    (`ignore_next` — спросить заранее, сработает ли потолок после того, как `next` съедят)."""
     if tkt.status not in ("done", "in_review") or tkt.reviewer not in P.ROLES or _review_returns(state, tkt.id) < MAX_REVIEW_RETURNS:
         return False
-    if tkt.next_role not in ("", tkt.reviewer):
+    if not ignore_next and tkt.next_role not in ("", tkt.reviewer):
         return False
     last = next((e for e in reversed(tkt.log) if e.author.lower() not in REVIEW_AUTO_AUTHORS), None)
     return bool(last) and T.author_is(last.author, tkt.owner)
