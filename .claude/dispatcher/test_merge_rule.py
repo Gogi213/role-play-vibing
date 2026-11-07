@@ -110,9 +110,10 @@ class MergeRuleTests(MergeRuleBase):
         self.assertEqual(self.run_m(), [])
 
     def test_red_or_pending_ci_no_merge(self):
-        for state in ("failure", "pending"):
-            C.save_state({f"{REPO}#7": {"sha": SHA, "state": state}})
-            self.assertEqual(self.run_m(), [])
+        C.save_state({f"{REPO}#7": {"sha": SHA, "state": "pending"}})
+        self.assertEqual(self.run_m(), [])
+        C.save_state({f"{REPO}#7": {"sha": SHA, "state": "failure"}})  # TK-121: красный на принятой голове — теперь событие CEO (test_tk121.py)
+        self.assertEqual(M.merge_once(REPO, gh=self.gh, emit=lambda *a: None), [(7, "принят, не влит → CEO")])
         self.assertEqual(self.put(), [])
 
     def test_conflict_wakes_owner_once(self):

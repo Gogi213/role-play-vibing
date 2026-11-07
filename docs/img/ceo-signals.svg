@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 540" width="1100" height="540" role="img" aria-labelledby="t-c d-c">
 <title id="t-c">Что будит CEO</title>
-<desc id="d-c">Сигналы из тикетов, диспетчера и сторожа проходят через append_ceo_inbox. Виды события (решение владельца, сломалось или срок, шаг цели без следующего, цель закрыта) пишутся в ceo-inbox.md и ceo-wake.log и будят CEO через ceo_wake.py. Остальные виды — строки очереди в ceo-inbox.md без побудки. Предупреждения о модели копятся и уходят раз в час. Механика пишется в mechanics.log и CEO не будит. Надзиратель CEO не пишет: находка идёт Судье, и CEO просыпается, только если Судья ответит blocked или ask-owner.</desc>
+<desc id="d-c">Сигналы из тикетов, диспетчера и сторожа проходят через append_ceo_inbox. Виды события (решение владельца, сломалось или срок, шаг цели без следующего, цель закрыта, влито не выпущено, принят не влит) пишутся в ceo-inbox.md и ceo-wake.log и будят CEO через ceo_wake.py. Остальные виды — строки очереди в ceo-inbox.md без побудки. Предупреждения о модели копятся и уходят раз в час. Механика пишется в mechanics.log и CEO не будит. Надзиратель CEO не пишет: находка идёт Судье, и CEO просыпается, только если Судья ответит blocked или ask-owner.</desc>
 <style>
   :root{--bg:#F6F8FA;--surface:#FFFFFF;--fg:#1F2933;--muted:#586471;--line:#AEB9C4;--model-bg:#E1EDFB;--model-line:#3A6EA5;--wake:#B83A08;--wake-bg:#FCEBE2}
   @media (prefers-color-scheme: dark){:root{--bg:#0E141A;--surface:#161E26;--fg:#E4EAF0;--muted:#98A5B1;--line:#4A5A68;--model-bg:#14283B;--model-line:#6FA8E0;--wake:#FF9A66;--wake-bg:#3B2216}}
@@ -59,7 +59,7 @@
 <text x="362" y="208" class="s">needs_owner · blocked · auth</text>
 <text x="362" y="222" class="s">goal-done · watch-goal-idle</text>
 <text x="362" y="236" class="s">следующий-не-определён · due</text>
-<text x="362" y="250" class="s">watch-unreleased</text>
+<text x="362" y="250" class="s">watch-unreleased · merge-red</text>
 <rect class="n-code" x="352" y="260" width="182" height="84" rx="6"/>
 <text x="362" y="278" class="t">строка очереди</text>
 <text x="362" y="294" class="s">done · next-ceo · ждёт-ceo</text>
