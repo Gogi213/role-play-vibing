@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 
 import ceo_wake as CW
@@ -25,11 +26,13 @@ HAIKU_ALLOWED_KINDS = {"file-move", "table-format", "publish", "log-compact"}
 WAKE_REASON_KINDS = {"watch-goal-idle"}  # в ceo-wake.log к таким видам дописывается причина (TK-086)
 
 
-def _ceo_file_write(tid: str, kind: str, note: str, now=None) -> None:
-    CFG.CEO_INBOX.parent.mkdir(parents=True, exist_ok=True)
-    with open(CFG.CEO_INBOX, "a", encoding="utf-8") as fh:
+def _ceo_file_write(tid: str, kind: str, note: str, now=None, inbox=None, log=None) -> None:
+    """`inbox`/`log` — пути, зафиксированные вызывающим: поток побудки пишет туда же, куда писал бы сразу (E-028)."""
+    inbox, log = inbox or CFG.CEO_INBOX, log or CFG.CEO_WAKE_LOG
+    inbox.parent.mkdir(parents=True, exist_ok=True)
+    with open(inbox, "a", encoding="utf-8") as fh:
         fh.write(f"- {T.now_iso(now)} {tid} [{kind}] {note}\n")
-    with open(CFG.CEO_WAKE_LOG, "a", encoding="utf-8") as fh:
+    with open(log, "a", encoding="utf-8") as fh:
         reason = f" — {' '.join(note.split())[:150]}" if kind in WAKE_REASON_KINDS else ""
         fh.write(f"{T.now_iso(now)} {tid} {kind}{reason}\n")
 
@@ -54,7 +57,7 @@ def append_ceo_inbox(tid: str, kind: str, note: str, now=None) -> None:
         _mech_log(tid, kind, note, now)
         return
     _ceo_file_write(tid, kind, note, now)
-    CW.wake(tid, kind, note, _ceo_file_write, now)  # событие (CW.EVENT_OF) — одна строка в сессию CEO; прочие виды не будят
+    CW.wake(tid, kind, note, partial(_ceo_file_write, inbox=CFG.CEO_INBOX, log=CFG.CEO_WAKE_LOG), now)  # событие (CW.EVENT_OF) — одна строка в сессию CEO; прочие виды не будят
 
 
 # --- таблица правил «вид сигнала → будить / сводка» (судья TK-002 п.3, взамен привратника TypeSafe) --

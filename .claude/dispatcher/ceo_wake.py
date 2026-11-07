@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from typing import Callable, NamedTuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import haiku_aux  # noqa: E402
@@ -79,12 +80,11 @@ def _prompt(session: dict, lines: list) -> str:
             "Больше ничего не делай и не пиши.")
 
 
-def _launch(session: dict, lines: list, runner) -> tuple[bool, str]:
+def _launch(session: dict, lines: list, runner, mode: str = DEFAULT_MODE) -> tuple[bool, str]:
     """(доставлено, причина). Один вызов `claude -p`; доставка — только маркер DELIVERED в ответе."""
     claude = haiku_aux._claude()
     if not claude:
         return False, "claude не найден"
-    mode = str(P.setting("ceo_wake_mode", DEFAULT_MODE))
     cmd = [claude, "-p", "--model", MODEL, "--permission-mode", mode, "--allowedTools", "ListAgents,SendMessage"]
     try:
         with tempfile.TemporaryDirectory(prefix="rpv-wake-") as cwd:  # вне проекта: без CLAUDE.md и хуков
@@ -103,36 +103,49 @@ def _launch(session: dict, lines: list, runner) -> tuple[bool, str]:
     return True, ""
 
 
+class _Wake(NamedTuple):
+    """Событие в очереди побудки. Сессия, каталог и отправка зафиксированы в момент wake(): поток живёт дольше вызова, а пути
+    проекта к его работе уже могут быть другими (тест подменил, `configure_project` перенастроил) — E-028."""
+    tid: str
+    line: str
+    write_inbox: Callable
+    now: object
+    runner: Optional[Callable]
+    send: Callable
+    session: dict
+    out_dir: Path
+    mode: str
+
+
 _LOCK = threading.Lock()
-_QUEUE: list = []  # события, ждущие запуска: (tid, строка, write_inbox, now, runner, send)
+_QUEUE: list = []  # события, ждущие запуска
 _WORKER: "threading.Thread | None" = None
 
 
 def _fail(batch: list, why: str, inbox: bool = True) -> None:
     """Отказ: по строке в очередь CEO на событие (кроме «сессия не названа» — та идёт в mechanics.log) и одно сообщение владельцу."""
-    for tid, line, write_inbox, now, _runner, _send in batch:
+    for item in batch:
         if inbox:
-            write_inbox(tid, "ceo-не-разбужен", f"{why}; событие: {line}", now)
-    send = batch[0][5] or notify.send
+            item.write_inbox(item.tid, "ceo-не-разбужен", f"{why}; событие: {item.line}", item.now)
     try:
-        send(f"CEO не разбужен ({why}). " + " | ".join(item[1] for item in batch), log_dir=CFG.DISPATCHER_DIR)
+        batch[0].send(f"CEO не разбужен ({why}). " + " | ".join(item.line for item in batch), log_dir=batch[0].out_dir)
     except Exception:  # noqa: BLE001
         pass
 
 
 def _deliver(batch: list) -> bool:
-    session = read_session()
-    if not session:
+    first = batch[0]
+    if not first.session:
         why = "сессия CEO не названа (`/ceo` не записал ceo-session.json)"
         try:
-            with (CFG.DISPATCHER_DIR / "mechanics.log").open("a", encoding="utf-8") as f:
-                for tid, line, _w, now, _r, _s in batch:
-                    f.write(f"{P.now_iso(now)} {tid} [ceo-не-разбужен] {why}; событие: {line}\n")
+            with (first.out_dir / "mechanics.log").open("a", encoding="utf-8") as f:
+                for item in batch:
+                    f.write(f"{P.now_iso(item.now)} {item.tid} [ceo-не-разбужен] {why}; событие: {item.line}\n")
         except OSError:
             pass
         _fail(batch, why, inbox=False)
         return False
-    ok, why = _launch(session, [item[1] for item in batch], batch[0][4] or haiku_aux.hide.run)
+    ok, why = _launch(first.session, [item.line for item in batch], first.runner or haiku_aux.hide.run, first.mode)
     if not ok:
         _fail(batch, why)
     return ok
@@ -142,11 +155,11 @@ def _drain() -> None:
     global _WORKER
     while True:
         with _LOCK:
-            batch = list(_QUEUE)
-            _QUEUE.clear()
-            if not batch:
+            if not _QUEUE:
                 _WORKER = None
                 return
+            batch = [item for item in _QUEUE if item.out_dir == _QUEUE[0].out_dir]  # один запуск — один проект
+            _QUEUE[:] = [item for item in _QUEUE if item not in batch]
         try:
             _deliver(batch)
         except Exception:  # noqa: BLE001 — побудка не роняет диспетчер
@@ -169,7 +182,8 @@ def wake(tid: str, kind: str, note: str, write_inbox, now=None, runner=None, sen
     if not event or P.setting("ceo_wake", True) is False:
         return False
     line = f"[{event}] {tid} — {' '.join(str(note).split())[:160]}. Прочитай `tickets.py inbox`."
-    item = (tid, line, write_inbox, now, runner, send)
+    item = _Wake(tid, line, write_inbox, now, runner, send or notify.send, read_session(), CFG.DISPATCHER_DIR,
+                 str(P.setting("ceo_wake_mode", DEFAULT_MODE)))
     if not BACKGROUND:
         return _deliver([item])
     with _LOCK:
