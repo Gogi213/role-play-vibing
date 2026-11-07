@@ -446,6 +446,9 @@ class PhoneFit(unittest.TestCase):
                 for track in re.findall(r"grid-template-columns:([^;}]*)", rule):
                     self.assertNotRegex(re.sub(r"minmax\(0,1fr\)", "", track), r"(?<![\w-])1fr", f"{selector}: колонка 1fr не сжимается ниже слова — minmax(0,1fr)")
 
+    def test_ticket_tag_is_not_torn_apart_by_the_wrapping(self):
+        self.assertIn("white-space:nowrap", "".join(self.rules(".tag")))
+
     def test_text_of_a_list_row_may_shrink_in_its_flex_row(self):
         self.assertIn("min-width:0", "".join(self.rules(".body li>span")))
 
