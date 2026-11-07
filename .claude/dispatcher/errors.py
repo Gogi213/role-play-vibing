@@ -490,13 +490,16 @@ def _infra_refusal(root: Path, tid: str, cwd: Path, infra: list, signal) -> str:
 
 def dead_copy(root: Path, tid: str) -> Path | None:
     """Каталог `.claude/worktrees/<ID>` есть, но живого checkout в нём нет (пуст или недоубран: `git worktree remove` упал на
-    «failed to delete», E-037) — путь к нему; копии нет или она живая — None. Прогон в таком каталоге даёт ложный отказ."""
+    «failed to delete», E-037) — путь к нему; копии нет или она живая — None. Живая — git сам видит каталог корнем дерева
+    (без уцелевшего `.git` он указал бы на проект выше) и читает HEAD. Прогон в мёртвой копии даёт ложный отказ."""
     wt = root / ".claude" / "worktrees" / tid
     if not tid or not wt.is_dir():
         return None
     try:
-        live = (wt / ".git").exists() and any(c.name != ".git" for c in wt.iterdir())
-    except OSError:
+        top = hide.git(wt, "rev-parse", "--show-toplevel", text=True, timeout=20)
+        head = hide.git(wt, "rev-parse", "--verify", "-q", "HEAD", text=True, timeout=20)
+        live = top.returncode == 0 and head.returncode == 0 and Path(top.stdout.strip()).resolve() == wt.resolve()
+    except (OSError, subprocess.TimeoutExpired):
         live = False
     return None if live else wt
 
