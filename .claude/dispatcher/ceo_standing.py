@@ -1,12 +1,11 @@
 """Что стоит сейчас (TK-120, В-58): для хука CEO — список «TK-N — что — стоит N мин» вместо числа строк ceo-inbox.
 
-Стоит: открытые `needs_owner` и `blocked`; принятые Судьёй, но не влитые (`done` с `pr:`, а PR в ci-state.json не закрыт);
+Стоит: открытые `needs_owner` и `blocked`; принятые Судьёй, но не влитые (`waiting` с `wait_for: merged:…` — так приёмка ждёт влития);
 «влито, не выпущено» (отметка сторожа `unreleased:<ветка>` в watch-state.json). Возраст — от `updated` тикета, у невыпущенного — от
 `pulse_since` в state.json, иначе от отметки сторожа. Только читает; модуль берёт хук сессии CEO (`role_memory.ceo_standing_alert`)."""
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -42,8 +41,6 @@ def standing(root, now: datetime | None = None) -> list:
     """Строки «TK-N — что — стоит N мин»; пусто — ничего не стоит. Нечитаемый тикет пропускается."""
     root, now = Path(root), now or datetime.now().astimezone()
     disp = root / ".claude" / "dispatcher"
-    repo = str(P.setting("ci_repo", "", root=root) or "")
-    ci = _json(disp / "ci-state.json") if repo else {}
     rows = []
     for path in T.list_tickets(root / ".claude" / "tickets"):
         try:
@@ -51,10 +48,8 @@ def standing(root, now: datetime | None = None) -> list:
         except Exception:  # noqa: BLE001 — один битый тикет не гасит подсказку
             continue
         what = KINDS.get(tkt.status, "")
-        if not what and tkt.status == "done":
-            prs = re.findall(r"\d+", str(tkt.header.get("pr") or ""))
-            if any(ci.get(f"{repo}#{n}") and not ci[f"{repo}#{n}"].get("closed") for n in prs):
-                what = "принят, не влит"
+        if not what and tkt.status == "waiting" and str(tkt.header.get("wait_for") or "").startswith("merged:"):
+            what = "принят, не влит"
         if what:
             rows.append((_minutes(tkt.header.get("updated"), now), f"{tkt.id} — {_short(tkt.header.get('title', ''))}: {what}"))
     watch = _json(disp / "watch-state.json").get("notified") or {}

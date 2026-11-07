@@ -3,7 +3,7 @@
 - UserPromptSubmit: подсказки минимальные и без повторов. Команда `/ceo` в сообщении ставит метку CEO текущей
   сессии (запасной путь к метке, которую ставит сама команда).
   Роль (не CEO): строка «молчание» — итог в лог тикета, не текстом в ход.
-  CEO: список того, что стоит сейчас («TK-N — что — стоит N мин», пусто — «всё идёт»; TK-120) и строка «N новых в ceo-inbox.md», когда пришли новые; сторож — по разу на 10 сообщений; порог контекста (`ceo_context.py`, TK-052, единственный источник порогов): CEO — от 350 тыс. токенов
+  CEO: список того, что стоит сейчас («TK-N — что — стоит N мин», пусто — «всё идёт»; TK-120); сторож — по разу на 10 сообщений; порог контекста (`ceo_context.py`, TK-052, единственный источник порогов): CEO — от 350 тыс. токенов
   вставка раз в 10 сообщений, от 400 тыс. — хардстоп (сообщение в модель не уходит); другие роли с владельцем — строка от 350 тыс., так же раз в 10.
 - SessionEnd (клир, выход, остановка): конспект разговора — сообщения владельца/диспетчера и сессий дословно, ответы
   (без инструментов и рассуждений; без пересказа моделью) — в `.claude/roles/log/<роль>/`. Не сработал — `role_context.py` на следующем
@@ -237,36 +237,16 @@ def watch_alert():
     return None
 
 
-# Диспетчер задач (.claude/dispatcher/): непрочитанные строки ceo-inbox.md — одна короткая строка; сами строки CEO
-# читает из файла (`tickets.py inbox`, он и двигает отметку; хук её не трогает, пока CEO не прочитал — подсказка повторяется).
-DISPATCHER_CEO_INBOX = os.path.join(DISPATCHER_DIR, "ceo-inbox.md")
-
-
-def ceo_inbox_alert():
-    ceo_inbox = _dispatcher_module("ceo_inbox")
-    lines, seen = ceo_inbox.read(DISPATCHER_CEO_INBOX, os.path.join(DISPATCHER_DIR, ceo_inbox.SEEN_NAME))
-    new = [ln for ln in lines[seen:] if ln.strip()]
-    if not new:
-        return None
-    return f"[диспетчер] {len(new)} новых в .claude/dispatcher/ceo-inbox.md"
-
-
+# Диспетчер задач (.claude/dispatcher/): что стоит сейчас — вместо числа строк ceo-inbox.md (их CEO читает `tickets.py inbox`).
 def ceo_standing_alert(state):
-    """Что стоит сейчас (`ceo_standing`, TK-120) и, когда пришли новые, строка про ceo-inbox. Стоящее — каждое сообщение, пока стоит;
-    «всё идёт» — как любая подсказка, не чаще раза в REPEAT_EVERY сообщений. Сбой чтения не мешает строке про ceo-inbox."""
-    parts = []
+    """Что стоит сейчас (`ceo_standing`, TK-120) вместо числа строк ceo-inbox. Стоящее — каждое сообщение, пока стоит;
+    «всё идёт» — как любая подсказка, не чаще раза в REPEAT_EVERY сообщений. Сбой чтения — без подсказки."""
     try:
-        lines = _dispatcher_module("ceo_standing").standing(ROOT)
+        standing = _dispatcher_module("ceo_standing")
+        lines = standing.standing(ROOT)
     except Exception:
-        lines = None
-    if lines:
-        parts.append(_dispatcher_module("ceo_standing").render(lines))
-    inbox = ceo_inbox_alert()
-    if inbox:
-        parts.append(inbox)
-    elif lines is not None and not lines:
-        parts.append(throttled(state, "standing", "calm", _dispatcher_module("ceo_standing").render([])))
-    return "\n".join(p for p in parts if p) or None
+        return None
+    return standing.render(lines) if lines else throttled(state, "standing", "calm", standing.render([]))
 
 
 # Контекст: пороги — одни, `ceo_context.limits` (350/400 тыс., В-15). CEO — вставка WARN и хардстоп (`ceo_gate`); остальные роли
