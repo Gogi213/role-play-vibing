@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ceo_inbox as CI  # noqa: E402
 import haiku_aux  # noqa: E402
 import notify  # noqa: E402
 import project as P  # noqa: E402
@@ -95,7 +96,7 @@ def _launch(session: dict, lines: list, runner, mode: str = DEFAULT_MODE) -> tup
     if r.returncode != 0:
         return False, f"код {r.returncode}: {((r.stderr or b'').decode('utf-8', 'replace') or out).strip()[:120]}"
     if NOT_FOUND in out:
-        return False, "сессия CEO не найдена в ListAgents"
+        return False, CI.ABSENT_WHY
     if FAILED in out:
         return False, f"SendMessage отказал: {' '.join(out.split())[:120]}"
     if DELIVERED not in out:
@@ -126,7 +127,7 @@ def _fail(batch: list, why: str, inbox: bool = True) -> None:
     """Отказ: по строке в очередь CEO на событие (кроме «сессия не названа» — та идёт в mechanics.log) и одно сообщение владельцу."""
     for item in batch:
         if inbox:
-            item.write_inbox(item.tid, "ceo-не-разбужен", f"{why}; событие: {item.line}", item.now)
+            item.write_inbox(item.tid, CI.FAIL_KIND, f"{why}; событие: {item.line}", item.now)
     try:
         batch[0].send(f"CEO не разбужен ({why}). " + " | ".join(item.line for item in batch), log_dir=batch[0].out_dir)
     except Exception:  # noqa: BLE001

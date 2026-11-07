@@ -663,6 +663,10 @@ def _overseer(state: dict, now) -> None:
 
 def _account_downtime(state: dict, now, **flags) -> None:
     try:
+        try:  # «влито, не выпущено» и «CEO не разбужен» — из файлов сторожа и очереди CEO (TK-112); не прочли — классы не считаем
+            flags.update(downtime.watch_flags(CFG.DISPATCHER_DIR, now))
+        except Exception as e:
+            print(f"[dispatch] downtime flags: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         downtime.account(state, now, poll_s=POLL_INTERVAL, slo_min=IDLE_SLO_MIN, **flags)  # минуты простоя — в отчёт (CP10)
     except Exception as e:  # счётчик не должен ронять тик
         print(f"[dispatch] downtime: {type(e).__name__}: {e}", file=sys.stderr, flush=True)

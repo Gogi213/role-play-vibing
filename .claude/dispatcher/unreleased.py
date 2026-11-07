@@ -17,6 +17,7 @@ import ticket as T  # noqa: E402
 
 UNRELEASED_IDLE_MIN = 10  # очередь пуста дольше этого — и только тогда проверяем теги (сторож ходит раз в ~2 мин)
 IDLE_SINCE_KEY = "unreleased_idle_since"  # watch-state.json: когда сторож впервые увидел пустую очередь
+OPEN_KEY = "unreleased_open_at"  # watch-state.json: когда сторож в последний раз подтвердил «влито, не выпущено» — счётчик простоя (TK-112)
 BRANCH_KEY = "unreleased_branch"  # watch-state.json: ветка репозитория по последнему ответу GitHub — ключ дедупа находки (TK-075)
 _VERSION_TAG = re.compile(r"v(\d+(?:\.\d+)*)")
 NOT_RELEASE_DIRS = ("docs/", "tools/")  # правки только здесь выпуска не требуют
@@ -55,6 +56,21 @@ def idle_minutes(ws: dict, now) -> float:
         ws[IDLE_SINCE_KEY] = T.now_iso(now)
         return 0.0
     return max((now - since).total_seconds() / 60, 0.0)
+
+
+def record_open(ws: dict, now, text: "str | None") -> None:
+    """Отметка для счётчика простоя из результата `unreleased_message`: находка есть — время подтверждения; нет — отметка снята;
+    None (GitHub не ответил) — отметка остаётся и стареет сама, устаревшую счётчик не считает."""
+    if text:
+        ws[OPEN_KEY] = T.now_iso(now)
+    elif text is not None:
+        ws.pop(OPEN_KEY, None)
+
+
+def open_fresh(ws: dict, now, max_age_s: float) -> bool:
+    """Сторож подтвердил «влито, не выпущено» не раньше max_age_s секунд назад."""
+    at = P.parse_time(ws.get(OPEN_KEY))
+    return at is not None and 0 <= (now - at).total_seconds() <= max_age_s
 
 
 def has_release_files(compare: dict) -> bool:
