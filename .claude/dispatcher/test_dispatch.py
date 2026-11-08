@@ -2578,8 +2578,8 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = lambda cmd, **kw: (calls.append(list(cmd)), subprocess.Popen([sys.executable, "-c", "pass"], **kw))[1]
         return calls
 
-    def test_default_review_returns_limit_is_500(self):
-        self.assertEqual(SIG.MAX_REVIEW_RETURNS, 500)  # В-64: 500 назначено владельцем 07.11, не измерено
+    def test_default_review_returns_limit_is_10(self):
+        self.assertEqual(SIG.MAX_REVIEW_RETURNS, 10)  # В-60/В-67: 10 назначено владельцем, 500 было заглушкой в rpv
 
     def test_reviewer_return_counts_and_approval_resets_the_series(self):
         path = self.review_setup()

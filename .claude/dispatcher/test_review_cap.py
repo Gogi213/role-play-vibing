@@ -24,7 +24,7 @@ import project_paths as CFG  # noqa: E402
 import routes as R  # noqa: E402
 import signals as SIG  # noqa: E402
 import ticket as T  # noqa: E402
-from test_review_cap_patch import patch_review_cap  # noqa: E402  (TK-129: малый потолок вместо 500 кругов)
+from test_review_cap_patch import patch_review_cap  # noqa: E402  (TK-129: малый потолок вместо настоящего)
 
 TZ = timezone(timedelta(hours=4))
 T0 = datetime(2026, 10, 31, 22, 30, tzinfo=TZ)
