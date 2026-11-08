@@ -221,24 +221,18 @@ class StatusTests(FactsBase):
         tid = self.ticket(ref="", status="in_progress", desc="Шаг 1 из 2 цели G-001.")
         self.assertEqual([r["ticket"] for r in self.status()["rows"]], [tid])
 
-    def test_accepted_is_grey_with_time_or_day(self):
-        today = self.ticket(status="done", accepted_at=self.now - timedelta(hours=2))
-        old = self.ticket(status="done", accepted_at=self.now - timedelta(days=1))
-        self.assertEqual(self.where(), [(today, "принят 10:00", "done", ""), (old, "принят вчера", "done", "")])
-
-    def test_more_than_three_accepted_keeps_last_three_and_counts_the_rest(self):
-        ids = [self.ticket(status="done", accepted_at=self.now) for _ in range(5)]
+    def test_accepted_are_not_rows_and_there_is_no_more_counter(self):
+        """В-79: принятые в «Статус» не попадают ни строками, ни счётчиком `more`; непринятые — как были."""
+        for hours in (2, 24, 48):
+            self.ticket(status="done", accepted_at=self.now - timedelta(hours=hours))
+        live = self.ticket(status="in_progress")
         got = self.status()
-        self.assertEqual([r["ticket"] for r in got["rows"]], ids[-3:])
-        self.assertEqual(got["more"], 2)
+        self.assertEqual([r["ticket"] for r in got["rows"]], [live])
+        self.assertNotIn("more", got)
+
+    def test_only_accepted_tickets_make_no_block(self):
         self.ticket(status="done", accepted_at=self.now)
-        self.assertEqual(self.status()["more"], 3)
-
-    def test_three_accepted_are_all_shown(self):
-        for _ in range(3):
-            self.ticket(status="done", accepted_at=self.now)
-        got = self.status()
-        self.assertEqual((len(got["rows"]), got["more"]), (3, 0))
+        self.assertIsNone(self.status())
 
     def test_who_holds_the_ticket(self):
         eng = self.ticket(status="in_progress")
@@ -289,20 +283,19 @@ class StatusTests(FactsBase):
 
     def test_queued_step_waits_on_nearest_unaccepted_step_before_it(self):
         self.plan_goal()
-        first = self.step(1, status="done", accepted_at=self.now)
+        self.step(1, status="done", accepted_at=self.now)
         second = self.step(2, status="in_progress")
         third = self.step(3, status="todo")
         state = {"active_runs": {second: {"role": "engineer", "started": T.now_iso(self.now)}}}
         plan = F.plan_of("G-001", self.read(), state, [], [], [], self.now)
-        self.assertEqual(self.where(state=state, plan=plan), [(first, "принят 12:00", "done", ""), (second, "Инженер делает", "run", ""),
-                                                              (third, f"ждёт {second}", "next", "")])
+        self.assertEqual(self.where(state=state, plan=plan), [(second, "Инженер делает", "run", ""), (third, f"ждёт {second}", "next", "")])
 
     def test_first_unaccepted_step_in_queue_does_not_wait(self):
         self.plan_goal()
         self.step(1, status="done", accepted_at=self.now)
         second, third = self.step(2, status="todo"), self.step(3, status="todo")
         plan = F.plan_of("G-001", self.read(), {}, [], [], [], self.now)
-        self.assertEqual([r[:2] for r in self.where(plan=plan)][1:], [(second, "в очереди"), (third, f"ждёт {second}")])
+        self.assertEqual([r[:2] for r in self.where(plan=plan)], [(second, "в очереди"), (third, f"ждёт {second}")])
 
     def test_blocked_is_not_with_the_judge(self):
         blocked, review = self.ticket(status="blocked"), self.ticket(status="in_review", owner="judge")

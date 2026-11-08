@@ -142,13 +142,15 @@ class StatusTests(unittest.TestCase):
     ROWS = [{"ticket": "TK-1", "title": "Схема", "mark": "done", "where": "принят 10:00"},
             {"ticket": "TK-2", "title": "Загрузчик", "mark": "run", "where": "стоит 23 мин", "level": "warn"}]
 
-    def test_rows_more_left_hold(self):
+    def test_rows_left_hold_and_accepted_rows_dropped(self):
+        """В-79: принятая строка из файла старой версии и счётчик `more` на страницу не попадают."""
         v = view("a", status={"rows": self.ROWS, "more": 2, "left": "Загрузчик", "hold": "TK-2 стоит 23 мин"})["status"]
-        self.assertEqual(v["rows"], [dict(self.ROWS[0], level=""), self.ROWS[1]])
-        self.assertEqual((v["more"], v["left"], v["hold"]), (2, "Загрузчик", "TK-2 стоит 23 мин"))
+        self.assertEqual(v["rows"], [self.ROWS[1]])
+        self.assertEqual((v["left"], v["hold"]), ("Загрузчик", "TK-2 стоит 23 мин"))
+        self.assertNotIn("more", v)
 
     def test_no_field_or_junk_is_empty(self):
-        empty = {"rows": [], "more": 0, "left": "", "hold": ""}
+        empty = {"rows": [], "left": "", "hold": ""}
         for junk in (None, "мусор", [], {"rows": "x", "more": -1, "left": 5}):
             self.assertEqual(V.normalise("a", raw(**({} if junk is None else {"status": junk})), NOW)["status"], empty, junk)
         self.assertEqual(V.normalise("a", None, NOW)["status"], empty, "пульс не читается")
@@ -158,10 +160,10 @@ class StatusTests(unittest.TestCase):
                 {"ticket": "TK-3", "title": "B", "mark": "next", "where": "ждёт TK-2", "level": "красный"}]
         self.assertEqual(view("a", status={"rows": rows})["status"]["rows"], [{"ticket": "TK-3", "title": "B", "mark": "next", "where": "ждёт TK-2", "level": ""}])
 
-    def test_stale_keeps_accepted_and_left_drops_now_and_hold(self):
+    def test_stale_keeps_left_drops_now_and_hold(self):
         old = raw(at=NOW - timedelta(minutes=30), status={"rows": self.ROWS, "left": "Выпуск", "hold": "TK-2 стоит 23 мин"})
         v = V.normalise("a", old, NOW)["status"]
-        self.assertEqual((v["rows"][0]["where"], v["rows"][1]["where"], v["rows"][1]["level"]), ("принят 10:00", "", ""))
+        self.assertEqual([(r["ticket"], r["where"], r["level"]) for r in v["rows"]], [("TK-2", "", "")])
         self.assertEqual((v["left"], v["hold"]), ("Выпуск", ""))
 
 
