@@ -1,7 +1,9 @@
 """TK-105 (В-50): Пульс v2, читатель — шапка в три состояния по-человечески, числа переключателя, итоги дня, поля версии 2 и версия 1."""
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -161,6 +163,51 @@ class StatusTests(unittest.TestCase):
         v = V.normalise("a", old, NOW)["status"]
         self.assertEqual((v["rows"][0]["where"], v["rows"][1]["where"], v["rows"][1]["level"]), ("принят 10:00", "", ""))
         self.assertEqual((v["left"], v["hold"]), ("Выпуск", ""))
+
+
+class HiddenGoalTests(unittest.TestCase):
+    """В-77: ключ rpv.json `pulse_hide_goal` — имена проектов, у которых карточка не показывает цель (план и «Статус» остаются)."""
+
+    GOAL = {"id": "G-1", "title": "Цель", "step": 1, "steps": 2}
+
+    def load(self, setting, extra=False):
+        """{имя: вид} проектов a (из pulse_projects) и, если extra, c (присланный на сервер); у всех в файле есть цель."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude").mkdir()
+            paths = {}
+            for name in ("a", "b", "c"):
+                paths[name] = root / f"{name}.json"
+                paths[name].write_text(json.dumps(raw(goal=self.GOAL, plan=[{"mark": "run", "n": 1, "title": "Шаг"}])), encoding="utf-8")
+            body = {"pulse_projects": {"a": str(paths["a"]), "b": str(paths["b"])}, **({} if setting is None else {"pulse_hide_goal": setting})}
+            (root / ".claude" / "rpv.json").write_text(json.dumps(body), encoding="utf-8")
+            return {v["name"]: v for v in V.load_all(root, NOW, extra={"c": str(paths["c"])} if extra else None)}
+
+    def test_listed_project_has_no_goal_but_keeps_plan_and_others_keep_goal(self):
+        got = self.load(["a"])
+        self.assertIsNone(got["a"]["goal"])
+        self.assertEqual(got["a"]["plan"][0]["title"], "Шаг")
+        self.assertEqual(got["b"]["goal"], self.GOAL)
+
+    def test_sent_project_can_be_listed_too(self):
+        got = self.load(["c", "a"], extra=True)
+        self.assertEqual({n: v["goal"] is None for n, v in got.items()}, {"a": True, "b": False, "c": True})
+
+    def test_boundary_inputs_hide_nothing_by_accident(self):
+        """Ключа нет · пустой список · строка вместо списка · другой регистр · пустое имя · не строки — цель на месте у всех."""
+        for setting in (None, [], "a", ["A"], ["", " "], [1, None, ["a"]], {"a": True}, True):
+            got = self.load(setting)
+            self.assertEqual([v["goal"] for v in got.values()], [self.GOAL, self.GOAL], repr(setting))
+
+    def test_non_string_items_do_not_spoil_the_valid_ones(self):
+        self.assertIsNone(self.load([1, "b", None])["b"]["goal"])
+
+    def test_key_is_valid_in_rpv_config(self):
+        import rpv_config as RC
+        check, words = RC.KEYS["pulse_hide_goal"]
+        self.assertTrue(check(["alpha"]) and check(["a", "b"]))
+        self.assertFalse(any(check(v) for v in ([], "alpha", [""], [1], {"a": 1}, None, True)))
+        self.assertIn("имён", words)
 
 
 class AgoTests(unittest.TestCase):

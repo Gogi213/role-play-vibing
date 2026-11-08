@@ -255,8 +255,11 @@ def _waits_on(tkt) -> str:
     return WAIT_TEXT[parsed[0]].format(*parsed)
 
 
-def _live_phrase(tkt, role: str) -> str:
-    """Кто сейчас держит живой тикет, до пяти слов: «у Судьи» · «в очереди» · «Инженер правит после возврата» · «Инженер делает»."""
+def _live_phrase(tkt, role: str, running: bool = True) -> str:
+    """Кто сейчас держит живой тикет, до пяти слов: «у Судьи» · «в очереди» · «Инженер правит после возврата» · «Инженер делает»;
+    отложенный — «отложен»; «делает»/«правит» — только при идущем запуске роли (`running`), иначе «<роль> — ждёт запуска» (В-77)."""
+    if tkt.status == "backlog":
+        return "отложен"
     role = (role or str(tkt.owner)).strip().lower()
     if role == "judge" or tkt.status == "in_review":
         return "у Судьи"
@@ -264,8 +267,10 @@ def _live_phrase(tkt, role: str) -> str:
         return "в очереди"
     verdict = RP.last_verdict(tkt)
     if role == "engineer" and verdict and verdict[0] == "return":
-        return "Инженер правит после возврата"
+        return "Инженер правит после возврата" if running else "Инженер — ждёт запуска после возврата"
     name = ROLE_RU.get(role)
+    if not running:
+        return f"{name} — ждёт запуска" if name else "ждёт запуска"
     return f"{name} делает" if name else "в работе"
 
 
@@ -295,11 +300,13 @@ def _where(tkt, state: dict, owner_ids: set, stuck_text: str, runs: list, now: d
     if tkt.status == "waiting" and not named:
         return "next", _waits_on(tkt), "", None
     running = (state.get("active_runs") or {}).get(tkt.id) or {}
-    if named or (level and tkt.status != "todo" and not running):  # идёт запуск роли — работа, не «стоит»
+    if named or (level and tkt.status not in ("todo", "backlog") and not running):  # идёт запуск роли — работа, не «стоит»; очередь — не «стоит»
         return "stuck" if named else "run", f"стоит {ago(minutes * 60)}" if minutes is not None else "застряло", level or "bad", minutes
-    phrase = _live_phrase(tkt, str(running.get("role") or ""))
+    phrase = _live_phrase(tkt, str(running.get("role") or ""), bool(running))
     if phrase == "в очереди":
         return "next", f"ждёт {after}" if after else phrase, "", minutes
+    if phrase == "отложен":
+        return "next", phrase, "", minutes
     return "run", phrase, "", minutes
 
 

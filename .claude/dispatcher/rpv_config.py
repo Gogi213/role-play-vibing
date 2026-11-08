@@ -80,6 +80,7 @@ KEYS = {
     "host_free_cmd": (lambda v: _text(v) and "{ticket}" in v, "непустая строка с {ticket} (иначе считаются процессы самого тикета)"),
     "host_mem_reserve": (lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1, "число ≥ 1"),
     "pulse_projects": (lambda v: isinstance(v, dict) and bool(v) and all(_text(k) and _text(x) for k, x in v.items()), "объект {имя проекта: путь к pulse.json или URL}"),
+    "pulse_hide_goal": (_str_list, "список имён проектов страницы"),
     "pulse_telegram": (lambda v: isinstance(v, bool), "true или false"),
     "pulse_push": (pulse_push.valid, "объект {url: https://хост:порт, name: имя проекта латиницей, key: ключ записи страницы (16+ знаков)}"),
     "ceo_context_warn": (_int_min, "целое ≥ 1, токены контекста; ниже ceo_context_stop"),
