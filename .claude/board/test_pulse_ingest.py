@@ -93,6 +93,24 @@ class AcceptTests(IngestServer):
         for _ in range(8):
             self.assertEqual(self.put("rpv", b"x" * (S.MAX_BODY * 2))[0], 413)
 
+    def test_rejection_reads_the_body_first(self):
+        """TK-140: отказ (404/401) до чтения тела закрывал соединение с непрочитанными данными — на Windows клиент
+        получал WinError 10053 вместо ответа. Тело вычитывается целиком до ответа, на любом отказе."""
+        import io
+        handler = S.make_handler(self.proj, READ, inbox=self.inbox, write_token=WRITE)
+        for path, key in (("/put/a.b", WRITE), ("/put/rpv", "wrong"), ("/other/rpv", WRITE)):
+            body = b"x" * 70000
+            h = handler.__new__(handler)
+            h.path, h.rfile, h.wfile = path, io.BytesIO(body), io.BytesIO()
+            h.headers = http.client.HTTPMessage()
+            h.headers["Authorization"] = f"Bearer {key}"
+            h.headers["Content-Length"] = str(len(body))
+            h.request_version, h.command, h.requestline = "HTTP/1.0", "PUT", "PUT " + path
+            h.client_address, h.close_connection, h._headers_buffer = ("127.0.0.1", 1), True, []
+            h.do_PUT()
+            self.assertEqual(h.rfile.read(), b"", f"{path}: тело не прочитано до ответа")
+            self.assertRegex(h.wfile.getvalue().decode("utf-8", "replace"), r"HTTP/1.0 (401|404)")
+
     def test_bad_names_are_404(self):
         for name in ("", "..", "a%2Fb", "a/b", "x" * 41, "%D0%B8%D0%BC%D1%8F", "a.b"):
             self.assertEqual(self.put(name, self.ok_data())[0], 404, name)

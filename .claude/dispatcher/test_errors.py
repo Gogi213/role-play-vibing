@@ -19,6 +19,7 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import errors as E  # noqa: E402
+import test_gitrun as testgit  # noqa: E402
 
 
 class ErrorsTests(unittest.TestCase):
@@ -49,8 +50,7 @@ class ErrorsTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def git(self, *a):
-        return subprocess.run(["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", *a],
-                              check=True, capture_output=True, text=True).stdout.strip()
+        return testgit.run(["-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", *a]).stdout.strip()
 
     def script(self, rel, body, track=True):
         p = self.root / rel
