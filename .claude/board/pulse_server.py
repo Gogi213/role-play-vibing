@@ -166,17 +166,14 @@ def timer(row: dict) -> tuple:
 
 
 def status_html(view: dict) -> str:
-    """Блок «Статус» первым в раскрытой карточке (TK-117): таблица Задача | Что | Где сейчас, принятые серым («принято ещё N» — свёрнутые
-    сверх трёх), под ней «Осталось: … · Держит: …». Данные — из `status` файла как есть; нет ни строк, ни «Осталось» — ничего."""
+    """Блок «Статус» первым в раскрытой карточке (TK-117): таблица Задача | Что | Где сейчас, принятые серым, под ней «Держит: …». «принято
+    ещё N» и «Осталось» не выводятся (владелец 08.11, В-77). Данные — из `status` файла как есть; нет ни строк, ни «Держит» — ничего."""
     st = view["status"]
-    rows = [f'<tr class="d"><td></td><td colspan="2">принято ещё {st["more"]}</td></tr>'] if st["more"] else []
-    rows += [f'<tr class="{PLAN_CLASS[r["mark"]]}"><td class="tk">{escape(r["ticket"])}</td><td>{escape(r["title"])}</td>'
-             f'<td class="where {r["level"]}">{escape(r["where"])}</td></tr>' for r in st["rows"]]
+    rows = [f'<tr class="{PLAN_CLASS[r["mark"]]}"><td class="tk">{escape(r["ticket"])}</td><td>{escape(r["title"])}</td>'
+            f'<td class="where {r["level"]}">{escape(r["where"])}</td></tr>' for r in st["rows"]]
     table = (f'<table class="st"><thead><tr><th>Задача</th><th>Что</th><th>Где сейчас</th></tr></thead><tbody>{"".join(rows)}</tbody></table>'
              if rows else "")
-    left = f'Осталось: {escape(st["left"])}' if st["left"] else ""
-    hold = f'<b>Держит:</b> {escape(st["hold"])}' if st["hold"] else ""
-    line = f'<p class="left">{" · ".join(x for x in (left, hold) if x)}</p>' if left or hold else ""
+    line = f'<p class="left"><b>Держит:</b> {escape(st["hold"])}</p>' if st["hold"] else ""
     return f'<div class="planbox"><h4>Статус</h4>{table}{line}</div>' if table or line else ""
 
 
@@ -194,17 +191,21 @@ def without(text: str, span: str) -> str:
     return re.sub(rf"\s*(?:уже\s+)?{re.escape(span)}$", "", text) if span else text
 
 
-def items_html(items: list, empty: str) -> str:
-    if not items:
-        return f'<li><span class="mute">{empty}</span></li>'
-    return "".join(f'<li><span>{escape(i["title"])} <span class="tag">{escape(i["ticket"])}</span></span></li>' for i in items)
+def queue_html(view: dict) -> str:
+    """«Дальше по очереди» — та же таблица, что «Статус»: Задача | Что, блок на всю ширину (владелец 08.11, В-77)."""
+    q = view["queue"]
+    if not q:
+        return '<div class="planbox"><h4>Дальше по очереди</h4><p class="left">пусто</p></div>'
+    rows = "".join(f'<tr><td class="tk">{escape(i["ticket"])}</td><td>{escape(i["title"])}</td></tr>' for i in q)
+    return (f'<div class="planbox"><h4>Дальше по очереди</h4><table class="st"><thead><tr><th>Задача</th><th>Что</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
 
 
 def card(view: dict, end: int) -> str:
     return (f'<details class="proj" data-n="{escape(view["name"], quote=True)}" data-s="{view["state"]}"><summary>'
             f'<div><div class="name">{escape(view["name"])}</div>{goal_html(view)}</div>'
             f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}</summary>'
-            f'<div class="body">{status_html(view)}<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто")}</ul></div></div></details>')
+            f'<div class="body">{status_html(view)}{queue_html(view)}</div></details>')
 
 
 def summary_html(views: list) -> str:

@@ -70,6 +70,12 @@ def projects_of(root) -> dict:
     return {str(k): str(v) for k, v in value.items() if k and v} if isinstance(value, dict) else {}
 
 
+def hidden_goals(root) -> set:
+    """Ключ rpv.json `pulse_hide_goal` — имена проектов, у которых карточка не показывает цель (В-77); нет ключа, не список — пусто."""
+    value = P.setting("pulse_hide_goal", [], root=root)
+    return {x for x in value if isinstance(x, str)} if isinstance(value, list) else set()
+
+
 def _cells_of(raw: dict) -> list:
     """96 клеток (класс, запусков) из `cells` шага 1: `{i, n, c, why?}`; нет клетки или класс неизвестен — ('none', 0)."""
     out = [("none", 0)] * CELLS
@@ -243,11 +249,13 @@ def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
 
 
 def load_all(root, now: datetime | None = None, fetch=urllib.request.urlopen, extra: dict | None = None, silence: tuple = SILENCE) -> list:
-    """Виды проектов: `pulse_projects` из rpv.json, затем `extra` {имя: путь|URL} (присланные на сервер, TK-113), которых там нет."""
+    """Виды проектов: `pulse_projects` из rpv.json, затем `extra` {имя: путь|URL} (присланные на сервер, TK-113), которых там нет;
+    у проектов из `pulse_hide_goal` цели нет (В-77)."""
     now = now or datetime.now().astimezone()
-    configured = projects_of(root)
+    configured, hidden = projects_of(root), hidden_goals(root)
     specs = {**configured, **{k: v for k, v in (extra or {}).items() if k not in configured}}
-    return [normalise(name, read(spec, fetch), now, silence) for name, spec in specs.items()]
+    views = (normalise(name, read(spec, fetch), now, silence) for name, spec in specs.items())
+    return [{**v, "goal": None} if v["name"] in hidden else v for v in views]
 
 
 def ask_text(view: dict) -> str:

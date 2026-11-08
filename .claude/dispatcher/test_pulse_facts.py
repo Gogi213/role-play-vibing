@@ -250,7 +250,24 @@ class StatusTests(FactsBase):
     def test_engineer_after_judge_return(self):
         tid = self.ticket(status="in_progress")
         self.log(tid, "judge", "[итог: return] PR #1@abcdef0 — не хватает теста", self.now)
-        self.assertEqual(self.where()[0][:2], (tid, "Инженер правит после возврата"))
+        state = {"active_runs": {tid: {"role": "engineer", "started": T.now_iso(self.now)}}}
+        self.assertEqual(self.where(state=state)[0][:2], (tid, "Инженер правит после возврата"))
+        self.assertEqual(self.where()[0][:2], (tid, "Инженер — ждёт запуска после возврата"), "запуска нет — не «правит»")
+
+    def test_no_run_is_waiting_for_a_run_not_doing(self):
+        """В-77: «делает» только при идущем запуске роли (alpha TK-429 показывался «Инженер делает», хотя запуска не было)."""
+        eng, rev = self.ticket(status="in_progress"), self.ticket(status="in_progress", owner="researcher")
+        self.assertEqual(self.where(), [(eng, "Инженер — ждёт запуска", "run", ""), (rev, "Исследователь — ждёт запуска", "run", "")])
+        state = {"active_runs": {eng: {"role": "engineer", "started": T.now_iso(self.now)}}}
+        self.assertEqual(self.where(state=state)[0][:2], (eng, "Инженер делает"))
+
+    def test_backlog_is_deferred_not_doing_and_not_standing(self):
+        tid = self.ticket(status="backlog")
+        self.assertEqual(self.where(), [(tid, "отложен", "next", "")])
+        self.log(tid, "engineer", "давно", self.now - timedelta(days=3))
+        self.assertEqual(self.where(), [(tid, "отложен", "next", "")], "отложенное простоем не считается")
+        state = {"active_runs": {tid: {"role": "engineer", "started": T.now_iso(self.now)}}}
+        self.assertEqual(self.where(state=state)[0][1], "отложен", "идущий запуск не делает отложенное «делает»")
 
     def test_waits_on_ticket_from_wait_for_and_other_forms(self):
         base = "Ссылка на задачу владельца: G-001\n"
@@ -303,7 +320,7 @@ class StatusTests(FactsBase):
         for minutes, level in [(14, ""), (15, "warn"), (29, "warn"), (30, "bad")]:
             self.log(tid, "engineer", f"заметка {minutes}", self.now - timedelta(minutes=minutes))
             row = self.where()[0]
-            self.assertEqual((row[1], row[3]), (f"стоит {minutes} мин" if level else "Инженер делает", level), minutes)
+            self.assertEqual((row[1], row[3]), (f"стоит {minutes} мин" if level else "Инженер — ждёт запуска", level), minutes)
         self.assertEqual(self.where()[1], (queued, "в очереди", "next", ""))
 
     def test_running_role_is_work_not_standing(self):

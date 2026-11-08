@@ -229,9 +229,24 @@ class PageStates(TG.States):
         html = self.render(data)
         self.assertNotIn("Сделано сегодня", html)  # блок убран (В-74), даже если старый pulse.json его присылает
         self.assertNotIn("Выпуск 2.0.20", html)
-        self.assertIn("<h4>Дальше по очереди</h4><ul><li><span>Строка «за сегодня» <span class=\"tag\">TK-106</span></span></li></ul>", html)
+        self.assertIn('<tr><td class="tk">TK-106</td><td>Строка «за сегодня»</td></tr>', html)
         empty = self.render(self.ok_data())
-        self.assertIn('<span class="mute">пусто</span>', empty)
+        self.assertIn('<div class="planbox"><h4>Дальше по очереди</h4><p class="left">пусто</p></div>', empty)
+
+    def test_queue_is_the_same_table_as_status_with_ticket_first(self):
+        """В-77: «Дальше по очереди» — таблица class=st, столбцы Задача | Что (номер, потом описание), блок на всю ширину, как «Статус»."""
+        data = dict(self.ok_data(), queue=[{"ticket": "TK-6", "title": "Первая"}, {"ticket": "TK-7", "title": "Вторая"}],
+                    status={"rows": [{"ticket": "TK-1", "title": "Схема", "mark": "run", "where": "Инженер делает"}], "hold": ""})
+        html = self.render(data)
+        body = html.split('<div class="body">')[1]
+        status, queue = re.findall(r'<div class="planbox"><h4>(.*?)</h4>(.*?)</div>', body)
+        self.assertEqual((status[0], queue[0]), ("Статус", "Дальше по очереди"))
+        self.assertTrue(status[1].startswith('<table class="st">') and queue[1].startswith('<table class="st">'))
+        self.assertIn("<th>Задача</th><th>Что</th></tr>", queue[1])
+        self.assertEqual(re.findall(r'<td class="tk">(TK-\d)</td><td>(\w+)</td>', queue[1]), [("TK-6", "Первая"), ("TK-7", "Вторая")])
+        for gone in ("<ul>", "<li>", 'class="tag"', 'class="mute"'):
+            self.assertNotIn(gone, body)
+        self.assertFalse(hasattr(S, "items_html"), "список очереди заменён таблицей")
 
     def test_answer_button_only_with_http_link(self):
         owner = self.owner_data()
@@ -386,21 +401,29 @@ class StatusBlock(PageStates):
         _, block = self.block({"rows": [srow("run", where="стоит 15 мин", level="warn")]})
         self.assertIn('<td class="where warn">стоит 15 мин</td>', block)
 
-    def test_left_and_hold_under_the_table(self):
-        _, block = self.block({"rows": [srow("run")], "left": "принять TK-105, выпустить", "hold": "ваш ответ по TK-105"})
-        self.assertIn('<p class="left">Осталось: принять TK-105, выпустить · <b>Держит:</b> ваш ответ по TK-105</p>', block)
-        _, block = self.block({"rows": [srow("run")], "left": "Выпуск"})
-        self.assertIn('<p class="left">Осталось: Выпуск</p>', block)
+    def test_hold_under_the_table_and_no_left(self):
+        """В-77: «Осталось» страница не выводит, даже если файл его присылает; «Держит» остаётся."""
+        html, block = self.block({"rows": [srow("run")], "left": "принять TK-105, выпустить", "hold": "ваш ответ по TK-105"})
+        self.assertIn('<p class="left"><b>Держит:</b> ваш ответ по TK-105</p>', block)
+        self.assertNotIn("Осталось", html)
+        html, block = self.block({"rows": [srow("run")], "left": "Выпуск"})
+        self.assertNotIn("Осталось", html)
         self.assertNotIn("Держит", block)
+        self.assertNotIn('<p class="left">', block)
 
-    def test_more_accepted_is_one_line_first(self):
-        _, block = self.block({"rows": [srow("done", "TK-4", where="принят 10:00")], "more": 5})
-        self.assertEqual(self.lines(block), ["принято ещё 5", "TK-4|Заголовок|принят 10:00"])
+    def test_more_accepted_is_not_a_line(self):
+        """В-77: «принято ещё N» не выводится; показаны только присланные строки."""
+        html, block = self.block({"rows": [srow("done", "TK-4", where="принят 10:00")], "more": 5})
+        self.assertEqual(self.lines(block), ["TK-4|Заголовок|принят 10:00"])
+        self.assertNotIn("принято ещё", html)
 
-    def test_only_left_still_shows_the_block(self):
-        _, block = self.block({"rows": [], "left": "Шаг один"})
-        self.assertNotIn("<table", block)
-        self.assertIn("Осталось: Шаг один", block)
+    def test_only_left_shows_no_block(self):
+        html = self.render(dict(self.ok_data(), status={"rows": [], "left": "Шаг один"}))
+        self.assertNotIn("<h4>Статус</h4>", html)
+        self.assertNotIn("Шаг один", html)
+        only_hold = self.render(dict(self.ok_data(), status={"rows": [], "left": "Шаг один", "hold": "ваш ответ по TK-1"}))
+        self.assertIn("<h4>Статус</h4>", only_hold)
+        self.assertIn("<b>Держит:</b> ваш ответ по TK-1", only_hold)
 
     def test_no_status_no_block_and_no_old_plan_block(self):
         for data in (self.ok_data(), dict(self.ok_data(), status="мусор"), dict(self.ok_data(), status={"rows": [], "left": ""}),
@@ -416,13 +439,13 @@ class StatusBlock(PageStates):
             self.assertNotIn(raw_tag, html)
         self.assertEqual(len(self.lines(block)), 2, "чужая отметка, без названия, не объект — не строки")
 
-    def test_stale_file_keeps_accepted_and_left_but_drops_now_and_hold(self):
+    def test_stale_file_keeps_accepted_but_drops_now_and_hold(self):
         status = {"rows": [srow("done", "TK-1", where="принят 10:00"), srow("run", "TK-2", where="Инженер делает", level="warn")],
                   "left": "Выпуск", "hold": "TK-2 стоит 23 мин"}
         old = self.at + timedelta(minutes=30)
         html = S.body_html([V.normalise("rpv", dict(self.ok_data(), status=status), old)], old)
         self.assertIn("принят 10:00", html)
-        self.assertIn("Осталось: Выпуск", html)
+        self.assertNotIn("Осталось", html)
         self.assertNotIn("Инженер делает", html)
         self.assertNotIn("Держит", html)
 
@@ -448,11 +471,16 @@ class PhoneFit(unittest.TestCase):
                 for track in re.findall(r"grid-template-columns:([^;}]*)", rule):
                     self.assertNotRegex(re.sub(r"minmax\(0,1fr\)", "", track), r"(?<![\w-])1fr", f"{selector}: колонка 1fr не сжимается ниже слова — minmax(0,1fr)")
 
-    def test_ticket_tag_is_not_torn_apart_by_the_wrapping(self):
-        self.assertIn("white-space:nowrap", "".join(self.rules(".tag")))
+    def test_ticket_number_is_not_torn_apart_and_text_of_a_cell_wraps(self):
+        self.assertIn("white-space:nowrap", "".join(self.rules(".st .tk")))
+        self.assertIn("overflow-wrap:anywhere", "".join(self.rules(".st td")))
 
-    def test_text_of_a_list_row_may_shrink_in_its_flex_row(self):
-        self.assertIn("min-width:0", "".join(self.rules(".body li>span")))
+    def test_tables_take_the_whole_card_width_and_no_list_styles_are_left(self):
+        """В-77: «Статус» и «Дальше по очереди» — блоки на всю ширину карточки; стилей списка очереди (.body li, .tag, .mute) больше нет."""
+        self.assertIn("grid-column:1/-1", "".join(self.rules(".body .planbox")))
+        self.assertIn("width:100%", "".join(self.rules(".st")))
+        for dead in (".body li", ".body ul", ".tag{", ".mute"):
+            self.assertNotIn(dead, self.css)
 
 
     def test_logo_and_page_padding_as_on_sofia(self):
@@ -568,6 +596,25 @@ class ServerTests(TG.States):
         self.assertIn('data-n="bad" data-s="stuck"', page)
         self.assertIn('<div class="name">fine</div>', page)
         self.assertEqual(page.count('>пульс не читается<span class="who">'), 2)  # bad и cut; fine — со своей строкой «сейчас»
+
+    def test_hide_goal_key_of_the_server_project_hides_the_goal_of_that_project_only(self):
+        """В-77: `pulse_hide_goal` в rpv.json сервера — цель выбранного проекта не выводится, у остальных на месте."""
+        goal = {"id": "G-1", "title": "Цель для всех"}
+        fresh = datetime.now().astimezone().isoformat()
+        (self.proj / "pulse.json").write_text(json.dumps(dict(self.owner_data(), generated=fresh, goal=dict(goal, title="Цель rpv"))), encoding="utf-8")
+        remote = json.dumps(dict(self.ok_data(), generated=fresh, goal=dict(goal, title="Цель invoice"))).encode("utf-8")
+        rpv = self.proj / ".claude" / "rpv.json"
+        rpv.write_text(json.dumps({"pulse_projects": {"rpv": str(self.proj / "pulse.json"), "invoice": "https://x.example/p.json"},
+                                   "pulse_hide_goal": ["rpv"]}), encoding="utf-8")
+        os.utime(rpv, (time.time() + 5, time.time() + 5))  # кэш настроек — по времени изменения
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), S.make_handler(self.proj, "sekret", lambda url, timeout=0: FakeResponse(remote)))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/sekret/", timeout=5) as r:
+            page = r.read().decode("utf-8")
+        self.assertNotIn("Цель rpv", page)
+        self.assertIn('<div class="goal">Цель invoice</div>', page)
 
     def test_wrong_token_or_path_is_404(self):
         self.assertEqual(self.get("/wrong/")[0], 404)
