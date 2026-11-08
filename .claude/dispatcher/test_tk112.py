@@ -23,7 +23,7 @@ import unreleased as UNR  # noqa: E402
 import watch as W  # noqa: E402
 
 NOW = datetime(2026, 11, 7, 20, 0, 0).astimezone()
-OFF = {"unreleased": False, "ceo_unwoken": False, "unmerged": False}
+OFF = {"unreleased": False, "ceo_unwoken": False}
 
 
 def iso(minutes_ago: float) -> str:

@@ -121,12 +121,13 @@ class MergeRuleTests(MergeRuleBase):
         T.write_header_updates(self.path, {"accepted": f"8@{SHA}"}, now=NOW)
         self.assertEqual(self.run_m(), [])
 
-    def test_red_or_pending_ci_no_merge(self):
-        C.save_state({f"{REPO}#7": {"sha": SHA, "state": "pending"}})
-        self.assertEqual(self.run_m(), [])
-        C.save_state({f"{REPO}#7": {"sha": SHA, "state": "failure"}})  # TK-121: красный на принятой голове — теперь событие CEO (test_tk121.py)
-        self.assertEqual(M.merge_once(REPO, gh=self.gh, emit=lambda *a: None), [(7, "принят, не влит → CEO")])
-        self.assertEqual(self.put(), [])
+    def test_merges_without_waiting_for_ci(self):  # TK-139 (В-72): идущий, красный, неизвестный CI слияния не держит
+        for state in ("pending", "failure", None):
+            self.calls.clear()
+            C.save_state({f"{REPO}#7": {"sha": SHA, "state": state}} if state else {})
+            self.assertEqual(self.run_m(), [(7, "влит")], state)
+            self.assertEqual(self.put()[0][2]["sha"], SHA, state)
+            T.write_header_updates(self.path, {"status": "in_review", "accepted": f"7@{SHA}"}, now=NOW)
 
     def test_conflict_wakes_owner_once(self):
         self.mergeable = False
@@ -300,10 +301,10 @@ class MergeRuleTests(MergeRuleBase):
         t = self.tkt()
         self.assertEqual((M.accepted_head(t, 7), M.accepted_head(t, 9)), (SHA, sha9))
         self.others = [{"number": 9, "title": self.tid, "head": {"sha": sha9, "ref": "feat/y"}, "base": {"ref": "main"}}]
-        self.assertEqual(self.run_m(), [(7, "влит")])  # у #9 CI не зелёный — ждёт
+        self.assertEqual(self.run_m(), [(7, "влит"), (9, "влит")])  # CI не ждём (В-72): оба вердикта на текущих головах
         t = self.tkt()
         self.assertIsNone(M.accepted_head(t, 7))
-        self.assertEqual(M.accepted_head(t, 9), sha9)
+        self.assertIsNone(M.accepted_head(t, 9))
 
     def test_reaccept_same_pr_replaces_its_head(self):
         os.environ.pop("RPV_ROLE", None)

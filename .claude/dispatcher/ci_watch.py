@@ -1,18 +1,23 @@
 """События CI без ИИ (TK-079 п.1, В-195): опрос GitHub раз в CI_WATCH_INTERVAL_S (≤ 60 с, `gh api`, токены — из gh).
-Для каждого открытого PR проекта смотрит check-runs головы; когда CI на голове завершён — один раз (по паре PR+sha) пишет
-запись `ci` в тикет этого PR и будит: красный → владелец тикета (имена красных клеток), зелёный → Судья, если вердикта на
-этой голове ещё нет (запись Судьи с началом sha). Тикет PR: поле шапки `pr: 22[, 23]`, иначе TK-<N> в ветке/заголовке.
+CI не ждём (TK-139, В-72): Судья на сдачу идёт сразу, PR вливает merge_rule по вердикту без CI. Для каждого открытого PR
+смотрит check-runs головы; красный CI на голове — один раз (по паре PR+sha) запись `ci` в тикет этого PR (имена красных клеток),
+без побудки: Судья видит запись, но не ждёт. Красный CI на голове основной ветки (там же — слитые PR) — один тикет Инженеру
+«Починить CI» на голову, с красными клетками, упавшими тестами и ссылкой на прогон; без отката и без возврата принятого.
+Тикет PR: поле шапки `pr: 22[, 23]`, иначе TK-<N> в ветке/заголовке. Тикет, ждавший `ci:<PR>` (поставлен до В-72), будится
+как прежде и ожидание снимается.
 Состояние — `ci-state.json` рядом с state.json диспетчера; из него `wait_for: ci:<владелец/репо>#<PR>` (готово, когда CI
 на текущей голове завершён)."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import project_paths as CFG  # noqa: E402
+import hide  # noqa: E402
 import merge_rule  # noqa: E402
 import procs  # noqa: E402
 import project as P  # noqa: E402
@@ -38,16 +43,19 @@ def judged_on(tkt, sha: str) -> bool:
 
 
 def decide(tkt, sha: str, state: str, red: list, pr_number: int, repo: str):
-    """(кого будить | None, текст записи). pending — тишина. Тикет, ждущий `ci:` этого PR, будится так же, как прочие:
-    зелёный → Судья (не владелец: лишний запуск ИИ ради передачи), красный → владелец; ожидание при этом снимает wake()."""
+    """(кого будить | None, текст записи). pending и зелёный — тишина: CI не ждём (В-72). Красный — запись без побудки, Судья
+    видит её, но не ждёт. Тикет, ждавший `ci:` этого PR (поставлен до В-72), будится как прежде: красный → владелец, зелёный
+    → Судья (не владелец: лишний запуск ИИ ради передачи); ожидание при этом снимает wake()."""
     if state == "pending" or tkt.status not in T.ACTIVE_STATUSES:
         return None, ""
     s7 = sha[:7]
+    waits = (tkt.header.get("wait_for") or "").strip() == f"ci:{repo}#{pr_number}"
     if state == "failure":
-        return tkt.owner, f"CI красный на {s7} (PR #{pr_number}): {', '.join(red)}. Исправь и запушь — CI запустится сам."
-    if judged_on(tkt, sha):
-        return None, ""
-    return "judge", f"CI зелёный на {s7} (PR #{pr_number}): проверь голову; вердикт — записью с {s7}."
+        text = f"CI красный на {s7} (PR #{pr_number}): {', '.join(red)}. Судья не ждёт CI (В-72); красное после слияния чинит тикет «Починить CI»."
+        return (tkt.owner if waits else None), text
+    if waits and not judged_on(tkt, sha):
+        return "judge", f"CI зелёный на {s7} (PR #{pr_number}): проверь голову; вердикт — записью с {s7}."
+    return None, ""
 
 
 ERR_LIMIT = 3          # подряд сбоев опроса CI одного PR, после которых о нём узнаёт владелец тикета
@@ -107,10 +115,75 @@ def run_once(repo: str, gh=gh_api) -> list:
             if who:
                 wake(tkt.path, tkt, who, text, repo, pr["number"])
                 woke = who
+            elif text:
+                with T.ticket_lock(tkt.path):
+                    T.append_log(tkt.path, "ci", text)
         st[key] = {"sha": sha, "state": state, "red": red, "woke": woke, "at": T.now_iso()}
         out.append((pr["number"], sha[:7], state, woke))
     save_state(st)
     return out
+
+
+FIX_PREFIX = "Починить CI"
+_FAILED = re.compile(r"FAILED (\S+::\S+)")
+
+
+def _job_log(repo: str, job_id) -> str:
+    r = hide.run(["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"], capture_output=True, timeout=60)
+    return (r.stdout or b"").decode("utf-8", "replace") if r.returncode == 0 else ""
+
+
+def failed_tests(repo: str, runs: list, job_log=None) -> list:
+    """Имена упавших тестов (`FAILED путь::тест` в журнале красных клеток); не удалось получить журнал — пусто. До 3 клеток, до 15 имён."""
+    job_log, names = job_log or _job_log, []
+    for r in [r for r in runs if r.get("conclusion") in RED][:3]:
+        try:
+            names += _FAILED.findall(job_log(repo, r.get("id")))
+        except Exception:
+            continue
+    return sorted(set(names))[:15]
+
+
+def _open_fix_ticket(tickets: list):
+    return next((t for t in tickets if str(t.header.get("title") or "").startswith(FIX_PREFIX) and t.status not in ("done", "stopped")), None)
+
+
+def watch_main(repo: str, gh=gh_api, job_log=None) -> list:
+    """Красный CI на голове основной ветки (слитый PR приходит туда же): один тикет Инженеру «Починить CI» на голову (В-72), без
+    отката и без возврата принятого. Уже есть открытый тикет починки — запись о новой голове в него, нового не заводим.
+    Возвращает [(sha7, tid)]."""
+    default = gh(f"repos/{repo}")["default_branch"]
+    runs = gh(f"repos/{repo}/commits/{default}/check-runs?per_page=100").get("check_runs", [])
+    state, red = ci_result(runs)
+    if state != "failure":
+        return []
+    sha, key, st = str(runs[0].get("head_sha") or ""), f"main:{repo}", load_state()
+    if not sha or (st.get(key) or {}).get("sha") == sha:
+        return []
+    tickets = []
+    for p in T.list_tickets(CFG.TICKETS_DIR):
+        try:
+            tickets.append(T.read_ticket(p))
+        except Exception:
+            continue
+    names, url = failed_tests(repo, runs, job_log), next((r.get("html_url") for r in runs if r.get("conclusion") in RED), "")
+    what = (f"CI красный на {default} {sha[:7]}: клетки {', '.join(red)}; упавшие тесты: {', '.join(names) or 'не удалось прочитать журнал — смотри прогон'}; "
+            f"прогон: {url or 'https://github.com/' + repo + '/commit/' + sha + '/checks'}.")
+    open_t = _open_fix_ticket(tickets)
+    if open_t is not None:
+        with T.ticket_lock(open_t.path):
+            T.append_log(open_t.path, "ci", f"Новая красная голова. {what}")
+        tid = open_t.id
+    else:
+        nl = chr(10)
+        desc = nl.join(["Ссылка на задачу владельца: В-72", "", what,
+                        f"Слитое не откатываем и принятое не возвращаем (В-72): найди причину, поправь, сдай PR в {default}.",
+                        f"Готово, когда: упавшие тесты зелёные (тесты самой правки), причина названа в итоге; PR в {default}."])
+        tid = T.create_ticket(CFG.TICKETS_DIR, owner="engineer", title=f"{FIX_PREFIX} на {default} {sha[:7]}", description=desc,
+                              reviewer="judge").stem
+    st[key] = {"sha": sha, "state": state, "red": red, "ticket": tid, "at": T.now_iso()}
+    save_state(st)
+    return [(sha[:7], tid)]
 
 
 def ci_done(repo: str, number: int, gh=gh_api) -> bool:
@@ -169,6 +242,8 @@ def main(argv=None) -> int:
                 print(f"[ci_watch] PR #{n} {s7}: {state}" + (f" → {woke}" if woke else ""))
             for n, what in merge_rule.merge_once(repo):
                 print(f"[merge_rule] PR #{n}: {what}")
+            for s7, tid in watch_main(repo):
+                print(f"[ci_watch] CI красный на основной ветке {s7} → {tid}")
         except Exception as e:
             print(f"[ci_watch] цикл: {type(e).__name__}: {e}", file=sys.stderr)
         write_heartbeat()
