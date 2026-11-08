@@ -31,15 +31,11 @@ class AcceptNote(MergeRuleBase):
             self.assertEqual(TK.cmd_accept(type("A", (), {"id": self.tid, "pr": 7, "sha": SHA, "text": ""})()), 0)
         return self.tkt().log[-1].text
 
-    def test_default_and_true_still_name_green_ci(self):
-        for value in (None, True):
-            self.assertIn("Влить, когда CI зелёный и нет конфликта", self.accept_text(value), value)
-
-    def test_false_does_not_ask_for_ci(self):
-        text = self.accept_text(False)
-        self.assertIn("Влить, когда нет конфликта", text)
-        self.assertIn("CI на PR нет", text)
-        self.assertNotIn("CI зелёный", text)
+    def test_note_never_asks_for_ci(self):  # TK-139 (В-72): CI не ждём при любом has_ci
+        for value in (None, True, False):
+            text = self.accept_text(value)
+            self.assertIn("Влить, когда нет конфликта (CI не ждём)", text, value)
+            self.assertNotIn("CI зелёный", text, value)
 
     def test_explicit_text_wins(self):
         T.write_header_updates(self.path, {"accepted": "", "status": "in_review"}, now=NOW)
@@ -103,7 +99,7 @@ class WaitCommand(unittest.TestCase):
 
 
 class ChainWithoutCi(MergeRuleBase):
-    """База PR не main (цепочка): без CI база переключается, когда родитель влит; с CI-умолчанием и без CI-клеток — нет."""
+    """База PR не main (цепочка): база переключается, когда родитель влит, — CI не ждём (TK-139)."""
 
     def setUp(self):
         super().setUp()
@@ -131,10 +127,9 @@ class ChainWithoutCi(MergeRuleBase):
         self.assertEqual(self.merge(False), [])
         self.assertEqual([c for c in self.calls if c[0] == "PATCH"], [])
 
-    def test_default_needs_ci_even_in_chain(self):
+    def test_default_retargets_without_ci_cells_too(self):  # TK-139 (В-72): CI не ждём и в цепочке
         for value in (None, True):
-            self.assertEqual(self.merge(value), [], value)
-        self.assertEqual([c for c in self.calls if c[0] == "PATCH"], [])
+            self.assertEqual(self.merge(value), [(7, "база feat/parent → main")], value)
 
 
 if __name__ == "__main__":
