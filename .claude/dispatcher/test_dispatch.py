@@ -785,6 +785,18 @@ class DispatchRunTests(unittest.TestCase):
         D._popen = fake_popen
         return script
 
+    def read_whole(self, path, timeout=10.0):
+        """Тикет, когда он цел: фейковая роль пишет его не атомарно (write_text — усечение, потом запись), и чтение
+        сразу после запуска ловило пустой файл (macOS, TK-140)."""
+        end = time.time() + timeout
+        while True:
+            try:
+                return T.read_ticket(path)
+            except ValueError:
+                if time.time() > end:
+                    raise
+                time.sleep(0.02)
+
     def wait_running(self, timeout=60.0):   # предел, не пауза: выходит по завершении; 10 с не хватало ПК под xdist (TK-095)
         deadline = time.time() + timeout
         while D.RUNNING and time.time() < deadline:
@@ -2248,7 +2260,7 @@ class DispatchRunTests(unittest.TestCase):
         self.assertIn(path.stem, D.RUNNING)
         self.assertEqual(D.RUNNING[path.stem]["role"], "judge")
         self.assertEqual(D.RUNNING[path.stem]["reason"], "next")
-        self.assertEqual(T.read_ticket(path).next_role, "", "поле очищено при запуске")
+        self.assertEqual(self.read_whole(path).next_role, "", "поле очищено при запуске")
         self.wait_running()
         D.tick()
         D.tick()

@@ -51,6 +51,17 @@ def wait_alive(pid, want=True, timeout=10.0):
     return False
 
 
+def wait_gone(pid, start, timeout=10.0):
+    """Прежний процесс (pid + метка старта) исчез. Windows отдаёт освобождённый pid следующему новому процессу —
+    сверка только pid с именем образа «py» принимала новый python за прежний (TK-140)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if not S.PR._pid_alive(pid, "py", start=start):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 class StartTests(unittest.TestCase):
     def test_optional_service_only_with_setting(self):
         """TK-090 Д-1, CP8: автовлив PR (ci_watch) — только если в `.claude/rpv.json` проекта есть `ci_repo`."""
@@ -103,12 +114,13 @@ class StartTests(unittest.TestCase):
 
     def test_second_start_stops_running_pair_and_starts_fresh(self):
         first = self.launch()
+        marks = {name: S.PR._proc_start(first[name]["pid"]) for name in S.SERVICES}
         second = self.launch()
         for name in S.SERVICES:
             old, new = first[name]["pid"], second[name]["pid"]
             self.assertNotEqual(old, new)
             self.assertEqual(second[name]["restarted"], old, name)
-            self.assertTrue(wait_alive(old, want=False), f"{name}: прежний процесс не остановлен")
+            self.assertTrue(wait_gone(old, marks[name]), f"{name}: прежний процесс не остановлен")
             self.assertTrue(wait_alive(new), name)
             self.assertEqual(S.read_pid(self.project / ".claude" / "dispatcher" / f"{name}.pid"), new)
 
