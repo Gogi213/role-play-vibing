@@ -37,7 +37,7 @@ NARROW = 16      # на телефоне (< 760 px): 4 часа
 PER_HOUR = 4     # 15-минутных клеток в часе
 CELL_MIN = 60 // PER_HOUR
 TIP_RUNS = 3     # строк запусков в подсказке клетки (остальные — «и ещё N»)
-KIND = {"ok": "", "owner": "owner", "stuck": "stuck"}  # класс шапки и строки «сейчас»
+KIND = {"ok": "", "owner": "owner", "stuck": "stuck"}  # класс строки «сейчас»
 SEG = (("all", "Все"), ("ok", "Идёт"), ("owner", "Нужен ответ"), ("stuck", "Застряло"))
 SUM = (("accepted", ("принято сегодня",) * 3), ("returns", ("возврат", "возврата", "возвратов")), ("working", ("в работе",) * 3),
        ("queued", ("в очереди",) * 3))
@@ -194,19 +194,17 @@ def without(text: str, span: str) -> str:
     return re.sub(rf"\s*(?:уже\s+)?{re.escape(span)}$", "", text) if span else text
 
 
-def items_html(items: list, empty: str, with_time: bool) -> str:
+def items_html(items: list, empty: str) -> str:
     if not items:
         return f'<li><span class="mute">{empty}</span></li>'
-    return "".join(f'<li>{"<em>" + escape(i["time"]) + "</em>" if with_time else ""}'
-                   f'<span>{escape(i["title"])} <span class="tag">{escape(i["ticket"])}</span></span></li>' for i in items)
+    return "".join(f'<li><span>{escape(i["title"])} <span class="tag">{escape(i["ticket"])}</span></span></li>' for i in items)
 
 
 def card(view: dict, end: int) -> str:
     return (f'<details class="proj" data-n="{escape(view["name"], quote=True)}" data-s="{view["state"]}"><summary>'
             f'<div><div class="name">{escape(view["name"])}</div>{goal_html(view)}</div>'
             f'{timeline(view, end, WINDOW, "w")}{timeline(view, end, NARROW, "n")}{now_line(view)}</summary>'
-            f'<div class="body">{status_html(view)}<div><h4>Сделано сегодня</h4><ul>{items_html(view["done_today"], "пока ничего", True)}</ul></div>'
-            f'<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто", False)}</ul></div></div></details>')
+            f'<div class="body">{status_html(view)}<div><h4>Дальше по очереди</h4><ul>{items_html(view["queue"], "пусто")}</ul></div></div></details>')
 
 
 def summary_html(views: list) -> str:
@@ -218,14 +216,12 @@ def summary_html(views: list) -> str:
 
 def body_html(views: list, now: datetime) -> str:
     """Содержимое страницы: шапка, переключатель, итоги дня, карточки проектов, легенда."""
-    head = V.header(views)
     end = max((v["idx"] for v in views), default=0)
     zone = next((v["zone"] for v in views if v.get("zone")), None)  # часы — по поясу проектов, не сервера
     shown = now.astimezone(zone) if zone else now
-    sub = f"<small>{escape(head['sub'])}</small>" if head["sub"] else ""
-    return (f'<div class="top"><div class="state {KIND[head["kind"]]}">{escape(head["title"])}{sub}</div>'
+    return (f'<div class="top"><div class="logo"><span class="mark">RPV</span>Role Play Vibing <b>· Пульс</b></div>'
             f'<div class="meta">обновлено {shown:%H:%M}</div></div>'
-            + (summary_html(views) if views else "") + "".join(card(v, end) for v in views)
+            + (summary_html(views) if views else f'<p class="none">{escape(V.NO_PROJECTS)}</p>') + "".join(card(v, end) for v in views)
             + '<p class="empty" id="empty" hidden>Таких проектов нет</p>' + LEGEND)
 
 
