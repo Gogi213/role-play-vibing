@@ -71,7 +71,7 @@ class VersionOneTests(unittest.TestCase):
     def test_stuck_phrase_tail_without_and_more(self):
         v = view("rpv", state="stuck", phrase="Застряло: rpv — тикет в очереди, слот свободен, запуска нет (лимит сессии) (и ещё 65).")
         self.assertEqual(v["fix"], {"text": "тикет в очереди, слот свободен, запуска нет (лимит сессии)", "who": "разбирает CEO"})
-        self.assertEqual((v["goal"], v["job"], v["done_today"], v["queue"], v["day"]), (None, None, [], [], {}))
+        self.assertEqual((v["goal"], v["job"], v["queue"], v["day"]), (None, None, [], {}))
 
     def test_owner_from_v1_owner_list(self):
         v = view("rpv", state="owner", owner=[{"ticket": "TK-9", "action": "ответить на вопрос"}], phrase="Нужны вы: rpv — ответить на вопрос по TK-9.")
@@ -114,10 +114,10 @@ class FieldsTests(unittest.TestCase):
         self.assertEqual(view("a", job=job)["job"], job)
         self.assertIsNone(view("a", job={"who": "Инженер"})["job"])
 
-    def test_done_and_queue_entries_need_ticket_and_title(self):
-        v = view("a", done_today=[{"time": "02:41", "ticket": "TK-104", "title": "Выпуск"}, {"time": "01:00", "ticket": "TK-1"}, "x"],
+    def test_queue_entries_need_ticket_and_title_and_done_today_is_dropped(self):
+        v = view("a", done_today=[{"time": "02:41", "ticket": "TK-104", "title": "Выпуск"}],
                  queue=[{"ticket": "TK-106", "title": "Строка"}, {"title": "без тикета"}])
-        self.assertEqual(v["done_today"], [{"time": "02:41", "ticket": "TK-104", "title": "Выпуск"}])
+        self.assertNotIn("done_today", v)  # В-74: блок «Сделано сегодня» убран
         self.assertEqual(v["queue"], [{"ticket": "TK-106", "title": "Строка"}])
 
     def test_cell_runs_and_why_by_index(self):

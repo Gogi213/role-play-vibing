@@ -198,7 +198,7 @@ def _unreadable(name: str, now: datetime) -> dict:
     return {"name": name, "state": "stuck", "phrase": f"Застряло: {name} — пульс не читается.", "now": "", "pause": "",
             "cells": [("none", 0)] * CELLS, "runs": [[] for _ in range(CELLS)], "why": [""] * CELLS, "idx": _slot(now), "age_s": None,
             "zone": None, "goal": None, "job": None, "ask": None, "fix": {"text": "пульс не читается", "who": "разбирает CEO"},
-            "done_today": [], "queue": [], "day": {}, "plan": [], "status": _status(None)}
+            "queue": [], "day": {}, "plan": [], "status": _status(None)}
 
 
 def stamp_of(raw):
@@ -212,7 +212,7 @@ def stamp_of(raw):
 
 def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
     """Один вид проекта: name, state, phrase, now, pause, cells [(класс, запусков)] ×96, idx (текущая клетка), age_s.
-    Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated; версия 2 — ещё goal, job, ask, fix, done_today, queue,
+    Формат — вывод `pulse.build` (state, phrase, now, pause, cells, generated; версия 2 — ещё goal, job, ask, fix, queue,
     day, plan, status, cells[].runs; версия 1 их не имеет — карточка без них). Нет файла, `state` не из списка, `cells` не список или
     `generated` не время — «застряло: пульс не читается»; `generated` старше STALE_S — «застряло: диспетчер не отвечает», клетки после
     записи — stuck, прежние «сейчас» и пауза убраны (`silence` — текст и кто чинит). Сутки и клетка — по поясу `generated` (поясу проекта), не сервера."""
@@ -226,7 +226,7 @@ def normalise(name: str, raw, now: datetime, silence: tuple = SILENCE) -> dict:
     view = {"name": name, "state": raw["state"], "phrase": phrase, "now": str(raw.get("now") or ""),
             "pause": str(raw.get("pause") or ""), "cells": _cells_of(raw), "runs": runs, "why": why, "idx": _slot(stamp), "age_s": age,
             "zone": stamp.tzinfo, "goal": _goal(raw.get("goal")), "job": _job(raw.get("job")), "ask": _ask(raw.get("ask"), raw, phrase),
-            "fix": _fix(raw.get("fix"), phrase), "done_today": _entries(raw.get("done_today"), "time", "ticket", "title"),
+            "fix": _fix(raw.get("fix"), phrase),
             "queue": _entries(raw.get("queue"), "ticket", "title"), "day": _day(raw.get("day")),
             "plan": _plan(raw.get("plan"), age > STALE_S), "status": _status(raw.get("status"), age > STALE_S)}
     if age > STALE_S:

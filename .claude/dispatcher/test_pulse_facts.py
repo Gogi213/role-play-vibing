@@ -363,7 +363,7 @@ class StatusTests(FactsBase):
 class DayTests(FactsBase):
     def test_accepted_today_returns_and_queue(self):
         yesterday = self.now - timedelta(days=1)
-        today = self.ticket(status="done", accepted_at=self.now, title="Сегодня")
+        self.ticket(status="done", accepted_at=self.now, title="Сегодня")
         self.ticket(status="done", accepted_at=yesterday, title="Вчера")
         back = self.ticket(status="in_review", title="Вернули")
         self.log(back, "judge", "[итог: return] проверка: x — нет")
@@ -372,12 +372,12 @@ class DayTests(FactsBase):
         self.ticket(status="todo", title="Ждёт")
         data = F.day_of(self.read(), {"active_runs": {running: {"role": "engineer"}}}, self.now)
         self.assertEqual(data["day"], {"accepted": 1, "returns": 1, "working": 1, "queued": 2})
-        self.assertEqual([x["ticket"] for x in data["done_today"]], [today])
+        self.assertNotIn("done_today", data)
         self.assertEqual([x["title"] for x in data["queue"]], ["Вернули", "Ждёт"])
 
     def test_empty_project_is_zeros(self):
         self.assertEqual(F.day_of([], {}, self.now),
-                         {"done_today": [], "queue": [], "day": {"accepted": 0, "returns": 0, "working": 0, "queued": 0}})
+                         {"queue": [], "day": {"accepted": 0, "returns": 0, "working": 0, "queued": 0}})
 
     def test_judge_ticket_closed_by_artifact_is_not_accepted_work(self):
         self.ticket(owner="judge", status="done", accepted_at=self.now)

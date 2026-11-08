@@ -126,13 +126,12 @@ def _returned_today(tkt, now: datetime) -> int:
 
 
 def day_of(tickets, state: dict, now: datetime) -> dict:
-    """Сделано сегодня (принято Судьёй), очередь, итоги дня: принято, возвратов, в работе, в очереди."""
+    """Очередь, итоги дня: принято, возвратов, в работе, в очереди."""
     running = set(state.get("active_runs") or {})
-    done = sorted(((at, t) for t in tickets if (at := _accepted_at(t, now)) and at.date() == now.date()), key=lambda r: r[0], reverse=True)
+    accepted = sum(1 for t in tickets if (at := _accepted_at(t, now)) and at.date() == now.date())
     queue = sorted((t for t in tickets if t.status in T.OPEN_STATUSES and t.id not in running), key=lambda t: t.id)
-    return {"done_today": [{"time": f"{at:%H:%M}", "ticket": t.id, "title": _title(t)} for at, t in done[:LIST_MAX]],
-            "queue": [{"ticket": t.id, "title": _title(t)} for t in queue[:LIST_MAX]],
-            "day": {"accepted": len(done), "returns": sum(_returned_today(t, now) for t in tickets), "working": len(running),
+    return {"queue": [{"ticket": t.id, "title": _title(t)} for t in queue[:LIST_MAX]],
+            "day": {"accepted": accepted, "returns": sum(_returned_today(t, now) for t in tickets), "working": len(running),
                     "queued": len(queue)}}
 
 
