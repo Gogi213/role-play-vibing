@@ -49,7 +49,8 @@ class PageStates(TG.States):
 
     def test_ok_state_header_cells_job(self):
         html = self.render(dict(self.ok_data(), job={"role": "judge", "who": "Судья", "verb": "проверяет", "ticket": "TK-7", "title": "Правка", "since": "25 мин"}))
-        self.assertIn(f'<div class="state ">{V.OK_TITLE}<small>{V.OK_SUB}</small></div>', html)
+        self.assertIn('<div class="logo"><span class="mark">RPV</span>Role Play Vibing <b>· Пульс</b></div>', html)
+        self.assertNotIn(V.OK_TITLE, html)  # фразы-итога в шапке нет (В-74); она остаётся в Telegram
         wide, narrow = classes(html, "w"), classes(html, "n")
         self.assertEqual((len(wide), len(narrow)), (S.WINDOW, S.NARROW))
         self.assertEqual(wide[-5:], ["", "a", "b", "c", "a"])  # клетки 48…52: запусков 0, 1, 3, 5, идёт
@@ -61,21 +62,22 @@ class PageStates(TG.States):
     def test_owner_state_is_yellow_only_for_owner_cells(self):
         data = dict(self.owner_data(), ask={"ticket": "TK-9", "question": "брать фьючерсы или только спот?"})
         html = self.render(data)
-        self.assertIn(f'<div class="state owner">{V.OWNER_TITLE}<small>rpv · TK-9: брать фьючерсы или только спот?</small>', html)
+        self.assertIn('data-n="rpv" data-s="owner"', html)
+        self.assertNotIn(V.OWNER_TITLE, html)  # фразы-итога в шапке нет (В-74)
         self.assertEqual(classes(html).count("o"), 8)
         self.assertEqual(len(classes(html)), 32)
         self.assertIn('<div class="now-line owner">брать фьючерсы или только спот?<span class="who">TK-9</span></div>', html)
 
     def test_stuck_state_from_file(self):
         html = self.render(dict(self.stuck_data(), fix={"text": "диспетчер молчит 23 мин", "who": "перезапускает CEO"}))
-        self.assertIn('<div class="state stuck">Застряло: rpv<small>диспетчер молчит 23 мин — перезапускает CEO</small>', html)
+        self.assertIn('data-n="rpv" data-s="stuck"', html)
         self.assertEqual(classes(html)[-1], "s")
         self.assertIn('<div class="now-line stuck">диспетчер молчит 23 мин<span class="who">перезапускает CEO</span></div>', html)
 
     def test_stuck_state_dead_dispatcher_from_stale_generated(self):
         html = self.render(self.ok_data(), now=self.at + timedelta(minutes=38))  # файл с 13:00, сейчас 13:38 — клетки 53 и 54 никто не писал
-        self.assertIn("Застряло: rpv", html)
-        self.assertIn("диспетчер не отвечает 38 мин — перезапускает CEO", html)
+        self.assertIn('data-n="rpv" data-s="stuck"', html)
+        self.assertRegex(html, r'диспетчер не отвечает[^<]*<span class="who">перезапускает CEO</span>')  # длительность видна в строке «сейчас»
         self.assertNotIn("38 мин.", html)
         wide = classes(html)
         self.assertEqual(wide[-2:], ["s", "s"])
@@ -146,7 +148,7 @@ class PageStates(TG.States):
     def test_no_projects_is_not_a_green_phrase(self):
         self.assertEqual(V.header([])["title"], V.NO_PROJECTS)
         html = S.body_html([], self.at)
-        self.assertIn(f'<div class="state stuck">{V.NO_PROJECTS}</div>', html)
+        self.assertIn(f'<p class="none">{V.NO_PROJECTS}</p>', html)
         self.assertNotIn(V.OK_TITLE, html)
         self.assertNotIn('class="seg"', html)
 
@@ -162,12 +164,12 @@ class PageStates(TG.States):
     def test_no_work_is_not_stuck(self):
         html = self.render(self.pulse())
         self.assertEqual({c for c in classes(html)} - {"now"}, {""})
-        self.assertNotIn("state stuck", html)
+        self.assertNotIn('class="none"', html)
 
     def test_unreadable_pulse_is_stuck(self):
         for raw in (None, {}, {"phrase": "x", "ts": self.at.isoformat(), "cells": []}):  # нет файла, пусто, чужой формат
             with self.subTest(raw=raw):
-                self.assertIn("Застряло: rpv", self.render(raw))
+                self.assertIn('data-n="rpv" data-s="stuck"', self.render(raw))
 
     def test_header_orders_stuck_before_owner(self):
         ok, owner, stuck = self.ok_data(), self.owner_data(), self.stuck_data()
@@ -176,7 +178,7 @@ class PageStates(TG.States):
         self.assertEqual(V.header(views[2:])["title"], V.OK_TITLE)
 
     def test_names_and_texts_are_escaped(self):
-        data = dict(self.ok_data(), goal={"id": "G-1", "title": "<b>цель</b>"}, done_today=[{"time": "01:00", "ticket": "TK-1", "title": "<i>x</i>"}])
+        data = dict(self.ok_data(), goal={"id": "G-1", "title": "<b>цель</b>"}, queue=[{"ticket": "TK-1", "title": "<i>x</i>"}])
         html = self.render(data, name="<script>")
         self.assertNotIn("<script>", html)
         self.assertNotIn("<b>цель</b>", html)
@@ -221,14 +223,14 @@ class PageStates(TG.States):
         self.assertIn('<div class="now-line ">Правка<span class="who">TK-5</span></div>', html)
         self.assertIn("Сейчас тихо", self.render(dict(self.ok_data(), job=None, now="")))
 
-    def test_done_today_and_queue_in_card_body(self):
+    def test_queue_in_card_body_and_no_done_today(self):
         data = dict(self.ok_data(), done_today=[{"time": "02:41", "ticket": "TK-104", "title": "Выпуск 2.0.20"}],
                     queue=[{"ticket": "TK-106", "title": "Строка «за сегодня»"}])
         html = self.render(data)
-        self.assertIn("<h4>Сделано сегодня</h4><ul><li><em>02:41</em><span>Выпуск 2.0.20 <span class=\"tag\">TK-104</span></span></li></ul>", html)
+        self.assertNotIn("Сделано сегодня", html)  # блок убран (В-74), даже если старый pulse.json его присылает
+        self.assertNotIn("Выпуск 2.0.20", html)
         self.assertIn("<h4>Дальше по очереди</h4><ul><li><span>Строка «за сегодня» <span class=\"tag\">TK-106</span></span></li></ul>", html)
         empty = self.render(self.ok_data())
-        self.assertIn('<span class="mute">пока ничего</span>', empty)
         self.assertIn('<span class="mute">пусто</span>', empty)
 
     def test_answer_button_only_with_http_link(self):
@@ -427,7 +429,7 @@ class StatusBlock(PageStates):
 
 class PhoneFit(unittest.TestCase):
     """TK-118: на телефоне (390 px) карточка не шире экрана — длинное слово («test_pulse_facts::test_thresholds_follow_rpv_json») в строке
-    «Сделано сегодня» переносится, а не растягивает колонку. Вид проверяется снимком 390 px (docs/reviews/TK-118-pulse-phone.py); здесь —
+    «Дальше по очереди» переносится, а не растягивает колонку. Вид проверяется снимком 390 px (docs/reviews/TK-118-pulse-phone.py); здесь —
     три правила, на которых он держится."""
 
     css = (HERE / "pulse.html").read_text(encoding="utf-8").split("<style>")[1].split("</style>")[0]
@@ -452,6 +454,17 @@ class PhoneFit(unittest.TestCase):
     def test_text_of_a_list_row_may_shrink_in_its_flex_row(self):
         self.assertIn("min-width:0", "".join(self.rules(".body li>span")))
 
+
+    def test_logo_and_page_padding_as_on_sofia(self):
+        """TK-142 (В-74): вид логотипа и отступ страницы — как на Софии, которую владелец видел и одобрил."""
+        self.assertIn("padding:32px 32px 48px", "".join(self.rules(".wrap")))
+        logo = "".join(self.rules(".logo"))
+        for part in ("gap:12px", "font-size:24px", "font-weight:650", "letter-spacing:-.02em"):
+            self.assertIn(part, logo)
+        mark = "".join(self.rules(".logo .mark"))
+        for part in ("height:36px", "padding:0 10px", "border-radius:9px", "font-weight:700", "letter-spacing:.04em"):
+            self.assertIn(part, mark)
+        self.assertNotIn(".logo{font-size", self.css.split("@media (max-width:760px)")[1])  # на телефоне логотип не уменьшается
 
     def test_status_table_has_vertical_lines_between_columns_but_not_before_the_first(self):
         self.assertIn("border-left:1px solid var(--line)", "".join(self.rules(".st th")))
@@ -501,10 +514,12 @@ class ServerTests(TG.States):
     def test_page_and_body_by_token_in_path(self):
         code, page = self.get("/sekret/")
         self.assertEqual(code, 200)
-        self.assertIn("Нужен ваш ответ", page)
+        self.assertIn('data-n="rpv" data-s="owner"', page)
         self.assertIn('<div class="name">invoice</div>', page)  # удалённый проект — по URL
         self.assertIn("prefers-color-scheme:dark", page)  # светлая и тёмная темы
-        self.assertIn("max-width:1040px", page)
+        self.assertNotIn("max-width:1040px", page)
+        self.assertIn("max-width:max(70vw,760px);margin:0 auto", page)  # ширина 70% экрана, по центру (владелец 08.11)
+        self.assertNotIn(".state", page)  # фразы-итога на странице нет (В-74)
         self.assertIn("max-width:760px", page)  # телефон: 4 часа, карточка в колонку
         self.assertIn("rpv-pulse-filter", page)  # выбор фильтра в localStorage
         self.assertIn("localStorage", page)
@@ -550,7 +565,7 @@ class ServerTests(TG.States):
         self.addCleanup(httpd.shutdown)
         with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/sekret/", timeout=5) as r:
             page = r.read().decode("utf-8")
-        self.assertIn("Застряло: bad", page)
+        self.assertIn('data-n="bad" data-s="stuck"', page)
         self.assertIn('<div class="name">fine</div>', page)
         self.assertEqual(page.count('>пульс не читается<span class="who">'), 2)  # bad и cut; fine — со своей строкой «сейчас»
 

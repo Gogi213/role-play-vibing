@@ -306,6 +306,16 @@ class StatusTests(FactsBase):
             self.assertEqual((row[1], row[3]), (f"стоит {minutes} мин" if level else "Инженер делает", level), minutes)
         self.assertEqual(self.where()[1], (queued, "в очереди", "next", ""))
 
+    def test_running_role_is_work_not_standing(self):
+        tid = self.ticket(status="in_progress")
+        started = self.now - timedelta(minutes=40)
+        self.log(tid, "engineer", "заметка", started)
+        state = {"active_runs": {tid: {"role": "engineer", "started": T.now_iso(started)}}}
+        self.assertEqual(self.where(), [(tid, "стоит 40 мин", "run", "bad")], "без идущего запуска — стоит")
+        self.assertEqual(self.where(state=state), [(tid, "Инженер делает", "run", "")], "идёт запуск роли — не «стоит»")
+        reason = ("loop", f"{tid}: возвращён Судьёй 2 раз", T.now_iso(self.now))
+        self.assertEqual(self.where(state=state, active=[reason])[0][2], "stuck", "названное причиной остаётся застрявшим")
+
     def test_named_by_a_reason_is_stuck(self):
         tid = self.ticket(status="in_progress")
         reason = ("loop", f"{tid}: возвращён Судьёй 2 раз", T.now_iso(self.now))
@@ -363,7 +373,7 @@ class StatusTests(FactsBase):
 class DayTests(FactsBase):
     def test_accepted_today_returns_and_queue(self):
         yesterday = self.now - timedelta(days=1)
-        today = self.ticket(status="done", accepted_at=self.now, title="Сегодня")
+        self.ticket(status="done", accepted_at=self.now, title="Сегодня")
         self.ticket(status="done", accepted_at=yesterday, title="Вчера")
         back = self.ticket(status="in_review", title="Вернули")
         self.log(back, "judge", "[итог: return] проверка: x — нет")
@@ -372,12 +382,12 @@ class DayTests(FactsBase):
         self.ticket(status="todo", title="Ждёт")
         data = F.day_of(self.read(), {"active_runs": {running: {"role": "engineer"}}}, self.now)
         self.assertEqual(data["day"], {"accepted": 1, "returns": 1, "working": 1, "queued": 2})
-        self.assertEqual([x["ticket"] for x in data["done_today"]], [today])
+        self.assertNotIn("done_today", data)
         self.assertEqual([x["title"] for x in data["queue"]], ["Вернули", "Ждёт"])
 
     def test_empty_project_is_zeros(self):
         self.assertEqual(F.day_of([], {}, self.now),
-                         {"done_today": [], "queue": [], "day": {"accepted": 0, "returns": 0, "working": 0, "queued": 0}})
+                         {"queue": [], "day": {"accepted": 0, "returns": 0, "working": 0, "queued": 0}})
 
     def test_judge_ticket_closed_by_artifact_is_not_accepted_work(self):
         self.ticket(owner="judge", status="done", accepted_at=self.now)

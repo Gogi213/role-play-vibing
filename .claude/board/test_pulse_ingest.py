@@ -160,7 +160,7 @@ class PageTests(IngestServer):
         views = V.load_all(self.proj, late, extra=S.inbox_projects(self.inbox), silence=V.NO_DATA)
         self.assertEqual((views[0]["state"], views[0]["fix"]), ("stuck", {"text": "нет данных 23 мин", "who": "проверяет CEO"}))
         html = S.body_html(views, late)
-        self.assertIn("Застряло: invoice", html)
+        self.assertIn('data-n="invoice" data-s="stuck"', html)
         self.assertIn("нет данных 23 мин", html)
         self.assertNotIn("диспетчер не отвечает", html)
         self.assertEqual(views[0]["cells"][self.cur + 1], ("stuck", 0))  # клетки после последней записи красные, не прежние цифры
