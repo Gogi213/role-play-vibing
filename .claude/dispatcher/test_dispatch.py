@@ -964,14 +964,16 @@ class DispatchRunTests(unittest.TestCase):
         self.assertEqual(T.wait_cycle(self.tickets_dir, ic, ia), [ic, ia, ib, ic])  # 3 тикета
         self.assertIsNone(T.wait_cycle(self.tickets_dir, ic, "TK-9999"))
         self.assertEqual(T.wait_cycle(self.tickets_dir, ic, ic), [ic, ic])  # сам на себя
-        orig = TK.TICKETS_DIR
-        TK.TICKETS_DIR = self.tickets_dir
+        orig = TK.TICKETS_DIR, TK.PROJECT_ROOT
+        TK.TICKETS_DIR, TK.PROJECT_ROOT = self.tickets_dir, self.base
+        (self.base / "flags").mkdir(exist_ok=True)
+        (self.base / "flags" / "ok-1108123456-ab12.job").write_text("mode=trap\nunit=ok-1108123456-ab12\npid=1\n", encoding="utf-8")  # запись jobrun (TK-141)
         try:
             self.assertEqual(TK.main(["wait", ic, f"ticket:{ia}"]), 1)
             self.assertEqual(T.read_ticket(c).status, "todo")  # отказ — шапка не тронута
-            self.assertEqual(TK.main(["wait", ic, "file:flags/ok", "--by", "2099-01-01T00:00+04:00"]), 0)
+            self.assertEqual(TK.main(["wait", ic, "file:flags/ok-1108123456-ab12.rc", "--by", "2099-01-01T00:00+04:00"]), 0)
         finally:
-            TK.TICKETS_DIR = orig
+            TK.TICKETS_DIR, TK.PROJECT_ROOT = orig
 
     def test_existing_cycle_signals_ceo_once_from_min_id(self):
         a, b = (self.mk("engineer", "todo") for _ in range(2))

@@ -63,7 +63,7 @@ _POINTER_LINE_RE = re.compile(r"^" + re.escape(ARCHIVE_POINTER_PREFIX) + r".*\n?
 
 # --- wait_for: допустимые формы (одно место правды: диспетчер, tickets.py, проверка записи) --------------------
 # Алиас машины в `host:<алиас>:...` — любое ssh-имя; адрес, пользователь и ключ берёт сам ssh из ~/.ssh/config.
-WAIT_FOR_FORMATS = ("file:<путь> | ticket:<ID> | host:<ssh-алиас>:<путь> (…/job.json с done/total — готово при "
+WAIT_FOR_FORMATS = ("file:<итог jobrun .rc> | ticket:<ID> | host:<ssh-алиас>:<путь> (…/job.json с done/total — готово при "
                     "done>=total; …/<unit>.rc — файл итога tools/jobrun.sh; иначе файл существует) | host:<ssh-алиас>:unit:<имя юнита> (готово, когда "
                     "systemctl is-active ≠ active) | ci:<владелец/репо>#<PR> (готово, когда CI на текущей голове PR завершён) | "
                     "merged:<владелец/репо>#<PR> (готово, когда PR влит) | ci-run:<владелец/репо>#<id прогона> (готово, когда прогон завершён — с любым исходом; исчез — сторож будит владельца) | job:<ssh-алиас>:<id задания> (готово при done; "
@@ -217,6 +217,47 @@ def file_wait_problem(spec: str) -> str:
         return (f"file:{p[1]} — posix-путь на Windows: диспетчер и оболочка роли понимают его по-разному. "
                 f"Дай путь с диском (file:C:/…) или относительный от корня проекта")
     return ci_wait_problem(spec)
+
+
+# Итог задания `tools/jobrun.sh`: <метка>-<MMDDhhmmss>-<4 hex>.rc (метка может содержать дефисы). Другое имя — не итог зарегистрированного задания.
+_JOBRUN_RC_RE = re.compile(r"^.+-\d{10}-[0-9a-f]{4}\.rc$")
+
+
+def jobrun_record(raw: str, root=None) -> dict | None:
+    """Запись регистрации задания `tools/jobrun.sh` — файл `<unit>.job` рядом с итогом `<unit>.rc` (jobrun кладёт её раньше строки
+    `UNIT=…`): {mode: trap|systemd, unit, pid?}. По ней сторож отличает живое задание от мёртвого. None — имя не итог jobrun,
+    записи рядом нет или она не читается/не сходится с именем итога. Относительный путь — от корня проекта `root`."""
+    raw = raw.strip()
+    if not _JOBRUN_RC_RE.match(re.split(r"[\\/]", raw)[-1]):
+        return None
+    path = Path(raw)
+    path = path if path.is_absolute() else Path(root or ".") / path
+    try:
+        text = path.with_suffix(".job").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    rec = dict(ln.split("=", 1) for ln in text.splitlines() if "=" in ln)
+    return rec if rec.get("mode") in ("trap", "systemd") and rec.get("unit") == path.stem else None
+
+
+def file_wait_unregistered(spec: str, root=None) -> str:
+    """TK-141 (В-73): `file:<путь>` при постановке ожидания принимается, только если путь — файл итога зарегистрированного задания
+    `tools/jobrun.sh` (рядом лежит его запись `<unit>.job`, `jobrun_record`): иначе писателя диспетчер не знает и его смерти не видит
+    (мёртвый фоновый процесс роли держал тикет 3 ч). Только для постановки (`wait`, `result wait`); уже ждущие тикеты проверяет
+    `file_wait_problem` — они доживают по-старому. Пусто — путь годится."""
+    p = parse_wait_for(spec)
+    if not p or p[0] != "file":
+        return ""
+    name = re.split(r"[\\/]", p[1].strip())[-1]  # хвостовой слеш — каталог, не файл итога
+    if _JOBRUN_RC_RE.match(name):
+        if jobrun_record(p[1], root):
+            return ""
+        return (f"file:{p[1]} — рядом нет записи регистрации {name[:-3]}.job: задание запущено не через tools/jobrun.sh, или путь не тот "
+                f"(RPV_RUNS_DIR другой/не виден диспетчеру), или файл не итог его запуска. Запусти работу через tools/jobrun.sh <метка> -- "
+                f"<команда> и бери путь из его строки `UNIT=… RC=<путь>`; жди `job:<алиас>:<id>` (если у проекта есть job_state_cmd)")
+    return (f"file:{p[1]} — не итог задания jobrun: писателя диспетчер не знает и смерти его не увидит. Запусти работу через "
+            f"tools/jobrun.sh <метка> -- <команда> и жди `job:<алиас>:<id>` (если у проекта есть job_state_cmd) либо файл итога из "
+            f"`UNIT=… RC=<путь>` (<метка>-<MMDDhhmmss>-<hex>.rc): file:<RC> локально, host:<алиас>:<RC> на машине")
 
 
 def ci_wait_problem(spec: str) -> str:

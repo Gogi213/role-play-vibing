@@ -666,7 +666,7 @@ def cmd_wait(args) -> int:
     if not spec:
         print(f"wait: форма пуста. Допустимо: {T.WAIT_FOR_FORMATS}", file=sys.stderr)
         return 1
-    if why := T.file_wait_problem(spec):  # роль ставит ожидание сама: отказ при постановке, а не вечное «нет»
+    if why := T.file_wait_problem(spec) or T.file_wait_unregistered(spec, PROJECT_ROOT):  # роль ставит ожидание сама: отказ при постановке, а не вечное «нет»
         print(f"wait: {why}", file=sys.stderr)
         return 1
     by = (getattr(args, "by", None) or "").strip()
