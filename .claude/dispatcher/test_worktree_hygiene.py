@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import testgit  # noqa: E402
+import test_gitrun as testgit  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 
 

@@ -19,7 +19,7 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import errors as E  # noqa: E402
-import testgit  # noqa: E402
+import test_gitrun as testgit  # noqa: E402
 
 
 class ErrorsTests(unittest.TestCase):
