@@ -455,6 +455,17 @@ class PhoneFit(unittest.TestCase):
         self.assertIn("min-width:0", "".join(self.rules(".body li>span")))
 
 
+    def test_logo_and_page_padding_as_on_sofia(self):
+        """TK-142 (В-74): вид логотипа и отступ страницы — как на Софии, которую владелец видел и одобрил."""
+        self.assertIn("padding:32px 32px 48px", "".join(self.rules(".wrap")))
+        logo = "".join(self.rules(".logo"))
+        for part in ("gap:12px", "font-size:24px", "font-weight:650", "letter-spacing:-.02em"):
+            self.assertIn(part, logo)
+        mark = "".join(self.rules(".logo .mark"))
+        for part in ("height:36px", "padding:0 10px", "border-radius:9px", "font-weight:700", "letter-spacing:.04em"):
+            self.assertIn(part, mark)
+        self.assertNotIn(".logo{font-size", self.css.split("@media (max-width:760px)")[1])  # на телефоне логотип не уменьшается
+
     def test_status_table_has_vertical_lines_between_columns_but_not_before_the_first(self):
         self.assertIn("border-left:1px solid var(--line)", "".join(self.rules(".st th")))
         self.assertIn("border-left:1px solid var(--line)", "".join(self.rules(".st td")))
