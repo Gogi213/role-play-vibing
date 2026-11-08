@@ -373,7 +373,7 @@ def srow(mark, ticket="TK-1", title="Заголовок", where="", **kw):
 
 
 class StatusBlock(PageStates):
-    """TK-117 (В-57): «Статус» — первый блок раскрытой карточки: таблица Задача | Что | Где сейчас, принятые серым, «Осталось · Держит».
+    """TK-117 (В-57): «Статус» — первый блок раскрытой карточки: таблица Задача | Что | Где сейчас, без принятых (В-79), «Держит».
     Страница только читает `status` из pulse.json."""
 
     def block(self, status, **kw):
@@ -388,14 +388,14 @@ class StatusBlock(PageStates):
         return [re.sub(r"\|+", "|", H.unescape(re.sub(r"<[^>]+>", "|", r))).strip("|") for r in rows]
 
     def test_table_columns_rows_and_classes(self):
-        html, block = self.block({"rows": [srow("done", "TK-1", "Схема", "принят 19:03"), srow("run", "TK-2", "Загрузчик", "Инженер делает"),
+        html, block = self.block({"rows": [srow("run", "TK-2", "Загрузчик", "Инженер делает"),
                                            srow("ask", "TK-3", "Фьючерсы", "ждёт вашего ответа"), srow("stuck", "TK-4", "Закачка", "стоит 47 мин", level="bad"),
                                            srow("next", "TK-5", "Сверка", "ждёт TK-4")], "left": "Закачка, Сверка"})
         self.assertIn("<th>Задача</th><th>Что</th><th>Где сейчас</th>", block)
-        self.assertEqual(self.lines(block), ["TK-1|Схема|принят 19:03", "TK-2|Загрузчик|Инженер делает", "TK-3|Фьючерсы|ждёт вашего ответа",
+        self.assertEqual(self.lines(block), ["TK-2|Загрузчик|Инженер делает", "TK-3|Фьючерсы|ждёт вашего ответа",
                                              "TK-4|Закачка|стоит 47 мин", "TK-5|Сверка|ждёт TK-4"])
-        self.assertEqual(re.findall(r'<tr class="(\w)">', block), ["d", "r", "o", "s", "w"])
-        self.assertEqual(re.findall(r'<td class="where ([^"]*)">', block), ["", "", "", "bad", ""])
+        self.assertEqual(re.findall(r'<tr class="(\w)">', block), ["r", "o", "s", "w"])
+        self.assertEqual(re.findall(r'<td class="where ([^"]*)">', block), ["", "", "bad", ""])
 
     def test_warn_level_colours_the_where_cell(self):
         _, block = self.block({"rows": [srow("run", where="стоит 15 мин", level="warn")]})
@@ -411,11 +411,14 @@ class StatusBlock(PageStates):
         self.assertNotIn("Держит", block)
         self.assertNotIn('<p class="left">', block)
 
-    def test_more_accepted_is_not_a_line(self):
-        """В-77: «принято ещё N» не выводится; показаны только присланные строки."""
-        html, block = self.block({"rows": [srow("done", "TK-4", where="принят 10:00")], "more": 5})
-        self.assertEqual(self.lines(block), ["TK-4|Заголовок|принят 10:00"])
+    def test_accepted_rows_and_more_are_not_shown(self):
+        """В-77, В-79: принятые строки (в том числе из файла старой версии) и «принято ещё N» не выводятся."""
+        html, block = self.block({"rows": [srow("done", "TK-4", where="принят 10:00"), srow("run", "TK-5", where="Инженер делает")], "more": 5})
+        self.assertEqual(self.lines(block), ["TK-5|Заголовок|Инженер делает"])
+        self.assertNotIn("TK-4", html)
         self.assertNotIn("принято ещё", html)
+        only_done = self.render(dict(self.ok_data(), status={"rows": [srow("done", "TK-4", where="принят 10:00")], "more": 5}))
+        self.assertNotIn("<h4>Статус</h4>", only_done)
 
     def test_only_left_shows_no_block(self):
         html = self.render(dict(self.ok_data(), status={"rows": [], "left": "Шаг один"}))
@@ -433,18 +436,19 @@ class StatusBlock(PageStates):
             self.assertNotIn("План цели", html)
 
     def test_bad_rows_are_dropped_and_texts_escaped(self):
-        html, block = self.block({"rows": [srow("done", "TK-1", "<b>x</b>", "<i>y</i>"), srow("???", "TK-2"), {"mark": "run", "title": ""}, "мусор",
+        html, block = self.block({"rows": [srow("run", "TK-1", "<b>x</b>", "<i>y</i>"), srow("???", "TK-2"), {"mark": "run", "title": ""}, "мусор",
                                            srow("next", "TK-3", "Верная")], "left": "<u>z</u>", "hold": "<s>h</s>"})
         for raw_tag in ("<b>x</b>", "<i>y</i>", "<u>z</u>", "<s>h</s>"):
             self.assertNotIn(raw_tag, html)
         self.assertEqual(len(self.lines(block)), 2, "чужая отметка, без названия, не объект — не строки")
 
-    def test_stale_file_keeps_accepted_but_drops_now_and_hold(self):
+    def test_stale_file_drops_now_and_hold(self):
         status = {"rows": [srow("done", "TK-1", where="принят 10:00"), srow("run", "TK-2", where="Инженер делает", level="warn")],
                   "left": "Выпуск", "hold": "TK-2 стоит 23 мин"}
         old = self.at + timedelta(minutes=30)
         html = S.body_html([V.normalise("rpv", dict(self.ok_data(), status=status), old)], old)
-        self.assertIn("принят 10:00", html)
+        self.assertNotIn("принят 10:00", html)
+        self.assertIn("TK-2", html)
         self.assertNotIn("Осталось", html)
         self.assertNotIn("Инженер делает", html)
         self.assertNotIn("Держит", html)

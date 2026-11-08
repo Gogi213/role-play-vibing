@@ -23,7 +23,7 @@ FIX = {"dispatcher_dead": "перезапускает CEO", "unserved": "раз�
        "merged_unreleased": "решает CEO", "ci_red": "чинит Инженер"}
 ASK_MARK = re.compile(r"\[итог: ask-owner\]\s*(.*?)(?:\s+повод:.*)?$", re.S)
 LIST_MAX = 12
-SHORT, LEFT_SHORT, LEFT_MAX, DONE_SHOWN = 120, 60, 4, 3  # знаков «Что» · знаков шага в «Осталось» · шагов в «Осталось» · принятых строк в таблице
+SHORT, LEFT_SHORT, LEFT_MAX = 120, 60, 4  # знаков «Что» · знаков шага в «Осталось» · шагов в «Осталось»
 SERVICE = re.compile(r"^(?:(?:Хвост|Правка|Возврат|Доработка)\s+)?TK-\d+\s*[:—–-]\s*")  # служебный префикс заголовка: «Хвост TK-112: …»
 WAIT_TEXT = {"ticket": "ждёт {1}", "merged": "ждёт слияния", "ci": "ждёт CI", "ci-run": "ждёт CI", "job": "ждёт задание на {1}"}  # по первой части parse_wait_for; file, host и at — в `_waits_on` (имя файла, юнит, местное время)
 MOVE_WARN_MIN, MOVE_BAD_MIN = 15, 30  # «стоит N мин» жёлтым / красным, минуты (ключи `.claude/rpv.json`, docs/pulse.md)
@@ -285,12 +285,9 @@ def _blockers(plan: list) -> dict:
 
 
 def _where(tkt, state: dict, owner_ids: set, stuck_text: str, runs: list, now: datetime, after: str = "") -> tuple:
-    """(отметка, «Где сейчас», уровень, минут без движения): принят чч:мм · ждёт вашего ответа · ждёт CEO (blocked) · ждёт TK-N (wait_for, а
+    """(отметка, «Где сейчас», уровень, минут без движения) непринятого тикета: ждёт вашего ответа · ждёт CEO (blocked) · ждёт TK-N (wait_for, а
     в очереди — предыдущий шаг плана `after`) · стоит N мин (жёлтое/красное от порогов TK-108; очередь и ожидание не «стоят») · кто держит.
-    Отметка — из PLAN_MARKS страницы: done / ask / next / stuck / run."""
-    if tkt.status == "done":
-        at = _accepted_text(_accepted_at(tkt, now), now)
-        return "done", f"принят {at}" if at else "принят", "", None
+    Отметка — из PLAN_MARKS страницы: ask / next / stuck / run."""
     if tkt.id in owner_ids or tkt.status == "needs_owner":
         return "ask", "ждёт вашего ответа", "", None
     named = bool(re.search(rf"\b{re.escape(tkt.id)}\b", stuck_text))
@@ -330,18 +327,17 @@ def _left(plan: list, open_rows: list) -> str:
 
 def status_of(gid: str, tickets, state: dict, active: list, owner_items: list, runs: list, now: datetime, plan: list,
               ask: dict | None, fix: dict | None) -> dict | None:
-    """Блок «Статус» раскрытой карточки (TK-117, В-57): таблица Задача | Что | Где сейчас по тикетам цели `gid` (нет цели — по открытым
-    тикетам проекта), «Осталось» и «Держит». Принятых больше DONE_SHOWN — последние DONE_SHOWN, остальные счётчиком `more`. Пусто — None."""
-    own = sorted((t for t in tickets if t.status != "stopped" and (_of_goal(t, gid) if gid else t.status in T.OPEN_STATUSES)), key=lambda t: t.id)
-    done, live = [t for t in own if t.status == "done"], [t for t in own if t.status != "done"]
+    """Блок «Статус» раскрытой карточки (TK-117, В-57): таблица Задача | Что | Где сейчас по непринятым тикетам цели `gid` (нет цели — по открытым
+    тикетам проекта), «Осталось» и «Держит». Принятые и остановленные не показываются (В-79). Пусто — None."""
+    live = sorted((t for t in tickets if t.status not in ("stopped", "done") and (_of_goal(t, gid) if gid else t.status in T.OPEN_STATUSES)),
+                  key=lambda t: t.id)
     owner_ids, stuck_text = {t for t, _ in owner_items}, " ".join(d for _, d, _ in active)
     rows, blockers = [], _blockers(plan)
-    for tkt in done[-DONE_SHOWN:] + live[:LIST_MAX]:
+    for tkt in live[:LIST_MAX]:
         mark, where, level, minutes = _where(tkt, state, owner_ids, stuck_text, runs, now, blockers.get(tkt.id, ""))
         row = {"ticket": tkt.id, "title": short(str(tkt.header.get("title") or tkt.id)), "mark": mark, "where": where}
         rows.append(({**row, "level": level} if level else row, minutes))
-    out = {"rows": [r for r, _ in rows], "more": max(0, len(done) - DONE_SHOWN), "left": _left(plan, [{"ticket": t.id} for t in live]),
-           "hold": _hold(ask, fix, rows)}
+    out = {"rows": [r for r, _ in rows], "left": _left(plan, [{"ticket": t.id} for t in live]), "hold": _hold(ask, fix, rows)}
     return out if out["rows"] or out["left"] else None
 
 

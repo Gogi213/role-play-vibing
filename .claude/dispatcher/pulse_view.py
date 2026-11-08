@@ -148,19 +148,19 @@ def _plan(value, stale: bool = False) -> list:
 
 
 def _status(value, stale: bool = False) -> dict:
-    """Блок «Статус» {rows: [{ticket, title, mark, where, level}], more, left, hold}; строка без названия или с чужой отметкой — не строка.
-    Файл устарел — всё о «сейчас» (где сейчас у непринятых, «Держит») убрано: оно о прошлом; принятое и «Осталось» остаются."""
+    """Блок «Статус» {rows: [{ticket, title, mark, where, level}], left, hold}; строка без названия, с чужой отметкой или принятая (В-79; файл
+    старой версии мог их прислать) — не строка. Файл устарел — всё о «сейчас» (где сейчас, «Держит») убрано: оно о прошлом; «Осталось» остаётся."""
     raw = value if isinstance(value, dict) else {}
     rows = []
     for item in raw.get("rows") if isinstance(raw.get("rows"), list) else []:
-        if not isinstance(item, dict) or item.get("mark") not in PLAN_MARKS or not _text(item.get("title")):
+        if not isinstance(item, dict) or item.get("mark") not in PLAN_MARKS or item["mark"] == "done" or not _text(item.get("title")):
             continue
         row = {k: _text(item.get(k)) for k in ("ticket", "title", "where")}
         row.update(mark=item["mark"], level=item.get("level") if item.get("level") in ("warn", "bad") else "")
-        if stale and row["mark"] != "done":
+        if stale:
             row.update(where="", level="")
         rows.append(row)
-    return {"rows": rows, "more": _count(raw.get("more")) or 0, "left": _text(raw.get("left")), "hold": "" if stale else _text(raw.get("hold"))}
+    return {"rows": rows, "left": _text(raw.get("left")), "hold": "" if stale else _text(raw.get("hold"))}
 
 
 def _job(value):
