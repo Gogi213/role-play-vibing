@@ -148,7 +148,7 @@ class PageStates(TG.States):
     def test_no_projects_is_not_a_green_phrase(self):
         self.assertEqual(V.header([])["title"], V.NO_PROJECTS)
         html = S.body_html([], self.at)
-        self.assertIn(f'<p class="state stuck">{V.NO_PROJECTS}</p>', html)
+        self.assertIn(f'<p class="none">{V.NO_PROJECTS}</p>', html)
         self.assertNotIn(V.OK_TITLE, html)
         self.assertNotIn('class="seg"', html)
 
@@ -164,7 +164,7 @@ class PageStates(TG.States):
     def test_no_work_is_not_stuck(self):
         html = self.render(self.pulse())
         self.assertEqual({c for c in classes(html)} - {"now"}, {""})
-        self.assertNotIn("state stuck", html)
+        self.assertNotIn('class="none"', html)
 
     def test_unreadable_pulse_is_stuck(self):
         for raw in (None, {}, {"phrase": "x", "ts": self.at.isoformat(), "cells": []}):  # нет файла, пусто, чужой формат
@@ -517,7 +517,9 @@ class ServerTests(TG.States):
         self.assertIn('data-n="rpv" data-s="owner"', page)
         self.assertIn('<div class="name">invoice</div>', page)  # удалённый проект — по URL
         self.assertIn("prefers-color-scheme:dark", page)  # светлая и тёмная темы
-        self.assertNotIn("max-width:1040px", page)  # страница на всю ширину (В-74)
+        self.assertNotIn("max-width:1040px", page)
+        self.assertIn("max-width:max(70vw,760px);margin:0 auto", page)  # ширина 70% экрана, по центру (владелец 08.11)
+        self.assertNotIn(".state", page)  # фразы-итога на странице нет (В-74)
         self.assertIn("max-width:760px", page)  # телефон: 4 часа, карточка в колонку
         self.assertIn("rpv-pulse-filter", page)  # выбор фильтра в localStorage
         self.assertIn("localStorage", page)

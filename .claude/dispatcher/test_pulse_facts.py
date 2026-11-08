@@ -306,6 +306,16 @@ class StatusTests(FactsBase):
             self.assertEqual((row[1], row[3]), (f"стоит {minutes} мин" if level else "Инженер делает", level), minutes)
         self.assertEqual(self.where()[1], (queued, "в очереди", "next", ""))
 
+    def test_running_role_is_work_not_standing(self):
+        tid = self.ticket(status="in_progress")
+        started = self.now - timedelta(minutes=40)
+        self.log(tid, "engineer", "заметка", started)
+        state = {"active_runs": {tid: {"role": "engineer", "started": T.now_iso(started)}}}
+        self.assertEqual(self.where(), [(tid, "стоит 40 мин", "run", "bad")], "без идущего запуска — стоит")
+        self.assertEqual(self.where(state=state), [(tid, "Инженер делает", "run", "")], "идёт запуск роли — не «стоит»")
+        reason = ("loop", f"{tid}: возвращён Судьёй 2 раз", T.now_iso(self.now))
+        self.assertEqual(self.where(state=state, active=[reason])[0][2], "stuck", "названное причиной остаётся застрявшим")
+
     def test_named_by_a_reason_is_stuck(self):
         tid = self.ticket(status="in_progress")
         reason = ("loop", f"{tid}: возвращён Судьёй 2 раз", T.now_iso(self.now))

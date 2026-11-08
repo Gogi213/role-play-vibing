@@ -294,9 +294,9 @@ def _where(tkt, state: dict, owner_ids: set, stuck_text: str, runs: list, now: d
         return "stuck", "ждёт CEO", level, minutes
     if tkt.status == "waiting" and not named:
         return "next", _waits_on(tkt), "", None
-    if named or (level and tkt.status != "todo"):
-        return "stuck" if named else "run", f"стоит {ago(minutes * 60)}" if minutes is not None else "застряло", level or "bad", minutes
     running = (state.get("active_runs") or {}).get(tkt.id) or {}
+    if named or (level and tkt.status != "todo" and not running):  # идёт запуск роли — работа, не «стоит»
+        return "stuck" if named else "run", f"стоит {ago(minutes * 60)}" if minutes is not None else "застряло", level or "bad", minutes
     phrase = _live_phrase(tkt, str(running.get("role") or ""))
     if phrase == "в очереди":
         return "next", f"ждёт {after}" if after else phrase, "", minutes

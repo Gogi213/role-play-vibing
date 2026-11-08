@@ -221,7 +221,7 @@ def body_html(views: list, now: datetime) -> str:
     shown = now.astimezone(zone) if zone else now
     return (f'<div class="top"><div class="logo"><span class="mark">RPV</span>Role Play Vibing <b>· Пульс</b></div>'
             f'<div class="meta">обновлено {shown:%H:%M}</div></div>'
-            + (summary_html(views) if views else f'<p class="state stuck">{escape(V.NO_PROJECTS)}</p>') + "".join(card(v, end) for v in views)
+            + (summary_html(views) if views else f'<p class="none">{escape(V.NO_PROJECTS)}</p>') + "".join(card(v, end) for v in views)
             + '<p class="empty" id="empty" hidden>Таких проектов нет</p>' + LEGEND)
 
 
