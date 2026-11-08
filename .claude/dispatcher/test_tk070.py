@@ -186,6 +186,8 @@ class WaitLoadTests(unittest.TestCase):
         self.assertNotIn("probe_load", self.tkt().header)
 
     def test_file_wait_is_not_checked_against_machine(self):
+        (TK.PROJECT_ROOT / "out").mkdir(exist_ok=True)
+        (TK.PROJECT_ROOT / "out" / "x-1108123456-ab12.job").write_text("mode=trap\nunit=x-1108123456-ab12\npid=1\n", encoding="utf-8")  # запись jobrun (TK-141)
         rc = self.wait(record(n="99"), spec="file:out/x-1108123456-ab12.rc")
         self.assertEqual(rc, 0, self.err)
 

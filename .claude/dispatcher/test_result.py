@@ -224,6 +224,8 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_sets_waiting_with_form(self):
+        (self.base / "flags").mkdir()
+        (self.base / "flags" / "rpv-flag-1108123456-ab12.job").write_text("mode=trap\nunit=rpv-flag-1108123456-ab12\npid=1\n", encoding="utf-8")  # запись jobrun (TK-141)
         self.assertEqual(self.res("engineer", "wait", form="file:flags/rpv-flag-1108123456-ab12.rc", by="2099-01-01T00:00+04:00"), 0)
         t = self.tkt()
         self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "file:flags/rpv-flag-1108123456-ab12.rc"))
@@ -361,6 +363,7 @@ class ResultTests(unittest.TestCase):
 
     def test_wait_refuses_already_met_file_unless_allowed(self):
         (self.base / "old-1108123456-ab12.rc").write_text("x", encoding="utf-8")
+        (self.base / "old-1108123456-ab12.job").write_text("mode=trap\nunit=old-1108123456-ab12\npid=1\n", encoding="utf-8")  # запись jobrun (TK-141)
         a = dict(id=self.tid, spec=f"file:{(self.base / 'old-1108123456-ab12.rc').as_posix()}", on_met=None, by="23:59")
         self.assertEqual(TK.cmd_wait(type("A", (), a)()), 1)
         self.assertNotEqual(self.tkt().status, "waiting")

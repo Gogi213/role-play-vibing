@@ -22,6 +22,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -187,12 +188,30 @@ def probe_wait_target(alias: str, what: str, arg: str) -> str:
     return out[0]
 
 
+def _jobrun_state(rec: dict, rows) -> str:
+    """Задание `tools/jobrun.sh` по записи регистрации `<unit>.job` (TK-141): `producer` — живо, `dead` — нет. trap: pid оболочки
+    задания есть в таблице процессов и это ещё jobrun (pid мог достаться чужому процессу; пустая командная строка — не судим);
+    systemd: `systemctl is-active <unit>` (active/activating/deactivating/reloading — живо; systemctl не спросить — не видим, не снимаем)."""
+    if rec.get("mode") == "systemd":
+        try:
+            state = (hide.run(["systemctl", "is-active", rec["unit"]], capture_output=True, text=True, timeout=10).stdout or "").strip()
+        except (OSError, subprocess.SubprocessError):
+            return "producer"
+        return "producer" if state in ("active", "activating", "deactivating", "reloading") else "dead"
+    pid = rec.get("pid", "")
+    if not pid.isdigit():
+        return "producer"
+    return "producer" if any(p == int(pid) and (not cmd or "jobrun" in cmd.lower()) for p, _, cmd in rows) else "dead"
+
+
 def probe_file_writer(raw: str, rows=None) -> str:
     """`file:<путь>` (TK-124, В-61): `exists` — файл лёг; `producer` — файла нет, но в таблице локальных процессов есть
     командная строка с путём или именем файла; `dead` — нет ни файла, ни писателя (задания тикета смотрит `_apply_owned_jobs`).
     Один путь в командной строке выглядит по-разному (диск с коротким именем 8.3, `C:/Users/…`, `/tmp/…` в Git Bash), поэтому
     сверяем и хвост «каталог/имя» из самого ожидания, а имя короче 4 знаков без каталога (`rc`) не различимо — `producer`.
-    Таблицу процессов не прочитать — `producer`: не видим, значит не снимаем. `rows` — уже прочитанная таблица прохода."""
+    Итог задания `tools/jobrun.sh` (имя `<метка>-<MMDDhhmmss>-<hex>.rc` и рядом `<unit>.job`) смотрим по записи регистрации
+    (`_jobrun_state`): в его командной строке имени итога нет. Таблицу процессов не прочитать — `producer`: не видим, значит
+    не снимаем. `rows` — уже прочитанная таблица прохода."""
     path = Path(raw)
     path = path if path.is_absolute() else CFG.PROJECT_ROOT / path
     if path.exists():
@@ -200,6 +219,8 @@ def probe_file_writer(raw: str, rows=None) -> str:
     rows = P.scan_processes() if rows is None else rows
     if not rows:
         return "producer"
+    if rec := T.jobrun_record(raw, CFG.PROJECT_ROOT):  # итог задания jobrun: писателя знаем по записи регистрации, не по командной строке
+        return _jobrun_state(rec, rows)
 
     def norm(text: str) -> str:
         return text.replace("\\", "/").lower()
