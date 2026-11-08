@@ -82,41 +82,38 @@ class CiWatchTests(unittest.TestCase):
             C.run_once(REPO, gh=boom)
         self.assertNotEqual(self.tkt().header.get("next"), "engineer")
 
-    def test_red_wakes_owner_with_names(self):
+    def test_red_is_a_note_with_names_and_does_not_wake(self):  # TK-139 (В-72): Судья видит запись, но CI не ждёт
         self.runs = [{"name": "test (win)", "status": "completed", "conclusion": "failure"},
                      {"name": "lint", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(self.run_ci(), [(7, "aaaaaaa", "failure", "engineer")])
+        self.assertEqual(self.run_ci(), [(7, "aaaaaaa", "failure", "")])
         t = self.tkt()
-        self.assertEqual(t.header.get("next"), "engineer")
+        self.assertEqual((t.header.get("next") or "", t.header.get("status")), ("", "in_review"))
+        self.assertEqual(t.log[-1].author, "ci")
         self.assertIn("test (win)", t.log[-1].text)
         self.assertNotIn("lint", t.log[-1].text)
-
-    def test_green_wakes_judge_once(self):
-        self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(self.run_ci()[0][3], "judge")
-        T.write_header_updates(self.path, {"next": ""}, stamp_updated=False)
         self.assertEqual(self.run_ci(), [])
-        self.assertEqual(self.tkt().header.get("next") or "", "")
+        self.assertEqual(len([e for e in self.tkt().log if e.author == "ci"]), 1)  # раз на голову
 
-    def test_green_with_verdict_on_head_is_silent(self):
-        T.append_log(self.path, "judge", "принято, голова aaaaaaa", now=NOW)
+    def test_green_is_silent(self):
         self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(self.run_ci()[0][3], "")
-        self.assertEqual(self.tkt().header.get("next") or "", "")
+        self.assertEqual(self.run_ci(), [(7, "aaaaaaa", "success", "")])
+        t = self.tkt()
+        self.assertEqual(t.header.get("next") or "", "")
+        self.assertFalse([e for e in t.log if e.author == "ci"])
 
     def test_pending_is_silent_and_new_head_repeats(self):
         self.runs = [{"name": "a", "status": "in_progress", "conclusion": None}]
         self.assertEqual(self.run_ci()[0][3], "")
-        self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(self.run_ci()[0][3], "judge")
-        T.write_header_updates(self.path, {"next": ""}, stamp_updated=False)
+        self.runs = [{"name": "a", "status": "completed", "conclusion": "failure"}]
+        self.assertEqual(self.run_ci()[0][2], "failure")
         self.sha = "b" * 40
-        self.assertEqual(self.run_ci()[0][3], "judge")
+        self.assertEqual(self.run_ci()[0][2], "failure")
+        self.assertEqual(len([e for e in self.tkt().log if e.author == "ci"]), 2)
 
     def test_no_runs_is_pending(self):
         self.assertEqual(C.ci_result([])[0], "pending")
 
-    def test_waiting_on_ci_green_wakes_judge_and_clears_wait(self):
+    def test_waiting_on_ci_green_wakes_judge_and_clears_wait(self):  # ожидание `ci:`, поставленное до В-72, ещё снимается
         T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"ci:{REPO}#7"}, now=NOW)
         self.runs = [{"name": "a", "status": "completed", "conclusion": "success"}]
         self.assertEqual(self.run_ci()[0][3], "judge")
@@ -129,12 +126,12 @@ class CiWatchTests(unittest.TestCase):
         self.assertEqual(self.run_ci()[0][3], "engineer")
         self.assertEqual(self.tkt().header.get("wait_for", ""), "")
 
-    def test_merged_wait_with_red_ci_wakes_owner_and_clears_wait(self):
+    def test_merged_wait_with_red_ci_keeps_waiting_for_merge(self):  # TK-139: красный CI слияния не держит и владельца не будит
         T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"merged:{REPO}#7"}, now=NOW)
         self.runs = [{"name": "a", "status": "completed", "conclusion": "failure"}]
-        self.assertEqual(self.run_ci()[0][3], "engineer")
+        self.assertEqual(self.run_ci()[0][3], "")
         h = self.tkt().header
-        self.assertEqual((h.get("status"), h.get("wait_for", ""), h.get("next")), ("in_progress", "", "engineer"))
+        self.assertEqual((h.get("status"), h.get("wait_for"), h.get("next") or ""), ("waiting", f"merged:{REPO}#7", ""))
 
     def test_merged_wait_with_green_ci_keeps_waiting_for_merge(self):
         T.write_header_updates(self.path, {"status": "waiting", "wait_for": f"merged:{REPO}#7"}, now=NOW)
