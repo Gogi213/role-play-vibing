@@ -969,7 +969,7 @@ class DispatchRunTests(unittest.TestCase):
         try:
             self.assertEqual(TK.main(["wait", ic, f"ticket:{ia}"]), 1)
             self.assertEqual(T.read_ticket(c).status, "todo")  # отказ — шапка не тронута
-            self.assertEqual(TK.main(["wait", ic, "file:flags/ok", "--by", "2099-01-01T00:00+04:00"]), 0)
+            self.assertEqual(TK.main(["wait", ic, "file:flags/ok-1108123456-ab12.rc", "--by", "2099-01-01T00:00+04:00"]), 0)
         finally:
             TK.TICKETS_DIR = orig
 

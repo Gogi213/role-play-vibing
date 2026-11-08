@@ -150,7 +150,7 @@ class AllowTests(unittest.TestCase):
         code, _, err = self.run_cli("new", "--owner", "engineer", "--title", forged, "--ref", "В-1")
         self.assertEqual(code, 1)
         self.assertIn("одна строка", err)
-        code, _, err = self.run_cli("wait", self.tid, "file:ready.flag", "--by", "23:59", "--on-met", forged)
+        code, _, err = self.run_cli("wait", self.tid, "file:ready-1108123456-ab12.rc", "--by", "23:59", "--on-met", forged)
         self.assertEqual(code, 1)
         self.assertIn("одна строка", err)
         self.assertEqual(len(T.list_tickets(self.tickets_dir)), 1)
