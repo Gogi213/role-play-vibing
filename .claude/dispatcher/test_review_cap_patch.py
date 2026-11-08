@@ -1,7 +1,7 @@
-"""Малый потолок возвратов для тестов цикла «n возвратов → потолок» (TK-129, хвост TK-128): настоящие 500 кругов шли по ~40 с на тест.
+"""Малый потолок возвратов для тестов цикла «n возвратов → потолок» (TK-129, хвост TK-128): сотни настоящих кругов шли по ~40 с на тест.
 `patch_review_cap(test)` подменяет `MAX_REVIEW_RETURNS` во всех модулях диспетчера, где он есть (`signals` и копии через
 `from signals import` в `decide`, `handoff`); модули ищем по тексту файлов, чтобы новая копия не осталась с настоящим числом.
-Настоящая константа — один тест `test_default_review_returns_limit_is_500` в test_dispatch.py, без подмены."""
+Настоящая константа — один тест `test_default_review_returns_limit_is_10` в test_dispatch.py, без подмены."""
 from __future__ import annotations
 
 import importlib
@@ -29,7 +29,7 @@ def cap_holders() -> list:
 
 
 def patch_review_cap(test: unittest.TestCase, n: int = SMALL_CAP) -> int:
-    """Потолок n вместо 500 на время теста; возвращает n. Снимается сам по окончании теста."""
+    """Потолок n вместо настоящего на время теста; возвращает n. Снимается сам по окончании теста."""
     for mod in cap_holders():
         patcher = mock.patch.object(mod, NAME, n)
         patcher.start()
@@ -42,12 +42,12 @@ class PatchReviewCap(unittest.TestCase):
         names = {m.__name__ for m in cap_holders()}
         self.assertTrue({"signals", "decide", "handoff"} <= names, names)
         before = {m.__name__: getattr(m, NAME) for m in cap_holders()}
-        self.assertEqual(set(before.values()), {500}, before)
+        self.assertEqual(set(before.values()), {10}, before)
         probe = unittest.TestCase()
         patch_review_cap(probe, 7)
         self.assertEqual({getattr(m, NAME) for m in cap_holders()}, {7})
         probe.doCleanups()
-        self.assertEqual({getattr(m, NAME) for m in cap_holders()}, {500})
+        self.assertEqual({getattr(m, NAME) for m in cap_holders()}, {10})
 
 
 if __name__ == "__main__":
