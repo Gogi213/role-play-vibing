@@ -5,11 +5,12 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_gitrun as testgit  # noqa: E402
 import worktree_hygiene as WH  # noqa: E402
 
 
 def git(cwd, *a):
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd, check=True, capture_output=True)
+    testgit.run(["-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd)
 
 
 class WorktreeHygieneTests(unittest.TestCase):

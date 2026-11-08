@@ -224,9 +224,11 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_sets_waiting_with_form(self):
-        self.assertEqual(self.res("engineer", "wait", form="file:flags/rpv-flag", by="2099-01-01T00:00+04:00"), 0)
+        (self.base / "flags").mkdir()
+        (self.base / "flags" / "rpv-flag-1108123456-ab12.job").write_text("mode=trap\nunit=rpv-flag-1108123456-ab12\npid=1\n", encoding="utf-8")  # запись jobrun (TK-141)
+        self.assertEqual(self.res("engineer", "wait", form="file:flags/rpv-flag-1108123456-ab12.rc", by="2099-01-01T00:00+04:00"), 0)
         t = self.tkt()
-        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "file:flags/rpv-flag"))
+        self.assertEqual((t.status, t.header.get("wait_for")), ("waiting", "file:flags/rpv-flag-1108123456-ab12.rc"))
 
     # --- отказы
     def refused(self, role, result, **kw):
@@ -240,9 +242,9 @@ class ResultTests(unittest.TestCase):
         self.refused("engineer", "pr", pr=7, sha="zzz")           # sha не hex
         self.refused("engineer", "done")                          # нет пути
         self.refused("engineer", "done", path="нет-такого.md")    # пути нет на диске
-        self.refused("engineer", "wait", form="file:flags/rpv-flag")  # TK-117: у file:/host:/job: срок --by обязателен
-        self.refused("engineer", "wait", form="file:flags/rpv-flag", by="00:00-")  # срок непонятен
-        self.refused("engineer", "wait", form="file:flags/rpv-flag", by="2020-01-01T00:00+04:00")  # срок в прошлом
+        self.refused("engineer", "wait", form="file:flags/rpv-flag-1108123456-ab12.rc")  # TK-117: у file:/host:/job: срок --by обязателен
+        self.refused("engineer", "wait", form="file:flags/rpv-flag-1108123456-ab12.rc", by="00:00-")  # срок непонятен
+        self.refused("engineer", "wait", form="file:flags/rpv-flag-1108123456-ab12.rc", by="2020-01-01T00:00+04:00")  # срок в прошлом
         self.refused("engineer", "wait")                          # нет формы
         self.refused("engineer", "wait", form="когда-нибудь")     # форма неизвестна
         self.refused("judge", "return")                           # нет sha
@@ -360,8 +362,9 @@ class ResultTests(unittest.TestCase):
         self.assertEqual((self.tkt().status, self.tkt().header.get("next")), ("needs_owner", ""))
 
     def test_wait_refuses_already_met_file_unless_allowed(self):
-        (self.base / "old.done").write_text("x", encoding="utf-8")
-        a = dict(id=self.tid, spec=f"file:{(self.base / 'old.done').as_posix()}", on_met=None, by="23:59")
+        (self.base / "old-1108123456-ab12.rc").write_text("x", encoding="utf-8")
+        (self.base / "old-1108123456-ab12.job").write_text("mode=trap\nunit=old-1108123456-ab12\npid=1\n", encoding="utf-8")  # запись jobrun (TK-141)
+        a = dict(id=self.tid, spec=f"file:{(self.base / 'old-1108123456-ab12.rc').as_posix()}", on_met=None, by="23:59")
         self.assertEqual(TK.cmd_wait(type("A", (), a)()), 1)
         self.assertNotEqual(self.tkt().status, "waiting")
         a["allow_met"] = True

@@ -576,8 +576,8 @@ def _after_merge_note(args) -> str:
 
 
 def cmd_accept(args) -> int:
-    """Судья: машиночитаемый вердикт «принято» на конкретной голове PR (TK-079 п.2). Вливает программа (merge_rule), когда
-    на этой голове CI зелёный (при `has_ci: false` не требуется) и PR без конфликтов; сменится голова — вердикт не действует."""
+    """Судья: машиночитаемый вердикт «принято» на конкретной голове PR (TK-079 п.2). Вливает программа (merge_rule) без ожидания
+    CI (В-72), если PR без конфликтов; сменится голова — вердикт не действует."""
     role = _caller_role()
     if role and role != "judge":
         print("accept: только Судья", file=sys.stderr)
@@ -666,7 +666,7 @@ def cmd_wait(args) -> int:
     if not spec:
         print(f"wait: форма пуста. Допустимо: {T.WAIT_FOR_FORMATS}", file=sys.stderr)
         return 1
-    if why := T.file_wait_problem(spec):  # роль ставит ожидание сама: отказ при постановке, а не вечное «нет»
+    if why := T.file_wait_problem(spec) or T.file_wait_unregistered(spec, PROJECT_ROOT):  # роль ставит ожидание сама: отказ при постановке, а не вечное «нет»
         print(f"wait: {why}", file=sys.stderr)
         return 1
     by = (getattr(args, "by", None) or "").strip()

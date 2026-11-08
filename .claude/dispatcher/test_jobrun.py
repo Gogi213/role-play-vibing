@@ -134,6 +134,30 @@ class JobrunTests(unittest.TestCase):
         self.assertEqual(unit.group(2), f"{self.runs}/{unit.group(1)}.rc")
         self.assertFalse(Path(unit.group(2)).exists(), "итог пишет systemd по концу задания, не запуск")
 
+    def test_trap_mode_registers_the_job_before_unit_line(self):
+        """TK-141: рядом с итогом лежит запись регистрации <unit>.job (mode, unit, pid живой оболочки задания) — по ней сторож видит писателя."""
+        stdout, rc = self.run_job("sleep 1.5; exit 0")
+        job = rc.with_suffix(".job")
+        self.assertTrue(job.exists(), "запись должна быть к моменту строки UNIT=…")
+        rec = dict(ln.split("=", 1) for ln in job.read_text(encoding="utf-8").splitlines())
+        self.assertEqual((rec["mode"], rec["unit"]), ("trap", rc.stem))
+        self.assertTrue(rec["pid"].isdigit(), rec)
+        self.assertFalse(Path(str(job) + ".tmp").exists(), "временный файл остался")
+        self.wait_rc(rc)
+        self.assertTrue(job.exists(), "запись остаётся и после итога")
+
+    def test_systemd_mode_registers_unit(self):
+        shim_dir = Path(self.tmp.name, "bin")
+        shim_dir.mkdir()
+        shim = shim_dir / "systemd-run"
+        shim.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8", newline="\n")
+        shim.chmod(0o755)
+        env = dict(self.env, RPV_JOBRUN_MODE="systemd", PATH=shim_dir.as_posix() + os.pathsep + os.environ["PATH"])
+        r = self.jobrun("lbl", "--", "true", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        unit = re.fullmatch(r"UNIT=(lbl-\d{10}-[0-9a-f]{4}) RC=(\S+)", r.stdout.strip()).group(1)
+        self.assertEqual(Path(self.runs, f"{unit}.job").read_text(encoding="utf-8"), f"mode=systemd\nunit={unit}\n")
+
     def test_systemd_refusal_is_reported(self):
         shim_dir = Path(self.tmp.name, "bin")
         shim_dir.mkdir()
@@ -144,6 +168,7 @@ class JobrunTests(unittest.TestCase):
         r = self.jobrun("lbl", "--", "true", env=env)
         self.assertEqual(r.returncode, 1)
         self.assertIn("systemd-run: отказ", r.stderr)
+        self.assertEqual(list(Path(self.runs).glob("*.job")), [], "отказавшее задание не остаётся зарегистрированным")
 
     def test_dispatcher_sees_the_result_through_a_loopback_ssh(self):
         """Вся цепочка без сети: jobrun.sh пишет файл итога, «ssh» (удалённая команда в локальном bash) отдаёт его сверке диспетчера."""

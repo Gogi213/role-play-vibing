@@ -263,11 +263,11 @@ def make_handler(project, token: str, fetch=None, inbox=None, write_token: str =
         def do_PUT(self):  # noqa: N802
             parts = self.path.split("?")[0].strip("/").split("/")
             if not inbox or not write_token or parts[0] != "put":
-                return self._send(404, "text/plain; charset=utf-8", "не найдено")
+                return self._reject(404, "не найдено")
             if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), f"Bearer {write_token}".encode()):
-                return self._send(401, "text/plain; charset=utf-8", "нужен ключ записи")
+                return self._reject(401, "нужен ключ записи")
             if len(parts) != 2 or not NAME.fullmatch(parts[1]):
-                return self._send(404, "text/plain; charset=utf-8", "не найдено")
+                return self._reject(404, "не найдено")
             length = self.headers.get("Content-Length", "")
             if not length.isdigit():
                 return self._send(411, "text/plain; charset=utf-8", "нужен Content-Length")
@@ -291,6 +291,14 @@ def make_handler(project, token: str, fetch=None, inbox=None, write_token: str =
             if parts[1] == "body":
                 return self._send(200, "text/html; charset=utf-8", body_html(views, now))
             self._send(404, "text/plain; charset=utf-8", "не найдено")
+
+        def _reject(self, code: int, text: str):
+            """Отказ до чтения тела: непрочитанное тело при закрытии соединения даёт RST, и клиент (Windows —
+            WinError 10053) не видит ответа вовсе — тело сбрасываем, как перед 413 (TK-140)."""
+            length = self.headers.get("Content-Length", "")
+            if length.isdigit():
+                self._drain(min(int(length), DRAIN))
+            self._send(code, "text/plain; charset=utf-8", text)
 
         def _drain(self, left: int):
             while left > 0 and (chunk := self.rfile.read(min(left, 65536))):

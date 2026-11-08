@@ -280,7 +280,7 @@ def full_context(role, title, source, hook_in, reserve=0):
             verbs, proofs = "|".join(routes.verbs_for(role)), f" (доказательство: {routes.proofs_for(role)}; --why — не длиннее 200 знаков)"
     except Exception:
         pass
-    wait = (" Долгая работа — `T wait <ID> <host:алиас:путь | file:путь | ticket:ID> --by ЧЧ:ММ` (срок обязателен), "
+    wait = (" Долгая работа — `T wait <ID> <job:алиас:id | host:алиас:путь | file:итог jobrun (RC=…) | ticket:ID> --by ЧЧ:ММ` (срок обязателен; фон — только tools/jobrun.sh), "
             "сессию не держать." if role != "ceo" else " Остальные подкоманды (`new`, `start`, `stop`, `allow`, `status`) — тем же `T`.")
     head.append(f"Команда тикетов `T` = `{tcmd}`. Связь с командой — лог тикета: итог шага — `T result <ID> "
                 f"<{verbs}> --why \"...\"`{proofs}; заметка без смены хода — `T comment <ID> --author {role} --text \"...\"`." + wait)
