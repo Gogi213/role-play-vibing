@@ -1,0 +1,17 @@
+{
+  "t_decide_ms": 70.76272500012237,
+  "t_new_ms": 158.18998600002487,
+  "t_hook_session_start_ms": 72.88359700010005,
+  "session_start_injected_chars": 5318,
+  "t_guard_allow_ms": 88.9519019999625,
+  "t_guard_deny_ms": 90.3753150000739,
+  "t_hook_user_prompt_ms": 54.2712379999557,
+  "user_prompt_injected_chars": 349,
+  "t_result_done_ms": 163.21416599998884,
+  "t_dispatch_handoff_ms": 193.28148400018108,
+  "t_result_accept_ms": 193.06301300002815,
+  "t_dispatch_close_ms": 267.3002430001361,
+  "t_watch_once_ms": 139.70855200000187,
+  "t_overseer_dry_ms": 123.99342200001229,
+  "t_doctor_ms": 159.27521599996908
+}
